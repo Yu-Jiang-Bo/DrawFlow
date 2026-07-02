@@ -78,7 +78,7 @@ def test_grouped_sheet_groups_items_by_order_number(tmp_path):
     workbook = Workbook()
     sheet = workbook.active
     sheet.append(["内部订单号", "订单明细id", "购买数量", "模板", "定制信息"])
-    sheet.append(["ORDER1", "1", "1", "JJMB202603281027102517", "Style Option:Style 1\nFont Option:F1\nPersonalization:A"])
+    sheet.append(["ORDER1", "1", "1", "JJMB202603281027102517", "Style Option:Style 1\nFont Option:F1\nPersonalization:A\nB"])
     sheet.append(["ORDER1", "2", "1", "JJMB202603281027102517", "Style Option:Style 2\nFont Option:F2\nPersonalization:B"])
     sheet.append(["ORDER2", "3", "1", "JJMB202603281027102517", "Style Option:Style 1\nFont Option:F10\nPersonalization:C"])
     workbook.save(xlsx)
@@ -92,4 +92,4 @@ def test_grouped_sheet_groups_items_by_order_number(tmp_path):
 
     assert len(task.groups) == 1
     assert task.groups[0].order_no == "ORDER1"
-    assert [item.text for item in task.groups[0].items] == ["A", "B"]
+    assert [item.text for item in task.groups[0].items] == ["A", "B", "B"]

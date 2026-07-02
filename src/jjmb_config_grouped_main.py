@@ -8,7 +8,6 @@ from collections import OrderedDict
 from pathlib import Path
 from typing import List
 
-from .jjmb_combined_main import combined_personalization_text
 from .jjmb_order_parser import parse_order_items, read_xlsx_rows
 from .jjmb_template_main import TEMPLATE_ID, TEXT_FONT_OPTIONS
 from .render_task import ConfigGroupedSheetRenderTask, TemplateTextOrderGroup, TemplateTextSheetItem
@@ -38,16 +37,19 @@ def build_grouped_task(
     for order_item in order_items:
         if order_item.font_option not in TEXT_FONT_OPTIONS:
             continue
-        grouped.setdefault(order_item.order_no, []).append(
-            TemplateTextSheetItem(
-                order_no=order_item.order_no,
-                detail_id=order_item.detail_id,
-                text=combined_personalization_text(order_item.personalization_values),
-                font_option=order_item.font_option,
-                style_option=order_item.style_option,
-                quantity_index=1,
+        for index, text in enumerate(order_item.personalization_values, start=1):
+            if not text.strip():
+                continue
+            grouped.setdefault(order_item.order_no, []).append(
+                TemplateTextSheetItem(
+                    order_no=order_item.order_no,
+                    detail_id=order_item.detail_id,
+                    text=text.strip(),
+                    font_option=order_item.font_option,
+                    style_option=order_item.style_option,
+                    quantity_index=index,
+                )
             )
-        )
     groups = [
         TemplateTextOrderGroup(order_no=order_no, items=items)
         for order_no, items in grouped.items()

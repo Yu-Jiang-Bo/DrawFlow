@@ -24,23 +24,27 @@
 
     var groupMetrics = [];
     var maxGroupWidth = 0;
-    var maxGroupHeight = 0;
     for (var g = 0; g < task.groups.length; g++) {
         var metrics = measureGroup(task.groups[g], config, orderLabelHeight, itemGap);
         groupMetrics.push(metrics);
         maxGroupWidth = Math.max(maxGroupWidth, metrics.width);
-        maxGroupHeight = Math.max(maxGroupHeight, metrics.height);
     }
 
+    var placements = compactPlacements(groupMetrics, columns, gap);
     var rows = Math.ceil(task.groups.length / columns);
+    var maxColumnHeight = 0;
+    for (var h = 0; h < placements.columnHeights.length; h++) {
+        maxColumnHeight = Math.max(maxColumnHeight, placements.columnHeights[h]);
+    }
+    if (maxColumnHeight > 0) maxColumnHeight -= gap;
     var docWidth = margin * 2 + columns * maxGroupWidth + (columns - 1) * gap;
-    var docHeight = margin * 2 + rows * maxGroupHeight + (rows - 1) * gap;
+    var docHeight = margin * 2 + maxColumnHeight;
     writeDebug(task, {
         groups: task.groups.length,
         columns: columns,
         rows: rows,
         maxGroupWidth: maxGroupWidth,
-        maxGroupHeight: maxGroupHeight,
+        maxColumnHeight: maxColumnHeight,
         docWidth: docWidth,
         docHeight: docHeight,
         sampleStyle: styleConfig(config, task.groups[0].items[0].style_option)
@@ -53,10 +57,9 @@
     for (var i = 0; i < task.groups.length; i++) {
         var group = task.groups[i];
         var metric = groupMetrics[i];
-        var col = i % columns;
-        var row = Math.floor(i / columns);
+        var col = placements.items[i].column;
         var groupLeft = margin + col * (maxGroupWidth + gap);
-        var groupTop = docHeight - margin - row * (maxGroupHeight + gap);
+        var groupTop = docHeight - margin - placements.items[i].y;
         var cursorTop = groupTop;
 
         var orderLabel = layer.textFrames.add();
@@ -107,6 +110,21 @@
             if (i < group.items.length - 1) height += itemGapValue;
         }
         return { width: width, height: height };
+    }
+
+    function compactPlacements(metrics, columnCount, gapValue) {
+        var heights = [];
+        var items = [];
+        for (var c = 0; c < columnCount; c++) heights.push(0);
+        for (var i = 0; i < metrics.length; i++) {
+            var column = 0;
+            for (var h = 1; h < heights.length; h++) {
+                if (heights[h] < heights[column]) column = h;
+            }
+            items.push({ column: column, y: heights[column] });
+            heights[column] += metrics[i].height + gapValue;
+        }
+        return { items: items, columnHeights: heights };
     }
 
     function styleConfig(config, name) {
