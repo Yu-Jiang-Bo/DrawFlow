@@ -132,3 +132,72 @@ class TemplateTextRenderTask:
                 "outline_text": True,
             },
         }
+
+
+@dataclass(frozen=True)
+class TemplateTextSheetItem:
+    order_no: str
+    detail_id: str
+    text: str
+    font_option: str
+    style_option: str
+    quantity_index: int = 1
+
+    def to_json_dict(self) -> Dict[str, Any]:
+        if not self.text:
+            raise RenderTaskError("合并模板文字任务缺少 text")
+        if not self.font_option:
+            raise RenderTaskError("合并模板文字任务缺少 font_option")
+        if not self.style_option:
+            raise RenderTaskError("合并模板文字任务缺少 style_option")
+        return {
+            "order_no": self.order_no,
+            "detail_id": self.detail_id,
+            "quantity_index": self.quantity_index,
+            "text": self.text,
+            "font_option": self.font_option,
+            "style_option": self.style_option,
+        }
+
+
+@dataclass(frozen=True)
+class TemplateTextSheetRenderTask:
+    template_ai: Path
+    output_ai: Path
+    items: List[TemplateTextSheetItem]
+    color_name: str = "black"
+    columns: int = 4
+
+    def to_json_dict(self) -> Dict[str, Any]:
+        if not self.template_ai:
+            raise RenderTaskError("合并模板文字任务缺少 template_ai")
+        if not self.output_ai:
+            raise RenderTaskError("合并模板文字任务缺少 output_ai")
+        if not self.items:
+            raise RenderTaskError("合并模板文字任务缺少 items")
+        return {
+            "type": "template_text_sheet",
+            "template_ai": str(self.template_ai),
+            "output_ai": str(self.output_ai),
+            "items": [item.to_json_dict() for item in self.items],
+            "style": {
+                "color_name": self.color_name,
+            },
+            "layout": {
+                "columns": self.columns,
+                "gap_mm": 8.0,
+                "margin_mm": 8.0,
+                "label_height_mm": 4.0,
+                "label_font_size_pt": 7.0,
+            },
+            "fit": {
+                "padding_mm": 1.0,
+                "min_font_size_pt": 4.0,
+                "max_font_size_pt": 300.0,
+            },
+            "export": {
+                "format": "ai",
+                "compatibility": "Illustrator 8",
+                "outline_text": True,
+            },
+        }

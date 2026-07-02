@@ -4,6 +4,7 @@ from src.jjmb_order_parser import (
     split_personalization,
 )
 from src.jjmb_template_main import expand_values
+from src.jjmb_combined_main import combined_personalization_text
 
 
 def test_parse_custom_info_with_multiline_personalization():
@@ -61,3 +62,7 @@ def test_expand_values_does_not_duplicate_by_quantity():
     )[0]
 
     assert expand_values(item) == ["Only One"]
+
+
+def test_combined_sheet_keeps_multiline_personalization_together():
+    assert combined_personalization_text(["A", "B", "C"]) == "A\nB\nC"
