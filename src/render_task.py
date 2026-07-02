@@ -84,6 +84,9 @@ class PureTextRenderTask:
                 "compatibility": "Illustrator 8",
                 "outline_text": True,
             },
+            "debug": {
+                "report_path": str(self.output_ai.with_suffix(".debug.json")),
+            },
         }
 
 
@@ -130,6 +133,9 @@ class TemplateTextRenderTask:
                 "format": "ai",
                 "compatibility": "Illustrator 8",
                 "outline_text": True,
+            },
+            "debug": {
+                "report_path": str(self.output_ai.with_suffix(".debug.json")),
             },
         }
 
@@ -199,5 +205,68 @@ class TemplateTextSheetRenderTask:
                 "format": "ai",
                 "compatibility": "Illustrator 8",
                 "outline_text": True,
+            },
+        }
+
+
+@dataclass(frozen=True)
+class TemplateTextOrderGroup:
+    order_no: str
+    items: List[TemplateTextSheetItem]
+
+    def to_json_dict(self) -> Dict[str, Any]:
+        if not self.order_no:
+            raise RenderTaskError("订单组缺少 order_no")
+        if not self.items:
+            raise RenderTaskError("订单组缺少 items")
+        return {
+            "order_no": self.order_no,
+            "items": [item.to_json_dict() for item in self.items],
+        }
+
+
+@dataclass(frozen=True)
+class ConfigGroupedSheetRenderTask:
+    template_config: Path
+    output_ai: Path
+    groups: List[TemplateTextOrderGroup]
+    color_name: str = "black"
+    columns: int = 4
+
+    def to_json_dict(self) -> Dict[str, Any]:
+        if not self.template_config:
+            raise RenderTaskError("配置分组总图任务缺少 template_config")
+        if not self.output_ai:
+            raise RenderTaskError("配置分组总图任务缺少 output_ai")
+        if not self.groups:
+            raise RenderTaskError("配置分组总图任务缺少 groups")
+        return {
+            "type": "config_grouped_text_sheet",
+            "template_config": str(self.template_config),
+            "output_ai": str(self.output_ai),
+            "groups": [group.to_json_dict() for group in self.groups],
+            "style": {
+                "color_name": self.color_name,
+            },
+            "layout": {
+                "columns": self.columns,
+                "gap_mm": 8.0,
+                "margin_mm": 8.0,
+                "order_label_height_mm": 7.0,
+                "order_label_font_size_pt": 12.0,
+                "item_gap_mm": 4.0,
+            },
+            "fit": {
+                "padding_mm": 1.0,
+                "min_font_size_pt": 4.0,
+                "max_font_size_pt": 300.0,
+            },
+            "export": {
+                "format": "ai",
+                "compatibility": "Illustrator 8",
+                "outline_text": True,
+            },
+            "debug": {
+                "report_path": str(self.output_ai.with_suffix(".debug.json")),
             },
         }

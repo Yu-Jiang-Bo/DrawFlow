@@ -1,10 +1,13 @@
+from pathlib import Path
+
+from src.jjmb_combined_main import combined_personalization_text
+from src.jjmb_config_grouped_main import build_grouped_task
 from src.jjmb_order_parser import (
     parse_custom_info,
     parse_order_items,
     split_personalization,
 )
 from src.jjmb_template_main import expand_values
-from src.jjmb_combined_main import combined_personalization_text
 
 
 def test_parse_custom_info_with_multiline_personalization():
@@ -66,3 +69,27 @@ def test_expand_values_does_not_duplicate_by_quantity():
 
 def test_combined_sheet_keeps_multiline_personalization_together():
     assert combined_personalization_text(["A", "B", "C"]) == "A\nB\nC"
+
+
+def test_grouped_sheet_groups_items_by_order_number(tmp_path):
+    xlsx = tmp_path / "orders.xlsx"
+    from openpyxl import Workbook
+
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["内部订单号", "订单明细id", "购买数量", "模板", "定制信息"])
+    sheet.append(["ORDER1", "1", "1", "JJMB202603281027102517", "Style Option:Style 1\nFont Option:F1\nPersonalization:A"])
+    sheet.append(["ORDER1", "2", "1", "JJMB202603281027102517", "Style Option:Style 2\nFont Option:F2\nPersonalization:B"])
+    sheet.append(["ORDER2", "3", "1", "JJMB202603281027102517", "Style Option:Style 1\nFont Option:F10\nPersonalization:C"])
+    workbook.save(xlsx)
+
+    task = build_grouped_task(
+        xlsx_path=xlsx,
+        template_config=Path("template.config.json"),
+        output_ai=tmp_path / "out.ai",
+        columns=4,
+    )
+
+    assert len(task.groups) == 1
+    assert task.groups[0].order_no == "ORDER1"
+    assert [item.text for item in task.groups[0].items] == ["A", "B"]
