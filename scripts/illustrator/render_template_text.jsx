@@ -41,7 +41,10 @@
     fitTextToRect(textFrame, rect, Number(task.fit && task.fit.min_font_size_pt || 4), Number(task.fit && task.fit.max_font_size_pt || 300));
 
     if (task.export && task.export.outline_text) {
-        try { textFrame.createOutline(); } catch (outlineError) {}
+        try {
+            var outlineItem = textFrame.createOutline();
+            cleanupOutline(outlineItem);
+        } catch (outlineError) {}
     }
 
     templateDoc.close(SaveOptions.DONOTSAVECHANGES);
@@ -175,6 +178,22 @@
         opts.pdfCompatible = false;
         opts.compressed = false;
         doc.saveAs(file, opts);
+    }
+
+    function cleanupOutline(item) {
+        if (!item) return;
+        try {
+            app.executeMenuCommand("deselectall");
+        } catch (e0) {}
+        try {
+            item.selected = true;
+            app.executeMenuCommand("Live Pathfinder Add");
+            app.executeMenuCommand("expandStyle");
+        } catch (e1) {
+            try {
+                item.selected = false;
+            } catch (e2) {}
+        }
     }
 
     function ensureFolder(folder) {
