@@ -28,3 +28,33 @@ python -m src.main --csv samples/orders_text.csv --output output --dry-run
 ```powershell
 python -m src.main --csv samples/orders_text.csv --output output
 ```
+
+## JJMB202603281027102517 模板纯文字渲染
+
+当前只处理字体选项 `F1-F9` 的纯文字订单，`F10-F12` 设计字体先跳过。
+
+```powershell
+python -m src.jjmb_template_main `
+  --xlsx "C:\Users\Administrator\Desktop\image\test\ai测试\JJMB202603281027102517--文本+颜色\JJMB202603281027102517\C-208.xlsx" `
+  --template-ai "C:\Users\Administrator\Desktop\image\test\ai测试\JJMB202603281027102517--文本+颜色\JJMB202603281027102517\JJMB202603281027102517.ai" `
+  --output output\jjmb202603281027102517-text `
+  --dry-run
+```
+
+实际渲染会调用 Illustrator，并从模板里读取 `字体区/F1-F9` 的字体属性和 `作图区/Style1-Style5` 的方框尺寸：
+
+```powershell
+python -m src.jjmb_template_main `
+  --xlsx "C:\Users\Administrator\Desktop\image\test\ai测试\JJMB202603281027102517--文本+颜色\JJMB202603281027102517\C-208.xlsx" `
+  --template-ai "C:\Users\Administrator\Desktop\image\test\ai测试\JJMB202603281027102517--文本+颜色\JJMB202603281027102517\JJMB202603281027102517.ai" `
+  --output output\jjmb202603281027102517-text `
+  --limit 1
+```
+
+如果 Illustrator COM 启动失败，可以先 dry-run 生成 `render-tasks/*.json`，再在 Illustrator 中运行：
+
+```text
+scripts/illustrator/run_render_template_text_task.jsx
+```
+
+运行后选择对应的 render task JSON 即可手动渲染。

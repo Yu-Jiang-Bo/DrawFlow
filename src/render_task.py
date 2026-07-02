@@ -85,3 +85,50 @@ class PureTextRenderTask:
                 "outline_text": True,
             },
         }
+
+
+@dataclass(frozen=True)
+class TemplateTextRenderTask:
+    order_no: str
+    detail_id: str
+    template_ai: Path
+    output_ai: Path
+    text: str
+    font_option: str
+    style_option: str
+    quantity_index: int = 1
+    color_name: str = "black"
+
+    def to_json_dict(self) -> Dict[str, Any]:
+        if not self.text:
+            raise RenderTaskError("模板文字任务缺少 text")
+        if not self.template_ai:
+            raise RenderTaskError("模板文字任务缺少 template_ai")
+        if not self.font_option:
+            raise RenderTaskError("模板文字任务缺少 font_option")
+        if not self.style_option:
+            raise RenderTaskError("模板文字任务缺少 style_option")
+        return {
+            "type": "template_text",
+            "order_no": self.order_no,
+            "detail_id": self.detail_id,
+            "quantity_index": self.quantity_index,
+            "template_ai": str(self.template_ai),
+            "output_ai": str(self.output_ai),
+            "text": self.text,
+            "font_option": self.font_option,
+            "style_option": self.style_option,
+            "style": {
+                "color_name": self.color_name,
+            },
+            "fit": {
+                "padding_mm": 1.0,
+                "min_font_size_pt": 4.0,
+                "max_font_size_pt": 300.0,
+            },
+            "export": {
+                "format": "ai",
+                "compatibility": "Illustrator 8",
+                "outline_text": True,
+            },
+        }
