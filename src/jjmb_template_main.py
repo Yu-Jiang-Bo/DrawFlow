@@ -54,10 +54,6 @@ def build_tasks(xlsx_path: Path, template_ai: Path, output_dir: Path) -> List[Te
 
 
 def expand_values(item: JJMBOrderItem) -> List[str]:
-    if len(item.personalization_values) >= item.quantity:
-        return item.personalization_values
-    if len(item.personalization_values) == 1 and item.quantity > 1:
-        return item.personalization_values * item.quantity
     return item.personalization_values
 
 

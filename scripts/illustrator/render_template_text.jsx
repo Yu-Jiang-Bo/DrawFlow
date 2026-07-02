@@ -65,8 +65,22 @@
     }
 
     function findPageItemByName(doc, name) {
-        for (var i = 0; i < doc.pageItems.length; i++) {
-            if (doc.pageItems[i].name === name) return doc.pageItems[i];
+        for (var l = 0; l < doc.layers.length; l++) {
+            var found = findInContainer(doc.layers[l], name);
+            if (found) return found;
+        }
+        return null;
+    }
+
+    function findInContainer(container, name) {
+        if (!container.pageItems) return null;
+        for (var i = 0; i < container.pageItems.length; i++) {
+            var item = container.pageItems[i];
+            if (item.name === name) return item;
+            if (item.typename === "GroupItem" || item.typename === "Layer") {
+                var found = findInContainer(item, name);
+                if (found) return found;
+            }
         }
         return null;
     }

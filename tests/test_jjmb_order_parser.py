@@ -3,6 +3,7 @@ from src.jjmb_order_parser import (
     parse_order_items,
     split_personalization,
 )
+from src.jjmb_template_main import expand_values
 
 
 def test_parse_custom_info_with_multiline_personalization():
@@ -43,3 +44,20 @@ def test_parse_order_items_normalizes_options():
     assert items[0].style_option == "Style2"
     assert items[0].font_option == "F3"
     assert items[0].personalization_values == ["Mr Clarke", "Mrs Clarke"]
+
+
+def test_expand_values_does_not_duplicate_by_quantity():
+    item = parse_order_items(
+        [
+            {
+                "内部订单号": "401",
+                "订单明细id": "1",
+                "购买数量": "5",
+                "模板": "JJMB202603281027102517",
+                "定制信息": "Style Option:Style 1\nFont Option:F1\nPersonalization:Only One",
+            }
+        ],
+        template_id="JJMB202603281027102517",
+    )[0]
+
+    assert expand_values(item) == ["Only One"]
