@@ -26,6 +26,7 @@ def test_parse_custom_info_with_multiline_personalization():
 def test_split_personalization_by_lines_and_pipe():
     assert split_personalization("A\nB\nC") == ["A", "B", "C"]
     assert split_personalization("A|B|C") == ["A", "B", "C"]
+    assert split_personalization("1. Payt\n2. Ave\n3) Ken\n4\u3001Luc") == ["Payt", "Ave", "Ken", "Luc"]
 
 
 def test_parse_order_items_normalizes_options():

@@ -116,7 +116,12 @@ def split_personalization(value: str) -> List[str]:
     lines = [line.strip() for line in text.replace("\r\n", "\n").split("\n") if line.strip()]
     if len(lines) <= 1 and "|" in text:
         lines = [part.strip() for part in text.split("|") if part.strip()]
-    return lines
+    cleaned = [strip_list_marker(line) for line in lines]
+    return [line for line in cleaned if line]
+
+
+def strip_list_marker(value: str) -> str:
+    return re.sub(r"^\s*\d{1,3}\s*[\.\)\]\u3001:-]\s*", "", value or "").strip()
 
 
 def parse_order_items(rows: Iterable[Dict[str, str]], template_id: str | None = None) -> List[JJMBOrderItem]:
