@@ -255,6 +255,7 @@ class ConfigGroupedSheetRenderTask:
                 "order_label_height_mm": 7.0,
                 "order_label_font_size_pt": 12.0,
                 "item_gap_mm": 4.0,
+                "show_style_boxes": True,
             },
             "fit": {
                 "padding_mm": 1.0,

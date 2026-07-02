@@ -93,3 +93,4 @@ def test_grouped_sheet_groups_items_by_order_number(tmp_path):
     assert len(task.groups) == 1
     assert task.groups[0].order_no == "ORDER1"
     assert [item.text for item in task.groups[0].items] == ["A", "B", "B"]
+    assert task.to_json_dict()["layout"]["show_style_boxes"] is True

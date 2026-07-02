@@ -18,6 +18,7 @@
     var orderLabelHeight = mmToPt(Number(layout.order_label_height_mm || 7));
     var orderLabelFontSize = Number(layout.order_label_font_size_pt || 12);
     var itemGap = mmToPt(Number(layout.item_gap_mm || 4));
+    var showStyleBoxes = layout.show_style_boxes !== false;
     var padding = mmToPt(Number(task.fit && task.fit.padding_mm || 1));
     var minFontSize = Number(task.fit && task.fit.min_font_size_pt || 4);
     var maxFontSize = Number(task.fit && task.fit.max_font_size_pt || 300);
@@ -81,6 +82,8 @@
             var boxRight = boxLeft + styleWidth;
             var boxBottom = boxTop - styleHeight;
 
+            if (showStyleBoxes) drawStyleBox(layer, boxLeft, boxTop, styleWidth, styleHeight, String(item.style_option || ""));
+
             var tf = layer.textFrames.add();
             tf.contents = String(item.text || "");
             applyFontConfig(tf, font);
@@ -110,6 +113,20 @@
             if (i < group.items.length - 1) height += itemGapValue;
         }
         return { width: width, height: height };
+    }
+
+    function drawStyleBox(layer, left, top, width, height, name) {
+        var rect = layer.pathItems.rectangle(top, left, width, height);
+        rect.name = name + "_BOX";
+        rect.filled = false;
+        rect.stroked = true;
+        rect.strokeWidth = 0.35;
+        var color = new RGBColor();
+        color.red = 255;
+        color.green = 102;
+        color.blue = 153;
+        rect.strokeColor = color;
+        return rect;
     }
 
     function compactPlacements(metrics, columnCount, gapValue) {
