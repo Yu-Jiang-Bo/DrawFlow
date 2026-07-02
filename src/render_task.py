@@ -187,8 +187,8 @@ class TemplateTextSheetRenderTask:
                 "columns": self.columns,
                 "gap_mm": 8.0,
                 "margin_mm": 8.0,
-                "label_height_mm": 4.0,
-                "label_font_size_pt": 7.0,
+                "label_height_mm": 6.0,
+                "label_font_size_pt": 10.0,
             },
             "fit": {
                 "padding_mm": 1.0,
