@@ -57,12 +57,14 @@ def test_parse_items_applies_department_color_rule():
     assert items[0].color_option == "Gold"
     assert items[0].design_option == "Design3"
     assert items[0].production_label == "ORDER1  Gold  Meg"
+    assert items[0].production_label_lines == ["ORDER1", "Gold  Meg"]
     assert items[0].show_frame is False
     assert items[1].apply_color_to_artwork is True
     assert items[1].show_color_label is False
     assert items[1].color_option == DEFAULT_COLOR
     assert items[1].design_option == DEFAULT_DESIGN
     assert items[1].production_label == "ORDER2  Amy"
+    assert items[1].production_label_lines == ["ORDER2", "Amy"]
     assert items[1].show_frame is False
 
 
@@ -106,6 +108,7 @@ def test_department_rules_are_loaded_from_config():
     h_rule = resolve_department_rule("H", rules)
 
     assert k_rule["label_fields"] == ["order_no", "color_option", "text"]
+    assert k_rule["label_lines"] == [["order_no"], ["color_option", "text"]]
     assert k_rule["apply_color_to_artwork"] is False
     assert h_rule["label_fields"] == ["order_no", "text"]
     assert h_rule["apply_color_to_artwork"] is True

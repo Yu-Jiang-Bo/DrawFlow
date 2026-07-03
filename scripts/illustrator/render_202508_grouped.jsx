@@ -17,6 +17,7 @@
     var gap = mmToPt(Number(compactOutput ? (layout.compact_gap_mm || 4) : (layout.gap_mm || 8)));
     var margin = mmToPt(Number(compactOutput ? (layout.compact_margin_mm || 4) : (layout.margin_mm || 8)));
     var orderLabelHeight = mmToPt(Number(compactOutput ? (layout.compact_order_label_height_mm || 5) : (layout.order_label_height_mm || 7)));
+    var groupLabelHeight = compactOutput ? 0 : orderLabelHeight;
     var itemLabelHeight = mmToPt(Number(compactOutput ? (layout.compact_item_label_height_mm || 5) : (layout.item_label_height_mm || 6)));
     var labelFontSize = Number(compactOutput ? (layout.compact_label_font_size_pt || 10) : (layout.label_font_size_pt || 12));
     var itemGap = mmToPt(Number(compactOutput ? (layout.compact_item_gap_mm || 2) : (layout.item_gap_mm || 5)));
@@ -33,7 +34,7 @@
     for (var g = 0; g < task.groups.length; g++) {
         var metric = {
             width: columnWidth,
-            height: orderLabelHeight + task.groups[g].items.length * (itemLabelHeight + contentSize.height + itemGap)
+            height: groupLabelHeight + task.groups[g].items.length * (itemLabelHeight + contentSize.height + itemGap)
         };
         groupMetrics.push(metric);
         maxGroupWidth = Math.max(maxGroupWidth, metric.width);
@@ -57,7 +58,8 @@
         productHeightPt: productSize.height,
         contentWidthPt: contentSize.width,
         contentHeightPt: contentSize.height,
-        compactLabelWidthPt: compactLabelWidth
+        compactLabelWidthPt: compactLabelWidth,
+        groupLabelHeightPt: groupLabelHeight
     };
 
     var doc = app.documents.add(DocumentColorSpace.RGB, docWidth, docHeight);
@@ -71,8 +73,10 @@
         var groupTop = docHeight - margin - placements.items[i].y;
         var cursorTop = groupTop;
 
-        drawLabel(layer, String(group.order_no || ""), groupLeft, cursorTop, groupLeft + maxGroupWidth, cursorTop - orderLabelHeight, labelFontSize);
-        cursorTop -= orderLabelHeight;
+        if (groupLabelHeight > 0) {
+            drawLabel(layer, String(group.order_no || ""), groupLeft, cursorTop, groupLeft + maxGroupWidth, cursorTop - groupLabelHeight, labelFontSize);
+            cursorTop -= groupLabelHeight;
+        }
 
         for (var j = 0; j < group.items.length; j++) {
             var item = group.items[j];
@@ -93,7 +97,7 @@
                 var labelLeft = groupLeft + (maxGroupWidth - compactLabelWidth) / 2;
                 var labelRight = labelLeft + compactLabelWidth;
 
-                drawLabel(layer, itemLabel, labelLeft, cursorTop, labelRight, cursorTop - itemLabelHeight, labelFontSize);
+                drawLabelLines(layer, labelLines(item, itemLabel), labelLeft, cursorTop, labelRight, cursorTop - itemLabelHeight, labelFontSize);
                 drawPersonalizedText(layer, item, font, design, [contentLeft + padding, contentTop - padding, contentRight - padding, contentBottom + padding], minFontSize, maxFontSize);
                 cursorTop = contentBottom - itemGap;
                 continue;
@@ -170,6 +174,30 @@
         applyColor(tf, [0, 0, 0]);
         fitTextToRect(tf, [left, top, right, bottom], 5, size);
         return tf;
+    }
+
+    function drawLabelLines(layer, lines, left, top, right, bottom, size) {
+        var clean = [];
+        for (var i = 0; i < lines.length; i++) {
+            var text = String(lines[i] || "");
+            if (text) clean.push(text);
+        }
+        if (clean.length === 0) clean.push("");
+        var lineHeight = (top - bottom) / clean.length;
+        var frames = [];
+        for (var l = 0; l < clean.length; l++) {
+            var lineTop = top - l * lineHeight;
+            var lineBottom = lineTop - lineHeight;
+            frames.push(drawLabel(layer, clean[l], left, lineTop, right, lineBottom, size));
+        }
+        return frames;
+    }
+
+    function labelLines(item, fallback) {
+        if (item.production_label_lines && item.production_label_lines instanceof Array && item.production_label_lines.length > 0) {
+            return item.production_label_lines;
+        }
+        return [fallback];
     }
 
     function drawBox(layer, left, top, width, height, name) {

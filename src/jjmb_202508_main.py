@@ -49,6 +49,7 @@ class ColorDesignOrderItem:
     apply_color_to_artwork: bool
     show_color_label: bool
     production_label: str
+    production_label_lines: List[str]
     show_frame: bool
     quantity_index: int = 1
 
@@ -65,6 +66,7 @@ class ColorDesignOrderItem:
             "apply_color_to_artwork": self.apply_color_to_artwork,
             "show_color_label": self.show_color_label,
             "production_label": self.production_label,
+            "production_label_lines": self.production_label_lines,
             "show_frame": self.show_frame,
             "quantity_index": self.quantity_index,
         }
@@ -180,6 +182,45 @@ def build_production_label(
     return compact_label(order_no, color_option, text)
 
 
+def build_production_label_lines(
+    order_no: str,
+    department: str,
+    product_name: str,
+    text: str,
+    color_option: str,
+    rule: Dict[str, object] | None = None,
+) -> List[str]:
+    values = {
+        "order_no": order_no,
+        "department": department,
+        "product_name": product_name,
+        "text": text,
+        "color_option": color_option,
+    }
+    label_lines = rule.get("label_lines") if rule else None
+    if isinstance(label_lines, list) and label_lines:
+        result: List[str] = []
+        for line_fields in label_lines:
+            if isinstance(line_fields, list):
+                line = compact_label(*(values.get(str(field), "") for field in line_fields))
+            else:
+                line = values.get(str(line_fields), "")
+            if line:
+                result.append(line)
+        if result:
+            return result
+    return [
+        build_production_label(
+            order_no=order_no,
+            department=department,
+            product_name=product_name,
+            text=text,
+            color_option=color_option,
+            rule=rule,
+        )
+    ]
+
+
 def compact_label(*parts: str) -> str:
     return "  ".join(part.strip() for part in parts if part and part.strip())
 
@@ -216,6 +257,14 @@ def parse_items(rows: Iterable[Dict[str, str]]) -> List[ColorDesignOrderItem]:
                     apply_color_to_artwork=apply_color,
                     show_color_label=not apply_color,
                     production_label=build_production_label(
+                        order_no=order_no,
+                        department=department,
+                        product_name=product_name,
+                        text=text,
+                        color_option=color_option,
+                        rule=rule,
+                    ),
+                    production_label_lines=build_production_label_lines(
                         order_no=order_no,
                         department=department,
                         product_name=product_name,
@@ -260,6 +309,8 @@ def build_task(
             "label_font_size_pt": 12.0,
             "item_gap_mm": 5.0,
             "compact_label_width_mm": 90.0,
+            "compact_item_label_height_mm": 10.0,
+            "compact_label_font_size_pt": 8.0,
             "show_style_boxes": show_style_boxes,
         },
         "fit": {
