@@ -18,6 +18,8 @@ TEMPLATE_ID = "JJMB202508261001394920"
 DEFAULT_COLOR = "Gold"
 DEFAULT_DESIGN = "Design2"
 TEXT_COLOR_DEPARTMENT = "H"
+CONFIG_DIR = Path(__file__).resolve().parents[1] / "config"
+DEPARTMENT_RULES_PATH = CONFIG_DIR / "department_rules.json"
 
 COLOR_ALIASES = {
     "white": "White",
@@ -114,8 +116,39 @@ def normalize_department(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9]+", "", value or "").upper()
 
 
-def should_show_frame(department: str) -> bool:
-    return "D" in normalize_department(department)
+def load_department_rules(path: Path | None = None) -> Dict[str, object]:
+    rules_path = path or DEPARTMENT_RULES_PATH
+    try:
+        return json.loads(rules_path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {
+            "default": {
+                "label_fields": ["order_no", "color_option", "text"],
+                "apply_color_to_artwork": False,
+                "show_frame": False,
+            },
+            "rules": [],
+        }
+
+
+def resolve_department_rule(department: str, rules_config: Dict[str, object]) -> Dict[str, object]:
+    code = normalize_department(department)
+    for rule in rules_config.get("rules", []):
+        if not isinstance(rule, dict):
+            continue
+        departments = [normalize_department(str(value)) for value in rule.get("departments", [])]
+        match_type = str(rule.get("match", "exact")).lower()
+        if match_type == "contains" and any(value and value in code for value in departments):
+            return rule
+        if match_type == "exact" and code in departments:
+            return rule
+    default = rules_config.get("default", {})
+    return default if isinstance(default, dict) else {}
+
+
+def rule_bool(rule: Dict[str, object], key: str, fallback: bool) -> bool:
+    value = rule.get(key)
+    return fallback if value is None else bool(value)
 
 
 def build_production_label(
@@ -124,7 +157,17 @@ def build_production_label(
     product_name: str,
     text: str,
     color_option: str,
+    rule: Dict[str, object] | None = None,
 ) -> str:
+    values = {
+        "order_no": order_no,
+        "department": department,
+        "product_name": product_name,
+        "text": text,
+        "color_option": color_option,
+    }
+    if rule and rule.get("label_fields"):
+        return compact_label(*(values.get(str(field), "") for field in rule["label_fields"]))
     code = normalize_department(department)
     if code == "H":
         return compact_label(order_no, text)
@@ -143,6 +186,7 @@ def compact_label(*parts: str) -> str:
 
 def parse_items(rows: Iterable[Dict[str, str]]) -> List[ColorDesignOrderItem]:
     result: List[ColorDesignOrderItem] = []
+    department_rules = load_department_rules()
     for row in rows:
         if (row.get("模板") or "").strip() != TEMPLATE_ID:
             continue
@@ -154,7 +198,9 @@ def parse_items(rows: Iterable[Dict[str, str]]) -> List[ColorDesignOrderItem]:
         product_name = (row.get("产品中文名称") or "").strip()
         color_option = normalize_color(row.get("字体颜色", ""))
         design_option = normalize_design(row.get("设计", ""))
-        apply_color = is_h_department(department)
+        rule = resolve_department_rule(department, department_rules)
+        apply_color = rule_bool(rule, "apply_color_to_artwork", is_h_department(department))
+        show_frame = rule_bool(rule, "show_frame", "D" in normalize_department(department))
         values = split_personalization(row.get("定制信息", ""))
         for index, text in enumerate(values, start=1):
             result.append(
@@ -175,8 +221,9 @@ def parse_items(rows: Iterable[Dict[str, str]]) -> List[ColorDesignOrderItem]:
                         product_name=product_name,
                         text=text,
                         color_option=color_option,
+                        rule=rule,
                     ),
-                    show_frame=should_show_frame(department),
+                    show_frame=show_frame,
                     quantity_index=index,
                 )
             )
@@ -212,6 +259,7 @@ def build_task(
             "item_label_height_mm": 6.0,
             "label_font_size_pt": 12.0,
             "item_gap_mm": 5.0,
+            "compact_label_width_mm": 90.0,
             "show_style_boxes": show_style_boxes,
         },
         "fit": {

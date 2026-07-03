@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "default": {
+    "label_fields": ["order_no", "color_option", "text"],
+    "apply_color_to_artwork": false,
+    "show_frame": false
+  },
+  "rules": [
+    {
+      "name": "H",
+      "match": "exact",
+      "departments": ["H"],
+      "label_fields": ["order_no", "text"],
+      "apply_color_to_artwork": true,
+      "show_frame": false
+    },
+    {
+      "name": "K_T_FK_ZK",
+      "match": "exact",
+      "departments": ["K", "T", "FK", "ZK"],
+      "label_fields": ["order_no", "color_option", "text"],
+      "apply_color_to_artwork": false,
+      "show_frame": false
+    },
+    {
+      "name": "D_CONTAINS",
+      "match": "contains",
+      "departments": ["D"],
+      "label_fields": ["order_no", "product_name"],
+      "apply_color_to_artwork": false,
+      "show_frame": true
+    },
+    {
+      "name": "PW_EW",
+      "match": "exact",
+      "departments": ["PW", "EW"],
+      "label_fields": ["order_no", "product_name", "color_option"],
+      "apply_color_to_artwork": false,
+      "show_frame": false
+    }
+  ]
+}

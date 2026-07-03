@@ -1,9 +1,11 @@
 from src.jjmb_202508_main import (
     DEFAULT_COLOR,
     DEFAULT_DESIGN,
+    load_department_rules,
     normalize_color,
     normalize_design,
     parse_items,
+    resolve_department_rule,
 )
 
 
@@ -96,3 +98,14 @@ def test_parse_items_sets_department_labels_and_frames():
     assert items[0].show_frame is True
     assert items[1].production_label == "ORDER4  皮质首饰盒  Black"
     assert items[1].show_frame is False
+
+
+def test_department_rules_are_loaded_from_config():
+    rules = load_department_rules()
+    k_rule = resolve_department_rule("K", rules)
+    h_rule = resolve_department_rule("H", rules)
+
+    assert k_rule["label_fields"] == ["order_no", "color_option", "text"]
+    assert k_rule["apply_color_to_artwork"] is False
+    assert h_rule["label_fields"] == ["order_no", "text"]
+    assert h_rule["apply_color_to_artwork"] is True

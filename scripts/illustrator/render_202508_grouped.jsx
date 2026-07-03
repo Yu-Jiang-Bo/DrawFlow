@@ -20,17 +20,19 @@
     var itemLabelHeight = mmToPt(Number(compactOutput ? (layout.compact_item_label_height_mm || 5) : (layout.item_label_height_mm || 6)));
     var labelFontSize = Number(compactOutput ? (layout.compact_label_font_size_pt || 10) : (layout.label_font_size_pt || 12));
     var itemGap = mmToPt(Number(compactOutput ? (layout.compact_item_gap_mm || 2) : (layout.item_gap_mm || 5)));
+    var compactLabelWidth = mmToPt(Number(layout.compact_label_width_mm || 90));
     var padding = mmToPt(Number(task.fit && task.fit.padding_mm || 0));
     var minFontSize = Number(task.fit && task.fit.min_font_size_pt || 4);
     var maxFontSize = Number(task.fit && task.fit.max_font_size_pt || 300);
 
     var productSize = maxProductSize(config);
     var contentSize = compactOutput ? maxAnchorSize(config) : productSize;
+    var columnWidth = compactOutput ? Math.max(contentSize.width, compactLabelWidth) : contentSize.width;
     var groupMetrics = [];
-    var maxGroupWidth = contentSize.width;
+    var maxGroupWidth = columnWidth;
     for (var g = 0; g < task.groups.length; g++) {
         var metric = {
-            width: contentSize.width,
+            width: columnWidth,
             height: orderLabelHeight + task.groups[g].items.length * (itemLabelHeight + contentSize.height + itemGap)
         };
         groupMetrics.push(metric);
@@ -54,7 +56,8 @@
         productWidthPt: productSize.width,
         productHeightPt: productSize.height,
         contentWidthPt: contentSize.width,
-        contentHeightPt: contentSize.height
+        contentHeightPt: contentSize.height,
+        compactLabelWidthPt: compactLabelWidth
     };
 
     var doc = app.documents.add(DocumentColorSpace.RGB, docWidth, docHeight);
@@ -87,8 +90,10 @@
                 var contentTop = cursorTop - itemLabelHeight;
                 var contentRight = contentLeft + contentSize.width;
                 var contentBottom = contentTop - contentSize.height;
+                var labelLeft = groupLeft + (maxGroupWidth - compactLabelWidth) / 2;
+                var labelRight = labelLeft + compactLabelWidth;
 
-                drawLabel(layer, itemLabel, contentLeft, cursorTop, contentRight, cursorTop - itemLabelHeight, labelFontSize);
+                drawLabel(layer, itemLabel, labelLeft, cursorTop, labelRight, cursorTop - itemLabelHeight, labelFontSize);
                 drawPersonalizedText(layer, item, font, design, [contentLeft + padding, contentTop - padding, contentRight - padding, contentBottom + padding], minFontSize, maxFontSize);
                 cursorTop = contentBottom - itemGap;
                 continue;
