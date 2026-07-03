@@ -40,7 +40,8 @@
     if (maxColumnHeight > 0) maxColumnHeight -= gap;
     var docWidth = margin * 2 + columns * maxGroupWidth + (columns - 1) * gap;
     var docHeight = margin * 2 + maxColumnHeight;
-    writeDebug(task, {
+    var fitStats = { count: 0, maxDeltaPt: 0 };
+    var debugPayload = {
         groups: task.groups.length,
         columns: columns,
         rows: rows,
@@ -49,7 +50,7 @@
         docWidth: docWidth,
         docHeight: docHeight,
         sampleStyle: styleConfig(config, task.groups[0].items[0].style_option)
-    });
+    };
     var doc = app.documents.add(DocumentColorSpace.RGB, docWidth, docHeight);
     var layer = doc.layers[0];
     layer.name = "GROUPED_OUTPUT";
@@ -88,12 +89,19 @@
             tf.contents = String(item.text || "");
             applyFontConfig(tf, font);
             applyColor(tf, String(task.style && task.style.color_name || "black"));
-            renderOutlinedTextToRect(tf, [boxLeft + padding, boxTop - padding, boxRight - padding, boxBottom + padding], minFontSize, maxFontSize);
+            var outline = renderOutlinedTextToRect(tf, [boxLeft + padding, boxTop - padding, boxRight - padding, boxBottom + padding], minFontSize, maxFontSize);
+            try { outline.name = String(item.order_no || "") + "_" + String(item.quantity_index || j + 1) + "_TEXT"; } catch (e0) {}
             cursorTop = boxBottom - itemGap;
         }
     }
 
     if (task.export && task.export.outline_text) outlineAndClean(outlines);
+    debugPayload.textFit = {
+        count: fitStats.count,
+        maxDeltaPt: fitStats.maxDeltaPt,
+        maxDeltaMm: fitStats.maxDeltaPt * 25.4 / 72
+    };
+    writeDebug(task, debugPayload);
 
     var output = File(String(task.output_ai));
     ensureFolder(output.parent);
@@ -270,14 +278,13 @@
     }
 
     function renderOutlinedTextToRect(tf, rect, minSize, maxSize) {
-        var left = rect[0], top = rect[1], right = rect[2], bottom = rect[3];
-        var maxW = right - left;
-        var maxH = top - bottom;
-        tf.textRange.characterAttributes.size = fitMaxFontSize(tf, maxW, maxH, minSize, maxSize);
+        var size = Math.min(Math.max(tf.textRange.characterAttributes.size, minSize), maxSize);
+        tf.textRange.characterAttributes.size = size;
         try { app.redraw(); } catch (e0) {}
         var outline = tf.createOutline();
-        cleanupOutline(outline);
         fitPageItemToRect(outline, rect);
+        cleanupOutline(outline);
+        recordFitDelta(fitPageItemToRect(outline, rect));
         return outline;
     }
 
@@ -301,29 +308,45 @@
 
     function fitPageItemToRect(item, rect) {
         var left = rect[0], top = rect[1], right = rect[2], bottom = rect[3];
-        for (var i = 0; i < 3; i++) {
+        var targetW = right - left;
+        var targetH = top - bottom;
+        for (var i = 0; i < 6; i++) {
             try { app.redraw(); } catch (e0) {}
-            var b = item.visibleBounds;
+            var b = item.geometricBounds;
             var w = Math.abs(b[2] - b[0]);
             var h = Math.abs(b[1] - b[3]);
             if (w <= 0 || h <= 0) return;
-            var scaleX = ((right - left) / w) * 100;
-            var scaleY = ((top - bottom) / h) * 100;
+            var scaleX = (targetW / w) * 100;
+            var scaleY = (targetH / h) * 100;
             try {
                 item.resize(scaleX, scaleY, true, true, true, true, 100, Transformation.CENTER);
             } catch (e1) {
                 try { item.resize(scaleX, scaleY); } catch (e2) {}
             }
-            centerPageItemInRect(item, rect);
+            alignPageItemToRect(item, rect);
         }
+        return boundsDelta(item, rect);
     }
 
-    function centerPageItemInRect(item, rect) {
+    function recordFitDelta(delta) {
+        fitStats.count += 1;
+        if (!isNaN(delta)) fitStats.maxDeltaPt = Math.max(fitStats.maxDeltaPt, delta);
+    }
+
+    function boundsDelta(item, rect) {
+        var b = item.geometricBounds;
+        return Math.max(
+            Math.abs(b[0] - rect[0]),
+            Math.abs(b[1] - rect[1]),
+            Math.abs(b[2] - rect[2]),
+            Math.abs(b[3] - rect[3])
+        );
+    }
+
+    function alignPageItemToRect(item, rect) {
         var left = rect[0], top = rect[1], right = rect[2], bottom = rect[3];
-        var b = item.visibleBounds;
-        var cx = (left + right) / 2;
-        var cy = (top + bottom) / 2;
-        item.translate(cx - (b[0] + b[2]) / 2, cy - (b[1] + b[3]) / 2);
+        var b = item.geometricBounds;
+        item.translate(left - b[0], top - b[1]);
     }
 
     function outlineAndClean(items) {
