@@ -1,0 +1,360 @@
+#target illustrator
+
+(function () {
+    var taskPath = $.getenv("CUSTOM_RENDER_TASK");
+    if (!taskPath) throw new Error("CUSTOM_RENDER_TASK missing");
+    var task = readJSON(taskPath);
+    if (task.type !== "jjmb_202508_grouped") throw new Error("Unsupported task type: " + task.type);
+    var config = readJSON(String(task.template_config));
+    if (!task.groups || task.groups.length === 0) throw new Error("No order groups");
+
+    try { app.userInteractionLevel = UserInteractionLevel.DONTDISPLAYALERTS; } catch (e0) {}
+
+    var layout = task.layout || {};
+    var columns = Math.max(Number(layout.columns || 4), 1);
+    var gap = mmToPt(Number(layout.gap_mm || 8));
+    var margin = mmToPt(Number(layout.margin_mm || 8));
+    var orderLabelHeight = mmToPt(Number(layout.order_label_height_mm || 7));
+    var itemLabelHeight = mmToPt(Number(layout.item_label_height_mm || 6));
+    var labelFontSize = Number(layout.label_font_size_pt || 12);
+    var itemGap = mmToPt(Number(layout.item_gap_mm || 5));
+    var showBoxes = layout.show_style_boxes !== false;
+    var padding = mmToPt(Number(task.fit && task.fit.padding_mm || 0));
+    var minFontSize = Number(task.fit && task.fit.min_font_size_pt || 4);
+    var maxFontSize = Number(task.fit && task.fit.max_font_size_pt || 300);
+
+    var productSize = maxProductSize(config);
+    var groupMetrics = [];
+    var maxGroupWidth = productSize.width;
+    for (var g = 0; g < task.groups.length; g++) {
+        var metric = {
+            width: productSize.width,
+            height: orderLabelHeight + task.groups[g].items.length * (itemLabelHeight + productSize.height + itemGap)
+        };
+        groupMetrics.push(metric);
+        maxGroupWidth = Math.max(maxGroupWidth, metric.width);
+    }
+
+    var placements = compactPlacements(groupMetrics, columns, gap);
+    var maxColumnHeight = 0;
+    for (var h = 0; h < placements.columnHeights.length; h++) {
+        maxColumnHeight = Math.max(maxColumnHeight, placements.columnHeights[h]);
+    }
+    if (maxColumnHeight > 0) maxColumnHeight -= gap;
+    var docWidth = margin * 2 + columns * maxGroupWidth + (columns - 1) * gap;
+    var docHeight = margin * 2 + maxColumnHeight;
+    var debugPayload = {
+        groups: task.groups.length,
+        columns: columns,
+        docWidth: docWidth,
+        docHeight: docHeight,
+        productWidthPt: productSize.width,
+        productHeightPt: productSize.height
+    };
+
+    var doc = app.documents.add(DocumentColorSpace.RGB, docWidth, docHeight);
+    var layer = doc.layers[0];
+    layer.name = "JJMB202508261001394920_OUTPUT";
+
+    for (var i = 0; i < task.groups.length; i++) {
+        var group = task.groups[i];
+        var col = placements.items[i].column;
+        var groupLeft = margin + col * (maxGroupWidth + gap);
+        var groupTop = docHeight - margin - placements.items[i].y;
+        var cursorTop = groupTop;
+
+        drawLabel(layer, String(group.order_no || ""), groupLeft, cursorTop, groupLeft + maxGroupWidth, cursorTop - orderLabelHeight, labelFontSize);
+        cursorTop -= orderLabelHeight;
+
+        for (var j = 0; j < group.items.length; j++) {
+            var item = group.items[j];
+            var design = designConfig(config, item.design_option);
+            var font = fontConfig(config, item.font_option);
+            var productLeft = groupLeft + (maxGroupWidth - productSize.width) / 2;
+            var productTop = cursorTop - itemLabelHeight;
+            var productRight = productLeft + productSize.width;
+            var productBottom = productTop - productSize.height;
+            var itemLabel = item.production_label || (item.show_color_label ? item.order_no + "  " + item.font_option + "  " + item.color_option : item.order_no);
+            var drawFrame = showBoxes || item.show_frame === true;
+
+            drawLabel(layer, itemLabel, productLeft, cursorTop, productRight, cursorTop - itemLabelHeight, labelFontSize);
+            if (drawFrame) drawBox(layer, productLeft, productTop, productSize.width, productSize.height, "PRODUCT_BOX");
+            var anchor = mapAnchor(design, productLeft, productTop, productSize.width, productSize.height);
+            if (drawFrame) drawBox(layer, anchor[0], anchor[1], anchor[2] - anchor[0], anchor[1] - anchor[3], item.design_option + "_BOX");
+
+            var tf = layer.textFrames.add();
+            tf.contents = String(item.text || "");
+            applyFontConfig(tf, font);
+            applyColor(tf, item.apply_color_to_artwork ? colorConfig(config, item.color_option) : [0, 0, 0]);
+            renderOutlinedTextToRect(tf, [anchor[0] + padding, anchor[1] - padding, anchor[2] - padding, anchor[3] + padding], minFontSize, maxFontSize, Number(design.rotation_deg || 0));
+            cursorTop = productBottom - itemGap;
+        }
+    }
+
+    writeDebug(task, debugPayload);
+    var output = File(String(task.output_ai));
+    ensureFolder(output.parent);
+    if (output.exists) output.remove();
+    saveAsAI8(doc, output);
+    doc.close(SaveOptions.DONOTSAVECHANGES);
+    return output.fsName;
+
+    function maxProductSize(config) {
+        var width = 0;
+        var height = 0;
+        for (var key in config.design_options) {
+            if (!config.design_options.hasOwnProperty(key)) continue;
+            var b = config.design_options[key].product_bounds_pt;
+            width = Math.max(width, Math.abs(Number(b[2]) - Number(b[0])));
+            height = Math.max(height, Math.abs(Number(b[1]) - Number(b[3])));
+        }
+        if (width <= 0 || height <= 0) {
+            width = mmToPt(100);
+            height = mmToPt(100);
+        }
+        return { width: width, height: height };
+    }
+
+    function mapAnchor(design, productLeft, productTop, productWidth, productHeight) {
+        var product = design.product_bounds_pt;
+        var anchor = design.anchor_bounds_pt;
+        var sourceWidth = Math.abs(Number(product[2]) - Number(product[0]));
+        var sourceHeight = Math.abs(Number(product[1]) - Number(product[3]));
+        var sx = productWidth / sourceWidth;
+        var sy = productHeight / sourceHeight;
+        var left = productLeft + (Number(anchor[0]) - Number(product[0])) * sx;
+        var top = productTop - (Number(product[1]) - Number(anchor[1])) * sy;
+        var right = productLeft + (Number(anchor[2]) - Number(product[0])) * sx;
+        var bottom = productTop - (Number(product[1]) - Number(anchor[3])) * sy;
+        return [left, top, right, bottom];
+    }
+
+    function drawLabel(layer, text, left, top, right, bottom, size) {
+        var tf = layer.textFrames.add();
+        tf.contents = String(text || "");
+        tf.textRange.characterAttributes.size = size;
+        applyColor(tf, [0, 0, 0]);
+        fitTextToRect(tf, [left, top, right, bottom], 5, size);
+        return tf;
+    }
+
+    function drawBox(layer, left, top, width, height, name) {
+        var rect = layer.pathItems.rectangle(top, left, width, height);
+        rect.name = name;
+        rect.filled = false;
+        rect.stroked = true;
+        rect.strokeWidth = 0.35;
+        var color = new RGBColor();
+        color.red = 255;
+        color.green = 102;
+        color.blue = 153;
+        rect.strokeColor = color;
+        return rect;
+    }
+
+    function designConfig(config, name) {
+        var key = String(name || (config.defaults && config.defaults.design_option) || "Design2").replace(/\s+/g, "");
+        var design = config.design_options && config.design_options[key];
+        if (!design) throw new Error("Design config not found: " + key);
+        return design;
+    }
+
+    function fontConfig(config, name) {
+        var font = config.font_options && config.font_options[String(name || "")];
+        if (!font) throw new Error("Font config not found: " + name);
+        return font;
+    }
+
+    function colorConfig(config, name) {
+        var color = config.color_options && config.color_options[String(name || "")];
+        if (!color) color = config.color_options && config.color_options["Gold"];
+        return color && color.rgb ? color.rgb : [0, 0, 0];
+    }
+
+    function applyFontConfig(tf, font) {
+        var attr = tf.textRange.characterAttributes;
+        attr.size = Number(font.font_size_pt || 48);
+        try { attr.tracking = Number(font.tracking || 0); } catch (e1) {}
+        try { attr.horizontalScale = Number(font.horizontal_scale || 100); } catch (e2) {}
+        try { attr.verticalScale = Number(font.vertical_scale || 100); } catch (e3) {}
+        applyFont(tf, String(font.font_name || font.font_family || ""));
+    }
+
+    function applyFont(tf, fontName) {
+        if (!fontName) return;
+        try {
+            for (var i = 0; i < app.textFonts.length; i++) {
+                var font = app.textFonts[i];
+                if (font.name === fontName || font.family === fontName) {
+                    tf.textRange.characterAttributes.textFont = font;
+                    return;
+                }
+            }
+        } catch (e) {}
+    }
+
+    function applyColor(tf, rgb) {
+        var color = new RGBColor();
+        color.red = Number(rgb[0] || 0);
+        color.green = Number(rgb[1] || 0);
+        color.blue = Number(rgb[2] || 0);
+        tf.textRange.characterAttributes.fillColor = color;
+    }
+
+    function fitTextToRect(tf, rect, minSize, maxSize) {
+        var left = rect[0], top = rect[1], right = rect[2], bottom = rect[3];
+        var maxW = right - left;
+        var maxH = top - bottom;
+        tf.textRange.characterAttributes.size = fitMaxFontSize(tf, maxW, maxH, minSize, maxSize);
+        try { app.redraw(); } catch (e0) {}
+        var b = tf.visibleBounds;
+        tf.translate((left + right) / 2 - (b[0] + b[2]) / 2, (top + bottom) / 2 - (b[1] + b[3]) / 2);
+    }
+
+    function renderOutlinedTextToRect(tf, rect, minSize, maxSize, rotationDeg) {
+        var left = rect[0], top = rect[1], right = rect[2], bottom = rect[3];
+        var maxW = right - left;
+        var maxH = top - bottom;
+        tf.textRange.characterAttributes.size = fitMaxFontSize(tf, maxW, maxH, minSize, maxSize);
+        try { app.redraw(); } catch (e0) {}
+        var outline = tf.createOutline();
+        cleanupOutline(outline);
+        if (rotationDeg) {
+            try { outline.rotate(rotationDeg, true, true, true, true, Transformation.CENTER); } catch (e1) {}
+        }
+        fitPageItemToRect(outline, rect);
+        return outline;
+    }
+
+    function fitMaxFontSize(tf, maxW, maxH, minSize, maxSize) {
+        var size = Math.min(Math.max(tf.textRange.characterAttributes.size, minSize), maxSize);
+        tf.textRange.characterAttributes.size = size;
+        for (var i = 0; i < 8; i++) {
+            try { app.redraw(); } catch (e0) {}
+            var b = tf.visibleBounds;
+            var w = Math.abs(b[2] - b[0]);
+            var h = Math.abs(b[1] - b[3]);
+            if (w <= 0 || h <= 0) break;
+            var scale = Math.min(maxW / w, maxH / h) * 0.98;
+            var nextSize = Math.min(Math.max(size * scale, minSize), maxSize);
+            if (Math.abs(nextSize - size) < 0.05) break;
+            size = nextSize;
+            tf.textRange.characterAttributes.size = size;
+        }
+        return size;
+    }
+
+    function fitPageItemToRect(item, rect) {
+        var left = rect[0], top = rect[1], right = rect[2], bottom = rect[3];
+        for (var i = 0; i < 4; i++) {
+            try { app.redraw(); } catch (e0) {}
+            var b = item.geometricBounds;
+            var w = Math.abs(b[2] - b[0]);
+            var h = Math.abs(b[1] - b[3]);
+            if (w <= 0 || h <= 0) return;
+            try {
+                item.resize(((right - left) / w) * 100, ((top - bottom) / h) * 100, true, true, true, true, 100, Transformation.CENTER);
+            } catch (e1) {
+                try { item.resize(((right - left) / w) * 100, ((top - bottom) / h) * 100); } catch (e2) {}
+            }
+            alignPageItemToRect(item, rect);
+        }
+    }
+
+    function alignPageItemToRect(item, rect) {
+        var b = item.geometricBounds;
+        item.translate(rect[0] - b[0], rect[1] - b[1]);
+    }
+
+    function centerPageItemInRect(item, rect) {
+        var b = item.geometricBounds;
+        item.translate((rect[0] + rect[2]) / 2 - (b[0] + b[2]) / 2, (rect[1] + rect[3]) / 2 - (b[1] + b[3]) / 2);
+    }
+
+    function cleanupOutline(item) {
+        if (!item) return;
+        try { app.executeMenuCommand("deselectall"); } catch (e0) {}
+        try {
+            item.selected = true;
+            app.executeMenuCommand("Live Pathfinder Add");
+            app.executeMenuCommand("expandStyle");
+            item.selected = false;
+        } catch (e1) {
+            try { item.selected = false; } catch (e2) {}
+        }
+    }
+
+    function compactPlacements(metrics, columnCount, gapValue) {
+        var heights = [];
+        var items = [];
+        for (var c = 0; c < columnCount; c++) heights.push(0);
+        for (var i = 0; i < metrics.length; i++) {
+            var column = 0;
+            for (var h = 1; h < heights.length; h++) {
+                if (heights[h] < heights[column]) column = h;
+            }
+            items.push({ column: column, y: heights[column] });
+            heights[column] += metrics[i].height + gapValue;
+        }
+        return { items: items, columnHeights: heights };
+    }
+
+    function readJSON(path) {
+        var file = File(path);
+        if (!file.exists) throw new Error("JSON file not found: " + path);
+        file.encoding = "UTF-8";
+        file.open("r");
+        var text = file.read();
+        file.close();
+        if (typeof JSON !== "undefined" && JSON.parse) return JSON.parse(text);
+        return eval("(" + text + ")");
+    }
+
+    function writeDebug(task, payload) {
+        try {
+            if (!task.debug || !task.debug.report_path) return;
+            var file = File(String(task.debug.report_path));
+            ensureFolder(file.parent);
+            file.encoding = "UTF-8";
+            if (!file.open("w")) return;
+            file.write(toJson(payload));
+            file.close();
+        } catch (e) {}
+    }
+
+    function toJson(value) {
+        if (value === null) return "null";
+        var type = typeof value;
+        if (type === "number" || type === "boolean") return String(value);
+        if (type === "string") return "\"" + String(value).replace(/\\/g, "\\\\").replace(/"/g, "\\\"").replace(/\n/g, "\\n") + "\"";
+        if (value instanceof Array) {
+            var arr = [];
+            for (var i = 0; i < value.length; i++) arr.push(toJson(value[i]));
+            return "[" + arr.join(",") + "]";
+        }
+        var props = [];
+        for (var key in value) {
+            if (value.hasOwnProperty(key)) props.push(toJson(key) + ":" + toJson(value[key]));
+        }
+        return "{" + props.join(",") + "}";
+    }
+
+    function saveAsAI8(doc, file) {
+        var opts = new IllustratorSaveOptions();
+        opts.compatibility = Compatibility.ILLUSTRATOR8;
+        opts.pdfCompatible = false;
+        opts.compressed = false;
+        doc.saveAs(file, opts);
+    }
+
+    function ensureFolder(folder) {
+        if (!folder.exists) {
+            ensureFolder(folder.parent);
+            folder.create();
+        }
+    }
+
+    function mmToPt(mm) {
+        return mm * 72 / 25.4;
+    }
+}());
