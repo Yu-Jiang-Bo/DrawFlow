@@ -14,12 +14,13 @@ from urllib.parse import unquote, urlparse
 
 from ..jjmb_202508_main import DEPARTMENT_RULES_PATH
 from .job_store import JobStore
-from .paths import SERVICE_UPLOADS_DIR
+from .paths import CONFIG_DIR, SERVICE_UPLOADS_DIR
 from .render_service import RenderService
 from .template_registry import TemplateRegistry
+from .web_page import INDEX_HTML as WORKBENCH_HTML
 
 
-INDEX_HTML = """<!doctype html>
+LEGACY_INDEX_HTML = """<!doctype html>
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8" />
@@ -742,7 +743,7 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         path = urlparse(self.path).path
         if path == "/":
-            self._send_html(INDEX_HTML)
+            self._send_html(WORKBENCH_HTML)
             return
         if path == "/api/health":
             self._send_json({"ok": True})
@@ -759,6 +760,9 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
             return
         if path == "/api/rules/department":
             self._send_json(json.loads(DEPARTMENT_RULES_PATH.read_text(encoding="utf-8")))
+            return
+        if path == "/api/jobs":
+            self._send_json({"jobs": self.jobs.list_recent(30)})
             return
         if path.startswith("/api/jobs/") and path.endswith("/download/output_ai"):
             parts = path.strip("/").split("/")
@@ -786,6 +790,12 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
             except Exception as exc:
                 self._send_error(HTTPStatus.BAD_REQUEST, str(exc))
             return
+        if path == "/api/rules/department/draft":
+            try:
+                self._send_json(self._save_department_rule_draft(self._read_json()))
+            except Exception as exc:
+                self._send_error(HTTPStatus.BAD_REQUEST, str(exc))
+            return
         if path != "/api/render":
             self._send_error(HTTPStatus.NOT_FOUND, "not found")
             return
@@ -803,7 +813,7 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
         body = self.rfile.read(length).decode("utf-8") if length else "{}"
         return json.loads(body or "{}")
 
-    def _read_template_payload(self) -> tuple[dict[str, str], dict[str, dict[str, object]]]:
+    def _read_template_payload(self) -> tuple[dict[str, str], dict[str, list[dict[str, object]]]]:
         content_type = self.headers.get("Content-Type", "")
         if content_type.startswith("multipart/form-data"):
             return self._read_multipart(content_type)
@@ -815,7 +825,7 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
         if not content_type.startswith("multipart/form-data"):
             return self._read_json()
         fields, files = self._read_multipart(content_type)
-        upload = files.get("order_file")
+        upload = self._first_file(files, "order_file")
         if not upload or not upload.get("content"):
             raise ValueError("请上传订单表格")
         order_file = self._save_uploaded_order(
@@ -826,13 +836,13 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
         payload["order_file"] = str(order_file)
         return payload
 
-    def _read_multipart(self, content_type: str) -> tuple[dict[str, str], dict[str, dict[str, object]]]:
+    def _read_multipart(self, content_type: str) -> tuple[dict[str, str], dict[str, list[dict[str, object]]]]:
         length = int(self.headers.get("Content-Length", "0") or "0")
         body = self.rfile.read(length)
         header = f"Content-Type: {content_type}\r\nMIME-Version: 1.0\r\n\r\n".encode("utf-8")
         message = BytesParser(policy=policy.default).parsebytes(header + body)
         fields: dict[str, str] = {}
-        files: dict[str, dict[str, object]] = {}
+        files: dict[str, list[dict[str, object]]] = {}
         for part in message.iter_parts():
             name = part.get_param("name", header="content-disposition")
             if not name:
@@ -840,13 +850,17 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
             data = part.get_payload(decode=True) or b""
             filename = part.get_filename()
             if filename:
-                files[name] = {"filename": filename, "content": data}
+                files.setdefault(name, []).append({"filename": filename, "content": data})
             else:
                 charset = part.get_content_charset() or "utf-8"
                 fields[name] = data.decode(charset, errors="replace")
         return fields, files
 
-    def _register_template(self, fields: dict[str, str], files: dict[str, dict[str, object]]) -> object:
+    def _first_file(self, files: dict[str, list[dict[str, object]]], name: str) -> dict[str, object] | None:
+        uploads = files.get(name, [])
+        return uploads[0] if uploads else None
+
+    def _register_template(self, fields: dict[str, str], files: dict[str, list[dict[str, object]]]) -> object:
         template_id = fields.get("template_id", "").strip()
         existing = None
         if template_id:
@@ -857,6 +871,8 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
 
         template_ai = self._resolve_template_ai(fields, files, template_id, existing)
         template_config = self._save_template_rules(fields, template_id, existing)
+        assets = list(existing.assets) if existing else []
+        assets.extend(self.registry.save_uploaded_assets(template_id, files.get("template_assets", [])))
         item = {
             "template_id": template_id,
             "name": fields.get("name", "").strip() or (existing.name if existing else ""),
@@ -866,6 +882,7 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
             "template_ai": template_ai,
             "default_columns": fields.get("default_columns", existing.default_columns if existing else 4),
             "default_hide_boxes": fields.get("default_hide_boxes", existing.default_hide_boxes if existing else True),
+            "assets": assets,
         }
         if template_config:
             item["template_config"] = template_config
@@ -874,11 +891,11 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
     def _resolve_template_ai(
         self,
         fields: dict[str, str],
-        files: dict[str, dict[str, object]],
+        files: dict[str, list[dict[str, object]]],
         template_id: str,
         existing: object | None,
     ) -> str:
-        upload = files.get("template_ai")
+        upload = self._first_file(files, "template_ai")
         if upload and upload.get("content"):
             output_path = self.registry.save_uploaded_ai(template_id, str(upload.get("filename", "")), upload["content"])  # type: ignore[arg-type]
             return self.registry.to_config_path(output_path)
@@ -895,12 +912,45 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
 
     def _save_template_rules(self, fields: dict[str, str], template_id: str, existing: object | None) -> str:
         rules_text = fields.get("template_rules_json", "").strip()
+        natural_text = fields.get("template_rules_text", "").strip()
+        if not rules_text and natural_text:
+            rules_text = json.dumps(
+                {
+                    "template_id": template_id,
+                    "rule_source": "natural_language",
+                    "raw_text": natural_text,
+                },
+                ensure_ascii=False,
+            )
         if rules_text:
             config_path = self.registry.save_template_config(template_id, rules_text)
             return self.registry.to_config_path(config_path) if config_path else ""
         if existing and existing.template_config:
             return self.registry.to_config_path(existing.template_config)
         return ""
+
+    def _save_department_rule_draft(self, payload: dict[str, object]) -> dict[str, object]:
+        rule_name = str(payload.get("rule_name", "")).strip()
+        if not rule_name:
+            raise ValueError("缺少规则名称")
+        draft_path = CONFIG_DIR / "department_rule_drafts.json"
+        if draft_path.exists():
+            raw = json.loads(draft_path.read_text(encoding="utf-8"))
+        else:
+            raw = {"version": 1, "drafts": []}
+        drafts = [item for item in raw.get("drafts", []) if item.get("rule_name") != rule_name]
+        drafts.append(
+            {
+                "rule_name": rule_name,
+                "natural_text": str(payload.get("natural_text", "")).strip(),
+                "preview": str(payload.get("preview", "")).strip(),
+            }
+        )
+        raw["version"] = int(raw.get("version", 1) or 1)
+        raw["drafts"] = drafts
+        draft_path.parent.mkdir(parents=True, exist_ok=True)
+        draft_path.write_text(json.dumps(raw, ensure_ascii=False, indent=2), encoding="utf-8")
+        return {"ok": True, "drafts": len(drafts)}
 
     def _read_template_config(self, template_id: str) -> dict[str, object]:
         template = self.registry.get_template(template_id)

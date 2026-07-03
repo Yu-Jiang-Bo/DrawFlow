@@ -146,6 +146,36 @@ def test_template_registry_upserts_uploaded_template_and_rules(tmp_path):
     assert template.pipeline == "jjmb_202508"
 
 
+def test_template_registry_saves_multiple_ai_assets(tmp_path):
+    config_path = tmp_path / "templates.json"
+    storage_dir = tmp_path / "templates"
+    registry = TemplateRegistry(config_path, storage_dir)
+
+    ai_path = registry.save_uploaded_ai("JJMB202607030002", "main.ai", b"main ai")
+    assets = registry.save_uploaded_assets(
+        "JJMB202607030002",
+        [
+            {"filename": "design-a.ai", "content": b"asset a"},
+            {"filename": "design-b.ai", "content": b"asset b"},
+        ],
+    )
+    template = registry.upsert_template(
+        {
+            "template_id": "JJMB202607030002",
+            "name": "多资产模板",
+            "template_type": "pure_text_color_design",
+            "status": "active",
+            "template_ai": registry.to_config_path(ai_path),
+            "assets": assets,
+        }
+    )
+
+    assert len(template.assets) == 2
+    assert template.assets[0]["file_name"] == "design-a.ai"
+    assert Path(template.assets[0]["stored_path"]).name == "design-a.ai"
+    assert (storage_dir / "JJMB202607030002" / "assets" / "design-a.ai").exists()
+
+
 def test_service_accepts_string_boolean_flags(tmp_path):
     config_path = tmp_path / "templates.json"
     order_path = tmp_path / "orders.xlsx"
@@ -186,3 +216,13 @@ def test_service_rejects_missing_order_file(tmp_path):
         assert "缺少 order_file" in str(exc)
     else:
         raise AssertionError("missing order_file should fail")
+
+
+def test_job_store_lists_recent_jobs(tmp_path):
+    jobs = JobStore(tmp_path / "jobs")
+    first = jobs.create({"template_id": "A"})
+    second = jobs.create({"template_id": "B"})
+
+    recent = jobs.list_recent(2)
+
+    assert [item["job_id"] for item in recent] == [second["job_id"], first["job_id"]]

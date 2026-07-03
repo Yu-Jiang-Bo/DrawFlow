@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -28,6 +28,7 @@ class TemplateDefinition:
     default_columns: int = 4
     default_hide_boxes: bool = True
     template_config: Path | None = None
+    assets: List[Dict[str, Any]] = field(default_factory=list)
 
     def to_json_dict(self) -> Dict[str, Any]:
         return {
@@ -40,6 +41,7 @@ class TemplateDefinition:
             "template_config": str(self.template_config) if self.template_config else "",
             "default_columns": self.default_columns,
             "default_hide_boxes": self.default_hide_boxes,
+            "assets": self.assets,
         }
 
 
@@ -84,6 +86,33 @@ class TemplateRegistry:
         output_path.write_bytes(content)
         return output_path
 
+    def save_uploaded_assets(self, template_id: str, uploads: List[Dict[str, object]]) -> List[Dict[str, Any]]:
+        if not uploads:
+            return []
+        asset_dir = self._template_dir(template_id) / "assets"
+        asset_dir.mkdir(parents=True, exist_ok=True)
+        saved: List[Dict[str, Any]] = []
+        for upload in uploads:
+            filename = str(upload.get("filename", "")).strip()
+            content = upload.get("content", b"")
+            if not filename.lower().endswith(".ai"):
+                raise ValueError("附加模板资产必须是 .ai 格式")
+            if not isinstance(content, bytes) or not content:
+                raise ValueError(f"附加模板资产为空: {filename}")
+            output_path = _unique_path(asset_dir, _safe_filename(filename))
+            output_path.write_bytes(content)
+            saved.append(
+                {
+                    "file_name": Path(filename).name,
+                    "stored_path": self.to_config_path(output_path),
+                    "asset_type": "ai_template",
+                    "role": "附加模板",
+                    "status": "uploaded",
+                    "size_bytes": len(content),
+                }
+            )
+        return saved
+
     def save_template_config(self, template_id: str, content: str) -> Path | None:
         text = content.strip()
         if not text:
@@ -113,7 +142,17 @@ class TemplateRegistry:
             default_columns=int(item.get("default_columns", 4) or 4),
             default_hide_boxes=bool(item.get("default_hide_boxes", True)),
             template_config=self._optional_path(item.get("template_config", "")),
+            assets=self._parse_assets(item.get("assets", [])),
         )
+
+    def _parse_assets(self, value: object) -> List[Dict[str, Any]]:
+        if not isinstance(value, list):
+            return []
+        assets: List[Dict[str, Any]] = []
+        for item in value:
+            if isinstance(item, dict):
+                assets.append({str(key): item[key] for key in item})
+        return assets
 
     def _optional_path(self, value: object) -> Path | None:
         text = str(value or "").strip()
@@ -164,6 +203,9 @@ class TemplateRegistry:
         template_config = str(item.get("template_config", "")).strip()
         if template_config:
             normalized["template_config"] = template_config
+        assets = item.get("assets", [])
+        if isinstance(assets, list):
+            normalized["assets"] = [asset for asset in assets if isinstance(asset, dict)]
         return normalized
 
     def _template_dir(self, template_id: str) -> Path:
@@ -179,6 +221,31 @@ def _safe_segment(value: str) -> str:
         if char.isalnum() or char in {"-", "_"}:
             chars.append(char)
     return "".join(chars)
+
+
+def _safe_filename(value: str) -> str:
+    chars = []
+    for char in Path(value).name.strip():
+        if char.isalnum() or char in {"-", "_", "."}:
+            chars.append(char)
+        else:
+            chars.append("_")
+    name = "".join(chars).strip("._")
+    return name or "asset.ai"
+
+
+def _unique_path(directory: Path, filename: str) -> Path:
+    candidate = directory / filename
+    if not candidate.exists():
+        return candidate
+    stem = candidate.stem
+    suffix = candidate.suffix
+    index = 2
+    while True:
+        next_candidate = directory / f"{stem}-{index}{suffix}"
+        if not next_candidate.exists():
+            return next_candidate
+        index += 1
 
 
 def _to_bool(value: object) -> bool:

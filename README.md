@@ -59,7 +59,7 @@ scripts/illustrator/run_render_template_text_task.jsx
 
 运行后选择对应的 render task JSON 即可手动渲染。
 
-## 本地 Web/API MVP
+## 本地 Web/API 工作台
 
 启动服务：
 
@@ -73,6 +73,15 @@ python -m src.service.http_server --host 127.0.0.1 --port 8765
 http://127.0.0.1:8765
 ```
 
+页面包含：
+
+```text
+出图任务   # 上传订单表格，渲染完成后自动下载 AI 文件
+模板管理   # 登记模板信息，上传主 .ai 和多个附加 .ai 模板资产
+规则配置   # 查看部门规则，保存自然语言规则草稿
+任务记录   # 查看最近任务并下载历史输出
+```
+
 当前 API：
 
 ```text
@@ -81,7 +90,9 @@ GET  /api/templates
 GET  /api/templates/{template_id}/config
 POST /api/templates
 GET  /api/rules/department
+POST /api/rules/department/draft
 POST /api/render
+GET  /api/jobs
 GET  /api/jobs/{job_id}
 GET  /api/jobs/{job_id}/download/output_ai
 ```
@@ -91,7 +102,9 @@ GET  /api/jobs/{job_id}/download/output_ai
 ```text
 config/templates.json                  # 模板元数据注册表
 templates/<template_id>/template.ai    # 页面上传后的模板文件
-templates/<template_id>/template.config.json # 页面录入的模板特有规则
+templates/<template_id>/assets/*.ai    # 复杂设计拆分出的附加模板资产
+templates/<template_id>/template.config.json # 自然语言规则转换后的结构化配置
+config/department_rule_drafts.json     # 部门规则页面保存的草稿
 ```
 
 正式部署时，这部分应迁移为数据库记录 + 共享文件存储。

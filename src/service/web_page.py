@@ -1,0 +1,1301 @@
+"""Static HTML for the local renderer workbench."""
+
+INDEX_HTML = """<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>制图渲染工作台</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #eef2f6;
+      --ink: #17212b;
+      --muted: #657385;
+      --soft: #f7f9fc;
+      --surface: #ffffff;
+      --line: #d5dde7;
+      --line-strong: #b9c5d2;
+      --primary: #1456d9;
+      --primary-dark: #0d42ac;
+      --success: #16794c;
+      --warning: #8a5a00;
+      --danger: #ad2b21;
+      --shadow: 0 14px 34px rgba(23, 33, 43, 0.08);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: Arial, "Microsoft YaHei", sans-serif;
+      font-size: 14px;
+      line-height: 1.45;
+    }
+    button, input, select, textarea {
+      font: inherit;
+    }
+    button {
+      min-height: 36px;
+      padding: 8px 14px;
+      border-radius: 5px;
+      border: 1px solid transparent;
+      font-weight: 700;
+      cursor: pointer;
+      background: #fff;
+    }
+    input, select, textarea {
+      width: 100%;
+      min-height: 38px;
+      border: 1px solid var(--line-strong);
+      border-radius: 5px;
+      padding: 8px 10px;
+      color: var(--ink);
+      background: #fff;
+      outline: none;
+    }
+    textarea {
+      min-height: 148px;
+      resize: vertical;
+    }
+    input:focus, select:focus, textarea:focus {
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(20, 86, 217, 0.13);
+    }
+    label {
+      display: block;
+      margin-bottom: 6px;
+      color: #354457;
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .app-header {
+      background: #17212b;
+      color: #fff;
+      border-bottom: 1px solid #0d141c;
+    }
+    .header-inner {
+      width: min(1320px, calc(100vw - 40px));
+      margin: 0 auto;
+      min-height: 66px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+    }
+    .brand h1 {
+      margin: 0 0 2px;
+      font-size: 19px;
+      letter-spacing: 0;
+    }
+    .brand p {
+      margin: 0;
+      color: #b9c5d2;
+      font-size: 12px;
+    }
+    .health {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 10px;
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      border-radius: 5px;
+      color: #dbe5f0;
+      background: rgba(255, 255, 255, 0.06);
+      white-space: nowrap;
+    }
+    .health-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #8ee0ae;
+    }
+    .shell {
+      width: min(1320px, calc(100vw - 40px));
+      margin: 22px auto 36px;
+    }
+    .tabs {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px;
+      margin-bottom: 16px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface);
+      box-shadow: 0 1px 2px rgba(23, 33, 43, 0.04);
+    }
+    .tab {
+      color: #405064;
+      border-color: transparent;
+      background: transparent;
+    }
+    .tab.active {
+      color: #fff;
+      background: var(--primary);
+      border-color: var(--primary);
+    }
+    .page { display: none; }
+    .page.active { display: block; }
+    .grid {
+      display: grid;
+      gap: 16px;
+    }
+    .grid.two {
+      grid-template-columns: minmax(0, 1.35fr) minmax(360px, 0.9fr);
+      align-items: start;
+    }
+    .grid.template-layout {
+      grid-template-columns: minmax(260px, 0.7fr) minmax(0, 1.6fr);
+      align-items: start;
+    }
+    .grid.rule-layout {
+      grid-template-columns: minmax(240px, 0.56fr) minmax(0, 1.7fr);
+      align-items: start;
+    }
+    .panel {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+    .panel-header {
+      min-height: 56px;
+      padding: 15px 18px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      border-bottom: 1px solid var(--line);
+      background: #fbfcfe;
+    }
+    .panel-title {
+      margin: 0;
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: 0;
+    }
+    .panel-body {
+      padding: 18px;
+    }
+    .form-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 15px 16px;
+    }
+    .field-full { grid-column: 1 / -1; }
+    .task-upload {
+      min-height: 104px;
+      padding: 18px;
+      border: 1px dashed var(--line-strong);
+      border-radius: 7px;
+      background: var(--soft);
+    }
+    .actions {
+      display: flex;
+      justify-content: flex-end;
+      align-items: center;
+      gap: 10px;
+      margin-top: 18px;
+      padding-top: 16px;
+      border-top: 1px solid var(--line);
+    }
+    .btn-primary {
+      color: #fff;
+      background: var(--primary);
+      border-color: var(--primary);
+    }
+    .btn-primary:hover { background: var(--primary-dark); }
+    .btn-secondary {
+      color: #293847;
+      border-color: var(--line-strong);
+      background: #fff;
+    }
+    .btn-subtle {
+      color: #405064;
+      border-color: var(--line);
+      background: var(--soft);
+    }
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      min-height: 22px;
+      padding: 2px 8px;
+      border-radius: 4px;
+      background: #e8efff;
+      color: #214bb8;
+      font-size: 12px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+    .status-badge.success {
+      color: var(--success);
+      background: #e5f6ed;
+    }
+    .status-badge.warn {
+      color: var(--warning);
+      background: #fff5d7;
+    }
+    .definition-list {
+      display: grid;
+      gap: 11px;
+    }
+    .definition {
+      display: grid;
+      grid-template-columns: 92px 1fr;
+      gap: 12px;
+      padding-bottom: 11px;
+      border-bottom: 1px solid var(--line);
+    }
+    .definition:last-child {
+      padding-bottom: 0;
+      border-bottom: 0;
+    }
+    .definition dt {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .definition dd {
+      margin: 0;
+      overflow-wrap: anywhere;
+    }
+    .result-strip {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 16px;
+    }
+    .result-cell {
+      min-height: 70px;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--soft);
+    }
+    .result-cell span {
+      display: block;
+      margin-bottom: 5px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .result-cell strong {
+      display: block;
+      overflow-wrap: anywhere;
+      font-size: 13px;
+    }
+    .list {
+      display: grid;
+      gap: 10px;
+    }
+    .list-item {
+      padding: 11px 12px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--soft);
+    }
+    .item-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 5px;
+      font-weight: 700;
+    }
+    .item-meta {
+      color: var(--muted);
+      font-size: 12px;
+      overflow-wrap: anywhere;
+    }
+    .template-list {
+      display: grid;
+      gap: 8px;
+    }
+    .template-row {
+      width: 100%;
+      text-align: left;
+      min-height: 52px;
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--soft);
+      color: var(--ink);
+    }
+    .template-row.active {
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(20, 86, 217, 0.12);
+    }
+    .template-row strong {
+      display: block;
+      margin-bottom: 3px;
+      overflow-wrap: anywhere;
+    }
+    .template-row span {
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .asset-panel-grid {
+      display: grid;
+      grid-template-columns: minmax(280px, 0.9fr) minmax(300px, 1.1fr);
+      gap: 16px;
+      align-items: stretch;
+    }
+    .upload-box {
+      min-height: 236px;
+      padding: 16px;
+      border: 1px dashed var(--line-strong);
+      border-radius: 7px;
+      background: var(--soft);
+      display: grid;
+      gap: 14px;
+      align-content: start;
+    }
+    .asset-list {
+      min-height: 236px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      overflow: hidden;
+      background: #fff;
+    }
+    .asset-list-head,
+    .asset-row {
+      display: grid;
+      grid-template-columns: 1.25fr 92px 86px;
+      gap: 10px;
+      align-items: center;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--line);
+    }
+    .asset-list-head {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+      background: #f4f7fa;
+    }
+    .asset-row:last-child { border-bottom: 0; }
+    .asset-name {
+      overflow-wrap: anywhere;
+      font-weight: 700;
+    }
+    .preview-box {
+      min-height: 154px;
+      padding: 13px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #fbfcfe;
+    }
+    .preview-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .preview-chip {
+      min-height: 54px;
+      padding: 10px 11px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #fff;
+    }
+    .preview-chip span {
+      display: block;
+      margin-bottom: 4px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .preview-chip strong {
+      display: block;
+      overflow-wrap: anywhere;
+    }
+    .rule-category {
+      width: 100%;
+      text-align: left;
+      min-height: 46px;
+      margin-bottom: 8px;
+      border: 1px solid var(--line);
+      color: #36485a;
+      background: var(--soft);
+    }
+    .rule-category.active {
+      color: #fff;
+      border-color: var(--primary);
+      background: var(--primary);
+    }
+    .rule-detail-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(300px, 0.78fr);
+      gap: 16px;
+      align-items: start;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: #fff;
+    }
+    th, td {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+    th {
+      color: var(--muted);
+      font-size: 12px;
+      background: #f4f7fa;
+    }
+    td {
+      overflow-wrap: anywhere;
+    }
+    .empty {
+      color: var(--muted);
+      padding: 12px;
+    }
+    .message {
+      min-height: 22px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .message.ok { color: var(--success); }
+    .message.error { color: var(--danger); }
+    .download-link {
+      color: var(--primary);
+      font-weight: 700;
+      text-decoration: none;
+    }
+    .download-link:hover {
+      text-decoration: underline;
+    }
+    @media (max-width: 960px) {
+      .header-inner, .shell { width: min(100vw - 24px, 1320px); }
+      .tabs { overflow-x: auto; }
+      .grid.two,
+      .grid.template-layout,
+      .grid.rule-layout,
+      .form-grid,
+      .asset-panel-grid,
+      .result-strip,
+      .preview-grid,
+      .rule-detail-grid {
+        grid-template-columns: 1fr;
+      }
+      .actions {
+        justify-content: stretch;
+      }
+      .actions button {
+        width: 100%;
+      }
+      .asset-list-head, .asset-row {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header class="app-header">
+    <div class="header-inner">
+      <div class="brand">
+        <h1>制图渲染工作台</h1>
+        <p>模板资产、订单出图、规则配置</p>
+      </div>
+      <div class="health"><span class="health-dot"></span><span id="healthText">服务检查中</span></div>
+    </div>
+  </header>
+
+  <main class="shell">
+    <nav class="tabs" aria-label="主导航">
+      <button class="tab active" data-page-tab="render">出图任务</button>
+      <button class="tab" data-page-tab="templates">模板管理</button>
+      <button class="tab" data-page-tab="rules">规则配置</button>
+      <button class="tab" data-page-tab="jobs">任务记录</button>
+    </nav>
+
+    <section class="page active" id="page-render">
+      <div class="grid two">
+        <section class="panel">
+          <div class="panel-header">
+            <h2 class="panel-title">出图任务</h2>
+            <span class="status-badge" id="renderTemplateBadge">未选择模板</span>
+          </div>
+          <div class="panel-body">
+            <div class="form-grid">
+              <div class="field-full">
+                <label for="renderTemplate">模板</label>
+                <select id="renderTemplate"></select>
+              </div>
+              <div class="field-full task-upload">
+                <label for="orderFile">订单表格</label>
+                <input id="orderFile" type="file" accept=".xlsx,.xls,.csv" />
+              </div>
+            </div>
+            <div class="actions">
+              <button class="btn-secondary" id="resetTaskBtn">重置</button>
+              <button class="btn-primary" id="renderBtn">开始渲染</button>
+            </div>
+            <div class="result-strip">
+              <div class="result-cell"><span>任务编号</span><strong id="resultJobId">-</strong></div>
+              <div class="result-cell"><span>渲染状态</span><strong id="resultStatus">待提交</strong></div>
+              <div class="result-cell"><span>渲染项数</span><strong id="resultItems">-</strong></div>
+              <div class="result-cell"><span>下载状态</span><strong id="resultDownload">-</strong></div>
+            </div>
+            <div class="message" id="taskMessage">等待提交</div>
+          </div>
+        </section>
+
+        <aside class="grid">
+          <section class="panel">
+            <div class="panel-header">
+              <h2 class="panel-title">当前模板状态</h2>
+              <span class="status-badge" id="templateStatusBadge">-</span>
+            </div>
+            <div class="panel-body">
+              <dl class="definition-list" id="renderTemplateStatus"></dl>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-header">
+              <h2 class="panel-title">最近任务</h2>
+              <button class="btn-subtle" id="refreshJobsBtn">刷新</button>
+            </div>
+            <div class="panel-body">
+              <div class="list" id="recentJobs"></div>
+            </div>
+          </section>
+        </aside>
+      </div>
+    </section>
+
+    <section class="page" id="page-templates">
+      <div class="grid template-layout">
+        <section class="panel">
+          <div class="panel-header">
+            <h2 class="panel-title">模板列表</h2>
+            <span class="status-badge" id="templateCountBadge">0 个</span>
+          </div>
+          <div class="panel-body">
+            <div class="template-list" id="templateList"></div>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-header">
+            <h2 class="panel-title">新增或编辑模板</h2>
+            <span class="status-badge">纯文字模板</span>
+          </div>
+          <div class="panel-body">
+            <div class="form-grid">
+              <div>
+                <label for="templateId">模板 ID</label>
+                <input id="templateId" placeholder="JJMB202607030001" />
+              </div>
+              <div>
+                <label for="templateName">模板名称</label>
+                <input id="templateName" placeholder="例如：皮质钥匙扣文字模板" />
+              </div>
+              <div>
+                <label for="templateType">模板类型</label>
+                <select id="templateType">
+                  <option value="pure_text_color_design">纯文字颜色/设计位置模板</option>
+                  <option value="pure_text_style">纯文字作图区模板</option>
+                </select>
+              </div>
+              <div>
+                <label for="templateStatus">状态</label>
+                <select id="templateStatus">
+                  <option value="active">启用</option>
+                  <option value="draft">草稿</option>
+                  <option value="disabled">停用</option>
+                </select>
+              </div>
+              <div class="field-full">
+                <label>上传.ai模版</label>
+                <div class="asset-panel-grid">
+                  <div class="upload-box">
+                    <div>
+                      <label for="primaryAiFile">主模板文件</label>
+                      <input id="primaryAiFile" type="file" accept=".ai" />
+                    </div>
+                    <div>
+                      <label for="assetAiFiles">附加模板文件</label>
+                      <input id="assetAiFiles" type="file" accept=".ai" multiple />
+                    </div>
+                  </div>
+                  <div class="asset-list">
+                    <div class="asset-list-head"><span>文件</span><span>类型</span><span>状态</span></div>
+                    <div id="assetRows"></div>
+                  </div>
+                </div>
+              </div>
+              <div class="field-full">
+                <label for="templateRuleText">模板特有规则</label>
+                <textarea id="templateRuleText" placeholder="例如：未选择颜色默认金色；未选择设计默认 Design2；Design2 字体逆时针旋转 15 度。"></textarea>
+              </div>
+              <div class="field-full">
+                <label>结构化预览</label>
+                <div class="preview-box" id="templateRulePreview"></div>
+              </div>
+            </div>
+            <div class="actions">
+              <button class="btn-secondary" id="newTemplateBtn">新建空白</button>
+              <button class="btn-subtle" id="previewTemplateRuleBtn">生成预览</button>
+              <button class="btn-primary" id="saveTemplateBtn">保存模板</button>
+            </div>
+            <div class="message" id="templateSaveMessage">等待编辑</div>
+          </div>
+        </section>
+      </div>
+    </section>
+
+    <section class="page" id="page-rules">
+      <div class="grid rule-layout">
+        <section class="panel">
+          <div class="panel-header">
+            <h2 class="panel-title">规则分类</h2>
+            <span class="status-badge">全局规则</span>
+          </div>
+          <div class="panel-body">
+            <div id="ruleCategories"></div>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-header">
+            <h2 class="panel-title">规则配置</h2>
+            <span class="status-badge" id="ruleStatusBadge">未选择</span>
+          </div>
+          <div class="panel-body">
+            <div class="rule-detail-grid">
+              <div>
+                <dl class="definition-list" id="ruleDefinition"></dl>
+                <div style="margin-top:16px">
+                  <label for="ruleNaturalText">自然语言规则</label>
+                  <textarea id="ruleNaturalText"></textarea>
+                </div>
+              </div>
+              <div>
+                <label>结构化预览</label>
+                <div class="preview-box" id="rulePreview"></div>
+              </div>
+            </div>
+            <div class="actions">
+              <button class="btn-subtle" id="previewRuleBtn">生成预览</button>
+              <button class="btn-primary" id="saveRuleDraftBtn">保存草稿</button>
+            </div>
+            <div class="message" id="ruleSaveMessage">等待编辑</div>
+          </div>
+        </section>
+      </div>
+    </section>
+
+    <section class="page" id="page-jobs">
+      <section class="panel">
+        <div class="panel-header">
+          <h2 class="panel-title">任务记录</h2>
+          <button class="btn-subtle" id="refreshJobsPageBtn">刷新</button>
+        </div>
+        <div class="panel-body">
+          <table>
+            <thead>
+              <tr>
+                <th>任务编号</th>
+                <th>模板</th>
+                <th>状态</th>
+                <th>项数</th>
+                <th>创建时间</th>
+                <th>结果</th>
+              </tr>
+            </thead>
+            <tbody id="jobsTableBody"></tbody>
+          </table>
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <script>
+    const state = {
+      templates: [],
+      jobs: [],
+      departmentRules: [],
+      selectedTemplateId: "",
+      selectedRuleName: ""
+    };
+
+    const typeNames = {
+      pure_text_color_design: "纯文字颜色/设计位置模板",
+      pure_text_style: "纯文字作图区模板"
+    };
+    const statusNames = {
+      active: "启用",
+      draft: "草稿",
+      disabled: "停用",
+      completed: "完成",
+      failed: "失败",
+      running: "运行中",
+      queued: "排队中"
+    };
+    const fieldNames = {
+      order_no: "订单号",
+      color_option: "字体颜色",
+      text: "定制信息",
+      product_name: "产品名称"
+    };
+
+    async function init() {
+      bindEvents();
+      await checkHealth();
+      await Promise.all([loadTemplates(), loadRules(), loadJobs()]);
+      resetTaskResult();
+    }
+
+    function bindEvents() {
+      document.querySelectorAll("[data-page-tab]").forEach(button => {
+        button.addEventListener("click", () => switchPage(button.dataset.pageTab));
+      });
+      document.getElementById("renderTemplate").addEventListener("change", event => {
+        state.selectedTemplateId = event.target.value;
+        syncSelectedTemplate();
+      });
+      document.getElementById("renderBtn").addEventListener("click", submitRender);
+      document.getElementById("resetTaskBtn").addEventListener("click", resetTaskResult);
+      document.getElementById("refreshJobsBtn").addEventListener("click", loadJobs);
+      document.getElementById("refreshJobsPageBtn").addEventListener("click", loadJobs);
+      document.getElementById("newTemplateBtn").addEventListener("click", clearTemplateForm);
+      document.getElementById("previewTemplateRuleBtn").addEventListener("click", renderTemplateRulePreview);
+      document.getElementById("saveTemplateBtn").addEventListener("click", saveTemplate);
+      document.getElementById("assetAiFiles").addEventListener("change", renderAssetRows);
+      document.getElementById("primaryAiFile").addEventListener("change", renderAssetRows);
+      document.getElementById("templateRuleText").addEventListener("input", renderTemplateRulePreview);
+      document.getElementById("previewRuleBtn").addEventListener("click", renderRulePreview);
+      document.getElementById("saveRuleDraftBtn").addEventListener("click", saveRuleDraft);
+    }
+
+    function switchPage(name) {
+      document.querySelectorAll("[data-page-tab]").forEach(button => {
+        button.classList.toggle("active", button.dataset.pageTab === name);
+      });
+      document.querySelectorAll(".page").forEach(page => {
+        page.classList.toggle("active", page.id === `page-${name}`);
+      });
+    }
+
+    async function checkHealth() {
+      try {
+        await getJson("/api/health");
+        document.getElementById("healthText").textContent = "服务在线";
+      } catch (error) {
+        document.getElementById("healthText").textContent = "服务异常";
+        throw error;
+      }
+    }
+
+    async function loadTemplates(selectedId) {
+      const payload = await getJson("/api/templates");
+      state.templates = payload.templates || [];
+      if (selectedId) {
+        state.selectedTemplateId = selectedId;
+      } else if (!state.selectedTemplateId && state.templates.length) {
+        state.selectedTemplateId = state.templates[0].template_id;
+      }
+      renderTemplateOptions();
+      renderTemplateList();
+      syncSelectedTemplate();
+    }
+
+    async function loadRules() {
+      const payload = await getJson("/api/rules/department");
+      state.departmentRules = payload.rules || [];
+      if (!state.selectedRuleName && state.departmentRules.length) {
+        state.selectedRuleName = state.departmentRules[0].name;
+      }
+      renderRuleCategories();
+      syncSelectedRule();
+    }
+
+    async function loadJobs() {
+      const payload = await getJson("/api/jobs");
+      state.jobs = payload.jobs || [];
+      renderRecentJobs();
+      renderJobsTable();
+    }
+
+    function renderTemplateOptions() {
+      const select = document.getElementById("renderTemplate");
+      select.innerHTML = "";
+      state.templates.forEach(template => {
+        const option = document.createElement("option");
+        option.value = template.template_id;
+        option.textContent = `${template.template_id} | ${template.name}`;
+        select.appendChild(option);
+      });
+      if (state.selectedTemplateId) {
+        select.value = state.selectedTemplateId;
+      }
+    }
+
+    function renderTemplateList() {
+      document.getElementById("templateCountBadge").textContent = `${state.templates.length} 个`;
+      const target = document.getElementById("templateList");
+      if (!state.templates.length) {
+        target.innerHTML = '<div class="empty">暂无模板</div>';
+        return;
+      }
+      target.innerHTML = state.templates.map(template => `
+        <button class="template-row ${template.template_id === state.selectedTemplateId ? "active" : ""}" data-template-id="${escapeHtml(template.template_id)}">
+          <strong>${escapeHtml(template.template_id)}</strong>
+          <span>${escapeHtml(template.name || "-")}</span>
+        </button>
+      `).join("");
+      target.querySelectorAll("[data-template-id]").forEach(button => {
+        button.addEventListener("click", () => {
+          state.selectedTemplateId = button.dataset.templateId;
+          renderTemplateOptions();
+          renderTemplateList();
+          syncSelectedTemplate();
+          switchPage("templates");
+        });
+      });
+    }
+
+    function syncSelectedTemplate() {
+      const template = selectedTemplate();
+      if (!template) {
+        document.getElementById("renderTemplateBadge").textContent = "未选择模板";
+        document.getElementById("templateStatusBadge").textContent = "-";
+        document.getElementById("renderTemplateStatus").innerHTML = '<div class="empty">暂无模板</div>';
+        clearTemplateForm();
+        return;
+      }
+      document.getElementById("renderTemplate").value = template.template_id;
+      document.getElementById("renderTemplateBadge").textContent = displayType(template.template_type);
+      document.getElementById("templateStatusBadge").textContent = displayStatus(template.status);
+      document.getElementById("renderTemplateStatus").innerHTML = definitionHtml([
+        ["模板 ID", template.template_id],
+        ["名称", template.name],
+        ["状态", displayStatus(template.status)],
+        ["类型", displayType(template.template_type)],
+        ["主模板", template.template_ai ? "已配置" : "未配置"],
+        ["附加模板", `${(template.assets || []).length} 个`],
+        ["特有规则", template.template_config ? "已配置" : "未配置"]
+      ]);
+      fillTemplateForm(template);
+      renderTemplateList();
+    }
+
+    function fillTemplateForm(template) {
+      document.getElementById("templateId").value = template.template_id || "";
+      document.getElementById("templateName").value = template.name || "";
+      document.getElementById("templateType").value = template.template_type || "pure_text_color_design";
+      document.getElementById("templateStatus").value = template.status || "active";
+      document.getElementById("primaryAiFile").value = "";
+      document.getElementById("assetAiFiles").value = "";
+      loadTemplateRuleText(template);
+      renderAssetRows();
+    }
+
+    async function loadTemplateRuleText(template) {
+      const editor = document.getElementById("templateRuleText");
+      editor.value = "";
+      if (!template || !template.template_config) {
+        renderTemplateRulePreview();
+        return;
+      }
+      try {
+        const payload = await getJson(`/api/templates/${encodeURIComponent(template.template_id)}/config`);
+        const config = payload.config || {};
+        editor.value = config.raw_text || config.notes || config.description || "";
+      } catch (error) {
+        editor.value = "";
+      }
+      renderTemplateRulePreview();
+    }
+
+    function renderAssetRows() {
+      const template = formTemplate();
+      const rows = [];
+      if (template && template.template_ai) {
+        rows.push({ name: fileName(template.template_ai), type: "主模板", status: "已保存" });
+      }
+      (template && template.assets ? template.assets : []).forEach(asset => {
+        rows.push({ name: asset.file_name || fileName(asset.stored_path), type: "附加模板", status: "已保存" });
+      });
+      const primary = document.getElementById("primaryAiFile").files[0];
+      if (primary) rows.push({ name: primary.name, type: "主模板", status: "待上传" });
+      Array.from(document.getElementById("assetAiFiles").files || []).forEach(file => {
+        rows.push({ name: file.name, type: "附加模板", status: "待上传" });
+      });
+      const target = document.getElementById("assetRows");
+      if (!rows.length) {
+        target.innerHTML = '<div class="empty">暂无 .ai 模板资产</div>';
+        return;
+      }
+      target.innerHTML = rows.map(row => `
+        <div class="asset-row">
+          <span class="asset-name">${escapeHtml(row.name || "-")}</span>
+          <span>${escapeHtml(row.type)}</span>
+          <span>${escapeHtml(row.status)}</span>
+        </div>
+      `).join("");
+    }
+
+    function renderTemplateRulePreview() {
+      const payload = buildTemplateRulePayload();
+      const target = document.getElementById("templateRulePreview");
+      target.innerHTML = `
+        <div class="preview-grid">
+          <div class="preview-chip"><span>默认颜色</span><strong>${escapeHtml(payload.defaults.color || "未识别")}</strong></div>
+          <div class="preview-chip"><span>默认设计</span><strong>${escapeHtml(payload.defaults.design || "未识别")}</strong></div>
+          <div class="preview-chip"><span>旋转规则</span><strong>${escapeHtml(payload.transforms.rotation || "未识别")}</strong></div>
+          <div class="preview-chip"><span>规则来源</span><strong>自然语言草稿</strong></div>
+        </div>
+      `;
+    }
+
+    function buildTemplateRulePayload() {
+      const raw = document.getElementById("templateRuleText").value.trim();
+      return {
+        template_id: document.getElementById("templateId").value.trim(),
+        rule_source: "natural_language",
+        raw_text: raw,
+        defaults: {
+          color: inferColor(raw),
+          design: inferDesign(raw)
+        },
+        transforms: {
+          rotation: inferRotation(raw)
+        }
+      };
+    }
+
+    async function saveTemplate() {
+      setMessage("templateSaveMessage", "保存中", "");
+      const templateId = document.getElementById("templateId").value.trim();
+      const name = document.getElementById("templateName").value.trim();
+      if (!templateId || !name) {
+        setMessage("templateSaveMessage", "请填写模板 ID 和模板名称", "error");
+        return;
+      }
+      const form = new FormData();
+      form.append("template_id", templateId);
+      form.append("name", name);
+      form.append("template_type", document.getElementById("templateType").value);
+      form.append("status", document.getElementById("templateStatus").value);
+      form.append("template_rules_text", document.getElementById("templateRuleText").value.trim());
+      form.append("template_rules_json", JSON.stringify(buildTemplateRulePayload()));
+      const primary = document.getElementById("primaryAiFile").files[0];
+      if (primary) form.append("template_ai", primary);
+      Array.from(document.getElementById("assetAiFiles").files || []).forEach(file => {
+        form.append("template_assets", file);
+      });
+      try {
+        const result = await postForm("/api/templates", form);
+        state.selectedTemplateId = result.template.template_id;
+        await loadTemplates(result.template.template_id);
+        setMessage("templateSaveMessage", `已保存模板：${result.template.template_id}`, "ok");
+      } catch (error) {
+        setMessage("templateSaveMessage", String(error.message || error), "error");
+      }
+    }
+
+    function clearTemplateForm() {
+      document.getElementById("templateId").value = "";
+      document.getElementById("templateName").value = "";
+      document.getElementById("templateType").value = "pure_text_color_design";
+      document.getElementById("templateStatus").value = "active";
+      document.getElementById("primaryAiFile").value = "";
+      document.getElementById("assetAiFiles").value = "";
+      document.getElementById("templateRuleText").value = "";
+      document.getElementById("assetRows").innerHTML = '<div class="empty">暂无 .ai 模板资产</div>';
+      renderTemplateRulePreview();
+      setMessage("templateSaveMessage", "等待编辑", "");
+    }
+
+    async function submitRender() {
+      const file = document.getElementById("orderFile").files[0];
+      const templateId = document.getElementById("renderTemplate").value;
+      if (!templateId) {
+        setMessage("taskMessage", "请先选择模板", "error");
+        return;
+      }
+      if (!file) {
+        setMessage("taskMessage", "请上传订单表格", "error");
+        return;
+      }
+      const payload = new FormData();
+      payload.append("template_id", templateId);
+      payload.append("order_file", file);
+      setTaskRunning();
+      try {
+        const result = await postForm("/api/render", payload);
+        renderTaskResult(result);
+        await loadJobs();
+      } catch (error) {
+        document.getElementById("resultStatus").textContent = "失败";
+        setMessage("taskMessage", String(error.message || error), "error");
+      }
+    }
+
+    function setTaskRunning() {
+      document.getElementById("resultJobId").textContent = "-";
+      document.getElementById("resultStatus").textContent = "运行中";
+      document.getElementById("resultItems").textContent = "-";
+      document.getElementById("resultDownload").textContent = "-";
+      setMessage("taskMessage", "正在渲染", "");
+    }
+
+    function renderTaskResult(result) {
+      document.getElementById("resultJobId").textContent = result.job_id || "-";
+      document.getElementById("resultStatus").textContent = displayStatus(result.status);
+      document.getElementById("resultItems").textContent = result.stats && result.stats.items !== undefined ? result.stats.items : "-";
+      if (result.status === "completed" && result.outputs && result.outputs.output_ai) {
+        document.getElementById("resultDownload").textContent = "下载中";
+        setMessage("taskMessage", "渲染完成，AI 文件开始下载", "ok");
+        window.location.href = `/api/jobs/${encodeURIComponent(result.job_id)}/download/output_ai`;
+      } else if (result.status === "failed") {
+        document.getElementById("resultDownload").textContent = "-";
+        setMessage("taskMessage", result.error || "渲染失败", "error");
+      } else {
+        document.getElementById("resultDownload").textContent = "-";
+        setMessage("taskMessage", "任务已提交", "");
+      }
+    }
+
+    function resetTaskResult() {
+      document.getElementById("orderFile").value = "";
+      document.getElementById("resultJobId").textContent = "-";
+      document.getElementById("resultStatus").textContent = "待提交";
+      document.getElementById("resultItems").textContent = "-";
+      document.getElementById("resultDownload").textContent = "-";
+      setMessage("taskMessage", "等待提交", "");
+    }
+
+    function renderRecentJobs() {
+      const target = document.getElementById("recentJobs");
+      const jobs = state.jobs.slice(0, 5);
+      if (!jobs.length) {
+        target.innerHTML = '<div class="empty">暂无任务</div>';
+        return;
+      }
+      target.innerHTML = jobs.map(job => {
+        const request = job.request || {};
+        const stats = job.stats || {};
+        return `
+          <div class="list-item">
+            <div class="item-head"><span>${escapeHtml(job.job_id)}</span><span class="status-badge ${job.status === "completed" ? "success" : ""}">${escapeHtml(displayStatus(job.status))}</span></div>
+            <div class="item-meta">${escapeHtml(request.template_id || "-")} / ${stats.items !== undefined ? stats.items : "-"} 项</div>
+          </div>
+        `;
+      }).join("");
+    }
+
+    function renderJobsTable() {
+      const target = document.getElementById("jobsTableBody");
+      if (!state.jobs.length) {
+        target.innerHTML = '<tr><td colspan="6" class="empty">暂无任务</td></tr>';
+        return;
+      }
+      target.innerHTML = state.jobs.map(job => {
+        const request = job.request || {};
+        const stats = job.stats || {};
+        const hasOutput = job.status === "completed" && job.outputs && job.outputs.output_ai;
+        const link = hasOutput ? `<a class="download-link" href="/api/jobs/${encodeURIComponent(job.job_id)}/download/output_ai">下载 AI</a>` : "-";
+        return `
+          <tr>
+            <td>${escapeHtml(job.job_id)}</td>
+            <td>${escapeHtml(request.template_id || "-")}</td>
+            <td>${escapeHtml(displayStatus(job.status))}</td>
+            <td>${stats.items !== undefined ? stats.items : "-"}</td>
+            <td>${escapeHtml(formatDate(job.created_at))}</td>
+            <td>${link}</td>
+          </tr>
+        `;
+      }).join("");
+    }
+
+    function renderRuleCategories() {
+      const target = document.getElementById("ruleCategories");
+      if (!state.departmentRules.length) {
+        target.innerHTML = '<div class="empty">暂无规则</div>';
+        return;
+      }
+      target.innerHTML = state.departmentRules.map(rule => `
+        <button class="rule-category ${rule.name === state.selectedRuleName ? "active" : ""}" data-rule-name="${escapeHtml(rule.name)}">${escapeHtml(rule.display_name || rule.name)}</button>
+      `).join("");
+      target.querySelectorAll("[data-rule-name]").forEach(button => {
+        button.addEventListener("click", () => {
+          state.selectedRuleName = button.dataset.ruleName;
+          renderRuleCategories();
+          syncSelectedRule();
+        });
+      });
+    }
+
+    function syncSelectedRule() {
+      const rule = selectedRule();
+      if (!rule) {
+        document.getElementById("ruleStatusBadge").textContent = "未选择";
+        document.getElementById("ruleDefinition").innerHTML = '<div class="empty">暂无规则</div>';
+        document.getElementById("ruleNaturalText").value = "";
+        renderRulePreview();
+        return;
+      }
+      document.getElementById("ruleStatusBadge").textContent = rule.display_name || rule.name;
+      document.getElementById("ruleDefinition").innerHTML = definitionHtml([
+        ["部门", (rule.departments || []).join(" / ")],
+        ["匹配方式", rule.match === "contains" ? "包含匹配" : "精确匹配"],
+        ["输出框", rule.show_frame ? "带框" : "不带框"],
+        ["颜色处理", rule.apply_color_to_artwork ? "效果图应用颜色" : "颜色作为标注"],
+        ["标注字段", displayLabelFields(rule.label_fields || [])]
+      ]);
+      document.getElementById("ruleNaturalText").value = rule.description || "";
+      renderRulePreview();
+    }
+
+    function renderRulePreview() {
+      const rule = selectedRule();
+      const text = document.getElementById("ruleNaturalText").value.trim();
+      const outputFrame = text.includes("带框") && !text.includes("不带框") ? "带框" : (rule && rule.show_frame ? "带框" : "不带框");
+      const colorMode = text.includes("应用") || text.includes("带字体颜色") ? "效果图应用颜色" : (rule && rule.apply_color_to_artwork ? "效果图应用颜色" : "颜色作为标注");
+      const labelFields = rule ? displayLabelFields(rule.label_fields || []) : "-";
+      document.getElementById("rulePreview").innerHTML = `
+        <div class="preview-grid">
+          <div class="preview-chip"><span>部门范围</span><strong>${escapeHtml(rule ? (rule.departments || []).join(" / ") : "-")}</strong></div>
+          <div class="preview-chip"><span>输出框</span><strong>${escapeHtml(outputFrame)}</strong></div>
+          <div class="preview-chip"><span>颜色处理</span><strong>${escapeHtml(colorMode)}</strong></div>
+          <div class="preview-chip"><span>标注字段</span><strong>${escapeHtml(labelFields)}</strong></div>
+        </div>
+      `;
+    }
+
+    async function saveRuleDraft() {
+      const rule = selectedRule();
+      if (!rule) return;
+      setMessage("ruleSaveMessage", "保存中", "");
+      try {
+        await postJson("/api/rules/department/draft", {
+          rule_name: rule.name,
+          natural_text: document.getElementById("ruleNaturalText").value.trim(),
+          preview: document.getElementById("rulePreview").innerText
+        });
+        setMessage("ruleSaveMessage", "草稿已保存", "ok");
+      } catch (error) {
+        setMessage("ruleSaveMessage", String(error.message || error), "error");
+      }
+    }
+
+    function selectedTemplate() {
+      return state.templates.find(template => template.template_id === state.selectedTemplateId) || null;
+    }
+
+    function formTemplate() {
+      const templateId = document.getElementById("templateId").value.trim();
+      return state.templates.find(template => template.template_id === templateId) || null;
+    }
+
+    function selectedRule() {
+      return state.departmentRules.find(rule => rule.name === state.selectedRuleName) || null;
+    }
+
+    async function getJson(url) {
+      const response = await fetch(url);
+      const text = await response.text();
+      if (!response.ok) throw new Error(extractError(text));
+      return text ? JSON.parse(text) : {};
+    }
+
+    async function postForm(url, body) {
+      const response = await fetch(url, { method: "POST", body });
+      const text = await response.text();
+      if (!response.ok) throw new Error(extractError(text));
+      return text ? JSON.parse(text) : {};
+    }
+
+    async function postJson(url, body) {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      });
+      const text = await response.text();
+      if (!response.ok) throw new Error(extractError(text));
+      return text ? JSON.parse(text) : {};
+    }
+
+    function extractError(text) {
+      try {
+        const payload = JSON.parse(text);
+        return payload.error || text;
+      } catch (error) {
+        return text || "请求失败";
+      }
+    }
+
+    function definitionHtml(rows) {
+      return rows.map(([key, value]) => `
+        <div class="definition"><dt>${escapeHtml(key)}</dt><dd>${escapeHtml(value || "-")}</dd></div>
+      `).join("");
+    }
+
+    function displayType(value) {
+      return typeNames[value] || value || "-";
+    }
+
+    function displayStatus(value) {
+      return statusNames[value] || value || "-";
+    }
+
+    function displayLabelFields(fields) {
+      return fields.map(field => fieldNames[field] || field).join("、") || "-";
+    }
+
+    function inferColor(text) {
+      if (/金色|Gold/i.test(text)) return "Gold";
+      if (/黑色|Black/i.test(text)) return "Black";
+      if (/白色|White/i.test(text)) return "White";
+      if (/玫瑰金|Rose/i.test(text)) return "Rose gold";
+      return "";
+    }
+
+    function inferDesign(text) {
+      const match = text.match(/Design\\s*([0-9]+)/i) || text.match(/设计\\s*([0-9]+)/);
+      return match ? `Design${match[1]}` : "";
+    }
+
+    function inferRotation(text) {
+      const match = text.match(/(-?\\d+)\\s*度/) || text.match(/(-?\\d+)\\s*°/);
+      return match ? `${match[1]}°` : "";
+    }
+
+    function fileName(path) {
+      return String(path || "").split(/[\\\\/]/).pop() || "-";
+    }
+
+    function formatDate(value) {
+      if (!value) return "-";
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return value;
+      return date.toLocaleString("zh-CN", { hour12: false });
+    }
+
+    function escapeHtml(value) {
+      return String(value)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    }
+
+    function setMessage(id, text, stateName) {
+      const target = document.getElementById(id);
+      target.className = `message ${stateName || ""}`.trim();
+      target.textContent = text;
+    }
+
+    init().catch(error => {
+      setMessage("taskMessage", String(error.message || error), "error");
+    });
+  </script>
+</body>
+</html>
+"""
