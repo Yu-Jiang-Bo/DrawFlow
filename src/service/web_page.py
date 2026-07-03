@@ -652,7 +652,7 @@ INDEX_HTML = """<!doctype html>
         <section class="panel">
           <div class="panel-header">
             <h2 class="panel-title">规则分类</h2>
-            <span class="status-badge">全局规则</span>
+            <button class="btn-subtle" id="newRuleBtn">新增规则</button>
           </div>
           <div class="panel-body">
             <div id="ruleCategories"></div>
@@ -667,7 +667,45 @@ INDEX_HTML = """<!doctype html>
           <div class="panel-body">
             <div class="rule-detail-grid">
               <div>
-                <dl class="definition-list" id="ruleDefinition"></dl>
+                <div class="form-grid" id="ruleDefinition">
+                  <div>
+                    <label for="ruleName">规则名称</label>
+                    <input id="ruleName" placeholder="例如：K_T_FK_ZK" />
+                  </div>
+                  <div>
+                    <label for="ruleDisplayName">显示名称</label>
+                    <input id="ruleDisplayName" placeholder="例如：K/T/FK/ZK 部门" />
+                  </div>
+                  <div>
+                    <label for="ruleDepartments">适用部门</label>
+                    <input id="ruleDepartments" placeholder="多个部门用 / 或 , 分隔" />
+                  </div>
+                  <div>
+                    <label for="ruleMatch">匹配方式</label>
+                    <select id="ruleMatch">
+                      <option value="exact">精确匹配</option>
+                      <option value="contains">包含匹配</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label for="ruleLabelFields">标注字段</label>
+                    <input id="ruleLabelFields" placeholder="订单号、字体颜色、定制信息" />
+                  </div>
+                  <div>
+                    <label for="ruleShowFrame">输出框</label>
+                    <select id="ruleShowFrame">
+                      <option value="false">不带框</option>
+                      <option value="true">带框</option>
+                    </select>
+                  </div>
+                  <div class="field-full">
+                    <label for="ruleColorMode">颜色处理</label>
+                    <select id="ruleColorMode">
+                      <option value="label">颜色只作为标注</option>
+                      <option value="artwork">效果图应用颜色</option>
+                    </select>
+                  </div>
+                </div>
                 <div style="margin-top:16px">
                   <label for="ruleNaturalText">自然语言规则</label>
                   <textarea id="ruleNaturalText"></textarea>
@@ -718,8 +756,10 @@ INDEX_HTML = """<!doctype html>
       templates: [],
       jobs: [],
       departmentRules: [],
+      ruleDrafts: [],
       selectedTemplateId: "",
-      selectedRuleName: ""
+      selectedRuleName: "",
+      ruleMode: "published"
     };
 
     const typeNames = {
@@ -769,6 +809,11 @@ INDEX_HTML = """<!doctype html>
       document.getElementById("templateRuleText").addEventListener("input", renderTemplateRulePreview);
       document.getElementById("previewRuleBtn").addEventListener("click", renderRulePreview);
       document.getElementById("saveRuleDraftBtn").addEventListener("click", saveRuleDraft);
+      document.getElementById("newRuleBtn").addEventListener("click", newRuleDraft);
+      ["ruleName", "ruleDisplayName", "ruleDepartments", "ruleMatch", "ruleLabelFields", "ruleShowFrame", "ruleColorMode", "ruleNaturalText"].forEach(id => {
+        document.getElementById(id).addEventListener("input", renderRulePreview);
+        document.getElementById(id).addEventListener("change", renderRulePreview);
+      });
     }
 
     function switchPage(name) {
@@ -806,8 +851,10 @@ INDEX_HTML = """<!doctype html>
     async function loadRules() {
       const payload = await getJson("/api/rules/department");
       state.departmentRules = payload.rules || [];
+      state.ruleDrafts = payload.drafts || [];
       if (!state.selectedRuleName && state.departmentRules.length) {
         state.selectedRuleName = state.departmentRules[0].name;
+        state.ruleMode = "published";
       }
       renderRuleCategories();
       syncSelectedRule();
@@ -1115,16 +1162,21 @@ INDEX_HTML = """<!doctype html>
 
     function renderRuleCategories() {
       const target = document.getElementById("ruleCategories");
-      if (!state.departmentRules.length) {
+      if (!state.departmentRules.length && !state.ruleDrafts.length) {
         target.innerHTML = '<div class="empty">暂无规则</div>';
         return;
       }
-      target.innerHTML = state.departmentRules.map(rule => `
-        <button class="rule-category ${rule.name === state.selectedRuleName ? "active" : ""}" data-rule-name="${escapeHtml(rule.name)}">${escapeHtml(rule.display_name || rule.name)}</button>
+      const published = state.departmentRules.map(rule => `
+        <button class="rule-category ${state.ruleMode === "published" && rule.name === state.selectedRuleName ? "active" : ""}" data-rule-mode="published" data-rule-name="${escapeHtml(rule.name)}">${escapeHtml(rule.display_name || rule.name)}</button>
       `).join("");
+      const drafts = state.ruleDrafts.map(rule => `
+        <button class="rule-category ${state.ruleMode === "draft" && rule.rule_name === state.selectedRuleName ? "active" : ""}" data-rule-mode="draft" data-rule-name="${escapeHtml(rule.rule_name)}">${escapeHtml(rule.display_name || rule.rule_name)}（草稿）</button>
+      `).join("");
+      target.innerHTML = published + drafts;
       target.querySelectorAll("[data-rule-name]").forEach(button => {
         button.addEventListener("click", () => {
           state.selectedRuleName = button.dataset.ruleName;
+          state.ruleMode = button.dataset.ruleMode || "published";
           renderRuleCategories();
           syncSelectedRule();
         });
@@ -1135,53 +1187,93 @@ INDEX_HTML = """<!doctype html>
       const rule = selectedRule();
       if (!rule) {
         document.getElementById("ruleStatusBadge").textContent = "未选择";
-        document.getElementById("ruleDefinition").innerHTML = '<div class="empty">暂无规则</div>';
-        document.getElementById("ruleNaturalText").value = "";
+        fillRuleForm(emptyRuleDraft());
         renderRulePreview();
         return;
       }
-      document.getElementById("ruleStatusBadge").textContent = rule.display_name || rule.name;
-      document.getElementById("ruleDefinition").innerHTML = definitionHtml([
-        ["部门", (rule.departments || []).join(" / ")],
-        ["匹配方式", rule.match === "contains" ? "包含匹配" : "精确匹配"],
-        ["输出框", rule.show_frame ? "带框" : "不带框"],
-        ["颜色处理", rule.apply_color_to_artwork ? "效果图应用颜色" : "颜色作为标注"],
-        ["标注字段", displayLabelFields(rule.label_fields || [])]
-      ]);
-      document.getElementById("ruleNaturalText").value = rule.description || "";
+      document.getElementById("ruleStatusBadge").textContent = state.ruleMode === "draft" ? "草稿" : "已发布";
+      fillRuleForm(rule);
       renderRulePreview();
     }
 
+    function newRuleDraft() {
+      state.ruleMode = "new";
+      state.selectedRuleName = "";
+      renderRuleCategories();
+      document.getElementById("ruleStatusBadge").textContent = "新增草稿";
+      fillRuleForm(emptyRuleDraft());
+      setMessage("ruleSaveMessage", "正在新增规则草稿", "");
+      renderRulePreview();
+    }
+
+    function fillRuleForm(rule) {
+      document.getElementById("ruleName").value = rule.rule_name || rule.name || "";
+      document.getElementById("ruleDisplayName").value = rule.display_name || "";
+      document.getElementById("ruleDepartments").value = (rule.departments || []).join(" / ");
+      document.getElementById("ruleMatch").value = rule.match || "exact";
+      document.getElementById("ruleLabelFields").value = displayLabelFields(rule.label_fields || []);
+      document.getElementById("ruleShowFrame").value = rule.show_frame ? "true" : "false";
+      document.getElementById("ruleColorMode").value = rule.apply_color_to_artwork ? "artwork" : "label";
+      document.getElementById("ruleNaturalText").value = rule.natural_text || rule.description || "";
+    }
+
+    function emptyRuleDraft() {
+      return {
+        rule_name: "",
+        display_name: "",
+        departments: [],
+        match: "exact",
+        label_fields: ["order_no", "text"],
+        show_frame: false,
+        apply_color_to_artwork: false,
+        natural_text: ""
+      };
+    }
+
     function renderRulePreview() {
-      const rule = selectedRule();
-      const text = document.getElementById("ruleNaturalText").value.trim();
-      const outputFrame = text.includes("带框") && !text.includes("不带框") ? "带框" : (rule && rule.show_frame ? "带框" : "不带框");
-      const colorMode = text.includes("应用") || text.includes("带字体颜色") ? "效果图应用颜色" : (rule && rule.apply_color_to_artwork ? "效果图应用颜色" : "颜色作为标注");
-      const labelFields = rule ? displayLabelFields(rule.label_fields || []) : "-";
+      const draft = buildRuleDraftPayload();
       document.getElementById("rulePreview").innerHTML = `
         <div class="preview-grid">
-          <div class="preview-chip"><span>部门范围</span><strong>${escapeHtml(rule ? (rule.departments || []).join(" / ") : "-")}</strong></div>
-          <div class="preview-chip"><span>输出框</span><strong>${escapeHtml(outputFrame)}</strong></div>
-          <div class="preview-chip"><span>颜色处理</span><strong>${escapeHtml(colorMode)}</strong></div>
-          <div class="preview-chip"><span>标注字段</span><strong>${escapeHtml(labelFields)}</strong></div>
+          <div class="preview-chip"><span>部门范围</span><strong>${escapeHtml(draft.departments.join(" / ") || "-")}</strong></div>
+          <div class="preview-chip"><span>输出框</span><strong>${escapeHtml(draft.show_frame ? "带框" : "不带框")}</strong></div>
+          <div class="preview-chip"><span>颜色处理</span><strong>${escapeHtml(draft.apply_color_to_artwork ? "效果图应用颜色" : "颜色作为标注")}</strong></div>
+          <div class="preview-chip"><span>标注字段</span><strong>${escapeHtml(displayLabelFields(draft.label_fields))}</strong></div>
         </div>
       `;
     }
 
     async function saveRuleDraft() {
-      const rule = selectedRule();
-      if (!rule) return;
+      const draft = buildRuleDraftPayload();
+      if (!draft.rule_name) {
+        setMessage("ruleSaveMessage", "请填写规则名称", "error");
+        return;
+      }
       setMessage("ruleSaveMessage", "保存中", "");
       try {
         await postJson("/api/rules/department/draft", {
-          rule_name: rule.name,
-          natural_text: document.getElementById("ruleNaturalText").value.trim(),
+          ...draft,
           preview: document.getElementById("rulePreview").innerText
         });
+        state.selectedRuleName = draft.rule_name;
+        state.ruleMode = "draft";
+        await loadRules();
         setMessage("ruleSaveMessage", "草稿已保存", "ok");
       } catch (error) {
         setMessage("ruleSaveMessage", String(error.message || error), "error");
       }
+    }
+
+    function buildRuleDraftPayload() {
+      return {
+        rule_name: document.getElementById("ruleName").value.trim(),
+        display_name: document.getElementById("ruleDisplayName").value.trim(),
+        departments: parseList(document.getElementById("ruleDepartments").value),
+        match: document.getElementById("ruleMatch").value,
+        label_fields: normalizeLabelFields(document.getElementById("ruleLabelFields").value),
+        show_frame: document.getElementById("ruleShowFrame").value === "true",
+        apply_color_to_artwork: document.getElementById("ruleColorMode").value === "artwork",
+        natural_text: document.getElementById("ruleNaturalText").value.trim()
+      };
     }
 
     function selectedTemplate() {
@@ -1194,6 +1286,9 @@ INDEX_HTML = """<!doctype html>
     }
 
     function selectedRule() {
+      if (state.ruleMode === "draft") {
+        return state.ruleDrafts.find(rule => rule.rule_name === state.selectedRuleName) || null;
+      }
       return state.departmentRules.find(rule => rule.name === state.selectedRuleName) || null;
     }
 
@@ -1247,6 +1342,25 @@ INDEX_HTML = """<!doctype html>
 
     function displayLabelFields(fields) {
       return fields.map(field => fieldNames[field] || field).join("、") || "-";
+    }
+
+    function parseList(value) {
+      return String(value || "")
+        .split(/[、,，/|\\s]+/)
+        .map(item => item.trim())
+        .filter(Boolean);
+    }
+
+    function normalizeLabelFields(value) {
+      const reverseNames = {
+        订单号: "order_no",
+        字体颜色: "color_option",
+        颜色: "color_option",
+        定制信息: "text",
+        信息: "text",
+        产品名称: "product_name"
+      };
+      return parseList(value).map(field => reverseNames[field] || field);
     }
 
     function inferColor(text) {

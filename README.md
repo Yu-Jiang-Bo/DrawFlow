@@ -78,7 +78,7 @@ http://127.0.0.1:8765
 ```text
 出图任务   # 上传订单表格，渲染完成后自动下载 AI 文件
 模板管理   # 登记模板信息，上传主 .ai 和多个附加 .ai 模板资产
-规则配置   # 查看部门规则，保存自然语言规则草稿
+规则配置   # 查看部门规则，新增或编辑自然语言规则草稿
 任务记录   # 查看最近任务并下载历史输出
 ```
 
@@ -104,7 +104,7 @@ config/templates.json                  # 模板元数据注册表
 templates/<template_id>/template.ai    # 页面上传后的模板文件
 templates/<template_id>/assets/*.ai    # 复杂设计拆分出的附加模板资产
 templates/<template_id>/template.config.json # 自然语言规则转换后的结构化配置
-config/department_rule_drafts.json     # 部门规则页面保存的草稿
+config/department_rule_drafts.json     # 部门规则页面新增/编辑的草稿
 ```
 
 正式部署时，这部分应迁移为数据库记录 + 共享文件存储。

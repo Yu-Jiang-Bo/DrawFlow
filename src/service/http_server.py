@@ -759,7 +759,7 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
                 self._send_error(HTTPStatus.NOT_FOUND, str(exc))
             return
         if path == "/api/rules/department":
-            self._send_json(json.loads(DEPARTMENT_RULES_PATH.read_text(encoding="utf-8")))
+            self._send_json(self._read_department_rules())
             return
         if path == "/api/jobs":
             self._send_json({"jobs": self.jobs.list_recent(30)})
@@ -942,6 +942,12 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
         drafts.append(
             {
                 "rule_name": rule_name,
+                "display_name": str(payload.get("display_name", "")).strip(),
+                "departments": _to_string_list(payload.get("departments", [])),
+                "match": str(payload.get("match", "exact")).strip() or "exact",
+                "label_fields": _to_string_list(payload.get("label_fields", [])),
+                "show_frame": _to_bool(payload.get("show_frame", False)),
+                "apply_color_to_artwork": _to_bool(payload.get("apply_color_to_artwork", False)),
                 "natural_text": str(payload.get("natural_text", "")).strip(),
                 "preview": str(payload.get("preview", "")).strip(),
             }
@@ -951,6 +957,16 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
         draft_path.parent.mkdir(parents=True, exist_ok=True)
         draft_path.write_text(json.dumps(raw, ensure_ascii=False, indent=2), encoding="utf-8")
         return {"ok": True, "drafts": len(drafts)}
+
+    def _read_department_rules(self) -> dict[str, object]:
+        payload = json.loads(DEPARTMENT_RULES_PATH.read_text(encoding="utf-8"))
+        draft_path = CONFIG_DIR / "department_rule_drafts.json"
+        if draft_path.exists():
+            draft_payload = json.loads(draft_path.read_text(encoding="utf-8"))
+            payload["drafts"] = draft_payload.get("drafts", [])
+        else:
+            payload["drafts"] = []
+        return payload
 
     def _read_template_config(self, template_id: str) -> dict[str, object]:
         template = self.registry.get_template(template_id)
@@ -1029,6 +1045,26 @@ def _safe_download_name(value: str) -> str:
             chars.append("_")
     name = "".join(chars).strip("._")
     return name or "file"
+
+
+def _to_string_list(value: object) -> list[str]:
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    text = str(value or "").strip()
+    if not text:
+        return []
+    return [item.strip() for item in text.replace("，", ",").replace("、", ",").replace("/", ",").split(",") if item.strip()]
+
+
+def _to_bool(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "on", "是"}:
+        return True
+    if text in {"0", "false", "no", "off", "否"}:
+        return False
+    return bool(value)
 
 
 def main() -> int:
