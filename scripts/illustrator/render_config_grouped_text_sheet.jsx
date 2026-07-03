@@ -67,7 +67,7 @@
         orderLabel.contents = String(group.order_no || "");
         orderLabel.textRange.characterAttributes.size = orderLabelFontSize;
         applyColor(orderLabel, "black");
-        fitTextToRect(orderLabel, [groupLeft, cursorTop, groupLeft + metric.width, cursorTop - orderLabelHeight], 6, orderLabelFontSize, false);
+        fitTextToRect(orderLabel, [groupLeft, cursorTop, groupLeft + metric.width, cursorTop - orderLabelHeight], 6, orderLabelFontSize);
         outlines.push(orderLabel);
         cursorTop -= orderLabelHeight;
 
@@ -88,8 +88,7 @@
             tf.contents = String(item.text || "");
             applyFontConfig(tf, font);
             applyColor(tf, String(task.style && task.style.color_name || "black"));
-            fitTextToRect(tf, [boxLeft + padding, boxTop - padding, boxRight - padding, boxBottom + padding], minFontSize, maxFontSize, true);
-            outlines.push(tf);
+            renderOutlinedTextToRect(tf, [boxLeft + padding, boxTop - padding, boxRight - padding, boxBottom + padding], minFontSize, maxFontSize);
             cursorTop = boxBottom - itemGap;
         }
     }
@@ -254,14 +253,13 @@
         return map[key] || map.black;
     }
 
-    function fitTextToRect(tf, rect, minSize, maxSize, stretchToFill) {
+    function fitTextToRect(tf, rect, minSize, maxSize) {
         var left = rect[0], top = rect[1], right = rect[2], bottom = rect[3];
         var maxW = right - left;
         var maxH = top - bottom;
         var bestSize = fitMaxFontSize(tf, maxW, maxH, minSize, maxSize);
         tf.textRange.characterAttributes.size = bestSize;
         try { app.redraw(); } catch (e0) {}
-        if (stretchToFill) stretchTextToRect(tf, maxW, maxH);
 
         var bounds = tf.visibleBounds;
         var cx = (left + right) / 2;
@@ -269,6 +267,18 @@
         var tx = cx - (bounds[0] + bounds[2]) / 2;
         var ty = cy - (bounds[1] + bounds[3]) / 2;
         tf.translate(tx, ty);
+    }
+
+    function renderOutlinedTextToRect(tf, rect, minSize, maxSize) {
+        var left = rect[0], top = rect[1], right = rect[2], bottom = rect[3];
+        var maxW = right - left;
+        var maxH = top - bottom;
+        tf.textRange.characterAttributes.size = fitMaxFontSize(tf, maxW, maxH, minSize, maxSize);
+        try { app.redraw(); } catch (e0) {}
+        var outline = tf.createOutline();
+        cleanupOutline(outline);
+        fitPageItemToRect(outline, rect);
+        return outline;
     }
 
     function fitMaxFontSize(tf, maxW, maxH, minSize, maxSize) {
@@ -289,20 +299,31 @@
         return size;
     }
 
-    function stretchTextToRect(tf, maxW, maxH) {
-        try { app.redraw(); } catch (e0) {}
-        var b = tf.visibleBounds;
-        var w = Math.abs(b[2] - b[0]);
-        var h = Math.abs(b[1] - b[3]);
-        if (w <= 0 || h <= 0) return;
-        var scaleX = (maxW / w) * 100;
-        var scaleY = (maxH / h) * 100;
-        try {
-            tf.resize(scaleX, scaleY, true, true, true, true, 100, Transformation.CENTER);
-        } catch (e1) {
-            try { tf.resize(scaleX, scaleY); } catch (e2) {}
+    function fitPageItemToRect(item, rect) {
+        var left = rect[0], top = rect[1], right = rect[2], bottom = rect[3];
+        for (var i = 0; i < 3; i++) {
+            try { app.redraw(); } catch (e0) {}
+            var b = item.visibleBounds;
+            var w = Math.abs(b[2] - b[0]);
+            var h = Math.abs(b[1] - b[3]);
+            if (w <= 0 || h <= 0) return;
+            var scaleX = ((right - left) / w) * 100;
+            var scaleY = ((top - bottom) / h) * 100;
+            try {
+                item.resize(scaleX, scaleY, true, true, true, true, 100, Transformation.CENTER);
+            } catch (e1) {
+                try { item.resize(scaleX, scaleY); } catch (e2) {}
+            }
+            centerPageItemInRect(item, rect);
         }
-        try { app.redraw(); } catch (e3) {}
+    }
+
+    function centerPageItemInRect(item, rect) {
+        var left = rect[0], top = rect[1], right = rect[2], bottom = rect[3];
+        var b = item.visibleBounds;
+        var cx = (left + right) / 2;
+        var cy = (top + bottom) / 2;
+        item.translate(cx - (b[0] + b[2]) / 2, cy - (b[1] + b[3]) / 2);
     }
 
     function outlineAndClean(items) {
