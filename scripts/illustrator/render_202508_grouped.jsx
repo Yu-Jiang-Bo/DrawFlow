@@ -11,25 +11,27 @@
     try { app.userInteractionLevel = UserInteractionLevel.DONTDISPLAYALERTS; } catch (e0) {}
 
     var layout = task.layout || {};
-    var columns = Math.max(Number(layout.columns || 4), 1);
-    var gap = mmToPt(Number(layout.gap_mm || 8));
-    var margin = mmToPt(Number(layout.margin_mm || 8));
-    var orderLabelHeight = mmToPt(Number(layout.order_label_height_mm || 7));
-    var itemLabelHeight = mmToPt(Number(layout.item_label_height_mm || 6));
-    var labelFontSize = Number(layout.label_font_size_pt || 12);
-    var itemGap = mmToPt(Number(layout.item_gap_mm || 5));
     var showBoxes = layout.show_style_boxes !== false;
+    var compactOutput = !showBoxes;
+    var columns = Math.max(Number(layout.columns || 4), 1);
+    var gap = mmToPt(Number(compactOutput ? (layout.compact_gap_mm || 4) : (layout.gap_mm || 8)));
+    var margin = mmToPt(Number(compactOutput ? (layout.compact_margin_mm || 4) : (layout.margin_mm || 8)));
+    var orderLabelHeight = mmToPt(Number(compactOutput ? (layout.compact_order_label_height_mm || 5) : (layout.order_label_height_mm || 7)));
+    var itemLabelHeight = mmToPt(Number(compactOutput ? (layout.compact_item_label_height_mm || 5) : (layout.item_label_height_mm || 6)));
+    var labelFontSize = Number(compactOutput ? (layout.compact_label_font_size_pt || 10) : (layout.label_font_size_pt || 12));
+    var itemGap = mmToPt(Number(compactOutput ? (layout.compact_item_gap_mm || 2) : (layout.item_gap_mm || 5)));
     var padding = mmToPt(Number(task.fit && task.fit.padding_mm || 0));
     var minFontSize = Number(task.fit && task.fit.min_font_size_pt || 4);
     var maxFontSize = Number(task.fit && task.fit.max_font_size_pt || 300);
 
     var productSize = maxProductSize(config);
+    var contentSize = compactOutput ? maxAnchorSize(config) : productSize;
     var groupMetrics = [];
-    var maxGroupWidth = productSize.width;
+    var maxGroupWidth = contentSize.width;
     for (var g = 0; g < task.groups.length; g++) {
         var metric = {
-            width: productSize.width,
-            height: orderLabelHeight + task.groups[g].items.length * (itemLabelHeight + productSize.height + itemGap)
+            width: contentSize.width,
+            height: orderLabelHeight + task.groups[g].items.length * (itemLabelHeight + contentSize.height + itemGap)
         };
         groupMetrics.push(metric);
         maxGroupWidth = Math.max(maxGroupWidth, metric.width);
@@ -46,10 +48,13 @@
     var debugPayload = {
         groups: task.groups.length,
         columns: columns,
+        compactOutput: compactOutput,
         docWidth: docWidth,
         docHeight: docHeight,
         productWidthPt: productSize.width,
-        productHeightPt: productSize.height
+        productHeightPt: productSize.height,
+        contentWidthPt: contentSize.width,
+        contentHeightPt: contentSize.height
     };
 
     var doc = app.documents.add(DocumentColorSpace.RGB, docWidth, docHeight);
@@ -75,18 +80,26 @@
             var productRight = productLeft + productSize.width;
             var productBottom = productTop - productSize.height;
             var itemLabel = item.production_label || (item.show_color_label ? item.order_no + "  " + item.font_option + "  " + item.color_option : item.order_no);
-            var drawFrame = showBoxes || item.show_frame === true;
+            var drawFrame = !compactOutput && (showBoxes || item.show_frame === true);
+
+            if (compactOutput) {
+                var contentLeft = groupLeft + (maxGroupWidth - contentSize.width) / 2;
+                var contentTop = cursorTop - itemLabelHeight;
+                var contentRight = contentLeft + contentSize.width;
+                var contentBottom = contentTop - contentSize.height;
+
+                drawLabel(layer, itemLabel, contentLeft, cursorTop, contentRight, cursorTop - itemLabelHeight, labelFontSize);
+                drawPersonalizedText(layer, item, font, design, [contentLeft + padding, contentTop - padding, contentRight - padding, contentBottom + padding], minFontSize, maxFontSize);
+                cursorTop = contentBottom - itemGap;
+                continue;
+            }
 
             drawLabel(layer, itemLabel, productLeft, cursorTop, productRight, cursorTop - itemLabelHeight, labelFontSize);
             if (drawFrame) drawBox(layer, productLeft, productTop, productSize.width, productSize.height, "PRODUCT_BOX");
             var anchor = mapAnchor(design, productLeft, productTop, productSize.width, productSize.height);
             if (drawFrame) drawBox(layer, anchor[0], anchor[1], anchor[2] - anchor[0], anchor[1] - anchor[3], item.design_option + "_BOX");
 
-            var tf = layer.textFrames.add();
-            tf.contents = String(item.text || "");
-            applyFontConfig(tf, font);
-            applyColor(tf, item.apply_color_to_artwork ? colorConfig(config, item.color_option) : [0, 0, 0]);
-            renderOutlinedTextToRect(tf, [anchor[0] + padding, anchor[1] - padding, anchor[2] - padding, anchor[3] + padding], minFontSize, maxFontSize, Number(design.rotation_deg || 0));
+            drawPersonalizedText(layer, item, font, design, [anchor[0] + padding, anchor[1] - padding, anchor[2] - padding, anchor[3] + padding], minFontSize, maxFontSize);
             cursorTop = productBottom - itemGap;
         }
     }
@@ -111,6 +124,22 @@
         if (width <= 0 || height <= 0) {
             width = mmToPt(100);
             height = mmToPt(100);
+        }
+        return { width: width, height: height };
+    }
+
+    function maxAnchorSize(config) {
+        var width = 0;
+        var height = 0;
+        for (var key in config.design_options) {
+            if (!config.design_options.hasOwnProperty(key)) continue;
+            var b = config.design_options[key].anchor_bounds_pt;
+            width = Math.max(width, Math.abs(Number(b[2]) - Number(b[0])));
+            height = Math.max(height, Math.abs(Number(b[1]) - Number(b[3])));
+        }
+        if (width <= 0 || height <= 0) {
+            width = mmToPt(55);
+            height = mmToPt(40);
         }
         return { width: width, height: height };
     }
@@ -150,6 +179,14 @@
         color.blue = 153;
         rect.strokeColor = color;
         return rect;
+    }
+
+    function drawPersonalizedText(layer, item, font, design, rect, minSize, maxSize) {
+        var tf = layer.textFrames.add();
+        tf.contents = String(item.text || "");
+        applyFontConfig(tf, font);
+        applyColor(tf, item.apply_color_to_artwork ? colorConfig(config, item.color_option) : [0, 0, 0]);
+        return renderOutlinedTextToRect(tf, rect, minSize, maxSize, Number(design.rotation_deg || 0));
     }
 
     function designConfig(config, name) {
