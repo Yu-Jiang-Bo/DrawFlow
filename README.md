@@ -58,3 +58,46 @@ scripts/illustrator/run_render_template_text_task.jsx
 ```
 
 运行后选择对应的 render task JSON 即可手动渲染。
+
+## 本地 Web/API MVP
+
+启动服务：
+
+```powershell
+python -m src.service.http_server --host 127.0.0.1 --port 8765
+```
+
+浏览器打开：
+
+```text
+http://127.0.0.1:8765
+```
+
+当前 API：
+
+```text
+GET  /api/health
+GET  /api/templates
+GET  /api/rules/department
+POST /api/render
+GET  /api/jobs/{job_id}
+```
+
+`POST /api/render` 示例：
+
+```json
+{
+  "template_id": "JJMB202508261001394920",
+  "order_file": "C:\\Users\\Administrator\\Desktop\\image\\test\\ai测试\\20260703111921_SoIaKp.xlsx",
+  "output_name": "web-render.ai",
+  "columns": 5,
+  "hide_boxes": true,
+  "dry_run": false
+}
+```
+
+任务记录会写入：
+
+```text
+output/service-jobs/{job_id}/job.json
+```
