@@ -1,0 +1,116 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="980" viewBox="0 0 1440 980">
+  <defs>
+    <style>
+      .bg { fill: #f3f5f7; }
+      .top { fill: #1f2933; }
+      .card { fill: #ffffff; stroke: #d9e0e7; stroke-width: 1; }
+      .panel { fill: #f8fafc; stroke: #d9e0e7; stroke-width: 1; }
+      .line { stroke: #d9e0e7; stroke-width: 1; }
+      .text { font-family: Arial, "Microsoft YaHei", sans-serif; fill: #1f2933; }
+      .muted { font-family: Arial, "Microsoft YaHei", sans-serif; fill: #687482; }
+      .white { font-family: Arial, "Microsoft YaHei", sans-serif; fill: #ffffff; }
+      .blue { fill: #1f5eff; }
+      .blueText { font-family: Arial, "Microsoft YaHei", sans-serif; fill: #1f5eff; }
+      .green { fill: #16835b; }
+      .greenBg { fill: #e8f6ef; stroke: #b9e4ce; stroke-width: 1; }
+      .warnBg { fill: #fff6df; stroke: #f3d27c; stroke-width: 1; }
+      .chip { fill: #e8efff; stroke: #c7d7ff; stroke-width: 1; }
+      .button { fill: #1f5eff; }
+      .button2 { fill: #ffffff; stroke: #bdc8d3; stroke-width: 1; }
+      .upload { fill: #f8fafc; stroke: #9db4d8; stroke-width: 1.5; stroke-dasharray: 6 6; }
+      .title { font-size: 20px; font-weight: 700; }
+      .h2 { font-size: 16px; font-weight: 700; }
+      .label { font-size: 13px; font-weight: 700; }
+      .body { font-size: 14px; }
+      .small { font-size: 12px; }
+      .metric { font-size: 24px; font-weight: 700; }
+    </style>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="1440" height="980"/>
+
+  <rect class="top" x="0" y="0" width="1440" height="68"/>
+  <text class="white title" x="48" y="30">制图渲染服务</text>
+  <text class="white small" x="48" y="52" opacity="0.72">订单解析 / 模板渲染 / AI8 输出</text>
+  <rect x="1030" y="18" width="94" height="32" rx="4" fill="#111827" stroke="#455466"/>
+  <text class="white body" x="1052" y="39">出图任务</text>
+  <text class="white body" x="1154" y="39" opacity="0.72">模板管理</text>
+  <text class="white body" x="1260" y="39" opacity="0.72">规则配置</text>
+  <circle cx="1360" cy="34" r="5" fill="#7dd3a7"/>
+  <text class="white small" x="1372" y="38" opacity="0.86">服务在线</text>
+
+  <rect class="card" x="48" y="92" width="314" height="92" rx="6"/>
+  <text class="muted small" x="68" y="124">当前模板</text>
+  <text class="text metric" x="68" y="158">JJMB202508...</text>
+  <rect class="card" x="382" y="92" width="314" height="92" rx="6"/>
+  <text class="muted small" x="402" y="124">任务状态</text>
+  <text class="text metric" x="402" y="158">待提交</text>
+  <rect class="card" x="716" y="92" width="314" height="92" rx="6"/>
+  <text class="muted small" x="736" y="124">渲染项数</text>
+  <text class="text metric" x="736" y="158">-</text>
+  <rect class="card" x="1050" y="92" width="342" height="92" rx="6"/>
+  <text class="muted small" x="1070" y="124">下载状态</text>
+  <text class="text metric" x="1070" y="158">等待生成</text>
+
+  <rect class="card" x="48" y="212" width="840" height="398" rx="6"/>
+  <text class="text h2" x="72" y="246">出图任务</text>
+  <rect class="chip" x="786" y="225" width="78" height="26" rx="4"/>
+  <text class="blueText small" x="803" y="243">纯文字模板</text>
+  <line class="line" x1="48" y1="266" x2="888" y2="266"/>
+
+  <text class="text label" x="72" y="306">1. 选择模板</text>
+  <rect class="panel" x="72" y="322" width="760" height="46" rx="4"/>
+  <text class="text body" x="92" y="351">JJMB202508261001394920 | 平纹方形皮质首饰盒文字颜色模板</text>
+  <text class="muted body" x="804" y="351">∨</text>
+
+  <text class="text label" x="72" y="408">2. 上传订单表格</text>
+  <rect class="upload" x="72" y="426" width="760" height="104" rx="6"/>
+  <text class="blueText body" x="356" y="468">点击上传 Excel / CSV 订单表</text>
+  <text class="muted small" x="320" y="496">支持 .xlsx、.xls、.csv，上传后由系统自动解析</text>
+
+  <text class="text label" x="72" y="570">3. 生成效果图</text>
+  <rect class="button2" x="620" y="548" width="96" height="40" rx="4"/>
+  <text class="text body" x="650" y="573">重置</text>
+  <rect class="button" x="736" y="548" width="96" height="40" rx="4"/>
+  <text class="white body" x="757" y="573">开始渲染</text>
+
+  <rect class="card" x="916" y="212" width="476" height="184" rx="6"/>
+  <text class="text h2" x="940" y="246">模板摘要</text>
+  <line class="line" x1="916" y1="266" x2="1392" y2="266"/>
+  <text class="muted small" x="940" y="302">模板 ID</text>
+  <text class="text body" x="1044" y="302">JJMB202508261001394920</text>
+  <line class="line" x1="940" y1="322" x2="1368" y2="322"/>
+  <text class="muted small" x="940" y="352">名称</text>
+  <text class="text body" x="1044" y="352">平纹方形皮质首饰盒文字颜色模板</text>
+  <line class="line" x1="940" y1="372" x2="1368" y2="372"/>
+  <text class="muted small" x="940" y="386">状态</text>
+  <rect class="greenBg" x="1044" y="370" width="54" height="24" rx="4"/>
+  <text class="muted small" x="1058" y="386">启用</text>
+
+  <rect class="card" x="916" y="420" width="476" height="190" rx="6"/>
+  <text class="text h2" x="940" y="454">部门规则摘要</text>
+  <line class="line" x1="916" y1="474" x2="1392" y2="474"/>
+  <rect class="panel" x="940" y="494" width="428" height="44" rx="4"/>
+  <text class="text body" x="956" y="513">K/T/FK/ZK 部门</text>
+  <text class="muted small" x="956" y="531">标注订单号、字体颜色和定制信息，不带框</text>
+  <rect class="panel" x="940" y="550" width="428" height="44" rx="4"/>
+  <text class="text body" x="956" y="569">H 部门</text>
+  <text class="muted small" x="956" y="587">效果图本体按订单字体颜色渲染</text>
+
+  <rect class="card" x="48" y="638" width="1344" height="238" rx="6"/>
+  <text class="text h2" x="72" y="672">任务结果</text>
+  <rect class="chip" x="1290" y="651" width="78" height="26" rx="4"/>
+  <text class="blueText small" x="1306" y="669">暂无任务</text>
+  <line class="line" x1="48" y1="692" x2="1392" y2="692"/>
+  <rect class="panel" x="72" y="720" width="392" height="76" rx="4"/>
+  <text class="muted small" x="92" y="750">任务编号</text>
+  <text class="text h2" x="92" y="778">-</text>
+  <rect class="panel" x="492" y="720" width="392" height="76" rx="4"/>
+  <text class="muted small" x="512" y="750">渲染状态</text>
+  <text class="text h2" x="512" y="778">待提交</text>
+  <rect class="panel" x="912" y="720" width="456" height="76" rx="4"/>
+  <text class="muted small" x="932" y="750">下载状态</text>
+  <text class="text h2" x="932" y="778">渲染完成后自动下载 AI 文件</text>
+  <rect class="warnBg" x="72" y="820" width="1296" height="34" rx="4"/>
+  <text class="muted body" x="92" y="842">提示：用户只上传订单表，不需要填写本机路径；系统按模板规则自动处理尺寸、排版和输出。</text>
+</svg>
