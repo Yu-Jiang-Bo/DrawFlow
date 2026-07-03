@@ -292,8 +292,6 @@
             try { outline.rotate(rotationDeg, true, true, true, true, Transformation.CENTER); } catch (e1) {}
         }
         fitPageItemToRect(outline, rect);
-        cleanupOutline(outline);
-        fitPageItemToRect(outline, rect);
         return outline;
     }
 
