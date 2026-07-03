@@ -115,6 +115,37 @@ def test_template_registry_resolves_defaults(tmp_path):
     assert template.pipeline == "jjmb_202508"
 
 
+def test_template_registry_upserts_uploaded_template_and_rules(tmp_path):
+    config_path = tmp_path / "templates.json"
+    storage_dir = tmp_path / "templates"
+    registry = TemplateRegistry(config_path, storage_dir)
+
+    ai_path = registry.save_uploaded_ai("JJMB202607030001", "source.ai", b"fake ai")
+    rule_path = registry.save_template_config(
+        "JJMB202607030001",
+        '{"template_id":"JJMB202607030001","defaults":{"color":"Gold"}}',
+    )
+    template = registry.upsert_template(
+        {
+            "template_id": "JJMB202607030001",
+            "name": "新增模板",
+            "template_type": "pure_text_color_design",
+            "pipeline": "jjmb_202508",
+            "status": "active",
+            "template_ai": registry.to_config_path(ai_path),
+            "template_config": registry.to_config_path(rule_path),
+            "default_columns": "6",
+            "default_hide_boxes": "false",
+        }
+    )
+
+    assert template.template_id == "JJMB202607030001"
+    assert template.template_ai.exists()
+    assert template.template_config and template.template_config.exists()
+    assert template.default_columns == 6
+    assert template.default_hide_boxes is False
+
+
 def test_service_rejects_missing_order_file(tmp_path):
     config_path = tmp_path / "templates.json"
     write_templates_config(config_path)

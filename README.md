@@ -78,10 +78,22 @@ http://127.0.0.1:8765
 ```text
 GET  /api/health
 GET  /api/templates
+GET  /api/templates/{template_id}/config
+POST /api/templates
 GET  /api/rules/department
 POST /api/render
 GET  /api/jobs/{job_id}
 ```
+
+当前模板注册仍是本地 MVP：
+
+```text
+config/templates.json                  # 模板元数据注册表
+templates/<template_id>/template.ai    # 页面上传后的模板文件
+templates/<template_id>/template.config.json # 页面录入的模板特有规则
+```
+
+正式部署时，这部分应迁移为数据库记录 + 共享文件存储。
 
 `POST /api/render` 示例：
 
