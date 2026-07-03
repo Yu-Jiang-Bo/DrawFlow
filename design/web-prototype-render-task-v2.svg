@@ -1,0 +1,95 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="1180" viewBox="0 0 1440 1180">
+  <defs>
+    <style>
+      .bg{fill:#f3f5f7}.top{fill:#1f2933}.card{fill:#fff;stroke:#d9e0e7;stroke-width:1}.soft{fill:#f8fafc;stroke:#d9e0e7;stroke-width:1}.line{stroke:#d9e0e7;stroke-width:1}
+      .text{font-family:Arial,"Microsoft YaHei",sans-serif;fill:#1f2933}.muted{font-family:Arial,"Microsoft YaHei",sans-serif;fill:#687482}.white{font-family:Arial,"Microsoft YaHei",sans-serif;fill:#fff}
+      .blue{fill:#1f5eff}.blueText{font-family:Arial,"Microsoft YaHei",sans-serif;fill:#1f5eff}.green{fill:#16835b}.greenBg{fill:#e8f6ef;stroke:#b9e4ce;stroke-width:1}
+      .chip{fill:#e8efff;stroke:#c7d7ff;stroke-width:1}.upload{fill:#f8fafc;stroke:#9db4d8;stroke-width:1.5;stroke-dasharray:7 7}.warn{fill:#fff7e6;stroke:#efd08a;stroke-width:1}
+      .title{font-size:20px;font-weight:700}.h1{font-size:22px;font-weight:700}.h2{font-size:16px;font-weight:700}.body{font-size:14px}.small{font-size:12px}.label{font-size:13px;font-weight:700}
+    </style>
+  </defs>
+  <rect class="bg" width="1440" height="1180"/>
+  <rect class="top" width="1440" height="68"/>
+  <text class="white title" x="48" y="30">制图渲染服务</text>
+  <text class="white small" x="48" y="52" opacity=".72">上传订单 / 自动渲染 / AI8 输出</text>
+  <rect x="1016" y="18" width="98" height="32" rx="4" fill="#111827" stroke="#455466"/>
+  <text class="white body" x="1036" y="39">出图任务</text>
+  <text class="white body" x="1144" y="39" opacity=".72">模板管理</text>
+  <text class="white body" x="1250" y="39" opacity=".72">规则配置</text>
+  <text class="white body" x="1344" y="39" opacity=".72">任务记录</text>
+
+  <text class="text h1" x="48" y="116">出图任务</text>
+  <text class="muted body" x="48" y="142">日常出图只保留必要动作：选择模板、上传订单、开始渲染、自动下载。</text>
+
+  <rect class="card" x="48" y="172" width="864" height="690" rx="6"/>
+  <text class="text h2" x="76" y="210">1. 选择模板</text>
+  <rect class="soft" x="76" y="232" width="808" height="64" rx="4"/>
+  <text class="text body" x="100" y="266">JJMB202508261001394920 | 平纹方形皮质首饰盒文字颜色模板</text>
+  <text class="muted small" x="100" y="286">纯文字颜色/设计位置模板 · 已启用 · 模板文件和规则均已配置</text>
+  <text class="muted body" x="852" y="270">∨</text>
+
+  <text class="text h2" x="76" y="350">2. 上传订单表格</text>
+  <rect class="upload" x="76" y="374" width="808" height="176" rx="8"/>
+  <text class="blueText h2" x="378" y="438">点击上传订单 Excel / CSV</text>
+  <text class="muted body" x="308" y="470">支持 .xlsx、.xls、.csv。上传后系统自动解析订单字段。</text>
+  <rect class="chip" x="330" y="492" width="250" height="28" rx="4"/>
+  <text class="blueText small" x="350" y="511">不需要填写本机路径或输出路径</text>
+
+  <text class="text h2" x="76" y="610">3. 开始渲染</text>
+  <text class="muted body" x="76" y="638">系统将按模板规则和生产部门规则生成 AI8 文件，完成后自动下载。</text>
+  <rect class="soft" x="76" y="670" width="244" height="76" rx="4"/>
+  <text class="muted small" x="100" y="700">渲染状态</text>
+  <text class="text h2" x="100" y="728">待提交</text>
+  <rect class="soft" x="346" y="670" width="244" height="76" rx="4"/>
+  <text class="muted small" x="370" y="700">解析项数</text>
+  <text class="text h2" x="370" y="728">-</text>
+  <rect class="soft" x="616" y="670" width="268" height="76" rx="4"/>
+  <text class="muted small" x="640" y="700">下载状态</text>
+  <text class="text h2" x="640" y="728">等待生成</text>
+
+  <rect class="soft" x="640" y="780" width="108" height="42" rx="4"/>
+  <text class="text body" x="670" y="806">重置</text>
+  <rect class="blue" x="768" y="780" width="116" height="42" rx="4"/>
+  <text class="white body" x="796" y="806">开始渲染</text>
+
+  <rect class="card" x="944" y="172" width="448" height="300" rx="6"/>
+  <text class="text h2" x="972" y="210">当前模板状态</text>
+  <line class="line" x1="944" y1="232" x2="1392" y2="232"/>
+  <text class="muted small" x="972" y="270">模板文件</text>
+  <rect class="greenBg" x="1090" y="252" width="86" height="28" rx="4"/>
+  <text class="text small" x="1112" y="271">已上传</text>
+  <text class="muted small" x="972" y="322">规则配置</text>
+  <rect class="greenBg" x="1090" y="304" width="86" height="28" rx="4"/>
+  <text class="text small" x="1112" y="323">已确认</text>
+  <text class="muted small" x="972" y="374">模板检查</text>
+  <rect class="chip" x="1090" y="356" width="86" height="28" rx="4"/>
+  <text class="blueText small" x="1112" y="375">可运行</text>
+  <rect class="warn" x="972" y="414" width="392" height="36" rx="4"/>
+  <text class="muted small" x="990" y="436">完整规则查看和编辑请进入“模板管理 / 规则配置”。</text>
+
+  <rect class="card" x="944" y="500" width="448" height="362" rx="6"/>
+  <text class="text h2" x="972" y="538">最近任务</text>
+  <line class="line" x1="944" y1="560" x2="1392" y2="560"/>
+  <rect class="soft" x="972" y="584" width="392" height="68" rx="4"/>
+  <text class="text body" x="992" y="614">20260703-001</text>
+  <text class="muted small" x="992" y="634">50 项 · 已完成 · 已下载</text>
+  <rect class="soft" x="972" y="672" width="392" height="68" rx="4"/>
+  <text class="text body" x="992" y="702">20260703-002</text>
+  <text class="muted small" x="992" y="722">18 项 · 渲染失败 · 查看错误</text>
+  <rect class="soft" x="972" y="760" width="392" height="68" rx="4"/>
+  <text class="text body" x="992" y="790">20260703-003</text>
+  <text class="muted small" x="992" y="810">76 项 · 排队中</text>
+
+  <rect class="card" x="48" y="894" width="1344" height="206" rx="6"/>
+  <text class="text h2" x="76" y="932">运行结果</text>
+  <line class="line" x1="48" y1="954" x2="1392" y2="954"/>
+  <rect class="soft" x="76" y="982" width="396" height="76" rx="4"/>
+  <text class="muted small" x="100" y="1012">任务编号</text>
+  <text class="text h2" x="100" y="1040">自动生成</text>
+  <rect class="soft" x="516" y="982" width="396" height="76" rx="4"/>
+  <text class="muted small" x="540" y="1012">输出文件</text>
+  <text class="text h2" x="540" y="1040">完成后自动下载 .ai</text>
+  <rect class="soft" x="956" y="982" width="408" height="76" rx="4"/>
+  <text class="muted small" x="980" y="1012">异常处理</text>
+  <text class="text h2" x="980" y="1040">失败时展示订单和原因</text>
+</svg>

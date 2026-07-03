@@ -1,0 +1,100 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="1260" viewBox="0 0 1440 1260">
+  <defs>
+    <style>
+      .bg{fill:#f3f5f7}.top{fill:#1f2933}.card{fill:#fff;stroke:#d9e0e7;stroke-width:1}.soft{fill:#f8fafc;stroke:#d9e0e7;stroke-width:1}.line{stroke:#d9e0e7;stroke-width:1}
+      .text{font-family:Arial,"Microsoft YaHei",sans-serif;fill:#1f2933}.muted{font-family:Arial,"Microsoft YaHei",sans-serif;fill:#687482}.white{font-family:Arial,"Microsoft YaHei",sans-serif;fill:#fff}
+      .blue{fill:#1f5eff}.blueText{font-family:Arial,"Microsoft YaHei",sans-serif;fill:#1f5eff}.greenBg{fill:#e8f6ef;stroke:#b9e4ce;stroke-width:1}.warn{fill:#fff7e6;stroke:#efd08a;stroke-width:1}
+      .chip{fill:#e8efff;stroke:#c7d7ff;stroke-width:1}.upload{fill:#f8fafc;stroke:#9db4d8;stroke-width:1.5;stroke-dasharray:7 7}
+      .title{font-size:20px;font-weight:700}.h1{font-size:22px;font-weight:700}.h2{font-size:16px;font-weight:700}.body{font-size:14px}.small{font-size:12px}.label{font-size:13px;font-weight:700}
+    </style>
+  </defs>
+  <rect class="bg" width="1440" height="1260"/>
+  <rect class="top" width="1440" height="68"/>
+  <text class="white title" x="48" y="30">制图渲染服务</text>
+  <text class="white small" x="48" y="52" opacity=".72">模板资产 / 规则草稿 / 人工确认</text>
+  <text class="white body" x="1018" y="39" opacity=".72">出图任务</text>
+  <rect x="1122" y="18" width="100" height="32" rx="4" fill="#111827" stroke="#455466"/>
+  <text class="white body" x="1143" y="39">模板管理</text>
+  <text class="white body" x="1254" y="39" opacity=".72">规则配置</text>
+  <text class="white body" x="1348" y="39" opacity=".72">任务记录</text>
+
+  <text class="text h1" x="48" y="116">模板管理</text>
+  <text class="muted body" x="48" y="142">面向模板维护：上传多份 AI 资产，描述规则，系统生成配置草稿，人工确认后入库。</text>
+
+  <rect class="card" x="48" y="172" width="600" height="268" rx="6"/>
+  <text class="text h2" x="76" y="210">1. 基础信息</text>
+  <line class="line" x1="48" y1="232" x2="648" y2="232"/>
+  <text class="text label" x="76" y="270">模板 ID</text>
+  <rect class="soft" x="76" y="286" width="250" height="42" rx="4"/>
+  <text class="muted body" x="96" y="312">JJMB202607030001</text>
+  <text class="text label" x="354" y="270">状态</text>
+  <rect class="soft" x="354" y="286" width="230" height="42" rx="4"/>
+  <text class="text body" x="374" y="312">启用</text>
+  <text class="text label" x="76" y="360">模板名称</text>
+  <rect class="soft" x="76" y="376" width="508" height="42" rx="4"/>
+  <text class="muted body" x="96" y="402">例如：UV 彩印皮革钥匙扣挂件</text>
+
+  <rect class="card" x="676" y="172" width="716" height="268" rx="6"/>
+  <text class="text h2" x="704" y="210">2. 模板类型</text>
+  <line class="line" x1="676" y1="232" x2="1392" y2="232"/>
+  <rect class="chip" x="704" y="260" width="198" height="42" rx="4"/>
+  <text class="blueText body" x="724" y="286">纯文字颜色/设计位置</text>
+  <rect class="soft" x="922" y="260" width="168" height="42" rx="4"/>
+  <text class="text body" x="942" y="286">纯文字作图区</text>
+  <rect class="soft" x="1110" y="260" width="222" height="42" rx="4"/>
+  <text class="text body" x="1130" y="286">复杂设计资产拆分</text>
+  <rect class="warn" x="704" y="332" width="628" height="64" rx="4"/>
+  <text class="muted body" x="724" y="358">复杂模板可以把每个设计方案拆成独立 .ai，例如 D1.ai、D2.ai。</text>
+  <text class="muted body" x="724" y="380">系统根据模板类型选择内部渲染方式，页面不展示技术字段。</text>
+
+  <rect class="card" x="48" y="468" width="1344" height="318" rx="6"/>
+  <text class="text h2" x="76" y="506">3. 上传 AI 资产</text>
+  <line class="line" x1="48" y1="528" x2="1392" y2="528"/>
+  <rect class="upload" x="76" y="556" width="408" height="174" rx="8"/>
+  <text class="blueText h2" x="190" y="620">批量上传 .ai 文件</text>
+  <text class="muted body" x="142" y="652">支持主模板、设计片段、字体样本、作图区文件</text>
+  <text class="muted small" x="174" y="682">上传后在右侧列表中分类和命名</text>
+
+  <rect class="soft" x="520" y="556" width="824" height="46" rx="4"/>
+  <text class="text label" x="544" y="585">文件名</text><text class="text label" x="820" y="585">资产类型</text><text class="text label" x="1050" y="585">编号/用途</text><text class="text label" x="1250" y="585">状态</text>
+  <rect class="soft" x="520" y="612" width="824" height="46" rx="4"/>
+  <text class="text body" x="544" y="641">template.ai</text><text class="muted body" x="820" y="641">主模板</text><text class="muted body" x="1050" y="641">基础画板</text><text class="blueText body" x="1250" y="641">已上传</text>
+  <rect class="soft" x="520" y="668" width="824" height="46" rx="4"/>
+  <text class="text body" x="544" y="697">D1.ai / D2.ai / D3.ai</text><text class="muted body" x="820" y="697">设计片段</text><text class="muted body" x="1050" y="697">多设计方案</text><text class="blueText body" x="1250" y="697">待检查</text>
+  <rect class="soft" x="520" y="724" width="824" height="46" rx="4"/>
+  <text class="text body" x="544" y="753">font-styles.ai</text><text class="muted body" x="820" y="753">字体样本</text><text class="muted body" x="1050" y="753">F1-F10</text><text class="blueText body" x="1250" y="753">可选</text>
+
+  <rect class="card" x="48" y="814" width="642" height="332" rx="6"/>
+  <text class="text h2" x="76" y="852">4. 规则说明</text>
+  <text class="muted small" x="76" y="876">同事不写 JSON，用自然语言描述模板规则。系统可生成草稿。</text>
+  <line class="line" x1="48" y1="894" x2="690" y2="894"/>
+  <rect class="soft" x="76" y="922" width="586" height="150" rx="4"/>
+  <text class="muted body" x="100" y="954">示例：</text>
+  <text class="text body" x="100" y="984">未选择颜色时默认金色；未选择设计时默认 Design2。</text>
+  <text class="text body" x="100" y="1014">Design2 在右下角，文字逆时针旋转 15 度。</text>
+  <text class="text body" x="100" y="1044">D1-D12 为独立设计片段，文字位按 Text1、Text2 顺序替换。</text>
+  <rect class="soft" x="390" y="1092" width="116" height="40" rx="4"/>
+  <text class="text body" x="420" y="1117">保存说明</text>
+  <rect class="blue" x="526" y="1092" width="136" height="40" rx="4"/>
+  <text class="white body" x="548" y="1117">生成规则草稿</text>
+
+  <rect class="card" x="718" y="814" width="674" height="332" rx="6"/>
+  <text class="text h2" x="746" y="852">5. 结构化规则预览</text>
+  <text class="muted small" x="746" y="876">这是系统生成的配置草稿，保存前必须人工确认。</text>
+  <line class="line" x1="718" y1="894" x2="1392" y2="894"/>
+  <rect class="soft" x="746" y="922" width="292" height="64" rx="4"/>
+  <text class="muted small" x="766" y="948">默认颜色</text><text class="text h2" x="766" y="972">Gold</text>
+  <rect class="soft" x="1068" y="922" width="292" height="64" rx="4"/>
+  <text class="muted small" x="1088" y="948">默认设计</text><text class="text h2" x="1088" y="972">Design2</text>
+  <rect class="soft" x="746" y="1006" width="614" height="54" rx="4"/>
+  <text class="text body" x="766" y="1038">Design2：右下角，文字逆时针旋转 15 度</text>
+  <rect class="soft" x="746" y="1078" width="614" height="54" rx="4"/>
+  <text class="text body" x="766" y="1110">设计片段：D1-D12；替换槽位：Text1、Text2、Text3...</text>
+
+  <rect class="warn" x="48" y="1170" width="936" height="44" rx="4"/>
+  <text class="muted body" x="76" y="1198">LLM 只用于生成规则草稿，不参与正式渲染；最终配置必须由人工确认。</text>
+  <rect class="soft" x="1032" y="1170" width="132" height="44" rx="4"/>
+  <text class="text body" x="1060" y="1198">保存草稿</text>
+  <rect class="blue" x="1188" y="1170" width="172" height="44" rx="4"/>
+  <text class="white body" x="1220" y="1198">确认并保存配置</text>
+</svg>
