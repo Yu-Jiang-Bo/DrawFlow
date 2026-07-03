@@ -258,7 +258,7 @@ class ConfigGroupedSheetRenderTask:
                 "show_style_boxes": True,
             },
             "fit": {
-                "padding_mm": 0.3,
+                "padding_mm": 0.0,
                 "min_font_size_pt": 4.0,
                 "max_font_size_pt": 300.0,
             },

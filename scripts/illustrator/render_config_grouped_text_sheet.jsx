@@ -295,11 +295,13 @@
         var w = Math.abs(b[2] - b[0]);
         var h = Math.abs(b[1] - b[3]);
         if (w <= 0 || h <= 0) return;
-        var attr = tf.textRange.characterAttributes;
-        var currentH = Number(attr.horizontalScale || 100);
-        var currentV = Number(attr.verticalScale || 100);
-        try { attr.horizontalScale = currentH * (maxW / w) * 0.995; } catch (e1) {}
-        try { attr.verticalScale = currentV * (maxH / h) * 0.995; } catch (e2) {}
+        var scaleX = (maxW / w) * 100;
+        var scaleY = (maxH / h) * 100;
+        try {
+            tf.resize(scaleX, scaleY, true, true, true, true, 100, Transformation.CENTER);
+        } catch (e1) {
+            try { tf.resize(scaleX, scaleY); } catch (e2) {}
+        }
         try { app.redraw(); } catch (e3) {}
     }
 
