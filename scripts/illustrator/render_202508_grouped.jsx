@@ -219,7 +219,11 @@
         tf.contents = String(item.text || "");
         applyFontConfig(tf, font);
         applyColor(tf, item.apply_color_to_artwork ? colorConfig(config, item.color_option) : [0, 0, 0]);
-        return renderOutlinedTextToRect(tf, rect, minSize, maxSize, Number(design.rotation_deg || 0));
+        return renderOutlinedTextToRect(tf, rect, minSize, maxSize, Number(design.rotation_deg || 0), shouldPreserveTextAspect(String(item.text || "")));
+    }
+
+    function shouldPreserveTextAspect(text) {
+        return /\s/.test(text) || text.length > 10;
     }
 
     function designConfig(config, name) {
@@ -281,7 +285,7 @@
         tf.translate((left + right) / 2 - (b[0] + b[2]) / 2, (top + bottom) / 2 - (b[1] + b[3]) / 2);
     }
 
-    function renderOutlinedTextToRect(tf, rect, minSize, maxSize, rotationDeg) {
+    function renderOutlinedTextToRect(tf, rect, minSize, maxSize, rotationDeg, preserveAspect) {
         var left = rect[0], top = rect[1], right = rect[2], bottom = rect[3];
         var maxW = right - left;
         var maxH = top - bottom;
@@ -291,7 +295,7 @@
         if (rotationDeg) {
             try { outline.rotate(rotationDeg, true, true, true, true, Transformation.CENTER); } catch (e1) {}
         }
-        fitPageItemToRect(outline, rect);
+        fitPageItemToRect(outline, rect, preserveAspect);
         return outline;
     }
 
@@ -313,7 +317,7 @@
         return size;
     }
 
-    function fitPageItemToRect(item, rect) {
+    function fitPageItemToRect(item, rect, preserveAspect) {
         var left = rect[0], top = rect[1], right = rect[2], bottom = rect[3];
         for (var i = 0; i < 4; i++) {
             try { app.redraw(); } catch (e0) {}
@@ -321,12 +325,23 @@
             var w = Math.abs(b[2] - b[0]);
             var h = Math.abs(b[1] - b[3]);
             if (w <= 0 || h <= 0) return;
-            try {
-                item.resize(((right - left) / w) * 100, ((top - bottom) / h) * 100, true, true, true, true, 100, Transformation.CENTER);
-            } catch (e1) {
-                try { item.resize(((right - left) / w) * 100, ((top - bottom) / h) * 100); } catch (e2) {}
+            var scaleX = ((right - left) / w) * 100;
+            var scaleY = ((top - bottom) / h) * 100;
+            if (preserveAspect) {
+                var scale = Math.min(scaleX, scaleY);
+                scaleX = scale;
+                scaleY = scale;
             }
-            alignPageItemToRect(item, rect);
+            try {
+                item.resize(scaleX, scaleY, true, true, true, true, 100, Transformation.CENTER);
+            } catch (e1) {
+                try { item.resize(scaleX, scaleY); } catch (e2) {}
+            }
+            if (preserveAspect) {
+                centerPageItemInRect(item, rect);
+            } else {
+                alignPageItemToRect(item, rect);
+            }
         }
     }
 
