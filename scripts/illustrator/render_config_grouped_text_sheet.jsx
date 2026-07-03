@@ -67,7 +67,7 @@
         orderLabel.contents = String(group.order_no || "");
         orderLabel.textRange.characterAttributes.size = orderLabelFontSize;
         applyColor(orderLabel, "black");
-        fitTextToRect(orderLabel, [groupLeft, cursorTop, groupLeft + metric.width, cursorTop - orderLabelHeight], 6, orderLabelFontSize);
+        fitTextToRect(orderLabel, [groupLeft, cursorTop, groupLeft + metric.width, cursorTop - orderLabelHeight], 6, orderLabelFontSize, false);
         outlines.push(orderLabel);
         cursorTop -= orderLabelHeight;
 
@@ -88,7 +88,7 @@
             tf.contents = String(item.text || "");
             applyFontConfig(tf, font);
             applyColor(tf, String(task.style && task.style.color_name || "black"));
-            fitTextToRect(tf, [boxLeft + padding, boxTop - padding, boxRight - padding, boxBottom + padding], minFontSize, maxFontSize);
+            fitTextToRect(tf, [boxLeft + padding, boxTop - padding, boxRight - padding, boxBottom + padding], minFontSize, maxFontSize, true);
             outlines.push(tf);
             cursorTop = boxBottom - itemGap;
         }
@@ -254,13 +254,14 @@
         return map[key] || map.black;
     }
 
-    function fitTextToRect(tf, rect, minSize, maxSize) {
+    function fitTextToRect(tf, rect, minSize, maxSize, stretchToFill) {
         var left = rect[0], top = rect[1], right = rect[2], bottom = rect[3];
         var maxW = right - left;
         var maxH = top - bottom;
         var bestSize = fitMaxFontSize(tf, maxW, maxH, minSize, maxSize);
         tf.textRange.characterAttributes.size = bestSize;
         try { app.redraw(); } catch (e0) {}
+        if (stretchToFill) stretchTextToRect(tf, maxW, maxH);
 
         var bounds = tf.visibleBounds;
         var cx = (left + right) / 2;
@@ -286,6 +287,20 @@
             tf.textRange.characterAttributes.size = size;
         }
         return size;
+    }
+
+    function stretchTextToRect(tf, maxW, maxH) {
+        try { app.redraw(); } catch (e0) {}
+        var b = tf.visibleBounds;
+        var w = Math.abs(b[2] - b[0]);
+        var h = Math.abs(b[1] - b[3]);
+        if (w <= 0 || h <= 0) return;
+        var attr = tf.textRange.characterAttributes;
+        var currentH = Number(attr.horizontalScale || 100);
+        var currentV = Number(attr.verticalScale || 100);
+        try { attr.horizontalScale = currentH * (maxW / w) * 0.995; } catch (e1) {}
+        try { attr.verticalScale = currentV * (maxH / h) * 0.995; } catch (e2) {}
+        try { app.redraw(); } catch (e3) {}
     }
 
     function outlineAndClean(items) {
