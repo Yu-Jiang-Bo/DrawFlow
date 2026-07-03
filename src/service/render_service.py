@@ -67,9 +67,9 @@ class RenderService:
             "template_id": template_id,
             "order_file": str(order_file.resolve()),
             "columns": int(payload.get("columns") or template.default_columns),
-            "hide_boxes": bool(payload.get("hide_boxes", template.default_hide_boxes)),
-            "dry_run": bool(payload.get("dry_run", False)),
-            "visible": bool(payload.get("visible", False)),
+            "hide_boxes": _to_bool(payload.get("hide_boxes", template.default_hide_boxes)),
+            "dry_run": _to_bool(payload.get("dry_run", False)),
+            "visible": _to_bool(payload.get("visible", False)),
             "output_name": str(payload.get("output_name", "")).strip(),
         }
 
@@ -189,3 +189,14 @@ def safe_filename(value: str) -> str:
             allowed.append("_")
     name = "".join(allowed).strip("._")
     return name or "output.ai"
+
+
+def _to_bool(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    if text in {"0", "false", "no", "off", "否"}:
+        return False
+    if text in {"1", "true", "yes", "on", "是"}:
+        return True
+    return bool(value)

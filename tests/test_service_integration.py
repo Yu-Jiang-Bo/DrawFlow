@@ -130,7 +130,6 @@ def test_template_registry_upserts_uploaded_template_and_rules(tmp_path):
             "template_id": "JJMB202607030001",
             "name": "新增模板",
             "template_type": "pure_text_color_design",
-            "pipeline": "jjmb_202508",
             "status": "active",
             "template_ai": registry.to_config_path(ai_path),
             "template_config": registry.to_config_path(rule_path),
@@ -144,6 +143,33 @@ def test_template_registry_upserts_uploaded_template_and_rules(tmp_path):
     assert template.template_config and template.template_config.exists()
     assert template.default_columns == 6
     assert template.default_hide_boxes is False
+    assert template.pipeline == "jjmb_202508"
+
+
+def test_service_accepts_string_boolean_flags(tmp_path):
+    config_path = tmp_path / "templates.json"
+    order_path = tmp_path / "orders.xlsx"
+    write_templates_config(config_path)
+    write_order_xlsx(order_path)
+
+    service = RenderService(
+        registry=TemplateRegistry(config_path),
+        jobs=JobStore(tmp_path / "jobs"),
+    )
+
+    record = service.submit(
+        {
+            "template_id": "JJMB202508261001394920",
+            "order_file": str(order_path),
+            "dry_run": "true",
+            "hide_boxes": "false",
+        }
+    )
+
+    assert record["status"] == "completed"
+    task_path = Path(record["outputs"]["render_task"])
+    task = json.loads(task_path.read_text(encoding="utf-8"))
+    assert task["layout"]["show_style_boxes"] is True
 
 
 def test_service_rejects_missing_order_file(tmp_path):

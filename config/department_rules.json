@@ -9,6 +9,8 @@
   "rules": [
     {
       "name": "H",
+      "display_name": "H 部门",
+      "description": "标注订单号和定制信息，不带框；效果图本体按订单字体颜色渲染。",
       "match": "exact",
       "departments": ["H"],
       "label_fields": ["order_no", "text"],
@@ -18,6 +20,8 @@
     },
     {
       "name": "K_T_FK_ZK",
+      "display_name": "K/T/FK/ZK 部门",
+      "description": "标注订单号、字体颜色和定制信息，不带框；字体颜色只作为标注，效果图本体正常输出。",
       "match": "exact",
       "departments": ["K", "T", "FK", "ZK"],
       "label_fields": ["order_no", "color_option", "text"],
@@ -27,6 +31,8 @@
     },
     {
       "name": "D_CONTAINS",
+      "display_name": "含 D 部门",
+      "description": "标注订单号和产品名称，输出带框设计图。",
       "match": "contains",
       "departments": ["D"],
       "label_fields": ["order_no", "product_name"],
@@ -36,6 +42,8 @@
     },
     {
       "name": "PW_EW",
+      "display_name": "PW/EW 部门",
+      "description": "标注订单号、产品名称和字体颜色，输出设计图。",
       "match": "exact",
       "departments": ["PW", "EW"],
       "label_fields": ["order_no", "product_name", "color_option"],

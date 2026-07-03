@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import uuid
 from email import policy
 from email.parser import BytesParser
 from http import HTTPStatus
@@ -13,6 +14,7 @@ from urllib.parse import unquote, urlparse
 
 from ..jjmb_202508_main import DEPARTMENT_RULES_PATH
 from .job_store import JobStore
+from .paths import SERVICE_UPLOADS_DIR
 from .render_service import RenderService
 from .template_registry import TemplateRegistry
 
@@ -392,7 +394,7 @@ INDEX_HTML = """<!doctype html>
     <section class="panel">
       <div class="panel-header">
         <h2 class="panel-title">渲染任务</h2>
-        <span class="badge" id="pipelineBadge">未选择</span>
+        <span class="badge" id="templateTypeBadge">未选择</span>
       </div>
       <div class="panel-body">
         <div class="form-grid">
@@ -401,20 +403,9 @@ INDEX_HTML = """<!doctype html>
             <select id="template"></select>
           </div>
           <div class="field-full">
-            <label for="orderFile">订单表格路径</label>
-            <input id="orderFile" placeholder="C:\\Users\\Administrator\\Desktop\\image\\test\\ai测试\\20260703111921_SoIaKp.xlsx" />
-          </div>
-          <div>
-            <label for="outputName">输出文件名</label>
-            <input id="outputName" value="web-render.ai" />
-          </div>
-          <div>
-            <label for="columns">排版列数</label>
-            <input id="columns" type="number" min="1" value="5" />
-          </div>
-          <div class="field-full checks">
-            <label class="check"><input id="hideBoxes" type="checkbox" checked />正式无框输出</label>
-            <label class="check"><input id="dryRun" type="checkbox" />只生成任务</label>
+            <label for="orderFile">订单表格</label>
+            <input id="orderFile" type="file" accept=".xlsx,.xls,.csv" />
+            <div class="form-hint">支持 Excel/CSV。渲染完成后会自动下载 AI 文件。</div>
           </div>
         </div>
         <div class="actions">
@@ -455,13 +446,9 @@ INDEX_HTML = """<!doctype html>
         </div>
         <div>
           <label for="managerType">模板类型</label>
-          <input id="managerType" value="pure_text_color_design" />
-        </div>
-        <div>
-          <label for="managerPipeline">渲染 Pipeline</label>
-          <select id="managerPipeline">
-            <option value="jjmb_202508">jjmb_202508</option>
-            <option value="jjmb_202603_grouped">jjmb_202603_grouped</option>
+          <select id="managerType">
+            <option value="pure_text_color_design">纯文字颜色/设计位置模板</option>
+            <option value="pure_text_style">纯文字作图区模板</option>
           </select>
         </div>
         <div>
@@ -472,21 +459,10 @@ INDEX_HTML = """<!doctype html>
             <option value="disabled">disabled</option>
           </select>
         </div>
-        <div>
-          <label for="managerColumns">默认列数</label>
-          <input id="managerColumns" type="number" min="1" value="5" />
-        </div>
         <div class="field-full">
           <label for="templateAiFile">上传模板 AI 文件</label>
           <input id="templateAiFile" type="file" accept=".ai" />
           <div class="form-hint">上传后会复制到 custom-renderer/templates/&lt;模板ID&gt;/template.ai。</div>
-        </div>
-        <div class="field-full">
-          <label for="templateAiPath">或登记服务端已有 AI 路径</label>
-          <input id="templateAiPath" placeholder="C:\\Users\\Administrator\\Desktop\\image\\test\\ai测试\\xxx.ai" />
-        </div>
-        <div class="field-full checks">
-          <label class="check"><input id="managerHideBoxes" type="checkbox" checked />默认正式无框输出</label>
         </div>
         <div class="field-full">
           <label for="templateRulesJson">模板特有规则 JSON</label>
@@ -507,9 +483,9 @@ INDEX_HTML = """<!doctype html>
     </div>
     <div class="panel-body">
       <div class="result-grid">
-        <div class="result-cell"><span>输出 AI</span><strong id="outputAi">-</strong></div>
-        <div class="result-cell"><span>Render Task</span><strong id="renderTask">-</strong></div>
-        <div class="result-cell"><span>Job 记录</span><strong id="jobPath">-</strong></div>
+        <div class="result-cell"><span>任务编号</span><strong id="jobIdCell">-</strong></div>
+        <div class="result-cell"><span>渲染状态</span><strong id="jobStatusCell">待提交</strong></div>
+        <div class="result-cell"><span>下载状态</span><strong id="downloadStatus">-</strong></div>
       </div>
       <pre id="result">等待提交</pre>
     </div>
@@ -522,12 +498,6 @@ async function getJson(url) {
   const res = await fetch(url);
   if (!res.ok) throw new Error(await res.text());
   return res.json();
-}
-async function postJson(url, body) {
-  const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-  const text = await res.text();
-  if (!res.ok) throw new Error(text);
-  return JSON.parse(text);
 }
 async function postForm(url, body) {
   const res = await fetch(url, { method: "POST", body });
@@ -550,8 +520,6 @@ async function loadTemplates(selectedId) {
     const option = document.createElement("option");
     option.value = t.template_id;
     option.textContent = `${t.template_id} | ${t.name}`;
-    option.dataset.columns = t.default_columns;
-    option.dataset.hideBoxes = t.default_hide_boxes;
     select.appendChild(option);
   });
   if (targetId && templateData.some(t => t.template_id === targetId)) {
@@ -571,14 +539,9 @@ async function checkHealth() {
 }
 function syncTemplateSelection() {
   const select = document.getElementById("template");
-  const option = select.selectedOptions[0];
   const selected = templateData.find(t => t.template_id === select.value);
-  if (option) {
-    document.getElementById("columns").value = option.dataset.columns || 4;
-    document.getElementById("hideBoxes").checked = option.dataset.hideBoxes === "true";
-  }
   document.getElementById("currentTemplate").textContent = selected ? selected.template_id.replace("JJMB", "") : "-";
-  document.getElementById("pipelineBadge").textContent = selected ? selected.pipeline : "未选择";
+  document.getElementById("templateTypeBadge").textContent = selected ? displayTemplateType(selected.template_type) : "未选择";
   renderTemplateSummary(selected);
   prefillTemplateForm(selected);
   loadTemplateConfigForEditor(selected);
@@ -588,11 +551,7 @@ function prefillTemplateForm(template) {
   document.getElementById("managerTemplateId").value = template.template_id || "";
   document.getElementById("managerName").value = template.name || "";
   document.getElementById("managerType").value = template.template_type || "";
-  document.getElementById("managerPipeline").value = template.pipeline || "jjmb_202508";
   document.getElementById("managerStatus").value = template.status || "active";
-  document.getElementById("managerColumns").value = template.default_columns || 4;
-  document.getElementById("managerHideBoxes").checked = Boolean(template.default_hide_boxes);
-  document.getElementById("templateAiPath").value = template.template_ai || "";
   document.getElementById("templateAiFile").value = "";
 }
 async function loadTemplateConfigForEditor(template) {
@@ -620,11 +579,10 @@ function renderTemplateSummary(template) {
   const rows = [
     ["模板 ID", template.template_id],
     ["名称", template.name],
-    ["类型", template.template_type],
-    ["Pipeline", template.pipeline],
+    ["类型", displayTemplateType(template.template_type)],
     ["状态", template.status],
-    ["AI 文件", template.template_ai],
-    ["配置", template.template_config || "运行时导出"]
+    ["模板文件", template.template_ai ? "已配置" : "未配置"],
+    ["模板规则", template.template_config ? "已配置" : "运行时导出"]
   ];
   target.innerHTML = rows.map(([key, value]) => `<div class="definition"><dt>${escapeHtml(key)}</dt><dd>${escapeHtml(String(value || "-"))}</dd></div>`).join("");
 }
@@ -637,33 +595,60 @@ function renderRules(rules) {
   }
   target.innerHTML = list.map(rule => {
     const departments = (rule.departments || []).join(" / ");
-    const lines = (rule.label_lines || []).map(formatRuleLine).join("<br>");
-    return `<div class="rule-item"><div class="rule-name"><span>${escapeHtml(rule.name || departments)}</span><span>${escapeHtml(departments)}</span></div><div class="rule-lines">${lines}</div></div>`;
+    const title = rule.display_name || `${departments} 部门`;
+    const description = rule.description || describeDepartmentRule(rule);
+    return `<div class="rule-item"><div class="rule-name"><span>${escapeHtml(title)}</span><span>${escapeHtml(departments)}</span></div><div class="rule-lines">${escapeHtml(description)}</div></div>`;
   }).join("");
 }
-function formatRuleLine(line) {
-  if (Array.isArray(line)) {
-    return line.map(part => escapeHtml(part)).join(" + ");
-  }
-  return escapeHtml(line);
+function describeDepartmentRule(rule) {
+  const parts = [];
+  parts.push(rule.show_frame ? "输出带框效果图" : "输出无框效果图");
+  parts.push(rule.apply_color_to_artwork ? "效果图应用字体颜色" : "字体颜色只作为文字标注");
+  parts.push(`标注内容：${displayLabelFields(rule.label_fields || [])}`);
+  return parts.join("；");
+}
+function displayLabelFields(fields) {
+  const names = {
+    order_no: "订单号",
+    color_option: "字体颜色",
+    text: "定制信息",
+    product_name: "产品名称"
+  };
+  return fields.map(field => names[field] || field).join("、");
 }
 function resetResult() {
   document.getElementById("jobStatus").textContent = "待提交";
   document.getElementById("itemCount").textContent = "-";
   document.getElementById("jobId").textContent = "暂无任务";
-  document.getElementById("outputAi").textContent = "-";
-  document.getElementById("renderTask").textContent = "-";
-  document.getElementById("jobPath").textContent = "-";
+  document.getElementById("jobIdCell").textContent = "-";
+  document.getElementById("jobStatusCell").textContent = "待提交";
+  document.getElementById("downloadStatus").textContent = "-";
   document.getElementById("result").textContent = "等待提交";
 }
 function renderJobResult(result) {
   document.getElementById("jobStatus").textContent = result.status || "-";
   document.getElementById("itemCount").textContent = result.stats && result.stats.items !== undefined ? result.stats.items : "-";
   document.getElementById("jobId").textContent = result.job_id || "暂无任务";
-  document.getElementById("outputAi").textContent = result.outputs && result.outputs.output_ai ? result.outputs.output_ai : "-";
-  document.getElementById("renderTask").textContent = result.outputs && result.outputs.render_task ? result.outputs.render_task : "-";
-  document.getElementById("jobPath").textContent = result.job_dir || "-";
-  document.getElementById("result").textContent = JSON.stringify(result, null, 2);
+  document.getElementById("jobIdCell").textContent = result.job_id || "-";
+  document.getElementById("jobStatusCell").textContent = result.status || "-";
+  document.getElementById("downloadStatus").textContent = result.status === "completed" ? "准备下载" : "-";
+  document.getElementById("result").textContent = renderResultMessage(result);
+  if (result.status === "completed" && result.job_id && result.outputs && result.outputs.output_ai) {
+    downloadOutput(result.job_id);
+  }
+}
+function renderResultMessage(result) {
+  if (result.status === "failed") {
+    return result.error || "渲染失败";
+  }
+  if (result.status === "completed") {
+    return `渲染完成，共 ${result.stats && result.stats.items !== undefined ? result.stats.items : "-"} 项，AI 文件已开始下载。`;
+  }
+  return JSON.stringify(result, null, 2);
+}
+function downloadOutput(jobId) {
+  document.getElementById("downloadStatus").textContent = "下载中";
+  window.location.href = `/api/jobs/${encodeURIComponent(jobId)}/download/output_ai`;
 }
 function escapeHtml(value) {
   return String(value)
@@ -678,11 +663,7 @@ async function saveTemplate() {
   form.append("template_id", document.getElementById("managerTemplateId").value.trim());
   form.append("name", document.getElementById("managerName").value.trim());
   form.append("template_type", document.getElementById("managerType").value.trim());
-  form.append("pipeline", document.getElementById("managerPipeline").value);
   form.append("status", document.getElementById("managerStatus").value);
-  form.append("default_columns", document.getElementById("managerColumns").value || "4");
-  form.append("default_hide_boxes", document.getElementById("managerHideBoxes").checked ? "true" : "false");
-  form.append("template_ai_path", document.getElementById("templateAiPath").value.trim());
   form.append("template_rules_json", document.getElementById("templateRulesJson").value.trim());
   const file = document.getElementById("templateAiFile").files[0];
   if (file) form.append("template_ai", file);
@@ -698,12 +679,8 @@ function clearTemplateForm() {
   document.getElementById("managerTemplateId").value = "";
   document.getElementById("managerName").value = "";
   document.getElementById("managerType").value = "pure_text_color_design";
-  document.getElementById("managerPipeline").value = "jjmb_202508";
   document.getElementById("managerStatus").value = "active";
-  document.getElementById("managerColumns").value = "5";
-  document.getElementById("managerHideBoxes").checked = true;
   document.getElementById("templateAiFile").value = "";
-  document.getElementById("templateAiPath").value = "";
   document.getElementById("templateRulesJson").value = "";
   setTemplateSaveMessage("等待编辑", "");
 }
@@ -718,21 +695,24 @@ document.getElementById("template").addEventListener("change", () => {
 document.getElementById("saveTemplateBtn").addEventListener("click", saveTemplate);
 document.getElementById("clearTemplateBtn").addEventListener("click", clearTemplateForm);
 document.getElementById("renderBtn").addEventListener("click", async () => {
-  const payload = {
-    template_id: document.getElementById("template").value,
-    order_file: document.getElementById("orderFile").value,
-    output_name: document.getElementById("outputName").value,
-    columns: Number(document.getElementById("columns").value || 4),
-    hide_boxes: document.getElementById("hideBoxes").checked,
-    dry_run: document.getElementById("dryRun").checked
-  };
+  const file = document.getElementById("orderFile").files[0];
+  if (!file) {
+    document.getElementById("result").textContent = "请先上传订单表格。";
+    return;
+  }
+  const payload = new FormData();
+  payload.append("template_id", document.getElementById("template").value);
+  payload.append("order_file", file);
   document.getElementById("jobStatus").textContent = "运行中";
+  document.getElementById("jobStatusCell").textContent = "运行中";
+  document.getElementById("downloadStatus").textContent = "-";
   document.getElementById("result").textContent = "运行中";
   try {
-    const result = await postJson("/api/render", payload);
+    const result = await postForm("/api/render", payload);
     renderJobResult(result);
   } catch (err) {
     document.getElementById("jobStatus").textContent = "失败";
+    document.getElementById("jobStatusCell").textContent = "失败";
     document.getElementById("result").textContent = String(err);
   }
 });
@@ -741,6 +721,13 @@ init().catch(err => {
   document.getElementById("jobStatus").textContent = "异常";
   document.getElementById("result").textContent = String(err);
 });
+function displayTemplateType(value) {
+  const names = {
+    pure_text_color_design: "纯文字颜色/设计位置模板",
+    pure_text_style: "纯文字作图区模板"
+  };
+  return names[value] || value || "-";
+}
 </script>
 </body>
 </html>
@@ -773,6 +760,13 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
         if path == "/api/rules/department":
             self._send_json(json.loads(DEPARTMENT_RULES_PATH.read_text(encoding="utf-8")))
             return
+        if path.startswith("/api/jobs/") and path.endswith("/download/output_ai"):
+            parts = path.strip("/").split("/")
+            if len(parts) == 5:
+                self._send_job_output(parts[2], "output_ai")
+                return
+            self._send_error(HTTPStatus.NOT_FOUND, "not found")
+            return
         if path.startswith("/api/jobs/"):
             job_id = path.rsplit("/", 1)[-1]
             try:
@@ -796,7 +790,7 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
             self._send_error(HTTPStatus.NOT_FOUND, "not found")
             return
         try:
-            payload = self._read_json()
+            payload = self._read_render_payload()
             self._send_json(self.service.submit(payload))
         except Exception as exc:
             self._send_error(HTTPStatus.BAD_REQUEST, str(exc))
@@ -815,6 +809,22 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
             return self._read_multipart(content_type)
         payload = self._read_json()
         return {key: str(value) for key, value in payload.items()}, {}
+
+    def _read_render_payload(self) -> dict[str, object]:
+        content_type = self.headers.get("Content-Type", "")
+        if not content_type.startswith("multipart/form-data"):
+            return self._read_json()
+        fields, files = self._read_multipart(content_type)
+        upload = files.get("order_file")
+        if not upload or not upload.get("content"):
+            raise ValueError("请上传订单表格")
+        order_file = self._save_uploaded_order(
+            str(upload.get("filename", "")),
+            upload["content"],  # type: ignore[arg-type]
+        )
+        payload: dict[str, object] = dict(fields)
+        payload["order_file"] = str(order_file)
+        return payload
 
     def _read_multipart(self, content_type: str) -> tuple[dict[str, str], dict[str, dict[str, object]]]:
         length = int(self.headers.get("Content-Length", "0") or "0")
@@ -881,7 +891,7 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
             return self.registry.to_config_path(resolved)
         if existing:
             return str(existing.template_ai)
-        raise ValueError("请上传 .ai 模板文件或填写模板文件路径")
+        raise ValueError("请上传 .ai 模板文件")
 
     def _save_template_rules(self, fields: dict[str, str], template_id: str, existing: object | None) -> str:
         rules_text = fields.get("template_rules_json", "").strip()
@@ -903,6 +913,35 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
             "path": str(template.template_config),
             "config": json.loads(template.template_config.read_text(encoding="utf-8")),
         }
+
+    def _save_uploaded_order(self, filename: str, content: bytes) -> Path:
+        if not content:
+            raise ValueError("上传的订单表格为空")
+        extension = Path(filename).suffix.lower()
+        if extension not in {".xlsx", ".xls", ".csv"}:
+            raise ValueError("订单表格只支持 .xlsx、.xls、.csv")
+        SERVICE_UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+        output_path = SERVICE_UPLOADS_DIR / f"{uuid.uuid4().hex[:12]}-{_safe_download_name(filename)}"
+        output_path.write_bytes(content)
+        return output_path
+
+    def _send_job_output(self, job_id: str, key: str) -> None:
+        try:
+            record = self.jobs.load(job_id)
+        except KeyError as exc:
+            self._send_error(HTTPStatus.NOT_FOUND, str(exc))
+            return
+        output_path = Path(record.get("outputs", {}).get(key, ""))
+        if not output_path.exists():
+            self._send_error(HTTPStatus.NOT_FOUND, "输出文件不存在")
+            return
+        data = output_path.read_bytes()
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "application/octet-stream")
+        self.send_header("Content-Disposition", f'attachment; filename="{_safe_download_name(output_path.name)}"')
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
 
     def _send_json(self, payload: object, status: HTTPStatus = HTTPStatus.OK) -> None:
         data = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
@@ -929,6 +968,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8765)
     return parser.parse_args()
+
+
+def _safe_download_name(value: str) -> str:
+    chars = []
+    for char in Path(value).name:
+        if char.isalnum() or char in {"-", "_", "."}:
+            chars.append(char)
+        else:
+            chars.append("_")
+    name = "".join(chars).strip("._")
+    return name or "file"
 
 
 def main() -> int:

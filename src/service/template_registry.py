@@ -11,6 +11,10 @@ from .paths import CONFIG_DIR, PROJECT_ROOT, TEMPLATE_STORAGE_DIR
 
 
 TEMPLATES_CONFIG = CONFIG_DIR / "templates.json"
+DEFAULT_PIPELINES = {
+    "pure_text_color_design": "jjmb_202508",
+    "pure_text_style": "jjmb_202603_grouped",
+}
 
 
 @dataclass(frozen=True)
@@ -134,7 +138,7 @@ class TemplateRegistry:
         template_id = str(item.get("template_id", "")).strip()
         name = str(item.get("name", "")).strip()
         template_type = str(item.get("template_type", "")).strip()
-        pipeline = str(item.get("pipeline", "")).strip()
+        pipeline = str(item.get("pipeline", "")).strip() or DEFAULT_PIPELINES.get(template_type, "")
         status = str(item.get("status", "draft")).strip() or "draft"
         template_ai = str(item.get("template_ai", "")).strip()
         if not template_id:
@@ -144,7 +148,7 @@ class TemplateRegistry:
         if not template_type:
             raise ValueError("缺少模板类型")
         if not pipeline:
-            raise ValueError("缺少 pipeline")
+            raise ValueError("无法根据模板类型推断渲染流程，请检查模板类型")
         if not template_ai:
             raise ValueError("缺少模板 AI 文件")
         normalized: Dict[str, Any] = {

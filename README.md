@@ -83,6 +83,7 @@ POST /api/templates
 GET  /api/rules/department
 POST /api/render
 GET  /api/jobs/{job_id}
+GET  /api/jobs/{job_id}/download/output_ai
 ```
 
 当前模板注册仍是本地 MVP：
@@ -95,18 +96,14 @@ templates/<template_id>/template.config.json # 页面录入的模板特有规则
 
 正式部署时，这部分应迁移为数据库记录 + 共享文件存储。
 
-`POST /api/render` 示例：
+`POST /api/render` 使用 `multipart/form-data` 上传订单表格：
 
-```json
-{
-  "template_id": "JJMB202508261001394920",
-  "order_file": "C:\\Users\\Administrator\\Desktop\\image\\test\\ai测试\\20260703111921_SoIaKp.xlsx",
-  "output_name": "web-render.ai",
-  "columns": 5,
-  "hide_boxes": true,
-  "dry_run": false
-}
+```text
+template_id: JJMB202508261001394920
+order_file: 订单 Excel/CSV 文件
 ```
+
+页面渲染成功后会自动请求 `/api/jobs/{job_id}/download/output_ai` 下载 AI 文件。
 
 任务记录会写入：
 
