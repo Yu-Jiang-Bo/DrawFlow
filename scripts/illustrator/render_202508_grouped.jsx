@@ -218,10 +218,11 @@
         tf.textRange.characterAttributes.size = fitMaxFontSize(tf, maxW, maxH, minSize, maxSize);
         try { app.redraw(); } catch (e0) {}
         var outline = tf.createOutline();
-        cleanupOutline(outline);
         if (rotationDeg) {
             try { outline.rotate(rotationDeg, true, true, true, true, Transformation.CENTER); } catch (e1) {}
         }
+        fitPageItemToRect(outline, rect);
+        cleanupOutline(outline);
         fitPageItemToRect(outline, rect);
         return outline;
     }
