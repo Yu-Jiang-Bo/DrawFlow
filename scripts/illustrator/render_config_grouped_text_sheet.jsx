@@ -258,25 +258,9 @@
         var left = rect[0], top = rect[1], right = rect[2], bottom = rect[3];
         var maxW = right - left;
         var maxH = top - bottom;
-        tf.textRange.characterAttributes.size = Math.min(tf.textRange.characterAttributes.size, maxSize);
-
-        for (var grow = 0; grow < 80; grow++) {
-            var gb = tf.visibleBounds;
-            var gw = Math.abs(gb[2] - gb[0]);
-            var gh = Math.abs(gb[1] - gb[3]);
-            var current = tf.textRange.characterAttributes.size;
-            if (gw >= maxW * 0.92 || gh >= maxH * 0.92 || current >= maxSize) break;
-            tf.textRange.characterAttributes.size = Math.min(maxSize, current * 1.08);
-        }
-
-        for (var shrink = 0; shrink < 120; shrink++) {
-            var b = tf.visibleBounds;
-            var w = Math.abs(b[2] - b[0]);
-            var h = Math.abs(b[1] - b[3]);
-            var currentSize = tf.textRange.characterAttributes.size;
-            if ((w <= maxW && h <= maxH) || currentSize <= minSize) break;
-            tf.textRange.characterAttributes.size = Math.max(minSize, currentSize * Math.min(maxW / w, maxH / h) * 0.96);
-        }
+        var bestSize = fitMaxFontSize(tf, maxW, maxH, minSize, maxSize);
+        tf.textRange.characterAttributes.size = bestSize;
+        try { app.redraw(); } catch (e0) {}
 
         var bounds = tf.visibleBounds;
         var cx = (left + right) / 2;
@@ -284,6 +268,24 @@
         var tx = cx - (bounds[0] + bounds[2]) / 2;
         var ty = cy - (bounds[1] + bounds[3]) / 2;
         tf.translate(tx, ty);
+    }
+
+    function fitMaxFontSize(tf, maxW, maxH, minSize, maxSize) {
+        var size = Math.min(Math.max(tf.textRange.characterAttributes.size, minSize), maxSize);
+        tf.textRange.characterAttributes.size = size;
+        for (var i = 0; i < 8; i++) {
+            try { app.redraw(); } catch (e0) {}
+            var b = tf.visibleBounds;
+            var w = Math.abs(b[2] - b[0]);
+            var h = Math.abs(b[1] - b[3]);
+            if (w <= 0 || h <= 0) break;
+            var scale = Math.min(maxW / w, maxH / h) * 0.98;
+            var nextSize = Math.min(Math.max(size * scale, minSize), maxSize);
+            if (Math.abs(nextSize - size) < 0.05) break;
+            size = nextSize;
+            tf.textRange.characterAttributes.size = size;
+        }
+        return size;
     }
 
     function outlineAndClean(items) {
