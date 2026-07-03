@@ -48,12 +48,12 @@
   <text class="muted body" x="724" y="380">系统根据模板类型选择内部渲染方式，页面不展示技术字段。</text>
 
   <rect class="card" x="48" y="468" width="1344" height="318" rx="6"/>
-  <text class="text h2" x="76" y="506">3. 上传 AI 资产</text>
+  <text class="text h2" x="76" y="506">3. 上传.ai模版</text>
   <line class="line" x1="48" y1="528" x2="1392" y2="528"/>
-  <rect class="upload" x="76" y="556" width="408" height="174" rx="8"/>
-  <text class="blueText h2" x="190" y="620">批量上传 .ai 文件</text>
-  <text class="muted body" x="142" y="652">支持主模板、设计片段、字体样本、作图区文件</text>
-  <text class="muted small" x="174" y="682">上传后在右侧列表中分类和命名</text>
+  <rect class="upload" x="76" y="556" width="408" height="214" rx="8"/>
+  <text class="blueText h2" x="190" y="638">批量上传 .ai 文件</text>
+  <text class="muted body" x="142" y="672">支持主模板、设计片段、字体样本、作图区文件</text>
+  <text class="muted small" x="174" y="704">上传后在右侧列表中分类和命名</text>
 
   <rect class="soft" x="520" y="556" width="824" height="46" rx="4"/>
   <text class="text label" x="544" y="585">文件名</text><text class="text label" x="820" y="585">资产类型</text><text class="text label" x="1050" y="585">编号/用途</text><text class="text label" x="1250" y="585">状态</text>

@@ -1,0 +1,105 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="1180" viewBox="0 0 1440 1180">
+  <defs>
+    <style>
+      .bg{fill:#f3f5f7}.top{fill:#1f2933}.card{fill:#fff;stroke:#d9e0e7;stroke-width:1}.soft{fill:#f8fafc;stroke:#d9e0e7;stroke-width:1}.line{stroke:#d9e0e7;stroke-width:1}
+      .text{font-family:Arial,"Microsoft YaHei",sans-serif;fill:#1f2933}.muted{font-family:Arial,"Microsoft YaHei",sans-serif;fill:#687482}.white{font-family:Arial,"Microsoft YaHei",sans-serif;fill:#fff}
+      .blue{fill:#1f5eff}.blueText{font-family:Arial,"Microsoft YaHei",sans-serif;fill:#1f5eff}.greenBg{fill:#e8f6ef;stroke:#b9e4ce;stroke-width:1}.warn{fill:#fff7e6;stroke:#efd08a;stroke-width:1}
+      .chip{fill:#e8efff;stroke:#c7d7ff;stroke-width:1}.danger{fill:#fff1f1;stroke:#ffc7c7;stroke-width:1}
+      .title{font-size:20px;font-weight:700}.h1{font-size:22px;font-weight:700}.h2{font-size:16px;font-weight:700}.body{font-size:14px}.small{font-size:12px}.label{font-size:13px;font-weight:700}
+    </style>
+  </defs>
+  <rect class="bg" width="1440" height="1180"/>
+  <rect class="top" width="1440" height="68"/>
+  <text class="white title" x="48" y="30">制图渲染服务</text>
+  <text class="white small" x="48" y="52" opacity=".72">规则配置 / 草稿审核 / 发布控制</text>
+  <text class="white body" x="1018" y="39" opacity=".72">出图任务</text>
+  <text class="white body" x="1124" y="39" opacity=".72">模板管理</text>
+  <rect x="1230" y="18" width="96" height="32" rx="4" fill="#111827" stroke="#455466"/>
+  <text class="white body" x="1250" y="39">规则配置</text>
+  <text class="white body" x="1350" y="39" opacity=".72">任务记录</text>
+
+  <text class="text h1" x="48" y="116">规则配置</text>
+  <text class="muted body" x="48" y="142">维护跨模板复用的生产部门、店铺、字体颜色和尺寸规则；规则发布后才会进入正式渲染。</text>
+
+  <rect class="card" x="48" y="172" width="270" height="820" rx="6"/>
+  <text class="text h2" x="76" y="210">规则分类</text>
+  <line class="line" x1="48" y1="232" x2="318" y2="232"/>
+  <rect class="chip" x="76" y="260" width="214" height="46" rx="4"/>
+  <text class="blueText body" x="96" y="289">生产部门规则</text>
+  <rect class="soft" x="76" y="322" width="214" height="46" rx="4"/>
+  <text class="text body" x="96" y="351">店铺默认规则</text>
+  <rect class="soft" x="76" y="384" width="214" height="46" rx="4"/>
+  <text class="text body" x="96" y="413">字体 / 颜色规则</text>
+  <rect class="soft" x="76" y="446" width="214" height="46" rx="4"/>
+  <text class="text body" x="96" y="475">尺寸 / 作图区规则</text>
+  <rect class="soft" x="76" y="508" width="214" height="46" rx="4"/>
+  <text class="text body" x="96" y="537">模板默认规则</text>
+  <line class="line" x1="76" y1="590" x2="290" y2="590"/>
+  <text class="muted small" x="76" y="626">当前发布版本</text>
+  <text class="text h2" x="76" y="656">v2026.07.03</text>
+  <text class="muted small" x="76" y="696">待审核草稿</text>
+  <text class="text h2" x="76" y="726">2 条</text>
+
+  <rect class="card" x="346" y="172" width="602" height="370" rx="6"/>
+  <text class="text h2" x="374" y="210">当前规则说明</text>
+  <line class="line" x1="346" y1="232" x2="948" y2="232"/>
+  <rect class="soft" x="374" y="260" width="546" height="58" rx="4"/>
+  <text class="text body" x="396" y="286">K/T/FK/ZK 部门</text>
+  <text class="muted small" x="396" y="306">标注订单号、字体颜色和定制信息；不带框；效果图本体正常输出。</text>
+  <rect class="soft" x="374" y="334" width="546" height="58" rx="4"/>
+  <text class="text body" x="396" y="360">H 部门</text>
+  <text class="muted small" x="396" y="380">标注订单号和定制信息；效果图本体按订单字体颜色渲染。</text>
+  <rect class="soft" x="374" y="408" width="546" height="58" rx="4"/>
+  <text class="text body" x="396" y="434">含 D 部门</text>
+  <text class="muted small" x="396" y="454">标注订单号和产品名称；输出带框设计图。</text>
+  <rect class="soft" x="374" y="482" width="546" height="38" rx="4"/>
+  <text class="blueText body" x="396" y="507">查看全部发布规则</text>
+
+  <rect class="card" x="976" y="172" width="416" height="370" rx="6"/>
+  <text class="text h2" x="1004" y="210">影响范围</text>
+  <line class="line" x1="976" y1="232" x2="1392" y2="232"/>
+  <text class="muted small" x="1004" y="272">影响模板</text>
+  <text class="text h2" x="1004" y="302">全部启用模板</text>
+  <text class="muted small" x="1004" y="350">影响部门</text>
+  <text class="text h2" x="1004" y="380">H / K / T / FK / ZK / D / PW / EW</text>
+  <rect class="warn" x="1004" y="420" width="346" height="72" rx="4"/>
+  <text class="muted body" x="1024" y="450">发布后会影响后续所有订单渲染。</text>
+  <text class="muted body" x="1024" y="474">历史输出文件不会自动重算。</text>
+
+  <rect class="card" x="346" y="570" width="602" height="364" rx="6"/>
+  <text class="text h2" x="374" y="608">编辑规则说明</text>
+  <text class="muted small" x="374" y="632">可以用自然语言描述变化，系统生成结构化草稿。</text>
+  <line class="line" x1="346" y1="650" x2="948" y2="650"/>
+  <rect class="soft" x="374" y="678" width="546" height="150" rx="4"/>
+  <text class="muted body" x="398" y="710">示例：</text>
+  <text class="text body" x="398" y="740">K/T/FK/ZK：订单号、字体颜色、定制信息分两行标注，不带框。</text>
+  <text class="text body" x="398" y="770">H：订单号和定制信息标注，效果图本体使用订单字体颜色。</text>
+  <text class="text body" x="398" y="800">PW/EW：订单号、产品名称、字体颜色标注，输出设计图。</text>
+  <rect class="soft" x="646" y="860" width="116" height="42" rx="4"/>
+  <text class="text body" x="676" y="886">保存草稿</text>
+  <rect class="blue" x="784" y="860" width="136" height="42" rx="4"/>
+  <text class="white body" x="808" y="886">生成预览</text>
+
+  <rect class="card" x="976" y="570" width="416" height="364" rx="6"/>
+  <text class="text h2" x="1004" y="608">结构化预览</text>
+  <text class="muted small" x="1004" y="632">供人工审核，不要求同事看 JSON。</text>
+  <line class="line" x1="976" y1="650" x2="1392" y2="650"/>
+  <rect class="soft" x="1004" y="678" width="346" height="50" rx="4"/>
+  <text class="text body" x="1024" y="708">部门：K / T / FK / ZK</text>
+  <rect class="soft" x="1004" y="744" width="346" height="50" rx="4"/>
+  <text class="text body" x="1024" y="774">标注：订单号 + 字体颜色 + 定制信息</text>
+  <rect class="soft" x="1004" y="810" width="346" height="50" rx="4"/>
+  <text class="text body" x="1024" y="840">带框：否；颜色应用：否</text>
+  <rect class="greenBg" x="1004" y="876" width="346" height="36" rx="4"/>
+  <text class="text body" x="1024" y="899">校验通过，可提交审核</text>
+
+  <rect class="card" x="48" y="1020" width="1344" height="108" rx="6"/>
+  <text class="text h2" x="76" y="1058">发布控制</text>
+  <text class="muted body" x="76" y="1090">规则草稿必须人工确认后才能发布；正式渲染只读取已发布规则，不调用 LLM。</text>
+  <rect class="soft" x="1010" y="1050" width="116" height="42" rx="4"/>
+  <text class="text body" x="1040" y="1076">取消</text>
+  <rect class="soft" x="1146" y="1050" width="116" height="42" rx="4"/>
+  <text class="text body" x="1176" y="1076">提交审核</text>
+  <rect class="blue" x="1282" y="1050" width="86" height="42" rx="4"/>
+  <text class="white body" x="1304" y="1076">发布</text>
+</svg>
