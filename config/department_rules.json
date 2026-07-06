@@ -1,8 +1,8 @@
 {
   "version": 1,
   "default": {
-    "label_fields": ["order_no", "color_option", "text"],
-    "label_lines": [["order_no"], ["color_option", "text"]],
+    "label_fields": ["order_no", "color_option"],
+    "label_lines": [["order_no"], ["color_option"]],
     "apply_color_to_artwork": false,
     "show_frame": false
   },
@@ -21,11 +21,11 @@
     {
       "name": "K_T_FK_ZK",
       "display_name": "K/T/FK/ZK 部门",
-      "description": "标注订单号、字体颜色和定制信息，不带框；字体颜色只作为标注，效果图本体正常输出。",
+      "description": "标注订单号和字体颜色，不带框；同订单同颜色的多个定制内容共用一组标注，竖向排成一列。",
       "match": "exact",
       "departments": ["K", "T", "FK", "ZK"],
-      "label_fields": ["order_no", "color_option", "text"],
-      "label_lines": [["order_no"], ["color_option", "text"]],
+      "label_fields": ["order_no", "color_option"],
+      "label_lines": [["order_no"], ["color_option"]],
       "apply_color_to_artwork": false,
       "show_frame": false
     },

@@ -101,7 +101,7 @@ def test_service_dry_run_creates_job_and_render_task(tmp_path):
     task_path = Path(record["outputs"]["render_task"])
     assert task_path.exists()
     task = json.loads(task_path.read_text(encoding="utf-8"))
-    assert task["groups"][0]["items"][0]["production_label_lines"] == ["ORDER1", "Gold  Meg"]
+    assert task["groups"][0]["items"][0]["production_label_lines"] == ["ORDER1", "Gold"]
 
 
 def test_template_registry_resolves_defaults(tmp_path):

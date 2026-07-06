@@ -29,12 +29,15 @@
     var productSize = maxProductSize(config);
     var contentSize = compactOutput ? maxAnchorSize(config) : productSize;
     var columnWidth = compactOutput ? Math.max(contentSize.width, compactLabelWidth) : contentSize.width;
+    var renderGroups = compactOutput ? buildCompactGroups(task.groups) : task.groups;
     var groupMetrics = [];
     var maxGroupWidth = columnWidth;
-    for (var g = 0; g < task.groups.length; g++) {
+    for (var g = 0; g < renderGroups.length; g++) {
+        var itemCount = renderGroups[g].items.length;
+        var compactHeight = itemLabelHeight + itemGap + itemCount * (contentSize.height + itemGap);
         var metric = {
             width: columnWidth,
-            height: groupLabelHeight + task.groups[g].items.length * (itemLabelHeight + contentSize.height + itemGap)
+            height: compactOutput ? compactHeight : groupLabelHeight + itemCount * (itemLabelHeight + contentSize.height + itemGap)
         };
         groupMetrics.push(metric);
         maxGroupWidth = Math.max(maxGroupWidth, metric.width);
@@ -49,7 +52,8 @@
     var docWidth = margin * 2 + columns * maxGroupWidth + (columns - 1) * gap;
     var docHeight = margin * 2 + maxColumnHeight;
     var debugPayload = {
-        groups: task.groups.length,
+        groups: renderGroups.length,
+        sourceGroups: task.groups.length,
         columns: columns,
         compactOutput: compactOutput,
         docWidth: docWidth,
@@ -66,8 +70,8 @@
     var layer = doc.layers[0];
     layer.name = "JJMB202508261001394920_OUTPUT";
 
-    for (var i = 0; i < task.groups.length; i++) {
-        var group = task.groups[i];
+    for (var i = 0; i < renderGroups.length; i++) {
+        var group = renderGroups[i];
         var col = placements.items[i].column;
         var groupLeft = margin + col * (maxGroupWidth + gap);
         var groupTop = docHeight - margin - placements.items[i].y;
@@ -90,14 +94,18 @@
             var drawFrame = !compactOutput && (showBoxes || item.show_frame === true);
 
             if (compactOutput) {
+                if (j === 0) {
+                    var labelLinesForGroup = group.production_label_lines || labelLines(item, itemLabel);
+                    var labelLeftForGroup = groupLeft + (maxGroupWidth - compactLabelWidth) / 2;
+                    var labelRightForGroup = labelLeftForGroup + compactLabelWidth;
+                    drawLabelLines(layer, labelLinesForGroup, labelLeftForGroup, cursorTop, labelRightForGroup, cursorTop - itemLabelHeight, labelFontSize);
+                    cursorTop -= itemLabelHeight + itemGap;
+                }
                 var contentLeft = groupLeft + (maxGroupWidth - contentSize.width) / 2;
-                var contentTop = cursorTop - itemLabelHeight;
+                var contentTop = cursorTop;
                 var contentRight = contentLeft + contentSize.width;
                 var contentBottom = contentTop - contentSize.height;
-                var labelLeft = groupLeft + (maxGroupWidth - compactLabelWidth) / 2;
-                var labelRight = labelLeft + compactLabelWidth;
 
-                drawLabelLines(layer, labelLines(item, itemLabel), labelLeft, cursorTop, labelRight, cursorTop - itemLabelHeight, labelFontSize);
                 drawPersonalizedText(layer, item, font, design, [contentLeft + padding, contentTop - padding, contentRight - padding, contentBottom + padding], minFontSize, maxFontSize);
                 cursorTop = contentBottom - itemGap;
                 continue;
@@ -151,6 +159,35 @@
             height = mmToPt(40);
         }
         return { width: width, height: height };
+    }
+
+    function buildCompactGroups(groups) {
+        var result = [];
+        for (var i = 0; i < groups.length; i++) {
+            var source = groups[i];
+            var buckets = {};
+            var keys = [];
+            var items = source.items || [];
+            for (var j = 0; j < items.length; j++) {
+                var item = items[j];
+                var lines = labelLines(item, item.production_label || item.order_no || source.order_no || "");
+                var key = String(source.order_no || item.order_no || "") + "\u001f" + String(item.color_option || "") + "\u001f" + lines.join("\u001e");
+                if (!buckets[key]) {
+                    buckets[key] = {
+                        order_no: source.order_no || item.order_no || "",
+                        production_label: lines.join("  "),
+                        production_label_lines: lines,
+                        items: []
+                    };
+                    keys.push(key);
+                }
+                buckets[key].items.push(item);
+            }
+            for (var k = 0; k < keys.length; k++) {
+                result.push(buckets[keys[k]]);
+            }
+        }
+        return result;
     }
 
     function mapAnchor(design, productLeft, productTop, productWidth, productHeight) {
