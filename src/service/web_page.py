@@ -763,8 +763,12 @@ INDEX_HTML = """<!doctype html>
     };
 
     const typeNames = {
+      pure_text: "纯文字模板",
       pure_text_color_design: "纯文字颜色/设计位置模板",
-      pure_text_style: "纯文字作图区模板"
+      pure_text_style: "纯文字作图区模板",
+      curved_title_text: "弯曲标题文字模板",
+      annotated_ai: "标准标注 AI 模板",
+      asset_split: "独立设计资产模板"
     };
     const statusNames = {
       active: "启用",
@@ -802,7 +806,7 @@ INDEX_HTML = """<!doctype html>
       document.getElementById("refreshJobsBtn").addEventListener("click", loadJobs);
       document.getElementById("refreshJobsPageBtn").addEventListener("click", loadJobs);
       document.getElementById("newTemplateBtn").addEventListener("click", clearTemplateForm);
-      document.getElementById("previewTemplateRuleBtn").addEventListener("click", renderTemplateRulePreview);
+      document.getElementById("previewTemplateRuleBtn").addEventListener("click", renderTemplateRulePreviewFromServer);
       document.getElementById("saveTemplateBtn").addEventListener("click", saveTemplate);
       document.getElementById("assetAiFiles").addEventListener("change", renderAssetRows);
       document.getElementById("primaryAiFile").addEventListener("change", renderAssetRows);
@@ -917,6 +921,7 @@ INDEX_HTML = """<!doctype html>
       document.getElementById("renderTemplate").value = template.template_id;
       document.getElementById("renderTemplateBadge").textContent = displayType(template.template_type);
       document.getElementById("templateStatusBadge").textContent = displayStatus(template.status);
+      const ruleCheck = template.rule_check || {};
       document.getElementById("renderTemplateStatus").innerHTML = definitionHtml([
         ["模板 ID", template.template_id],
         ["名称", template.name],
@@ -924,7 +929,11 @@ INDEX_HTML = """<!doctype html>
         ["类型", displayType(template.template_type)],
         ["主模板", template.template_ai ? "已配置" : "未配置"],
         ["附加模板", `${(template.assets || []).length} 个`],
-        ["特有规则", template.template_config ? "已配置" : "未配置"]
+        ["特有规则", template.template_config ? "已配置" : "未配置"],
+        ["规则状态", ruleCheck.complete ? "完整" : "待补充"],
+        ["可渲染", ruleCheck.renderable ? "可以" : "不可以"],
+        ["缺失规则", displayMissingRules(ruleCheck.missing || [])],
+        ["规则提示", (ruleCheck.warnings || []).join("；") || "-"]
       ]);
       fillTemplateForm(template);
       renderTemplateList();
@@ -997,6 +1006,34 @@ INDEX_HTML = """<!doctype html>
           <div class="preview-chip"><span>规则来源</span><strong>自然语言草稿</strong></div>
         </div>
       `;
+    }
+
+    async function renderTemplateRulePreviewFromServer() {
+      const raw = document.getElementById("templateRuleText").value.trim();
+      const templateId = document.getElementById("templateId").value.trim();
+      if (!templateId || !raw) {
+        renderTemplateRulePreview();
+        return;
+      }
+      try {
+        const payload = await postJson("/api/templates/rules/draft", {
+          template_id: templateId,
+          template_type: document.getElementById("templateType").value,
+          natural_text: raw,
+          asset_count: (document.getElementById("assetAiFiles").files || []).length
+        });
+        const draft = payload.draft || {};
+        document.getElementById("templateRulePreview").innerHTML = `
+          <div class="preview-grid">
+            <div class="preview-chip"><span>模板模式</span><strong>${escapeHtml(displayType(draft.mode))}</strong></div>
+            <div class="preview-chip"><span>字体选项</span><strong>${escapeHtml((draft.font_options || []).join(" / ") || "未识别")}</strong></div>
+            <div class="preview-chip"><span>能力模块</span><strong>${escapeHtml((draft.capabilities || []).join(" / ") || "未识别")}</strong></div>
+            <div class="preview-chip"><span>规则状态</span><strong>${escapeHtml(draft.status || "draft")}</strong></div>
+          </div>
+        `;
+      } catch (error) {
+        setMessage("templateSaveMessage", String(error.message || error), "error");
+      }
     }
 
     function buildTemplateRulePayload() {
@@ -1342,6 +1379,11 @@ INDEX_HTML = """<!doctype html>
 
     function displayLabelFields(fields) {
       return fields.map(field => fieldNames[field] || field).join("、") || "-";
+    }
+
+    function displayMissingRules(items) {
+      if (!items.length) return "-";
+      return items.map(item => item.message || item.code || String(item)).join("；");
     }
 
     function parseList(value) {

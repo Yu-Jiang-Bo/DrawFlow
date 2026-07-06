@@ -14,9 +14,16 @@ from ..jjmb_202508_main import (
     read_xlsx_rows as read_202508_rows,
     render_task as render_202508_task,
 )
+from ..jjmb_202509_curved_main import (
+    build_task as build_202509_curved_task,
+    group_items as group_202509_curved_items,
+    parse_items as parse_202509_curved_items,
+    read_xlsx_rows as read_202509_curved_rows,
+)
 from ..jjmb_config_grouped_main import build_grouped_task
 from ..renderer.illustrator_bridge import IllustratorBridge
 from .job_store import JobStore
+from .rule_center import check_template_definition
 from .template_registry import TemplateDefinition, TemplateRegistry
 
 
@@ -39,10 +46,16 @@ class RenderService:
         try:
             self.jobs.update(record, status="running")
             template = self.registry.get_template(request["template_id"])
+            rule_check = check_template_definition(template)
+            if not rule_check["renderable"]:
+                missing = "；".join(item["message"] for item in rule_check["missing"])
+                raise RenderServiceError(f"模板规则不完整，无法渲染：{missing}")
             if template.pipeline == "jjmb_202508":
                 result = self._run_202508(record, template)
             elif template.pipeline == "jjmb_202603_grouped":
                 result = self._run_202603_grouped(record, template)
+            elif template.pipeline == "jjmb_202509_curved":
+                result = self._run_202509_curved(record, template)
             else:
                 raise RenderServiceError(f"不支持的渲染 pipeline: {template.pipeline}")
             record["outputs"] = result["outputs"]
@@ -146,6 +159,44 @@ class RenderService:
             "stats": {
                 "groups": len(task.groups),
                 "items": sum(len(group.items) for group in task.groups),
+                "dry_run": request["dry_run"],
+            },
+        }
+
+    def _run_202509_curved(self, record: Dict[str, Any], template: TemplateDefinition) -> Dict[str, Any]:
+        request = record["request"]
+        job_dir = Path(record["job_dir"])
+        order_file = Path(request["order_file"])
+        output_ai = self._output_ai_path(job_dir, request, template)
+        font_report = template.template_config
+        if not font_report or not font_report.exists():
+            raise RenderServiceError(f"曲线标题字体报告不存在: {font_report}")
+
+        rows = read_202509_curved_rows(order_file)
+        items = parse_202509_curved_items(rows)
+        groups = group_202509_curved_items(items)
+        task = build_202509_curved_task(
+            font_report=font_report,
+            output_ai=output_ai,
+            groups=groups,
+            columns=request["columns"],
+        )
+        task_file = job_dir / "render-task.json"
+        self._write_json(task_file, task)
+
+        if not request["dry_run"]:
+            script = Path(__file__).resolve().parents[2] / "scripts" / "illustrator" / "render_202509_curved.jsx"
+            IllustratorBridge(visible=request["visible"]).render(script, task_file)
+
+        return {
+            "outputs": {
+                "output_ai": str(output_ai),
+                "template_config": str(font_report),
+                "render_task": str(task_file),
+            },
+            "stats": {
+                "groups": len(groups),
+                "items": sum(len(group.items) for group in groups),
                 "dry_run": request["dry_run"],
             },
         }

@@ -12,8 +12,12 @@ from .paths import CONFIG_DIR, PROJECT_ROOT, TEMPLATE_STORAGE_DIR
 
 TEMPLATES_CONFIG = CONFIG_DIR / "templates.json"
 DEFAULT_PIPELINES = {
+    "pure_text": "generic_rules_only",
     "pure_text_color_design": "jjmb_202508",
     "pure_text_style": "jjmb_202603_grouped",
+    "curved_title_text": "jjmb_202509_curved",
+    "annotated_ai": "generic_rules_only",
+    "asset_split": "generic_rules_only",
 }
 
 

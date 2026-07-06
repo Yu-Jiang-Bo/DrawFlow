@@ -16,6 +16,7 @@ from ..jjmb_202508_main import DEPARTMENT_RULES_PATH
 from .job_store import JobStore
 from .paths import CONFIG_DIR, SERVICE_UPLOADS_DIR
 from .render_service import RenderService
+from .rule_center import build_template_rule_draft, check_template_definition
 from .template_registry import TemplateRegistry
 from .web_page import INDEX_HTML as WORKBENCH_HTML
 
@@ -749,7 +750,15 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
             self._send_json({"ok": True})
             return
         if path == "/api/templates":
-            self._send_json({"templates": [item.to_json_dict() for item in self.registry.list_templates()]})
+            self._send_json({"templates": [self._template_payload(item) for item in self.registry.list_templates()]})
+            return
+        if path.startswith("/api/templates/") and path.endswith("/rules/status"):
+            template_id = unquote(path.split("/")[3])
+            try:
+                template = self.registry.get_template(template_id)
+                self._send_json(check_template_definition(template))
+            except KeyError as exc:
+                self._send_error(HTTPStatus.NOT_FOUND, str(exc))
             return
         if path.startswith("/api/templates/") and path.endswith("/config"):
             template_id = unquote(path.split("/")[3])
@@ -786,13 +795,19 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
             try:
                 fields, files = self._read_template_payload()
                 template = self._register_template(fields, files)
-                self._send_json({"template": template.to_json_dict()})
+                self._send_json({"template": self._template_payload(template)})
             except Exception as exc:
                 self._send_error(HTTPStatus.BAD_REQUEST, str(exc))
             return
         if path == "/api/rules/department/draft":
             try:
                 self._send_json(self._save_department_rule_draft(self._read_json()))
+            except Exception as exc:
+                self._send_error(HTTPStatus.BAD_REQUEST, str(exc))
+            return
+        if path == "/api/templates/rules/draft":
+            try:
+                self._send_json(self._build_template_rule_draft(self._read_json()))
             except Exception as exc:
                 self._send_error(HTTPStatus.BAD_REQUEST, str(exc))
             return
@@ -860,6 +875,30 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
         uploads = files.get(name, [])
         return uploads[0] if uploads else None
 
+    def _template_payload(self, template: object) -> dict[str, object]:
+        payload = template.to_json_dict()
+        payload["rule_check"] = check_template_definition(template)
+        return payload
+
+    def _build_template_rule_draft(self, payload: dict[str, object]) -> dict[str, object]:
+        template_id = str(payload.get("template_id", "")).strip()
+        template_type = str(payload.get("template_type", "")).strip()
+        natural_text = str(payload.get("natural_text", "")).strip()
+        asset_count = int(payload.get("asset_count", 0) or 0)
+        if template_id:
+            try:
+                template = self.registry.get_template(template_id)
+                template_type = template_type or template.template_type
+                asset_count = asset_count or len(template.assets)
+            except KeyError:
+                pass
+        if not template_id:
+            raise ValueError("缺少 template_id")
+        if not natural_text:
+            raise ValueError("缺少自然语言规则说明")
+        draft = build_template_rule_draft(template_id, template_type, natural_text, asset_count)
+        return {"draft": draft}
+
     def _register_template(self, fields: dict[str, str], files: dict[str, list[dict[str, object]]]) -> object:
         template_id = fields.get("template_id", "").strip()
         existing = None
@@ -870,9 +909,9 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
                 existing = None
 
         template_ai = self._resolve_template_ai(fields, files, template_id, existing)
-        template_config = self._save_template_rules(fields, template_id, existing)
         assets = list(existing.assets) if existing else []
         assets.extend(self.registry.save_uploaded_assets(template_id, files.get("template_assets", [])))
+        template_config = self._save_template_rules(fields, template_id, existing, len(assets))
         item = {
             "template_id": template_id,
             "name": fields.get("name", "").strip() or (existing.name if existing else ""),
@@ -910,16 +949,24 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
             return str(existing.template_ai)
         raise ValueError("请上传 .ai 模板文件")
 
-    def _save_template_rules(self, fields: dict[str, str], template_id: str, existing: object | None) -> str:
+    def _save_template_rules(
+        self,
+        fields: dict[str, str],
+        template_id: str,
+        existing: object | None,
+        asset_count: int = 0,
+    ) -> str:
         rules_text = fields.get("template_rules_json", "").strip()
         natural_text = fields.get("template_rules_text", "").strip()
-        if not rules_text and natural_text:
+        template_type = fields.get("template_type", "").strip() or (existing.template_type if existing else "")
+        if natural_text:
             rules_text = json.dumps(
-                {
-                    "template_id": template_id,
-                    "rule_source": "natural_language",
-                    "raw_text": natural_text,
-                },
+                build_template_rule_draft(
+                    template_id=template_id,
+                    template_type=template_type,
+                    natural_text=natural_text,
+                    asset_count=asset_count,
+                ),
                 ensure_ascii=False,
             )
         if rules_text:
