@@ -163,6 +163,7 @@
         tf.contents = text;
         applyFont(tf, font.font_name);
         applyBlack(tf);
+        applyCenterParagraph(tf);
         tf.textRange.characterAttributes.size = Math.max(minFontSize, Math.min(maxFontSize, titleSize));
         fitTitleTextToRect(tf, fitRect, minFontSize, Math.max(minFontSize, Math.min(maxFontSize, titleSize)));
         textItems.push(tf);
@@ -353,6 +354,12 @@
         color.green = 0;
         color.blue = 0;
         tf.textRange.characterAttributes.fillColor = color;
+    }
+
+    function applyCenterParagraph(tf) {
+        try {
+            tf.textRange.paragraphAttributes.justification = Justification.CENTER;
+        } catch (e0) {}
     }
 
     function redColor() {
