@@ -164,7 +164,7 @@
         applyFont(tf, font.font_name);
         applyBlack(tf);
         tf.textRange.characterAttributes.size = Math.max(minFontSize, Math.min(maxFontSize, titleSize));
-        centerTextToRect(tf, fitRect);
+        fitTitleTextToRect(tf, fitRect, minFontSize, Math.max(minFontSize, Math.min(maxFontSize, titleSize)));
         textItems.push(tf);
     }
 
@@ -268,6 +268,34 @@
         centerTextToRect(tf, rect);
     }
 
+    function fitTitleTextToRect(tf, rect, minSize, maxSize) {
+        var left = rect[0], top = rect[1], right = rect[2], bottom = rect[3];
+        var maxW = right - left;
+        var maxH = top - bottom;
+        var currentSize = Math.min(Number(tf.textRange.characterAttributes.size || maxSize), maxSize);
+        tf.textRange.characterAttributes.size = currentSize;
+
+        for (var shrink = 0; shrink < 140; shrink++) {
+            centerTextHorizontally(tf, rect);
+            clampTextToRect(tf, rect);
+            var b = tf.visibleBounds;
+            var w = Math.abs(b[2] - b[0]);
+            var h = Math.abs(b[1] - b[3]);
+            currentSize = Number(tf.textRange.characterAttributes.size);
+            var inside = b[0] >= left - 0.01 && b[2] <= right + 0.01 && b[1] <= top + 0.01 && b[3] >= bottom - 0.01;
+            if ((inside && w <= maxW && h <= maxH) || currentSize <= minSize + 0.01) break;
+
+            var ratio = 1;
+            if (w > 0) ratio = Math.min(ratio, maxW / w);
+            if (h > 0) ratio = Math.min(ratio, maxH / h);
+            if (ratio > 0.98) ratio = 0.96;
+            tf.textRange.characterAttributes.size = Math.max(minSize, currentSize * ratio * 0.94);
+        }
+
+        centerTextHorizontally(tf, rect);
+        clampTextToRect(tf, rect);
+    }
+
     function centerTextToRect(tf, rect) {
         var left = rect[0], top = rect[1], right = rect[2], bottom = rect[3];
         var bounds = tf.visibleBounds;
@@ -276,6 +304,28 @@
         var tx = cx - (bounds[0] + bounds[2]) / 2;
         var ty = cy - (bounds[1] + bounds[3]) / 2;
         try { tf.translate(tx, ty); } catch (e0) {}
+    }
+
+    function centerTextHorizontally(tf, rect) {
+        var left = rect[0], right = rect[2];
+        var bounds = tf.visibleBounds;
+        var cx = (left + right) / 2;
+        var tx = cx - (bounds[0] + bounds[2]) / 2;
+        try { tf.translate(tx, 0); } catch (e0) {}
+    }
+
+    function clampTextToRect(tf, rect) {
+        var left = rect[0], top = rect[1], right = rect[2], bottom = rect[3];
+        var bounds = tf.visibleBounds;
+        var tx = 0;
+        var ty = 0;
+        if (bounds[0] < left) tx = left - bounds[0];
+        if (bounds[2] > right) tx = right - bounds[2];
+        if (bounds[1] > top) ty = top - bounds[1];
+        if (bounds[3] < bottom) ty = bottom - bounds[3];
+        if (tx !== 0 || ty !== 0) {
+            try { tf.translate(tx, ty); } catch (e0) {}
+        }
     }
 
     function fontConfig(fontMap, name) {
