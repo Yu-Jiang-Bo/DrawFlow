@@ -55,7 +55,8 @@
             sample_bounds: bounds(sample),
             bounds: bounds(frame),
             path_bounds: bounds(path),
-            baseline_ratio: baselineRatio(frame)
+            baseline_ratio: baselineRatio(frame),
+            bounds_shape_ratio: pathShapeRatio(frame)
         });
     }
 
@@ -219,6 +220,24 @@
             (Number(point[0]) - Number(b[0])) / width,
             (Number(b[1]) - Number(point[1])) / height
         ];
+    }
+
+    function pathShapeRatio(item) {
+        var b = bounds(item);
+        var result = {
+            closed: item.closed === true,
+            points: []
+        };
+        if (!item.pathPoints) return result;
+        for (var i = 0; i < item.pathPoints.length; i++) {
+            var point = item.pathPoints[i];
+            result.points.push({
+                anchor: pointRatio(point.anchor, b),
+                left: pointRatio(point.leftDirection, b),
+                right: pointRatio(point.rightDirection, b)
+            });
+        }
+        return result;
     }
 
     function ensureLayer(doc, name) {

@@ -226,6 +226,7 @@ def load_font_map(mark_report: Path) -> Dict[str, Dict[str, str]]:
             "path_name": str(entry.get("path_name", "")),
             "bounds_name": str(entry.get("bounds_name", "")),
             "baseline_ratio": entry.get("baseline_ratio", {}),
+            "bounds_shape_ratio": entry.get("bounds_shape_ratio", {}),
         }
     return result
 
@@ -235,6 +236,7 @@ def build_task(
     output_ai: Path,
     groups: List[CurvedOrderGroup],
     columns: int,
+    keep_title_frames: bool = False,
 ) -> Dict[str, object]:
     if not groups:
         raise ValueError("No renderable orders")
@@ -254,6 +256,7 @@ def build_task(
             "name_height_mm": 5.0,
             "title_width_mm": 40.0,
             "title_height_mm": 7.0,
+            "keep_title_frames": keep_title_frames,
         },
         "fit": {
             "min_font_size_pt": 4.0,
@@ -282,6 +285,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--font-report", required=True)
     parser.add_argument("--output-ai", required=True)
     parser.add_argument("--columns", type=int, default=5)
+    parser.add_argument("--keep-title-frames", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--visible", action="store_true")
     return parser.parse_args()
@@ -300,6 +304,7 @@ def main() -> int:
             output_ai=output_ai,
             groups=groups,
             columns=args.columns,
+            keep_title_frames=args.keep_title_frames,
         )
         task_file = output_ai.parent / "render-tasks" / "jjmb-202509-curved-render-task.json"
         write_json(task_file, task)

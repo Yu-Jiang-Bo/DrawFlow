@@ -20,6 +20,7 @@
     var nameHeight = mmToPt(Number(layout.name_height_mm || 5));
     var titleWidth = mmToPt(Number(layout.title_width_mm || 40));
     var titleHeight = mmToPt(Number(layout.title_height_mm || 7));
+    var keepTitleFrames = layout.keep_title_frames === true;
     var minFontSize = Number(fit.min_font_size_pt || 4);
     var maxFontSize = Number(fit.max_font_size_pt || 80);
     var padding = mmToPt(Number(fit.padding_mm || 0.2));
@@ -52,6 +53,7 @@
     layer.name = "JJMB202509231236046265_OUTPUT";
     var textItems = [];
     var pathItems = [];
+    var titleFrameItems = [];
 
     for (var gi = 0; gi < groups.length; gi++) {
         var group = groups[gi];
@@ -72,7 +74,7 @@
             var itemTop = cursorTop;
             var itemBottom = itemTop - heightForItem;
             if (item.text_type === "title") {
-                drawCurvedTitle(layer, String(item.text || ""), font, itemLeft, itemTop, width, heightForItem, textItems, pathItems);
+                drawCurvedTitle(layer, String(item.text || ""), font, itemLeft, itemTop, width, heightForItem, textItems, pathItems, titleFrameItems);
             } else {
                 drawName(layer, String(item.text || ""), font, itemLeft, itemTop, width, heightForItem, textItems);
             }
@@ -96,6 +98,7 @@
         outlineText(textItems);
         removeItems(pathItems);
     }
+    if (!keepTitleFrames) removeItems(titleFrameItems);
 
     var output = File(String(task.output_ai));
     ensureFolder(output.parent);
@@ -127,9 +130,11 @@
         textItems.push(tf);
     }
 
-    function drawCurvedTitle(layer, text, font, left, top, width, height, textItems, pathItems) {
+    function drawCurvedTitle(layer, text, font, left, top, width, height, textItems, pathItems, titleFrameItems) {
         var fitRect = [left + padding, top - padding, left + width - padding, top - height + padding];
         var titleSize = measurePointTextSize(layer, text, font, fitRect, 16) * 0.82;
+        var titleFrame = drawTitleFrame(layer, font.bounds_shape_ratio, left, top, width, height);
+        if (titleFrame) titleFrameItems.push(titleFrame);
         var curve = scaledCurve(font.baseline_ratio, left, top, width, height);
         var path = layer.pathItems.add();
         path.name = "TITLE_RENDER_PATH";
@@ -161,6 +166,40 @@
         tf.textRange.characterAttributes.size = Math.max(minFontSize, Math.min(maxFontSize, titleSize));
         centerTextToRect(tf, fitRect);
         textItems.push(tf);
+    }
+
+    function drawTitleFrame(layer, shape, left, top, width, height) {
+        if (!shape || !shape.points || shape.points.length < 2) {
+            return drawFallbackTitleFrame(layer, left, top, width, height);
+        }
+        var path = layer.pathItems.add();
+        path.name = "TITLE_DEBUG_BOUNDS";
+        var anchors = [];
+        for (var i = 0; i < shape.points.length; i++) {
+            anchors.push(ratioPoint(shape.points[i].anchor, left, top, width, height));
+        }
+        path.setEntirePath(anchors);
+        path.closed = shape.closed === true;
+        path.filled = false;
+        path.stroked = true;
+        path.strokeWidth = 0.25;
+        path.strokeColor = redColor();
+        for (var p = 0; p < path.pathPoints.length && p < shape.points.length; p++) {
+            path.pathPoints[p].leftDirection = ratioPoint(shape.points[p].left, left, top, width, height);
+            path.pathPoints[p].rightDirection = ratioPoint(shape.points[p].right, left, top, width, height);
+            path.pathPoints[p].pointType = PointType.SMOOTH;
+        }
+        return path;
+    }
+
+    function drawFallbackTitleFrame(layer, left, top, width, height) {
+        var rect = layer.pathItems.rectangle(top, left, width, height);
+        rect.name = "TITLE_DEBUG_BOUNDS";
+        rect.filled = false;
+        rect.stroked = true;
+        rect.strokeWidth = 0.25;
+        rect.strokeColor = redColor();
+        return rect;
     }
 
     function measurePointTextSize(layer, text, font, rect, initialSize) {
@@ -264,6 +303,14 @@
         color.green = 0;
         color.blue = 0;
         tf.textRange.characterAttributes.fillColor = color;
+    }
+
+    function redColor() {
+        var color = new RGBColor();
+        color.red = 255;
+        color.green = 102;
+        color.blue = 102;
+        return color;
     }
 
     function compactPlacements(metrics, columnCount, gapValue) {

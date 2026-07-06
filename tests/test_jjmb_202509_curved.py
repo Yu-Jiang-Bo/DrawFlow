@@ -1,4 +1,5 @@
 from src.jjmb_202509_curved_main import (
+    build_task,
     clean_text,
     group_items,
     normalize_font,
@@ -85,3 +86,29 @@ def test_group_items_keeps_different_detail_rows_separate():
         ["Kai", "Merry Christmas"],
         ["Nora", "Merry Christmas"],
     ]
+
+
+def test_build_task_can_keep_title_frames(tmp_path):
+    report = tmp_path / "report.json"
+    report.write_text(
+        '{"entries":[{"status":"ok","font_option":"F1","font_name":"TestFont","baseline_ratio":{},"bounds_shape_ratio":{}}]}',
+        encoding="utf-8",
+    )
+    groups = group_items(
+        parse_items(
+            [
+                {
+                    "模板": "JJMB202509231236046265",
+                    "内部订单号": "ORDER1",
+                    "订单明细id": "1",
+                    "生产部门": "ZW",
+                    "定制信息": "Font Options:F1\nName:Kai",
+                }
+            ]
+        )
+    )
+
+    task = build_task(report, tmp_path / "out.ai", groups, columns=1, keep_title_frames=True)
+
+    assert task["layout"]["keep_title_frames"] is True
+    assert task["font_map"]["F1"]["bounds_shape_ratio"] == {}
