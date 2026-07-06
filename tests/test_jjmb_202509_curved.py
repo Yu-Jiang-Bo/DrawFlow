@@ -26,6 +26,7 @@ def test_split_names_accepts_numbered_inline_and_multiline_values():
     assert split_names("1. Kai\n2. Jc\n3. Noah") == ["Kai", "Jc", "Noah"]
     assert split_names("1. Tanya   2. Neel   3.Ansh") == ["Tanya", "Neel", "Ansh"]
     assert split_names("1. Jose, 2. Kaylee , 3. Vienna") == ["Jose", "Kaylee", "Vienna"]
+    assert split_names("Azamat\nAnna\nAlan\nAdam") == ["Azamat", "Anna", "Alan", "Adam"]
 
 
 def test_clean_text_decodes_html_entities_and_strips_markers():

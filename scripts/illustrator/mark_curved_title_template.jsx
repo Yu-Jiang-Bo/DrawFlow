@@ -54,7 +54,8 @@
             label_bounds: bounds(label.item),
             sample_bounds: bounds(sample),
             bounds: bounds(frame),
-            path_bounds: bounds(path)
+            path_bounds: bounds(path),
+            baseline_ratio: baselineRatio(frame)
         });
     }
 
@@ -140,18 +141,13 @@
     }
 
     function createTitlePath(layer, frame, name) {
-        var b = bounds(frame);
-        var left = b[0];
-        var top = b[1];
-        var right = b[2];
-        var bottom = b[3];
+        var curve = baselineFromFrame(frame);
+        var left = curve.left[0];
+        var right = curve.right[0];
         var width = right - left;
-        var height = top - bottom;
-        var cy = (top + bottom) / 2;
-        var sag = height * 0.55;
         var path = layer.pathItems.add();
         path.name = name;
-        path.setEntirePath([[left, cy], [right, cy]]);
+        path.setEntirePath([curve.left, curve.right]);
         path.closed = false;
         path.filled = false;
         path.stroked = true;
@@ -162,12 +158,67 @@
         color.blue = 255;
         path.strokeColor = color;
         path.pathPoints[0].leftDirection = path.pathPoints[0].anchor;
-        path.pathPoints[0].rightDirection = [left + width / 3, cy - sag];
+        path.pathPoints[0].rightDirection = curve.leftHandle || [left + width / 3, curve.mid[1]];
         path.pathPoints[0].pointType = PointType.SMOOTH;
-        path.pathPoints[1].leftDirection = [right - width / 3, cy - sag];
+        path.pathPoints[1].leftDirection = curve.rightHandle || [right - width / 3, curve.mid[1]];
         path.pathPoints[1].rightDirection = path.pathPoints[1].anchor;
         path.pathPoints[1].pointType = PointType.SMOOTH;
         return path;
+    }
+
+    function baselineFromFrame(frame) {
+        var b = bounds(frame);
+        var left = b[0];
+        var top = b[1];
+        var right = b[2];
+        var bottom = b[3];
+        var width = right - left;
+        var cy = (top + bottom) / 2;
+        if (frame.pathPoints && frame.pathPoints.length >= 9) {
+            var pts = frame.pathPoints;
+            var leftPoint = midpoint(pts[3].anchor, pts[6].anchor);
+            var midPoint = midpoint(pts[2].anchor, pts[7].anchor);
+            var rightPoint = midpoint(pts[1].anchor, pts[8].anchor);
+            return {
+                left: leftPoint,
+                mid: midPoint,
+                right: rightPoint,
+                leftHandle: [leftPoint[0] + (rightPoint[0] - leftPoint[0]) / 3, midPoint[1]],
+                rightHandle: [rightPoint[0] - (rightPoint[0] - leftPoint[0]) / 3, midPoint[1]]
+            };
+        }
+        return {
+            left: [left, cy],
+            mid: [(left + right) / 2, cy - width * 0.08],
+            right: [right, cy],
+            leftHandle: [left + width / 3, cy - width * 0.08],
+            rightHandle: [right - width / 3, cy - width * 0.08]
+        };
+    }
+
+    function baselineRatio(frame) {
+        var b = bounds(frame);
+        var curve = baselineFromFrame(frame);
+        return {
+            left: pointRatio(curve.left, b),
+            mid: pointRatio(curve.mid, b),
+            right: pointRatio(curve.right, b),
+            leftHandle: pointRatio(curve.leftHandle, b),
+            rightHandle: pointRatio(curve.rightHandle, b)
+        };
+    }
+
+    function midpoint(a, b) {
+        return [(Number(a[0]) + Number(b[0])) / 2, (Number(a[1]) + Number(b[1])) / 2];
+    }
+
+    function pointRatio(point, b) {
+        var width = Number(b[2]) - Number(b[0]);
+        var height = Number(b[1]) - Number(b[3]);
+        return [
+            (Number(point[0]) - Number(b[0])) / width,
+            (Number(b[1]) - Number(point[1])) / height
+        ];
     }
 
     function ensureLayer(doc, name) {

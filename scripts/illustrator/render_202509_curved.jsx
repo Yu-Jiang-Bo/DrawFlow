@@ -128,18 +128,19 @@
     }
 
     function drawCurvedTitle(layer, text, font, left, top, width, height, textItems, pathItems) {
-        var cy = top - height * 0.45;
-        var sag = height * 0.55;
+        var fitRect = [left + padding, top - padding, left + width - padding, top - height + padding];
+        var titleSize = measurePointTextSize(layer, text, font, fitRect, 16) * 0.82;
+        var curve = scaledCurve(font.baseline_ratio, left, top, width, height);
         var path = layer.pathItems.add();
         path.name = "TITLE_RENDER_PATH";
-        path.setEntirePath([[left, cy], [left + width, cy]]);
+        path.setEntirePath([curve.left, curve.right]);
         path.closed = false;
         path.filled = false;
         path.stroked = false;
         path.pathPoints[0].leftDirection = path.pathPoints[0].anchor;
-        path.pathPoints[0].rightDirection = [left + width / 3, cy - sag];
+        path.pathPoints[0].rightDirection = curve.leftHandle;
         path.pathPoints[0].pointType = PointType.SMOOTH;
-        path.pathPoints[1].leftDirection = [left + width * 2 / 3, cy - sag];
+        path.pathPoints[1].leftDirection = curve.rightHandle;
         path.pathPoints[1].rightDirection = path.pathPoints[1].anchor;
         path.pathPoints[1].pointType = PointType.SMOOTH;
         pathItems.push(path);
@@ -157,9 +158,47 @@
         tf.contents = text;
         applyFont(tf, font.font_name);
         applyBlack(tf);
-        tf.textRange.characterAttributes.size = 16;
-        fitTextToRect(tf, [left + padding, top - padding, left + width - padding, top - height + padding], minFontSize, maxFontSize);
+        tf.textRange.characterAttributes.size = Math.max(minFontSize, Math.min(maxFontSize, titleSize));
+        centerTextToRect(tf, fitRect);
         textItems.push(tf);
+    }
+
+    function measurePointTextSize(layer, text, font, rect, initialSize) {
+        var tf = layer.textFrames.add();
+        tf.contents = text;
+        applyFont(tf, font.font_name);
+        applyBlack(tf);
+        tf.textRange.characterAttributes.size = initialSize;
+        fitTextToRect(tf, rect, minFontSize, maxFontSize);
+        var size = Number(tf.textRange.characterAttributes.size || initialSize);
+        try { tf.remove(); } catch (e0) {}
+        return size;
+    }
+
+    function scaledCurve(ratio, left, top, width, height) {
+        if (!ratio || !ratio.left || !ratio.right || !ratio.leftHandle || !ratio.rightHandle) {
+            var cy = top - height * 0.45;
+            var sag = height * 0.33;
+            return {
+                left: [left, cy],
+                right: [left + width, cy],
+                leftHandle: [left + width / 3, cy - sag],
+                rightHandle: [left + width * 2 / 3, cy - sag]
+            };
+        }
+        return {
+            left: ratioPoint(ratio.left, left, top, width, height),
+            right: ratioPoint(ratio.right, left, top, width, height),
+            leftHandle: ratioPoint(ratio.leftHandle, left, top, width, height),
+            rightHandle: ratioPoint(ratio.rightHandle, left, top, width, height)
+        };
+    }
+
+    function ratioPoint(point, left, top, width, height) {
+        return [
+            left + Number(point[0]) * width,
+            top - Number(point[1]) * height
+        ];
     }
 
     function fitTextToRect(tf, rect, minSize, maxSize) {
@@ -187,6 +226,11 @@
             tf.textRange.characterAttributes.size = Math.max(minSize, currentSize * Math.min(maxW / w, maxH / h) * 0.96);
         }
 
+        centerTextToRect(tf, rect);
+    }
+
+    function centerTextToRect(tf, rect) {
+        var left = rect[0], top = rect[1], right = rect[2], bottom = rect[3];
         var bounds = tf.visibleBounds;
         var cx = (left + right) / 2;
         var cy = (top + bottom) / 2;

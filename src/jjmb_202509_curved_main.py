@@ -129,10 +129,22 @@ def normalize_font(value: str) -> str:
 
 
 def split_names(value: str) -> List[str]:
-    text = html.unescape(value or "").strip()
+    raw = html.unescape(value or "").strip()
+    if not raw:
+        return []
+    lines = [line.strip() for line in raw.replace("\r\n", "\n").split("\n") if line.strip()]
+    if len(lines) > 1:
+        result: List[str] = []
+        for line in lines:
+            result.extend(split_names_inline(line))
+        return result
+    return split_names_inline(raw)
+
+
+def split_names_inline(value: str) -> List[str]:
+    text = re.sub(r"\s+", " ", html.unescape(value or "")).strip()
     if not text:
         return []
-    text = re.sub(r"\s+", " ", text.replace("\r\n", "\n").replace("\n", " ")).strip()
     if re.search(r"(?:^|\s)\d{1,3}\s*[\.\)\]\u3001:]?\s*", text):
         parts = re.split(r"(?:^|\s)\d{1,3}\s*[\.\)\]\u3001:]?\s*", text)
     elif "|" in text:
@@ -213,6 +225,7 @@ def load_font_map(mark_report: Path) -> Dict[str, Dict[str, str]]:
             "font_name": str(entry.get("font_name", "")),
             "path_name": str(entry.get("path_name", "")),
             "bounds_name": str(entry.get("bounds_name", "")),
+            "baseline_ratio": entry.get("baseline_ratio", {}),
         }
     return result
 
