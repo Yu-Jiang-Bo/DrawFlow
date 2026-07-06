@@ -102,6 +102,8 @@ def test_service_dry_run_creates_job_and_render_task(tmp_path):
     assert task_path.exists()
     task = json.loads(task_path.read_text(encoding="utf-8"))
     assert task["groups"][0]["items"][0]["production_label_lines"] == ["ORDER1", "Gold"]
+    assert task["output"]["outline_text"] is True
+    assert task["output"]["pathfinder_merge"] is True
 
 
 def test_template_registry_resolves_defaults(tmp_path):

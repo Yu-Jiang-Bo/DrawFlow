@@ -322,6 +322,7 @@ def build_task(
             "format": "ai",
             "compatibility": "Illustrator 8",
             "outline_text": True,
+            "pathfinder_merge": True,
         },
         "debug": {
             "report_path": str(output_ai.with_suffix(".debug.json")),

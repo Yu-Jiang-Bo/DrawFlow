@@ -7,6 +7,9 @@
     if (task.type !== "jjmb_202508_grouped") throw new Error("Unsupported task type: " + task.type);
     var config = readJSON(String(task.template_config));
     if (!task.groups || task.groups.length === 0) throw new Error("No order groups");
+    var outputConfig = task.output || {};
+    var pathfinderMerge = outputConfig.pathfinder_merge !== false;
+    var cleanupStats = { attempted: 0, failed: 0 };
 
     try { app.userInteractionLevel = UserInteractionLevel.DONTDISPLAYALERTS; } catch (e0) {}
 
@@ -63,7 +66,9 @@
         contentWidthPt: contentSize.width,
         contentHeightPt: contentSize.height,
         compactLabelWidthPt: compactLabelWidth,
-        groupLabelHeightPt: groupLabelHeight
+        groupLabelHeightPt: groupLabelHeight,
+        pathfinderMerge: pathfinderMerge,
+        cleanupStats: cleanupStats
     };
 
     var doc = app.documents.add(DocumentColorSpace.RGB, docWidth, docHeight);
@@ -333,6 +338,10 @@
             try { outline.rotate(rotationDeg, true, true, true, true, Transformation.CENTER); } catch (e1) {}
         }
         fitPageItemToRect(outline, rect, preserveAspect);
+        if (pathfinderMerge) {
+            cleanupOutline(outline);
+            fitPageItemToRect(outline, rect, preserveAspect);
+        }
         return outline;
     }
 
@@ -394,6 +403,7 @@
 
     function cleanupOutline(item) {
         if (!item) return;
+        cleanupStats.attempted += 1;
         try { app.executeMenuCommand("deselectall"); } catch (e0) {}
         try {
             item.selected = true;
@@ -401,6 +411,7 @@
             app.executeMenuCommand("expandStyle");
             item.selected = false;
         } catch (e1) {
+            cleanupStats.failed += 1;
             try { item.selected = false; } catch (e2) {}
         }
     }
