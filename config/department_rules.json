@@ -6,6 +6,123 @@
     "apply_color_to_artwork": false,
     "show_frame": false
   },
+  "shop_rules": {
+    "source_file": "test/ai测试/部门作图要求和细节.xls",
+    "interpretation": "表格中的“定制信息”指系统生成的实际效果图/作图内容，不是订单表里的原始定制文字。",
+    "current_render_policy": "当前渲染仍只输出订单号、颜色标注和实际效果图；暂不按本节规则执行最终部门排版。",
+    "global_requirements": {
+      "must_outline_text": true,
+      "must_pathfinder_merge": true,
+      "keep_same_order_together": true
+    },
+    "department_output_requirements": [
+      {
+        "name": "T",
+        "departments": ["T"],
+        "output_format": "ai8",
+        "artwork_content": "订单号 + 字体颜色 + 效果图",
+        "save_strategy": "先按单保存，再按颜色排版为一个整体 AI8 文件",
+        "layout": {
+          "group_by_color": true,
+          "frame_width_mm": 580,
+          "frame_height_mm": 2000,
+          "color_label_outside_frame": true,
+          "keep_same_order_together": true
+        },
+        "file_naming": "店名+几单几图日期+生产部门，例如 T-5411D58T0816T"
+      },
+      {
+        "name": "K",
+        "departments": ["K"],
+        "output_format": "ai8",
+        "artwork_content": "订单号 + 字体颜色 + 效果图",
+        "save_strategy": "先按单保存，再按颜色排版为一个整体 AI8 文件",
+        "layout": {
+          "group_by_color": true,
+          "frame_width_mm": 480,
+          "frame_height_mm": 2000,
+          "color_label_outside_frame": true,
+          "keep_same_order_together": true
+        },
+        "file_naming": "店名+几单几图日期+生产部门，例如 T-5411D58T0816K"
+      },
+      {
+        "name": "ZK_FK",
+        "departments": ["ZK", "FK"],
+        "output_format": "ai8",
+        "artwork_content": "订单号 + 字体颜色 + 效果图",
+        "save_strategy": "先按单保存，再按颜色排版为一个整体 AI8 文件",
+        "layout": {
+          "group_by_color": true,
+          "frame_width_mm": 450,
+          "frame_height_mm": 2000,
+          "color_label_outside_frame": true,
+          "keep_same_order_together": true
+        },
+        "file_naming": "店名+几单几图日期+生产部门，例如 T-5411D58T0816ZK 或 T-5411D58T0816FK"
+      },
+      {
+        "name": "PW_EW",
+        "departments": ["PW", "EW"],
+        "output_format": "ai8",
+        "artwork_content": "订单号 + 产品名称 + 字体颜色 + 效果图",
+        "save_strategy": "先按单保存为 AI8，再将所有订单放在一个 AI8 文件中",
+        "layout": {
+          "fixed_size_required": false,
+          "keep_same_order_together": true,
+          "arrange_neatly": true
+        }
+      },
+      {
+        "name": "D_CONTAINS",
+        "match": "contains",
+        "departments": ["D"],
+        "output_format": "ai8",
+        "artwork_content": "订单号 + 产品中文名称 + 效果图",
+        "conditional_artwork_content": "雕刻有字体颜色特殊要求时，需要增加字体颜色",
+        "save_strategy": "按单保存为 AI8 文件"
+      },
+      {
+        "name": "H",
+        "departments": ["H"],
+        "output_format": "png",
+        "artwork_content": "订单号 + 效果图；字体颜色填充到名字本身",
+        "save_strategy": "先按图逐单保存，图命名为订单号；多图命名为订单号-1、订单号-2",
+        "layout": {
+          "frame_width_mm": 580,
+          "frame_height_mm": 2000,
+          "color_mode": "CMYK",
+          "keep_same_order_together": true
+        }
+      },
+      {
+        "name": "W_CONTAINS",
+        "match": "contains",
+        "departments": ["W"],
+        "output_format": "manufacturer_specific",
+        "artwork_content": "按厂家判断，不同厂家作图要求和输出格式不同",
+        "manufacturer_rules": [
+          {
+            "manufacturer": "MY-W196",
+            "output_format": "cs5_ai",
+            "artwork_content": "订单号 + 效果图；字体颜色填充到名字本身",
+            "save_strategy": "保存为整体 CS5 AI 文件"
+          },
+          {
+            "manufacturer": "MY-W120",
+            "output_format": "png",
+            "artwork_content": "按图输出，图上不加订单号",
+            "file_naming": "订单号"
+          },
+          {
+            "manufacturer": "other",
+            "output_format": "ai_or_png_or_jpg",
+            "note": "大多数保存为整体 AI 文件，个别厂家为 PNG/JPG"
+          }
+        ]
+      }
+    ]
+  },
   "rules": [
     {
       "name": "H",

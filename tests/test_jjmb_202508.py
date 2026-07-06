@@ -106,9 +106,16 @@ def test_department_rules_are_loaded_from_config():
     rules = load_department_rules()
     k_rule = resolve_department_rule("K", rules)
     h_rule = resolve_department_rule("H", rules)
+    shop_rules = rules["shop_rules"]
 
     assert k_rule["label_fields"] == ["order_no", "color_option"]
     assert k_rule["label_lines"] == [["order_no"], ["color_option"]]
     assert k_rule["apply_color_to_artwork"] is False
     assert h_rule["label_fields"] == ["order_no", "text"]
     assert h_rule["apply_color_to_artwork"] is True
+    assert "实际效果图" in shop_rules["interpretation"]
+    assert "暂不按本节规则执行最终部门排版" in shop_rules["current_render_policy"]
+    assert shop_rules["global_requirements"]["must_pathfinder_merge"] is True
+    k_output = next(rule for rule in shop_rules["department_output_requirements"] if rule["name"] == "K")
+    assert k_output["layout"]["frame_width_mm"] == 480
+    assert k_output["artwork_content"] == "订单号 + 字体颜色 + 效果图"
