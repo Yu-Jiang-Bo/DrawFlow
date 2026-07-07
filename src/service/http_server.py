@@ -993,7 +993,10 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
                 role="独立设计模板",
             )
         )
-        template_config = self._save_template_rules(fields, template_id, existing, _design_asset_count(assets))
+        template_config = fields.get("template_config", "").strip()
+        if not template_config and existing and existing.template_config:
+            template_config = self.registry.to_config_path(existing.template_config)
+        template_rules_config = self._save_template_rules(fields, template_id, existing, _design_asset_count(assets))
         item = {
             "template_id": template_id,
             "name": fields.get("name", "").strip() or (existing.name if existing else ""),
@@ -1008,6 +1011,8 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
         }
         if template_config:
             item["template_config"] = template_config
+        if template_rules_config:
+            item["template_rules_config"] = template_rules_config
         return self.registry.upsert_template(item)
 
     def _resolve_template_ai(
@@ -1072,10 +1077,10 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
                 ensure_ascii=False,
             )
         if rules_text:
-            config_path = self.registry.save_template_config(template_id, rules_text)
+            config_path = self.registry.save_template_rules_config(template_id, rules_text)
             return self.registry.to_config_path(config_path) if config_path else ""
-        if existing and existing.template_config:
-            return self.registry.to_config_path(existing.template_config)
+        if existing and existing.template_rules_config:
+            return self.registry.to_config_path(existing.template_rules_config)
         return ""
 
     def _save_department_rule_draft(self, payload: dict[str, object]) -> dict[str, object]:
@@ -1105,14 +1110,15 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
 
     def _read_template_config(self, template_id: str) -> dict[str, object]:
         template = self.registry.get_template(template_id)
-        if not template.template_config:
+        config_path = template.template_rules_config or template.template_config
+        if not config_path:
             return {"template_id": template_id, "path": "", "config": None}
-        if not template.template_config.exists():
-            return {"template_id": template_id, "path": str(template.template_config), "config": None}
+        if not config_path.exists():
+            return {"template_id": template_id, "path": str(config_path), "config": None}
         return {
             "template_id": template_id,
-            "path": str(template.template_config),
-            "config": json.loads(template.template_config.read_text(encoding="utf-8")),
+            "path": str(config_path),
+            "config": json.loads(config_path.read_text(encoding="utf-8")),
         }
 
     def _send_template_ai(self, template_id: str) -> None:

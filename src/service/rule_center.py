@@ -70,7 +70,9 @@ def build_template_rule_draft(
 def check_template_definition(template: Any) -> Dict[str, Any]:
     """Return rule completeness and renderability for a template definition."""
 
-    config = read_template_rule_config(getattr(template, "template_config", None))
+    config = read_template_rule_config(
+        getattr(template, "template_rules_config", None) or getattr(template, "template_config", None)
+    )
     template_type = str(getattr(template, "template_type", "") or "")
     pipeline = str(getattr(template, "pipeline", "") or "")
     mode = str(config.get("mode") or MODE_BY_TEMPLATE_TYPE.get(template_type, template_type or "unknown"))

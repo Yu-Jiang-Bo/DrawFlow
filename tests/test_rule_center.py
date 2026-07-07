@@ -86,7 +86,7 @@ def test_legacy_pipeline_without_template_ai_is_not_renderable(tmp_path):
 
 def test_confirmed_rule_config_can_be_complete(tmp_path):
     ai_path = tmp_path / "template.ai"
-    config_path = tmp_path / "template.config.json"
+    config_path = tmp_path / "template.rules.json"
     ai_path.write_text("fake ai", encoding="utf-8")
     config_path.write_text(
         json.dumps(
@@ -112,7 +112,7 @@ def test_confirmed_rule_config_can_be_complete(tmp_path):
             "template_type": "curved_title_text",
             "status": "active",
             "template_ai": str(ai_path),
-            "template_config": str(config_path),
+            "template_rules_config": str(config_path),
         }
     )
 

@@ -33,6 +33,7 @@ class TemplateDefinition:
     default_columns: int = 4
     default_hide_boxes: bool = True
     template_config: Path | None = None
+    template_rules_config: Path | None = None
     assets: List[Dict[str, Any]] = field(default_factory=list)
 
     def to_json_dict(self) -> Dict[str, Any]:
@@ -45,6 +46,7 @@ class TemplateDefinition:
             "template_ai": str(self.template_ai) if self.template_ai else "",
             "template_ai_role": self.template_ai_role,
             "template_config": str(self.template_config) if self.template_config else "",
+            "template_rules_config": str(self.template_rules_config) if self.template_rules_config else "",
             "default_columns": self.default_columns,
             "default_hide_boxes": self.default_hide_boxes,
             "assets": self.assets,
@@ -176,6 +178,17 @@ class TemplateRegistry:
         output_path.write_text(json.dumps(parsed, ensure_ascii=False, indent=2), encoding="utf-8")
         return output_path
 
+    def save_template_rules_config(self, template_id: str, content: str) -> Path | None:
+        text = content.strip()
+        if not text:
+            return None
+        parsed = json.loads(text)
+        template_dir = self._template_dir(template_id)
+        template_dir.mkdir(parents=True, exist_ok=True)
+        output_path = template_dir / "template.rules.json"
+        output_path.write_text(json.dumps(parsed, ensure_ascii=False, indent=2), encoding="utf-8")
+        return output_path
+
     def to_config_path(self, path: Path) -> str:
         resolved = path.resolve()
         try:
@@ -195,6 +208,7 @@ class TemplateRegistry:
             default_columns=int(item.get("default_columns", 4) or 4),
             default_hide_boxes=bool(item.get("default_hide_boxes", True)),
             template_config=self._optional_path(item.get("template_config", "")),
+            template_rules_config=self._optional_path(item.get("template_rules_config", "")),
             assets=self._parse_assets(item.get("assets", [])),
         )
 
@@ -255,6 +269,9 @@ class TemplateRegistry:
         template_config = str(item.get("template_config", "")).strip()
         if template_config:
             normalized["template_config"] = template_config
+        template_rules_config = str(item.get("template_rules_config", "")).strip()
+        if template_rules_config:
+            normalized["template_rules_config"] = template_rules_config
         assets = item.get("assets", [])
         if isinstance(assets, list):
             normalized["assets"] = [asset for asset in assets if isinstance(asset, dict)]

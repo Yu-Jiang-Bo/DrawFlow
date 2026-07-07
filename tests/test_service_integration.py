@@ -193,6 +193,41 @@ def test_register_template_keeps_reference_ai_as_asset_when_size_template_exists
     assert template.assets[0]["role"] == "原始参考模板"
 
 
+def test_register_template_saves_rules_without_overwriting_structure_config(tmp_path):
+    handler = object.__new__(RenderRequestHandler)
+    handler.registry = TemplateRegistry(tmp_path / "templates.json", tmp_path / "templates")
+    structure_config = tmp_path / "curved-title-mark-report.json"
+    structure_config.write_text('{"entries":[{"font_option":"F14","status":"ok"}]}', encoding="utf-8")
+    ai_path = handler.registry.save_uploaded_ai("JJMB202607030007", "template.ai", b"ai")
+    handler.registry.upsert_template(
+        {
+            "template_id": "JJMB202607030007",
+            "name": "曲线标题模板",
+            "template_type": "curved_title_text",
+            "pipeline": "jjmb_202509_curved",
+            "status": "active",
+            "template_ai": handler.registry.to_config_path(ai_path),
+            "template_config": str(structure_config),
+        }
+    )
+
+    template = handler._register_template(
+        {
+            "template_id": "JJMB202607030007",
+            "name": "曲线标题模板",
+            "template_type": "curved_title_text",
+            "status": "active",
+            "template_rules_json": '{"raw_text":"业务规则","font_options":["F14"]}',
+            "template_rules_text": "业务规则",
+        },
+        {},
+    )
+
+    assert template.template_config == structure_config
+    assert template.template_rules_config and template.template_rules_config.name == "template.rules.json"
+    assert "font_options" in template.template_rules_config.read_text(encoding="utf-8")
+
+
 def test_template_registry_saves_multiple_ai_assets(tmp_path):
     config_path = tmp_path / "templates.json"
     storage_dir = tmp_path / "templates"

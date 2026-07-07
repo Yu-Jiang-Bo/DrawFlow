@@ -984,7 +984,8 @@ INDEX_HTML = """<!doctype html>
         ["类型", displayType(template.template_type)],
         ["渲染基准 AI", template.template_ai ? displayTemplateAiRole(template) : "未配置"],
         ["文件资产", `${(template.assets || []).length} 个`],
-        ["特有规则", template.template_config ? "已配置" : "未配置"],
+        ["结构配置", template.template_config ? "已配置" : "未配置"],
+        ["特有规则", template.template_rules_config ? "已配置" : "未配置"],
         ["规则状态", ruleCheck.complete ? "完整" : "待补充"],
         ["可渲染", ruleCheck.renderable ? "可以" : "不可以"],
         ["缺失规则", displayMissingRules(ruleCheck.missing || [])],
@@ -1011,7 +1012,7 @@ INDEX_HTML = """<!doctype html>
       editor.value = "";
       state.templateRuleDraft = null;
       state.templateRulePreviewSignature = "";
-      if (!template || !template.template_config) {
+      if (!template || !(template.template_rules_config || template.template_config)) {
         renderTemplateRulePreview();
         return;
       }
