@@ -530,7 +530,8 @@ INDEX_HTML = """<!doctype html>
             </div>
             <div class="actions">
               <button class="btn-secondary" id="resetTaskBtn">重置</button>
-              <button class="btn-primary" id="renderBtn">开始渲染</button>
+              <button class="btn-subtle" id="dryRunBtn">解析测试</button>
+              <button class="btn-primary" id="renderBtn">生成效果图</button>
             </div>
             <div class="result-strip">
               <div class="result-cell"><span>任务编号</span><strong id="resultJobId">-</strong></div>
@@ -596,8 +597,12 @@ INDEX_HTML = """<!doctype html>
               <div>
                 <label for="templateType">模板类型</label>
                 <select id="templateType">
+                  <option value="pure_text">纯文字模板</option>
                   <option value="pure_text_color_design">纯文字颜色/设计位置模板</option>
                   <option value="pure_text_style">纯文字作图区模板</option>
+                  <option value="curved_title_text">弯曲标题文字模板</option>
+                  <option value="annotated_ai">标准标注 AI 模板</option>
+                  <option value="asset_split">独立设计资产模板</option>
                 </select>
               </div>
               <div>
@@ -812,7 +817,8 @@ INDEX_HTML = """<!doctype html>
         state.selectedTemplateId = event.target.value;
         syncSelectedTemplate();
       });
-      document.getElementById("renderBtn").addEventListener("click", submitRender);
+      document.getElementById("dryRunBtn").addEventListener("click", () => submitRender(true));
+      document.getElementById("renderBtn").addEventListener("click", () => submitRender(false));
       document.getElementById("resetTaskBtn").addEventListener("click", resetTaskResult);
       document.getElementById("refreshJobsBtn").addEventListener("click", loadJobs);
       document.getElementById("refreshJobsPageBtn").addEventListener("click", loadJobs);
@@ -1129,7 +1135,7 @@ INDEX_HTML = """<!doctype html>
       setMessage("templateSaveMessage", "等待编辑", "");
     }
 
-    async function submitRender() {
+    async function submitRender(dryRun) {
       const file = document.getElementById("orderFile").files[0];
       const templateId = document.getElementById("renderTemplate").value;
       if (!templateId) {
@@ -1143,7 +1149,8 @@ INDEX_HTML = """<!doctype html>
       const payload = new FormData();
       payload.append("template_id", templateId);
       payload.append("order_file", file);
-      setTaskRunning();
+      if (dryRun) payload.append("dry_run", "true");
+      setTaskRunning(dryRun);
       try {
         const result = await postForm("/api/render", payload);
         renderTaskResult(result);
@@ -1154,12 +1161,12 @@ INDEX_HTML = """<!doctype html>
       }
     }
 
-    function setTaskRunning() {
+    function setTaskRunning(dryRun) {
       document.getElementById("resultJobId").textContent = "-";
-      document.getElementById("resultStatus").textContent = "运行中";
+      document.getElementById("resultStatus").textContent = dryRun ? "解析中" : "运行中";
       document.getElementById("resultItems").textContent = "-";
       document.getElementById("resultDownload").textContent = "-";
-      setMessage("taskMessage", "正在渲染", "");
+      setMessage("taskMessage", dryRun ? "正在解析订单和模板规则" : "正在渲染", "");
     }
 
     function renderTaskResult(result) {
@@ -1170,6 +1177,10 @@ INDEX_HTML = """<!doctype html>
         document.getElementById("resultDownload").textContent = "下载中";
         setMessage("taskMessage", "渲染完成，AI 文件开始下载", "ok");
         window.location.href = `/api/jobs/${encodeURIComponent(result.job_id)}/download/output_ai`;
+      } else if (result.status === "completed" && result.outputs && result.outputs.render_task) {
+        const link = `/api/jobs/${encodeURIComponent(result.job_id)}/download/render_task`;
+        document.getElementById("resultDownload").innerHTML = `<a class="download-link" href="${link}">下载解析 JSON</a>`;
+        setMessage("taskMessage", "解析测试完成，可下载解析 JSON 检查字段、分组和渲染项", "ok");
       } else if (result.status === "failed") {
         document.getElementById("resultDownload").textContent = "-";
         setMessage("taskMessage", result.error || "渲染失败", "error");
@@ -1217,7 +1228,10 @@ INDEX_HTML = """<!doctype html>
         const request = job.request || {};
         const stats = job.stats || {};
         const hasOutput = job.status === "completed" && job.outputs && job.outputs.output_ai;
-        const link = hasOutput ? `<a class="download-link" href="/api/jobs/${encodeURIComponent(job.job_id)}/download/output_ai">下载 AI</a>` : "-";
+        const hasRenderTask = job.status === "completed" && job.outputs && job.outputs.render_task;
+        const link = hasOutput
+          ? `<a class="download-link" href="/api/jobs/${encodeURIComponent(job.job_id)}/download/output_ai">下载 AI</a>`
+          : (hasRenderTask ? `<a class="download-link" href="/api/jobs/${encodeURIComponent(job.job_id)}/download/render_task">下载解析 JSON</a>` : "-");
         return `
           <tr>
             <td>${escapeHtml(job.job_id)}</td>

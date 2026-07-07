@@ -98,6 +98,7 @@ POST /api/render
 GET  /api/jobs
 GET  /api/jobs/{job_id}
 GET  /api/jobs/{job_id}/download/output_ai
+GET  /api/jobs/{job_id}/download/render_task
 ```
 
 当前模板注册仍是本地 MVP：
@@ -125,6 +126,7 @@ $env:CUSTOM_RENDERER_LLM_MODEL="your-model"
 ```text
 template_id: JJMB202508261001394920
 order_file: 订单 Excel/CSV 文件
+dry_run: true  # 可选；只解析测试，不启动 Illustrator
 ```
 
 页面渲染成功后会自动请求 `/api/jobs/{job_id}/download/output_ai` 下载 AI 文件。

@@ -776,10 +776,10 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
         if path == "/api/jobs":
             self._send_json({"jobs": self.jobs.list_recent(30)})
             return
-        if path.startswith("/api/jobs/") and path.endswith("/download/output_ai"):
+        if path.startswith("/api/jobs/") and "/download/" in path:
             parts = path.strip("/").split("/")
-            if len(parts) == 5:
-                self._send_job_output(parts[2], "output_ai")
+            if len(parts) == 5 and parts[3] == "download" and parts[4] in {"output_ai", "render_task"}:
+                self._send_job_output(parts[2], parts[4])
                 return
             self._send_error(HTTPStatus.NOT_FOUND, "not found")
             return
