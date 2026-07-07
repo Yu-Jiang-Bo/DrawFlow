@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import TracebackType
+from typing import Any
 
 
 class IllustratorBridgeError(RuntimeError):
@@ -27,16 +29,17 @@ class IllustratorBridge:
             raise IllustratorBridgeError("缺少 pywin32，无法调用 Illustrator") from exc
 
         bootstrap = self._build_bootstrap(script, task)
-        try:
-            app = win32com.client.Dispatch("Illustrator.Application")
+        with ComApartment():
             try:
-                app.Visible = self.visible
-            except Exception:
-                pass
-            result = app.DoJavaScript(bootstrap)
-            return str(result) if result else ""
-        except Exception as exc:
-            raise IllustratorBridgeError(f"执行 Illustrator JSX 失败: {exc}") from exc
+                app = win32com.client.Dispatch("Illustrator.Application")
+                try:
+                    app.Visible = self.visible
+                except Exception:
+                    pass
+                result = app.DoJavaScript(bootstrap)
+                return str(result) if result else ""
+            except Exception as exc:
+                raise IllustratorBridgeError(f"执行 Illustrator JSX 失败: {exc}") from exc
 
     def _build_bootstrap(self, render_script: Path, task_file: Path) -> str:
         return "\n".join(
@@ -58,3 +61,30 @@ def jsx_string(value: str) -> str:
         .replace("'", "\\'")
     )
     return "'" + escaped + "'"
+
+
+class ComApartment:
+    """Initialize COM for the current thread while executing Illustrator automation."""
+
+    def __init__(self) -> None:
+        self._pythoncom: Any = None
+        self._initialized = False
+
+    def __enter__(self) -> "ComApartment":
+        try:
+            import pythoncom
+        except ImportError:
+            return self
+        pythoncom.CoInitialize()
+        self._pythoncom = pythoncom
+        self._initialized = True
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        if self._initialized and self._pythoncom is not None:
+            self._pythoncom.CoUninitialize()

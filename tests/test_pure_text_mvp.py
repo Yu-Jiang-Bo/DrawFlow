@@ -1,4 +1,6 @@
 import json
+import sys
+import types
 from pathlib import Path
 
 import pytest
@@ -58,3 +60,36 @@ def test_illustrator_bootstrap_contains_task_env(tmp_path):
 
     assert "CUSTOM_RENDER_TASK" in jsx
     assert "$.evalFile" in jsx
+
+
+def test_illustrator_render_initializes_com_for_current_thread(monkeypatch, tmp_path):
+    script = tmp_path / "render.jsx"
+    task = tmp_path / "task.json"
+    script.write_text("", encoding="utf-8")
+    task.write_text(json.dumps({"type": "pure_text"}), encoding="utf-8")
+    calls = []
+
+    fake_pythoncom = types.SimpleNamespace(
+        CoInitialize=lambda: calls.append("init"),
+        CoUninitialize=lambda: calls.append("uninit"),
+    )
+
+    class FakeIllustrator:
+        Visible = False
+
+        def DoJavaScript(self, _bootstrap):
+            calls.append("javascript")
+            return "OK"
+
+    fake_client = types.ModuleType("win32com.client")
+    fake_client.Dispatch = lambda name: calls.append(("dispatch", name)) or FakeIllustrator()
+    fake_win32com = types.ModuleType("win32com")
+    fake_win32com.client = fake_client
+    monkeypatch.setitem(sys.modules, "pythoncom", fake_pythoncom)
+    monkeypatch.setitem(sys.modules, "win32com", fake_win32com)
+    monkeypatch.setitem(sys.modules, "win32com.client", fake_client)
+
+    result = IllustratorBridge().render(script, task)
+
+    assert result == "OK"
+    assert calls == ["init", ("dispatch", "Illustrator.Application"), "javascript", "uninit"]
