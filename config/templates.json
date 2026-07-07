@@ -28,7 +28,7 @@
       "template_type": "curved_title_text",
       "pipeline": "jjmb_202509_curved",
       "status": "active",
-      "template_ai": "../test/ai测试/JJMB202509231236046265/JJMB202509231236046265.ai",
+      "template_ai": "output/template-named/JJMB202509231236046265/JJMB202509231236046265.curved-title-marked.ai",
       "template_config": "output/template-named/JJMB202509231236046265/curved-title-mark-report.json",
       "default_columns": 5,
       "default_hide_boxes": true
