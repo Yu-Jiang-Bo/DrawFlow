@@ -10,6 +10,7 @@
 
     var layout = task.layout || {};
     var fit = task.fit || {};
+    var outputConfig = task.output || {};
     var columns = Math.max(Number(layout.columns || 5), 1);
     var margin = mmToPt(Number(layout.margin_mm || 8));
     var gap = mmToPt(Number(layout.gap_mm || 18));
@@ -22,6 +23,7 @@
     var titleHeight = mmToPt(Number(layout.title_height_mm || 7));
     var keepTitleFrames = layout.keep_title_frames === true;
     var keepNameFrames = layout.keep_name_frames === true;
+    var pathfinderMerge = outputConfig.pathfinder_merge !== false;
     var minFontSize = Number(fit.min_font_size_pt || 4);
     var maxFontSize = Number(fit.max_font_size_pt || 80);
     var padding = mmToPt(Number(fit.padding_mm || 0.2));
@@ -95,10 +97,11 @@
         titleWidth: titleWidth,
         titleHeight: titleHeight,
         keepNameFrames: keepNameFrames,
-        keepTitleFrames: keepTitleFrames
+        keepTitleFrames: keepTitleFrames,
+        pathfinderMerge: pathfinderMerge
     });
 
-    if (task.output && task.output.outline_text) {
+    if (outputConfig.outline_text) {
         outlineText(textItems);
         removeItems(pathItems);
     }
@@ -122,10 +125,11 @@
         tf.textRange.characterAttributes.size = size;
         applyBlack(tf);
         fitTextToRect(tf, [left, top, right, bottom], 5, size);
-        textItems.push(tf);
+        textItems.push({ item: tf });
     }
 
     function drawName(layer, text, font, left, top, width, height, textItems, nameFrameItems) {
+        var rect = [left, top, left + width, top - height];
         var frame = drawDebugRect(layer, "NAME_DEBUG_BOUNDS", left, top, width, height);
         nameFrameItems.push(frame);
         var tf = layer.textFrames.add();
@@ -134,10 +138,11 @@
         applyBlack(tf);
         tf.textRange.characterAttributes.size = 18;
         fitTextToRect(tf, [left + padding, top - padding, left + width - padding, top - height + padding], minFontSize, maxFontSize);
-        textItems.push(tf);
+        textItems.push({ item: tf, rect: rect, exactFit: true });
     }
 
     function drawCurvedTitle(layer, text, font, left, top, width, height, textItems, pathItems, titleFrameItems) {
+        var frameRect = [left, top, left + width, top - height];
         var fitRect = [left + padding, top - padding, left + width - padding, top - height + padding];
         var titleSize = measurePointTextSize(layer, text, font, fitRect, 16) * 0.82;
         var titleFrame = drawTitleFrame(layer, font.bounds_shape_ratio, left, top, width, height);
@@ -173,7 +178,7 @@
         applyCenterParagraph(tf);
         tf.textRange.characterAttributes.size = Math.max(minFontSize, Math.min(maxFontSize, titleSize));
         fitTitleTextToRect(tf, fitRect, minFontSize, Math.max(minFontSize, Math.min(maxFontSize, titleSize)));
-        textItems.push(tf);
+        textItems.push({ item: tf, rect: frameRect, exactFit: true });
     }
 
     function drawTitleFrame(layer, shape, left, top, width, height) {
@@ -397,9 +402,56 @@
     }
 
     function outlineText(items) {
+        var outlines = [];
         for (var i = 0; i < items.length; i++) {
-            try { items[i].createOutline(); } catch (e0) {}
+            try {
+                var entry = items[i];
+                var source = entry.item || entry;
+                var outline = source.createOutline();
+                if (entry.exactFit && entry.rect) {
+                    fitPageItemToRect(outline, entry.rect);
+                }
+                outlines.push(outline);
+            } catch (e0) {}
         }
+        if (pathfinderMerge) cleanupOutlines(outlines);
+    }
+
+    function fitPageItemToRect(item, rect) {
+        var left = rect[0], top = rect[1], right = rect[2], bottom = rect[3];
+        var targetW = right - left;
+        var targetH = top - bottom;
+        for (var i = 0; i < 6; i++) {
+            try { app.redraw(); } catch (e0) {}
+            var b = item.geometricBounds;
+            var w = Math.abs(b[2] - b[0]);
+            var h = Math.abs(b[1] - b[3]);
+            if (w <= 0 || h <= 0) return;
+            try {
+                item.resize((targetW / w) * 100, (targetH / h) * 100, true, true, true, true, 100, Transformation.CENTER);
+            } catch (e1) {
+                try { item.resize((targetW / w) * 100, (targetH / h) * 100); } catch (e2) {}
+            }
+            alignPageItemToRect(item, rect);
+        }
+    }
+
+    function alignPageItemToRect(item, rect) {
+        var b = item.geometricBounds;
+        item.translate(rect[0] - b[0], rect[1] - b[1]);
+    }
+
+    function cleanupOutlines(items) {
+        if (!items || items.length === 0) return;
+        try { app.executeMenuCommand("deselectall"); } catch (e0) {}
+        try {
+            for (var i = 0; i < items.length; i++) {
+                try { items[i].selected = true; } catch (e1) {}
+            }
+            app.executeMenuCommand("Live Pathfinder Add");
+            app.executeMenuCommand("expandStyle");
+        } catch (e2) {}
+        try { app.executeMenuCommand("deselectall"); } catch (e3) {}
     }
 
     function removeItems(items) {

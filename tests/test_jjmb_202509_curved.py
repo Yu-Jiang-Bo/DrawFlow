@@ -112,6 +112,7 @@ def test_build_task_can_keep_debug_frames(tmp_path):
 
     assert task["layout"]["keep_title_frames"] is True
     assert task["layout"]["keep_name_frames"] is True
+    assert task["output"]["pathfinder_merge"] is True
     assert task["font_map"]["F1"]["bounds_shape_ratio"] == {}
 
 

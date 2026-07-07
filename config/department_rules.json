@@ -13,6 +13,9 @@
     "global_requirements": {
       "must_outline_text": true,
       "must_pathfinder_merge": true,
+      "size_frame_text_path_overlap": true,
+      "size_frame_text_path_overlap_note": "所有带尺寸框的内容，文字部分要与对应的尺寸框路径完全重合。",
+      "outline_dedupe_note": "输出文件一定要做转曲去重处理，去重很重要。",
       "keep_same_order_together": true
     },
     "department_output_requirements": [
