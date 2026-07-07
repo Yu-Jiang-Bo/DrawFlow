@@ -637,16 +637,12 @@ INDEX_HTML = """<!doctype html>
                 <textarea id="templateRuleText" placeholder="例如：未选择颜色默认金色；未选择设计默认 Design2；Design2 字体逆时针旋转 15 度。"></textarea>
               </div>
               <div class="field-full">
-                <label for="templateRuleJson">结构化规则 JSON</label>
-                <textarea id="templateRuleJson" placeholder='{"version":1,"status":"draft","capabilities":["text_fit_box"]}'></textarea>
-              </div>
-              <div class="field-full">
-                <label>结构化预览</label>
+                <label>编译后的规则说明</label>
                 <div class="preview-box" id="templateRulePreview"></div>
               </div>
             </div>
             <div class="actions">
-              <button class="btn-secondary" id="newTemplateBtn">新建空白</button>
+              <button class="btn-secondary" id="downloadTemplateBtn">下载当前模板</button>
               <button class="btn-subtle" id="previewTemplateRuleBtn">生成预览</button>
               <button class="btn-primary" id="saveTemplateBtn">保存模板</button>
             </div>
@@ -775,7 +771,9 @@ INDEX_HTML = """<!doctype html>
       shopRules: {},
       selectedTemplateId: "",
       selectedRuleName: "",
-      ruleMode: "published"
+      ruleMode: "published",
+      templateRuleDraft: null,
+      templateRulePreviewSignature: ""
     };
 
     const typeNames = {
@@ -822,13 +820,12 @@ INDEX_HTML = """<!doctype html>
       document.getElementById("resetTaskBtn").addEventListener("click", resetTaskResult);
       document.getElementById("refreshJobsBtn").addEventListener("click", loadJobs);
       document.getElementById("refreshJobsPageBtn").addEventListener("click", loadJobs);
-      document.getElementById("newTemplateBtn").addEventListener("click", clearTemplateForm);
+      document.getElementById("downloadTemplateBtn").addEventListener("click", downloadSelectedTemplate);
       document.getElementById("previewTemplateRuleBtn").addEventListener("click", renderTemplateRulePreviewFromServer);
       document.getElementById("saveTemplateBtn").addEventListener("click", saveTemplate);
       document.getElementById("assetAiFiles").addEventListener("change", renderAssetRows);
       document.getElementById("primaryAiFile").addEventListener("change", renderAssetRows);
-      document.getElementById("templateRuleText").addEventListener("input", renderTemplateRulePreview);
-      document.getElementById("templateRuleJson").addEventListener("input", renderTemplateRulePreview);
+      document.getElementById("templateRuleText").addEventListener("input", markTemplateRulePreviewStale);
       document.getElementById("previewRuleBtn").addEventListener("click", renderRulePreviewFromServer);
       document.getElementById("saveRuleDraftBtn").addEventListener("click", saveRuleDraft);
       document.getElementById("publishRuleBtn").addEventListener("click", publishRule);
@@ -978,9 +975,9 @@ INDEX_HTML = """<!doctype html>
 
     async function loadTemplateRuleText(template) {
       const editor = document.getElementById("templateRuleText");
-      const jsonEditor = document.getElementById("templateRuleJson");
       editor.value = "";
-      jsonEditor.value = "";
+      state.templateRuleDraft = null;
+      state.templateRulePreviewSignature = "";
       if (!template || !template.template_config) {
         renderTemplateRulePreview();
         return;
@@ -989,10 +986,12 @@ INDEX_HTML = """<!doctype html>
         const payload = await getJson(`/api/templates/${encodeURIComponent(template.template_id)}/config`);
         const config = payload.config || {};
         editor.value = config.raw_text || config.notes || config.description || "";
-        jsonEditor.value = payload.config ? JSON.stringify(config, null, 2) : "";
+        state.templateRuleDraft = payload.config || null;
+        state.templateRulePreviewSignature = editor.value.trim();
       } catch (error) {
         editor.value = "";
-        jsonEditor.value = "";
+        state.templateRuleDraft = null;
+        state.templateRulePreviewSignature = "";
       }
       renderTemplateRulePreview();
     }
@@ -1026,18 +1025,14 @@ INDEX_HTML = """<!doctype html>
     }
 
     function renderTemplateRulePreview() {
-      const payload = buildTemplateRulePayload();
-      const jsonText = document.getElementById("templateRuleJson").value.trim();
-      const jsonState = jsonText ? "已填写" : "未填写";
       const target = document.getElementById("templateRulePreview");
-      target.innerHTML = `
-        <div class="preview-grid">
-          <div class="preview-chip"><span>默认颜色</span><strong>${escapeHtml(payload.defaults.color || "未识别")}</strong></div>
-          <div class="preview-chip"><span>默认设计</span><strong>${escapeHtml(payload.defaults.design || "未识别")}</strong></div>
-          <div class="preview-chip"><span>旋转规则</span><strong>${escapeHtml(payload.transforms.rotation || "未识别")}</strong></div>
-          <div class="preview-chip"><span>结构化 JSON</span><strong>${escapeHtml(jsonState)}</strong></div>
-        </div>
-      `;
+      const raw = document.getElementById("templateRuleText").value.trim();
+      if (!state.templateRuleDraft) {
+        target.innerHTML = '<div class="empty">请先输入模板规则并点击“生成预览”。系统会把规则编译成可确认的说明，不需要你查看 JSON。</div>';
+        return;
+      }
+      const stale = raw !== state.templateRulePreviewSignature;
+      target.innerHTML = renderReadableTemplateRule(state.templateRuleDraft, stale);
     }
 
     async function renderTemplateRulePreviewFromServer() {
@@ -1048,6 +1043,7 @@ INDEX_HTML = """<!doctype html>
         return;
       }
       try {
+        setMessage("templateSaveMessage", "正在编译规则", "");
         const payload = await postJson("/api/templates/rules/draft", {
           template_id: templateId,
           template_type: document.getElementById("templateType").value,
@@ -1055,17 +1051,19 @@ INDEX_HTML = """<!doctype html>
           asset_count: (document.getElementById("assetAiFiles").files || []).length
         });
         const draft = payload.draft || {};
-        document.getElementById("templateRuleJson").value = JSON.stringify(draft, null, 2);
-        document.getElementById("templateRulePreview").innerHTML = `
-          <div class="preview-grid">
-            <div class="preview-chip"><span>模板模式</span><strong>${escapeHtml(displayType(draft.mode))}</strong></div>
-            <div class="preview-chip"><span>字体选项</span><strong>${escapeHtml((draft.font_options || []).join(" / ") || "未识别")}</strong></div>
-            <div class="preview-chip"><span>能力模块</span><strong>${escapeHtml((draft.capabilities || []).join(" / ") || "未识别")}</strong></div>
-            <div class="preview-chip"><span>解析来源</span><strong>${escapeHtml((draft.parser && draft.parser.source) || "local")}</strong></div>
-          </div>
-        `;
+        state.templateRuleDraft = draft;
+        state.templateRulePreviewSignature = raw;
+        renderTemplateRulePreview();
+        setMessage("templateSaveMessage", "规则已编译，请确认说明后保存", "ok");
       } catch (error) {
         setMessage("templateSaveMessage", String(error.message || error), "error");
+      }
+    }
+
+    function markTemplateRulePreviewStale() {
+      renderTemplateRulePreview();
+      if (document.getElementById("templateRuleText").value.trim()) {
+        setMessage("templateSaveMessage", "规则内容已修改，请先生成预览再保存", "");
       }
     }
 
@@ -1086,9 +1084,7 @@ INDEX_HTML = """<!doctype html>
     }
 
     function templateRuleJsonText() {
-      const raw = document.getElementById("templateRuleJson").value.trim();
-      if (raw) return raw;
-      return JSON.stringify(buildTemplateRulePayload());
+      return JSON.stringify(state.templateRuleDraft || buildTemplateRulePayload());
     }
 
     async function saveTemplate() {
@@ -1099,12 +1095,17 @@ INDEX_HTML = """<!doctype html>
         setMessage("templateSaveMessage", "请填写模板 ID 和模板名称", "error");
         return;
       }
+      const ruleText = document.getElementById("templateRuleText").value.trim();
+      if (ruleText && (!state.templateRuleDraft || state.templateRulePreviewSignature !== ruleText)) {
+        setMessage("templateSaveMessage", "模板规则已修改，请先点击“生成预览”，确认编译后的规则说明后再保存", "error");
+        return;
+      }
       const form = new FormData();
       form.append("template_id", templateId);
       form.append("name", name);
       form.append("template_type", document.getElementById("templateType").value);
       form.append("status", document.getElementById("templateStatus").value);
-      form.append("template_rules_text", document.getElementById("templateRuleText").value.trim());
+      form.append("template_rules_text", ruleText);
       form.append("template_rules_json", templateRuleJsonText());
       const primary = document.getElementById("primaryAiFile").files[0];
       if (primary) form.append("template_ai", primary);
@@ -1129,10 +1130,20 @@ INDEX_HTML = """<!doctype html>
       document.getElementById("primaryAiFile").value = "";
       document.getElementById("assetAiFiles").value = "";
       document.getElementById("templateRuleText").value = "";
-      document.getElementById("templateRuleJson").value = "";
+      state.templateRuleDraft = null;
+      state.templateRulePreviewSignature = "";
       document.getElementById("assetRows").innerHTML = '<div class="empty">暂无 .ai 模板资产</div>';
       renderTemplateRulePreview();
       setMessage("templateSaveMessage", "等待编辑", "");
+    }
+
+    function downloadSelectedTemplate() {
+      const templateId = document.getElementById("templateId").value.trim() || state.selectedTemplateId;
+      if (!templateId) {
+        setMessage("templateSaveMessage", "请先选择模板", "error");
+        return;
+      }
+      window.location.href = `/api/templates/${encodeURIComponent(templateId)}/download/template_ai`;
     }
 
     async function submitRender(dryRun) {
@@ -1282,6 +1293,68 @@ INDEX_HTML = """<!doctype html>
           <div class="preview-chip"><span>部门输出规则</span><strong>${escapeHtml(`${outputs.length} 条`)}</strong></div>
         </div>
       `;
+    }
+
+    function renderReadableTemplateRule(draft, stale) {
+      const slots = Array.isArray(draft.slots) ? draft.slots : [];
+      const slotText = slots.length ? slots.map(describeSlot).join("；") : "暂未识别到明确作图区域";
+      const defaults = draft.defaults || {};
+      const parser = draft.parser || {};
+      return `
+        ${stale ? '<div class="message error" style="margin-bottom:10px">规则文字已修改，请重新生成预览后再保存。</div>' : ""}
+        <div class="preview-grid">
+          <div class="preview-chip"><span>模板类型</span><strong>${escapeHtml(displayType(draft.mode || draft.template_type || ""))}</strong></div>
+          <div class="preview-chip"><span>字体选项</span><strong>${escapeHtml(displayOptions(draft.font_options))}</strong></div>
+          <div class="preview-chip"><span>款式/尺寸框</span><strong>${escapeHtml(displayOptions(draft.style_options))}</strong></div>
+          <div class="preview-chip"><span>设计选项</span><strong>${escapeHtml(displayOptions(draft.design_options))}</strong></div>
+          <div class="preview-chip"><span>文字和图片位置</span><strong>${escapeHtml(slotText)}</strong></div>
+          <div class="preview-chip"><span>默认内容</span><strong>${escapeHtml(describeDefaults(defaults))}</strong></div>
+          <div class="preview-chip"><span>处理能力</span><strong>${escapeHtml(describeCapabilities(draft.capabilities || []))}</strong></div>
+          <div class="preview-chip"><span>解析来源</span><strong>${escapeHtml(parser.source === "llm" ? "LLM 编译" : "本地规则编译")}</strong></div>
+        </div>
+      `;
+    }
+
+    function describeSlot(slot) {
+      const name = slot.name || "未命名区域";
+      const typeNames = {
+        text_fit_box: "普通文字按作图框适配",
+        text_on_curve: "标题文字按曲线居中",
+        place_ai_asset: "放入独立设计文件",
+        replace_text: "替换设计内文字",
+        image_slot: "填充图片/照片"
+      };
+      const type = typeNames[slot.type] || slot.type || "未知规则";
+      const source = slot.source ? `，来源：${slot.source}` : "";
+      const fallback = slot.default ? `，默认：${slot.default}` : "";
+      return `${name}：${type}${source}${fallback}`;
+    }
+
+    function describeDefaults(defaults) {
+      const parts = [];
+      if (defaults.color) parts.push(`颜色 ${defaults.color}`);
+      if (defaults.design) parts.push(`设计 ${defaults.design}`);
+      if (defaults.font) parts.push(`字体 ${defaults.font}`);
+      if (defaults.title) parts.push(`标题 ${defaults.title}`);
+      return parts.join("；") || "无默认值";
+    }
+
+    function describeCapabilities(capabilities) {
+      const names = {
+        text_fit_box: "文字适配作图框",
+        text_on_curve: "文字沿曲线居中",
+        replace_text: "替换变量文字",
+        place_ai_asset: "放置设计 AI 文件",
+        image_slot: "图片槽位",
+        scale_to_box: "按尺寸框缩放",
+        outline_dedupe: "转曲去重",
+        export_ai8: "输出 AI8"
+      };
+      return (capabilities || []).map(item => names[item] || item).join("；") || "未识别";
+    }
+
+    function displayOptions(values) {
+      return Array.isArray(values) && values.length ? values.join(" / ") : "未识别";
     }
 
     function syncSelectedRule() {

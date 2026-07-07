@@ -770,6 +770,13 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
             except KeyError as exc:
                 self._send_error(HTTPStatus.NOT_FOUND, str(exc))
             return
+        if path.startswith("/api/templates/") and path.endswith("/download/template_ai"):
+            template_id = unquote(path.split("/")[3])
+            try:
+                self._send_template_ai(template_id)
+            except KeyError as exc:
+                self._send_error(HTTPStatus.NOT_FOUND, str(exc))
+            return
         if path == "/api/rules/department":
             self._send_json(self._read_department_rules())
             return
@@ -1049,6 +1056,20 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
             "path": str(template.template_config),
             "config": json.loads(template.template_config.read_text(encoding="utf-8")),
         }
+
+    def _send_template_ai(self, template_id: str) -> None:
+        template = self.registry.get_template(template_id)
+        if not template.template_ai.exists():
+            self._send_error(HTTPStatus.NOT_FOUND, "模板 AI 文件不存在")
+            return
+        data = template.template_ai.read_bytes()
+        download_name = _safe_download_name(f"{template.template_id}.ai")
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "application/octet-stream")
+        self.send_header("Content-Disposition", f'attachment; filename="{download_name}"')
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
 
     def _save_uploaded_order(self, filename: str, content: bytes) -> Path:
         if not content:

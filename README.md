@@ -88,6 +88,7 @@ http://127.0.0.1:8765
 GET  /api/health
 GET  /api/templates
 GET  /api/templates/{template_id}/config
+GET  /api/templates/{template_id}/download/template_ai
 POST /api/templates
 POST /api/templates/rules/draft
 GET  /api/rules/department
