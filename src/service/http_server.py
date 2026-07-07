@@ -945,7 +945,7 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
             try:
                 template = self.registry.get_template(template_id)
                 template_type = template_type or template.template_type
-                asset_count = asset_count or len(template.assets)
+                asset_count = asset_count or _design_asset_count(template.assets)
                 context = self._template_payload(template)
             except KeyError:
                 pass
@@ -976,15 +976,16 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
             except KeyError:
                 existing = None
 
-        template_ai = self._resolve_template_ai(fields, files, template_id, existing)
+        template_ai, template_ai_role, template_ai_source = self._resolve_template_ai(fields, files, template_id, existing)
         assets = list(existing.assets) if existing else []
-        assets.extend(
-            self.registry.save_uploaded_assets(
-                template_id,
-                files.get("reference_ai", []),
-                role="原始参考模板",
+        if template_ai_source != "reference_upload":
+            assets.extend(
+                self.registry.save_uploaded_assets(
+                    template_id,
+                    files.get("reference_ai", []),
+                    role="原始参考模板",
+                )
             )
-        )
         assets.extend(
             self.registry.save_uploaded_assets(
                 template_id,
@@ -992,7 +993,7 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
                 role="独立设计模板",
             )
         )
-        template_config = self._save_template_rules(fields, template_id, existing, len(assets))
+        template_config = self._save_template_rules(fields, template_id, existing, _design_asset_count(assets))
         item = {
             "template_id": template_id,
             "name": fields.get("name", "").strip() or (existing.name if existing else ""),
@@ -1000,6 +1001,7 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
             "pipeline": fields.get("pipeline", "").strip() or (existing.pipeline if existing else ""),
             "status": fields.get("status", "").strip() or (existing.status if existing else "draft"),
             "template_ai": template_ai,
+            "template_ai_role": template_ai_role,
             "default_columns": fields.get("default_columns", existing.default_columns if existing else 4),
             "default_hide_boxes": fields.get("default_hide_boxes", existing.default_hide_boxes if existing else True),
             "assets": assets,
@@ -1014,21 +1016,31 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
         files: dict[str, list[dict[str, object]]],
         template_id: str,
         existing: object | None,
-    ) -> str:
+    ) -> tuple[str, str, str]:
         upload = self._first_file(files, "template_ai")
         if upload and upload.get("content"):
             output_path = self.registry.save_uploaded_ai(template_id, str(upload.get("filename", "")), upload["content"])  # type: ignore[arg-type]
-            return self.registry.to_config_path(output_path)
+            return self.registry.to_config_path(output_path), "尺寸/作图区模板", "template_upload"
         path_text = fields.get("template_ai_path", "").strip() or fields.get("template_ai", "").strip()
         if path_text:
             candidate = Path(path_text)
             resolved = candidate if candidate.is_absolute() else (Path(__file__).resolve().parents[2] / candidate)
             if not resolved.exists():
                 raise ValueError(f"模板 AI 文件不存在: {resolved}")
-            return self.registry.to_config_path(resolved)
+            role = str(getattr(existing, "template_ai_role", "") or "尺寸/作图区模板")
+            return self.registry.to_config_path(resolved), role, "path"
         if existing and existing.template_ai:
-            return str(existing.template_ai)
-        raise ValueError("请上传 .ai 模板文件")
+            role = str(getattr(existing, "template_ai_role", "") or "尺寸/作图区模板")
+            return str(existing.template_ai), role, "existing"
+        reference_upload = self._first_file(files, "reference_ai")
+        if reference_upload and reference_upload.get("content"):
+            output_path = self.registry.save_uploaded_ai(
+                template_id,
+                str(reference_upload.get("filename", "")),
+                reference_upload["content"],  # type: ignore[arg-type]
+            )
+            return self.registry.to_config_path(output_path), "原始参考模板", "reference_upload"
+        raise ValueError("请至少上传原始参考模板或尺寸/作图区模板")
 
     def _save_template_rules(
         self,
@@ -1202,6 +1214,19 @@ def _safe_download_name(value: str) -> str:
             chars.append("_")
     name = "".join(chars).strip("._")
     return name or "file"
+
+
+def _design_asset_count(assets: object) -> int:
+    if not isinstance(assets, list):
+        return 0
+    count = 0
+    for asset in assets:
+        if not isinstance(asset, dict):
+            continue
+        role = str(asset.get("role", ""))
+        if "独立设计" in role:
+            count += 1
+    return count
 
 
 def main() -> int:

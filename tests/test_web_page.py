@@ -38,5 +38,8 @@ def test_template_asset_list_has_download_and_delete_actions():
     assert "deleteTemplateAsset(" in INDEX_HTML
     assert "window.confirm" in INDEX_HTML
     assert 'id="referenceAiFile"' in INDEX_HTML
+    assert "简单模板可只传这一项" in INDEX_HTML
+    assert "尺寸/作图区模板（可选" in INDEX_HTML
     assert "尺寸/作图区模板" in INDEX_HTML
     assert "独立设计模板" in INDEX_HTML
+    assert "displayTemplateAiRole" in INDEX_HTML

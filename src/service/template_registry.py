@@ -29,6 +29,7 @@ class TemplateDefinition:
     pipeline: str
     status: str
     template_ai: Path | None
+    template_ai_role: str = "尺寸/作图区模板"
     default_columns: int = 4
     default_hide_boxes: bool = True
     template_config: Path | None = None
@@ -42,6 +43,7 @@ class TemplateDefinition:
             "pipeline": self.pipeline,
             "status": self.status,
             "template_ai": str(self.template_ai) if self.template_ai else "",
+            "template_ai_role": self.template_ai_role,
             "template_config": str(self.template_config) if self.template_config else "",
             "default_columns": self.default_columns,
             "default_hide_boxes": self.default_hide_boxes,
@@ -149,14 +151,16 @@ class TemplateRegistry:
             template_ai = str(item.get("template_ai", "")).strip()
             if not template_ai:
                 raise IndexError("模板 AI 文件不存在")
+            role = str(item.get("template_ai_role", "尺寸/作图区模板") or "尺寸/作图区模板").strip()
             item["template_ai"] = ""
+            item["template_ai_role"] = ""
             raw["version"] = int(raw.get("version", 1) or 1)
             self._write_config(raw)
             return {
                 "file_name": Path(template_ai).name,
                 "stored_path": template_ai,
                 "asset_type": "ai_template",
-                "role": "尺寸/作图区模板",
+                "role": role,
                 "status": "removed",
             }
         raise KeyError(f"模板不存在: {template_id}")
@@ -187,6 +191,7 @@ class TemplateRegistry:
             pipeline=str(item.get("pipeline", "")).strip(),
             status=str(item.get("status", "draft")).strip(),
             template_ai=self._optional_path(item.get("template_ai", "")),
+            template_ai_role=str(item.get("template_ai_role", "尺寸/作图区模板") or "尺寸/作图区模板").strip(),
             default_columns=int(item.get("default_columns", 4) or 4),
             default_hide_boxes=bool(item.get("default_hide_boxes", True)),
             template_config=self._optional_path(item.get("template_config", "")),
@@ -243,6 +248,7 @@ class TemplateRegistry:
             "pipeline": pipeline,
             "status": status,
             "template_ai": template_ai,
+            "template_ai_role": str(item.get("template_ai_role", "尺寸/作图区模板") or "尺寸/作图区模板").strip(),
             "default_columns": int(item.get("default_columns", 4) or 4),
             "default_hide_boxes": _to_bool(item.get("default_hide_boxes", True)),
         }

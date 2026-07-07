@@ -645,15 +645,15 @@ INDEX_HTML = """<!doctype html>
                 <div class="asset-panel-grid">
                   <div class="upload-box">
                     <div>
-                      <label for="referenceAiFile">原始参考模板（可选）</label>
+                      <label for="referenceAiFile">原始参考模板（简单模板可只传这一项）</label>
                       <input id="referenceAiFile" type="file" accept=".ai" />
                     </div>
                     <div>
-                      <label for="primaryAiFile">尺寸/作图区模板（渲染基准）</label>
+                      <label for="primaryAiFile">尺寸/作图区模板（可选，复杂模板用）</label>
                       <input id="primaryAiFile" type="file" accept=".ai" />
                     </div>
                     <div>
-                      <label for="assetAiFiles">独立设计模板文件（可多选）</label>
+                      <label for="assetAiFiles">独立设计模板文件（可选，可多选）</label>
                       <input id="assetAiFiles" type="file" accept=".ai" multiple />
                     </div>
                   </div>
@@ -982,7 +982,7 @@ INDEX_HTML = """<!doctype html>
         ["名称", template.name],
         ["状态", displayStatus(template.status)],
         ["类型", displayType(template.template_type)],
-        ["尺寸/作图区模板", template.template_ai ? "已配置" : "未配置"],
+        ["渲染基准 AI", template.template_ai ? displayTemplateAiRole(template) : "未配置"],
         ["文件资产", `${(template.assets || []).length} 个`],
         ["特有规则", template.template_config ? "已配置" : "未配置"],
         ["规则状态", ruleCheck.complete ? "完整" : "待补充"],
@@ -1033,9 +1033,10 @@ INDEX_HTML = """<!doctype html>
       const template = formTemplate();
       const rows = [];
       if (template && template.template_ai) {
+        const templateAiRole = displayTemplateAiRole(template);
         rows.push({
           name: fileName(template.template_ai),
-          type: "尺寸/作图区模板",
+          type: templateAiRole,
           status: "已保存",
           action: "primary",
           key: "primary"
@@ -1110,10 +1111,11 @@ INDEX_HTML = """<!doctype html>
 
     function uploadedAssetCount() {
       const template = formTemplate();
-      const existingCount = template && template.assets ? template.assets.length : 0;
-      const referenceCount = document.getElementById("referenceAiFile").files[0] ? 1 : 0;
+      const existingDesignCount = template && template.assets
+        ? template.assets.filter(asset => String(asset.role || "").includes("独立设计")).length
+        : 0;
       const designCount = (document.getElementById("assetAiFiles").files || []).length;
-      return existingCount + referenceCount + designCount;
+      return existingDesignCount + designCount;
     }
 
     function renderTemplateRulePreview() {
@@ -1253,7 +1255,7 @@ INDEX_HTML = """<!doctype html>
       if (!template) return;
       if (assetKey === "primary") {
         const assetName = fileName(template.template_ai) || "尺寸/作图区模板";
-        const confirmed = window.confirm(`确认删除文件资产 ${assetName}？\n\n只会移除当前模板中的主 .ai 文件登记，不会删除本地 .ai 文件。删除后该模板需要重新上传尺寸/作图区模板才能渲染。`);
+        const confirmed = window.confirm(`确认删除文件资产 ${assetName}？\n\n只会移除当前模板中的渲染基准 .ai 登记，不会删除本地 .ai 文件。删除后该模板需要重新上传原始参考模板或尺寸/作图区模板才能渲染。`);
         if (!confirmed) return;
         try {
           await deleteJson(`/api/templates/${encodeURIComponent(template.template_id)}/download/template_ai`);
@@ -1692,6 +1694,11 @@ INDEX_HTML = """<!doctype html>
 
     function displayStatus(value) {
       return statusNames[value] || value || "-";
+    }
+
+    function displayTemplateAiRole(template) {
+      const role = template && template.template_ai_role ? template.template_ai_role : "尺寸/作图区模板";
+      return role === "原始参考模板" ? "原始参考模板（渲染基准）" : role;
     }
 
     function displayLabelFields(fields) {

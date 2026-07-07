@@ -4,6 +4,7 @@ from pathlib import Path
 from openpyxl import Workbook
 
 from src.service.job_store import JobStore
+from src.service.http_server import RenderRequestHandler
 from src.service.render_service import RenderService
 from src.service.template_registry import TemplateRegistry
 
@@ -148,6 +149,48 @@ def test_template_registry_upserts_uploaded_template_and_rules(tmp_path):
     assert template.default_columns == 6
     assert template.default_hide_boxes is False
     assert template.pipeline == "jjmb_202508"
+
+
+def test_register_template_uses_reference_ai_when_size_template_is_empty(tmp_path):
+    handler = object.__new__(RenderRequestHandler)
+    handler.registry = TemplateRegistry(tmp_path / "templates.json", tmp_path / "templates")
+
+    template = handler._register_template(
+        {
+            "template_id": "JJMB202607030005",
+            "name": "只传原始参考模板",
+            "template_type": "pure_text_color_design",
+            "status": "active",
+        },
+        {"reference_ai": [{"filename": "source.ai", "content": b"source ai"}]},
+    )
+
+    assert template.template_ai and template.template_ai.exists()
+    assert template.template_ai_role == "原始参考模板"
+    assert template.assets == []
+
+
+def test_register_template_keeps_reference_ai_as_asset_when_size_template_exists(tmp_path):
+    handler = object.__new__(RenderRequestHandler)
+    handler.registry = TemplateRegistry(tmp_path / "templates.json", tmp_path / "templates")
+
+    template = handler._register_template(
+        {
+            "template_id": "JJMB202607030006",
+            "name": "参考和尺寸模板",
+            "template_type": "pure_text_color_design",
+            "status": "active",
+        },
+        {
+            "template_ai": [{"filename": "layout.ai", "content": b"layout ai"}],
+            "reference_ai": [{"filename": "source.ai", "content": b"source ai"}],
+        },
+    )
+
+    assert template.template_ai and template.template_ai.exists()
+    assert template.template_ai_role == "尺寸/作图区模板"
+    assert len(template.assets) == 1
+    assert template.assets[0]["role"] == "原始参考模板"
 
 
 def test_template_registry_saves_multiple_ai_assets(tmp_path):
