@@ -23,14 +23,11 @@ class IllustratorBridge:
         if not task.exists():
             raise FileNotFoundError(f"Render task 不存在: {task}")
 
-        try:
-            import win32com.client
-        except ImportError as exc:
-            raise IllustratorBridgeError("缺少 pywin32，无法调用 Illustrator") from exc
-
         bootstrap = self._build_bootstrap(script, task)
         with ComApartment():
             try:
+                import win32com.client
+
                 app = win32com.client.Dispatch("Illustrator.Application")
                 try:
                     app.Visible = self.visible
@@ -38,6 +35,8 @@ class IllustratorBridge:
                     pass
                 result = app.DoJavaScript(bootstrap)
                 return str(result) if result else ""
+            except ImportError as exc:
+                raise IllustratorBridgeError("缺少 pywin32，无法调用 Illustrator") from exc
             except Exception as exc:
                 raise IllustratorBridgeError(f"执行 Illustrator JSX 失败: {exc}") from exc
 
@@ -75,9 +74,16 @@ class ComApartment:
             import pythoncom
         except ImportError:
             return self
-        pythoncom.CoInitialize()
+        initialized_here = True
+        try:
+            pythoncom.CoInitialize()
+        except Exception as exc:
+            hresult = getattr(exc, "hresult", None)
+            if hresult != -2147417850:  # RPC_E_CHANGED_MODE: already initialized differently.
+                raise
+            initialized_here = False
         self._pythoncom = pythoncom
-        self._initialized = True
+        self._initialized = initialized_here
         return self
 
     def __exit__(
