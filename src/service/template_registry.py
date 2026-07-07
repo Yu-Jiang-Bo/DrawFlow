@@ -79,6 +79,17 @@ class TemplateRegistry:
         self._write_config(raw)
         return self.get_template(normalized["template_id"])
 
+    def delete_template(self, template_id: str) -> bool:
+        raw = self._read_config()
+        templates = raw.get("templates", [])
+        kept = [entry for entry in templates if entry.get("template_id") != template_id]
+        if len(kept) == len(templates):
+            return False
+        raw["version"] = int(raw.get("version", 1) or 1)
+        raw["templates"] = kept
+        self._write_config(raw)
+        return True
+
     def save_uploaded_ai(self, template_id: str, filename: str, content: bytes) -> Path:
         if not filename.lower().endswith(".ai"):
             raise ValueError("模板文件必须是 .ai 格式")

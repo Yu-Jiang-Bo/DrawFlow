@@ -90,6 +90,7 @@ GET  /api/templates
 GET  /api/templates/{template_id}/config
 GET  /api/templates/{template_id}/download/template_ai
 POST /api/templates
+DELETE /api/templates/{template_id}
 POST /api/templates/rules/draft
 GET  /api/rules/department
 POST /api/rules/department/parse

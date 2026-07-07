@@ -178,6 +178,32 @@ def test_template_registry_saves_multiple_ai_assets(tmp_path):
     assert (storage_dir / "JJMB202607030002" / "assets" / "design-a.ai").exists()
 
 
+def test_template_registry_deletes_registration_without_removing_files(tmp_path):
+    config_path = tmp_path / "templates.json"
+    storage_dir = tmp_path / "templates"
+    registry = TemplateRegistry(config_path, storage_dir)
+
+    ai_path = registry.save_uploaded_ai("JJMB202607030003", "main.ai", b"main ai")
+    registry.upsert_template(
+        {
+            "template_id": "JJMB202607030003",
+            "name": "待删除模板",
+            "template_type": "pure_text_color_design",
+            "status": "active",
+            "template_ai": registry.to_config_path(ai_path),
+        }
+    )
+
+    assert registry.delete_template("JJMB202607030003") is True
+    assert ai_path.exists()
+    try:
+        registry.get_template("JJMB202607030003")
+    except KeyError:
+        pass
+    else:
+        raise AssertionError("deleted template should not remain registered")
+
+
 def test_service_accepts_string_boolean_flags(tmp_path):
     config_path = tmp_path / "templates.json"
     order_path = tmp_path / "orders.xlsx"

@@ -21,10 +21,15 @@ def test_template_form_lists_supported_template_types():
 
 
 def test_template_rule_editor_is_business_readable():
-    assert 'id="downloadTemplateBtn"' in INDEX_HTML
-    assert "下载当前模板" in INDEX_HTML
     assert "编译后的规则说明" in INDEX_HTML
     assert "结构化规则 JSON" not in INDEX_HTML
     assert "新建空白" not in INDEX_HTML
     assert "templateRulePreviewSignature" in INDEX_HTML
     assert "请先点击“生成预览”" in INDEX_HTML
+
+
+def test_template_list_has_download_and_delete_actions():
+    assert "data-template-download" in INDEX_HTML
+    assert "data-template-delete" in INDEX_HTML
+    assert "deleteTemplate(" in INDEX_HTML
+    assert "window.confirm" in INDEX_HTML

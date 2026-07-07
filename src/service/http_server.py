@@ -842,6 +842,17 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
         except Exception as exc:
             self._send_error(HTTPStatus.BAD_REQUEST, str(exc))
 
+    def do_DELETE(self) -> None:
+        path = urlparse(self.path).path
+        if path.startswith("/api/templates/"):
+            template_id = unquote(path.split("/")[3])
+            if self.registry.delete_template(template_id):
+                self._send_json({"ok": True, "template_id": template_id})
+            else:
+                self._send_error(HTTPStatus.NOT_FOUND, f"模板不存在: {template_id}")
+            return
+        self._send_error(HTTPStatus.NOT_FOUND, "not found")
+
     def log_message(self, format: str, *args: object) -> None:
         print("%s - %s" % (self.address_string(), format % args))
 

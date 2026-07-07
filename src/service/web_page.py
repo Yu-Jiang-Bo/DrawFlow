@@ -314,26 +314,48 @@ INDEX_HTML = """<!doctype html>
     }
     .template-row {
       width: 100%;
-      text-align: left;
       min-height: 52px;
       padding: 10px 12px;
       border: 1px solid var(--line);
       border-radius: 6px;
       background: var(--soft);
       color: var(--ink);
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 10px;
+      align-items: center;
     }
     .template-row.active {
       border-color: var(--primary);
       box-shadow: 0 0 0 3px rgba(20, 86, 217, 0.12);
     }
-    .template-row strong {
+    .template-select {
+      min-height: 34px;
+      padding: 0;
+      text-align: left;
+      border: 0;
+      background: transparent;
+      color: var(--ink);
+      font-weight: 400;
+    }
+    .template-select strong {
       display: block;
       margin-bottom: 3px;
       overflow-wrap: anywhere;
     }
-    .template-row span {
+    .template-select span {
       display: block;
       color: var(--muted);
+      font-size: 12px;
+    }
+    .template-actions {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .template-actions button {
+      min-height: 30px;
+      padding: 5px 9px;
       font-size: 12px;
     }
     .asset-panel-grid {
@@ -642,7 +664,6 @@ INDEX_HTML = """<!doctype html>
               </div>
             </div>
             <div class="actions">
-              <button class="btn-secondary" id="downloadTemplateBtn">下载当前模板</button>
               <button class="btn-subtle" id="previewTemplateRuleBtn">生成预览</button>
               <button class="btn-primary" id="saveTemplateBtn">保存模板</button>
             </div>
@@ -820,7 +841,6 @@ INDEX_HTML = """<!doctype html>
       document.getElementById("resetTaskBtn").addEventListener("click", resetTaskResult);
       document.getElementById("refreshJobsBtn").addEventListener("click", loadJobs);
       document.getElementById("refreshJobsPageBtn").addEventListener("click", loadJobs);
-      document.getElementById("downloadTemplateBtn").addEventListener("click", downloadSelectedTemplate);
       document.getElementById("previewTemplateRuleBtn").addEventListener("click", renderTemplateRulePreviewFromServer);
       document.getElementById("saveTemplateBtn").addEventListener("click", saveTemplate);
       document.getElementById("assetAiFiles").addEventListener("change", renderAssetRows);
@@ -916,19 +936,31 @@ INDEX_HTML = """<!doctype html>
         return;
       }
       target.innerHTML = state.templates.map(template => `
-        <button class="template-row ${template.template_id === state.selectedTemplateId ? "active" : ""}" data-template-id="${escapeHtml(template.template_id)}">
-          <strong>${escapeHtml(template.template_id)}</strong>
-          <span>${escapeHtml(template.name || "-")}</span>
-        </button>
+        <div class="template-row ${template.template_id === state.selectedTemplateId ? "active" : ""}" data-template-id="${escapeHtml(template.template_id)}">
+          <button class="template-select" data-template-select="${escapeHtml(template.template_id)}">
+            <strong>${escapeHtml(template.template_id)}</strong>
+            <span>${escapeHtml(template.name || "-")}</span>
+          </button>
+          <div class="template-actions">
+            <button class="btn-subtle" data-template-download="${escapeHtml(template.template_id)}">下载</button>
+            <button class="btn-secondary" data-template-delete="${escapeHtml(template.template_id)}">删除</button>
+          </div>
+        </div>
       `).join("");
-      target.querySelectorAll("[data-template-id]").forEach(button => {
+      target.querySelectorAll("[data-template-select]").forEach(button => {
         button.addEventListener("click", () => {
-          state.selectedTemplateId = button.dataset.templateId;
+          state.selectedTemplateId = button.dataset.templateSelect;
           renderTemplateOptions();
           renderTemplateList();
           syncSelectedTemplate();
           switchPage("templates");
         });
+      });
+      target.querySelectorAll("[data-template-download]").forEach(button => {
+        button.addEventListener("click", () => downloadTemplate(button.dataset.templateDownload));
+      });
+      target.querySelectorAll("[data-template-delete]").forEach(button => {
+        button.addEventListener("click", () => deleteTemplate(button.dataset.templateDelete));
       });
     }
 
@@ -1137,13 +1169,29 @@ INDEX_HTML = """<!doctype html>
       setMessage("templateSaveMessage", "等待编辑", "");
     }
 
-    function downloadSelectedTemplate() {
-      const templateId = document.getElementById("templateId").value.trim() || state.selectedTemplateId;
+    function downloadTemplate(templateId) {
       if (!templateId) {
         setMessage("templateSaveMessage", "请先选择模板", "error");
         return;
       }
       window.location.href = `/api/templates/${encodeURIComponent(templateId)}/download/template_ai`;
+    }
+
+    async function deleteTemplate(templateId) {
+      const template = state.templates.find(item => item.template_id === templateId);
+      if (!template) return;
+      const confirmed = window.confirm(`确认删除模板 ${template.template_id}？\n\n只会移除系统注册记录，不会删除本地 .ai 文件。`);
+      if (!confirmed) return;
+      try {
+        await deleteJson(`/api/templates/${encodeURIComponent(template.template_id)}`);
+        if (state.selectedTemplateId === template.template_id) {
+          state.selectedTemplateId = "";
+        }
+        await loadTemplates();
+        setMessage("templateSaveMessage", `已删除模板注册：${template.template_id}`, "ok");
+      } catch (error) {
+        setMessage("templateSaveMessage", String(error.message || error), "error");
+      }
     }
 
     async function submitRender(dryRun) {
@@ -1527,6 +1575,13 @@ INDEX_HTML = """<!doctype html>
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body)
       });
+      const text = await response.text();
+      if (!response.ok) throw new Error(extractError(text));
+      return text ? JSON.parse(text) : {};
+    }
+
+    async function deleteJson(url) {
+      const response = await fetch(url, { method: "DELETE" });
       const text = await response.text();
       if (!response.ok) throw new Error(extractError(text));
       return text ? JSON.parse(text) : {};
