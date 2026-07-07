@@ -33,6 +33,8 @@ def test_template_asset_list_has_download_and_delete_actions():
     assert "data-template-delete" not in INDEX_HTML
     assert "data-asset-download" in INDEX_HTML
     assert "data-asset-delete" in INDEX_HTML
+    assert 'data-asset-delete="primary"' in INDEX_HTML
+    assert "disabled title=\"尺寸/作图区模板" not in INDEX_HTML
     assert "deleteTemplateAsset(" in INDEX_HTML
     assert "window.confirm" in INDEX_HTML
     assert 'id="referenceAiFile"' in INDEX_HTML

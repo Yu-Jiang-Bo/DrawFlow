@@ -65,6 +65,25 @@ def test_legacy_pipeline_is_renderable_but_not_rule_complete(tmp_path):
     assert check["warnings"]
 
 
+def test_legacy_pipeline_without_template_ai_is_not_renderable(tmp_path):
+    registry = TemplateRegistry(tmp_path / "templates.json", tmp_path / "templates")
+    template = registry.upsert_template(
+        {
+            "template_id": "JJMB202508261001394920",
+            "name": "legacy",
+            "template_type": "pure_text_color_design",
+            "pipeline": "jjmb_202508",
+            "status": "active",
+            "template_ai": "",
+        }
+    )
+
+    check = check_template_definition(template)
+
+    assert check["renderable"] is False
+    assert {item["code"] for item in check["missing"]} >= {"template_ai"}
+
+
 def test_confirmed_rule_config_can_be_complete(tmp_path):
     ai_path = tmp_path / "template.ai"
     config_path = tmp_path / "template.config.json"

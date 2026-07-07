@@ -1083,7 +1083,7 @@ INDEX_HTML = """<!doctype html>
         return `
           <span class="asset-actions">
             <button class="btn-subtle" data-asset-download="primary">下载</button>
-            <button class="btn-secondary" disabled title="尺寸/作图区模板请通过重新上传覆盖">删除</button>
+            <button class="btn-secondary" data-asset-delete="primary">删除</button>
           </span>
         `;
       }
@@ -1251,6 +1251,19 @@ INDEX_HTML = """<!doctype html>
     async function deleteTemplateAsset(assetKey) {
       const template = formTemplate();
       if (!template) return;
+      if (assetKey === "primary") {
+        const assetName = fileName(template.template_ai) || "尺寸/作图区模板";
+        const confirmed = window.confirm(`确认删除文件资产 ${assetName}？\n\n只会移除当前模板中的主 .ai 文件登记，不会删除本地 .ai 文件。删除后该模板需要重新上传尺寸/作图区模板才能渲染。`);
+        if (!confirmed) return;
+        try {
+          await deleteJson(`/api/templates/${encodeURIComponent(template.template_id)}/download/template_ai`);
+          await loadTemplates(template.template_id);
+          setMessage("templateSaveMessage", `已移除文件资产：${assetName}`, "ok");
+        } catch (error) {
+          setMessage("templateSaveMessage", String(error.message || error), "error");
+        }
+        return;
+      }
       const asset = (template.assets || [])[Number(assetKey)];
       if (!asset) return;
       const assetName = asset.file_name || fileName(asset.stored_path);

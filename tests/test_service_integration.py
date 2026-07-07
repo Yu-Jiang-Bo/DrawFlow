@@ -51,6 +51,8 @@ def write_order_xlsx(path: Path) -> None:
 
 
 def write_templates_config(path: Path) -> None:
+    fake_ai = path.parent / "fake-template.ai"
+    fake_ai.write_text("fake ai", encoding="utf-8")
     path.write_text(
         json.dumps(
             {
@@ -62,7 +64,7 @@ def write_templates_config(path: Path) -> None:
                         "template_type": "pure_text_color_design",
                         "pipeline": "jjmb_202508",
                         "status": "active",
-                        "template_ai": "fake-template.ai",
+                        "template_ai": str(fake_ai),
                         "default_columns": 3,
                         "default_hide_boxes": True,
                     }
@@ -209,6 +211,30 @@ def test_template_registry_deletes_asset_registration_without_removing_files(tmp
     assert ai_path.exists()
     assert asset_path.exists()
     assert registry.get_template("JJMB202607030003").assets == []
+
+
+def test_template_registry_deletes_primary_ai_registration_without_removing_file(tmp_path):
+    config_path = tmp_path / "templates.json"
+    storage_dir = tmp_path / "templates"
+    registry = TemplateRegistry(config_path, storage_dir)
+
+    ai_path = registry.save_uploaded_ai("JJMB202607030004", "main.ai", b"main ai")
+    registry.upsert_template(
+        {
+            "template_id": "JJMB202607030004",
+            "name": "待删除主模板",
+            "template_type": "pure_text_color_design",
+            "status": "active",
+            "template_ai": registry.to_config_path(ai_path),
+        }
+    )
+
+    removed = registry.delete_template_ai("JJMB202607030004")
+    template = registry.get_template("JJMB202607030004")
+
+    assert removed["role"] == "尺寸/作图区模板"
+    assert ai_path.exists()
+    assert template.template_ai is None
 
 
 def test_service_accepts_string_boolean_flags(tmp_path):

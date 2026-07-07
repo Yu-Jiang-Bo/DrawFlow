@@ -857,6 +857,14 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
 
     def do_DELETE(self) -> None:
         path = urlparse(self.path).path
+        if path.startswith("/api/templates/") and path.endswith("/download/template_ai"):
+            template_id = unquote(path.split("/")[3])
+            try:
+                asset = self.registry.delete_template_ai(template_id)
+                self._send_json({"ok": True, "asset": asset})
+            except (KeyError, IndexError) as exc:
+                self._send_error(HTTPStatus.NOT_FOUND, str(exc))
+            return
         parts = path.strip("/").split("/")
         if len(parts) == 5 and parts[0] == "api" and parts[1] == "templates" and parts[3] == "assets":
             try:
@@ -1018,7 +1026,7 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
             if not resolved.exists():
                 raise ValueError(f"模板 AI 文件不存在: {resolved}")
             return self.registry.to_config_path(resolved)
-        if existing:
+        if existing and existing.template_ai:
             return str(existing.template_ai)
         raise ValueError("请上传 .ai 模板文件")
 
@@ -1097,7 +1105,7 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
 
     def _send_template_ai(self, template_id: str) -> None:
         template = self.registry.get_template(template_id)
-        if not template.template_ai.exists():
+        if not template.template_ai or not template.template_ai.exists():
             self._send_error(HTTPStatus.NOT_FOUND, "模板 AI 文件不存在")
             return
         data = template.template_ai.read_bytes()

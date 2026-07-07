@@ -83,7 +83,8 @@ def check_template_definition(template: Any) -> Dict[str, Any]:
     template_ai = getattr(template, "template_ai", None)
     template_config = getattr(template, "template_config", None)
 
-    if not template_ai or not Path(template_ai).exists():
+    has_template_ai = bool(template_ai) and Path(template_ai).exists()
+    if not has_template_ai:
         missing.append({"code": "template_ai", "message": "缺少可用的 .ai 模板文件"})
 
     if mode in {"pure_text", "annotated_ai"} and not config.get("font_options"):
@@ -107,7 +108,7 @@ def check_template_definition(template: Any) -> Dict[str, Any]:
             missing.append({"code": "place_ai_asset", "message": "缺少放置独立设计资产的能力声明"})
 
     config_required = PIPELINE_CONFIG_REQUIRED.get(pipeline, False)
-    legacy_pipeline_ready = pipeline in LEGACY_RENDERABLE_PIPELINES
+    legacy_pipeline_ready = pipeline in LEGACY_RENDERABLE_PIPELINES and has_template_ai
     if legacy_pipeline_ready:
         if config_required and (not template_config or not Path(template_config).exists()):
             legacy_pipeline_ready = False

@@ -28,7 +28,7 @@ class TemplateDefinition:
     template_type: str
     pipeline: str
     status: str
-    template_ai: Path
+    template_ai: Path | None
     default_columns: int = 4
     default_hide_boxes: bool = True
     template_config: Path | None = None
@@ -41,7 +41,7 @@ class TemplateDefinition:
             "template_type": self.template_type,
             "pipeline": self.pipeline,
             "status": self.status,
-            "template_ai": str(self.template_ai),
+            "template_ai": str(self.template_ai) if self.template_ai else "",
             "template_config": str(self.template_config) if self.template_config else "",
             "default_columns": self.default_columns,
             "default_hide_boxes": self.default_hide_boxes,
@@ -140,6 +140,27 @@ class TemplateRegistry:
             return removed if isinstance(removed, dict) else {"value": removed}
         raise KeyError(f"模板不存在: {template_id}")
 
+    def delete_template_ai(self, template_id: str) -> Dict[str, Any]:
+        raw = self._read_config()
+        templates = raw.get("templates", [])
+        for item in templates:
+            if item.get("template_id") != template_id:
+                continue
+            template_ai = str(item.get("template_ai", "")).strip()
+            if not template_ai:
+                raise IndexError("模板 AI 文件不存在")
+            item["template_ai"] = ""
+            raw["version"] = int(raw.get("version", 1) or 1)
+            self._write_config(raw)
+            return {
+                "file_name": Path(template_ai).name,
+                "stored_path": template_ai,
+                "asset_type": "ai_template",
+                "role": "尺寸/作图区模板",
+                "status": "removed",
+            }
+        raise KeyError(f"模板不存在: {template_id}")
+
     def save_template_config(self, template_id: str, content: str) -> Path | None:
         text = content.strip()
         if not text:
@@ -165,7 +186,7 @@ class TemplateRegistry:
             template_type=str(item.get("template_type", "")).strip(),
             pipeline=str(item.get("pipeline", "")).strip(),
             status=str(item.get("status", "draft")).strip(),
-            template_ai=self._resolve_path(str(item.get("template_ai", "")).strip()),
+            template_ai=self._optional_path(item.get("template_ai", "")),
             default_columns=int(item.get("default_columns", 4) or 4),
             default_hide_boxes=bool(item.get("default_hide_boxes", True)),
             template_config=self._optional_path(item.get("template_config", "")),
@@ -215,8 +236,6 @@ class TemplateRegistry:
             raise ValueError("缺少模板类型")
         if not pipeline:
             raise ValueError("无法根据模板类型推断渲染流程，请检查模板类型")
-        if not template_ai:
-            raise ValueError("缺少模板 AI 文件")
         normalized: Dict[str, Any] = {
             "template_id": template_id,
             "name": name,
