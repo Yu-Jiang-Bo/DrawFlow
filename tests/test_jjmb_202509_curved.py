@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from src.jjmb_202509_curved_main import (
     build_task,
     clean_text,
@@ -7,6 +9,9 @@ from src.jjmb_202509_curved_main import (
     parse_items,
     split_names,
 )
+
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_parse_custom_info_extracts_font_title_and_names():
@@ -156,3 +161,11 @@ def test_build_task_applies_layout_dimension_overrides(tmp_path):
     assert task["layout"]["title_width_mm"] == 42.0
     assert task["layout"]["title_height_mm"] == 8.0
     assert task["output"]["color_mode"] == "RGB"
+
+
+def test_curved_renderer_stabilizes_name_typography():
+    jsx = (ROOT / "scripts" / "illustrator" / "render_202509_curved.jsx").read_text(encoding="utf-8")
+
+    assert "applyStableNameTypography(tf);" in jsx
+    assert '"contextualLigature", false' in jsx
+    assert "AlternateGlyphsForm.DEFAULTFORM" in jsx
