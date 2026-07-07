@@ -160,6 +160,7 @@ def test_template_registry_saves_multiple_ai_assets(tmp_path):
             {"filename": "design-a.ai", "content": b"asset a"},
             {"filename": "design-b.ai", "content": b"asset b"},
         ],
+        role="独立设计模板",
     )
     template = registry.upsert_template(
         {
@@ -174,16 +175,23 @@ def test_template_registry_saves_multiple_ai_assets(tmp_path):
 
     assert len(template.assets) == 2
     assert template.assets[0]["file_name"] == "design-a.ai"
+    assert template.assets[0]["role"] == "独立设计模板"
     assert Path(template.assets[0]["stored_path"]).name == "design-a.ai"
     assert (storage_dir / "JJMB202607030002" / "assets" / "design-a.ai").exists()
 
 
-def test_template_registry_deletes_registration_without_removing_files(tmp_path):
+def test_template_registry_deletes_asset_registration_without_removing_files(tmp_path):
     config_path = tmp_path / "templates.json"
     storage_dir = tmp_path / "templates"
     registry = TemplateRegistry(config_path, storage_dir)
 
     ai_path = registry.save_uploaded_ai("JJMB202607030003", "main.ai", b"main ai")
+    assets = registry.save_uploaded_assets(
+        "JJMB202607030003",
+        [{"filename": "design-a.ai", "content": b"asset a"}],
+        role="独立设计模板",
+    )
+    asset_path = storage_dir / "JJMB202607030003" / "assets" / "design-a.ai"
     registry.upsert_template(
         {
             "template_id": "JJMB202607030003",
@@ -191,17 +199,16 @@ def test_template_registry_deletes_registration_without_removing_files(tmp_path)
             "template_type": "pure_text_color_design",
             "status": "active",
             "template_ai": registry.to_config_path(ai_path),
+            "assets": assets,
         }
     )
 
-    assert registry.delete_template("JJMB202607030003") is True
+    removed = registry.delete_template_asset("JJMB202607030003", 0)
+
+    assert removed["file_name"] == "design-a.ai"
     assert ai_path.exists()
-    try:
-        registry.get_template("JJMB202607030003")
-    except KeyError:
-        pass
-    else:
-        raise AssertionError("deleted template should not remain registered")
+    assert asset_path.exists()
+    assert registry.get_template("JJMB202607030003").assets == []
 
 
 def test_service_accepts_string_boolean_flags(tmp_path):

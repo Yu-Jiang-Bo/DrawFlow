@@ -14,7 +14,7 @@ from urllib.parse import unquote, urlparse
 
 from .job_store import JobStore
 from .llm_rule_parser import LlmRuleParser
-from .paths import SERVICE_UPLOADS_DIR
+from .paths import PROJECT_ROOT, SERVICE_UPLOADS_DIR
 from .render_service import RenderService
 from .rule_center import build_template_rule_draft, check_template_definition
 from .rule_store import DepartmentRuleStore
@@ -770,6 +770,19 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
             except KeyError as exc:
                 self._send_error(HTTPStatus.NOT_FOUND, str(exc))
             return
+        parts = path.strip("/").split("/")
+        if (
+            len(parts) == 6
+            and parts[0] == "api"
+            and parts[1] == "templates"
+            and parts[3] == "assets"
+            and parts[5] == "download"
+        ):
+            try:
+                self._send_template_asset(unquote(parts[2]), int(parts[4]))
+            except (KeyError, IndexError, ValueError) as exc:
+                self._send_error(HTTPStatus.NOT_FOUND, str(exc))
+            return
         if path.startswith("/api/templates/") and path.endswith("/download/template_ai"):
             template_id = unquote(path.split("/")[3])
             try:
@@ -844,12 +857,13 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
 
     def do_DELETE(self) -> None:
         path = urlparse(self.path).path
-        if path.startswith("/api/templates/"):
-            template_id = unquote(path.split("/")[3])
-            if self.registry.delete_template(template_id):
-                self._send_json({"ok": True, "template_id": template_id})
-            else:
-                self._send_error(HTTPStatus.NOT_FOUND, f"模板不存在: {template_id}")
+        parts = path.strip("/").split("/")
+        if len(parts) == 5 and parts[0] == "api" and parts[1] == "templates" and parts[3] == "assets":
+            try:
+                asset = self.registry.delete_template_asset(unquote(parts[2]), int(parts[4]))
+                self._send_json({"ok": True, "asset": asset})
+            except (KeyError, IndexError, ValueError) as exc:
+                self._send_error(HTTPStatus.NOT_FOUND, str(exc))
             return
         self._send_error(HTTPStatus.NOT_FOUND, "not found")
 
@@ -956,7 +970,20 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
 
         template_ai = self._resolve_template_ai(fields, files, template_id, existing)
         assets = list(existing.assets) if existing else []
-        assets.extend(self.registry.save_uploaded_assets(template_id, files.get("template_assets", [])))
+        assets.extend(
+            self.registry.save_uploaded_assets(
+                template_id,
+                files.get("reference_ai", []),
+                role="原始参考模板",
+            )
+        )
+        assets.extend(
+            self.registry.save_uploaded_assets(
+                template_id,
+                files.get("template_assets", []),
+                role="独立设计模板",
+            )
+        )
         template_config = self._save_template_rules(fields, template_id, existing, len(assets))
         item = {
             "template_id": template_id,
@@ -1075,6 +1102,26 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
             return
         data = template.template_ai.read_bytes()
         download_name = _safe_download_name(f"{template.template_id}.ai")
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "application/octet-stream")
+        self.send_header("Content-Disposition", f'attachment; filename="{download_name}"')
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def _send_template_asset(self, template_id: str, asset_index: int) -> None:
+        template = self.registry.get_template(template_id)
+        if asset_index < 0 or asset_index >= len(template.assets):
+            raise IndexError("模板 AI 资产不存在")
+        asset = template.assets[asset_index]
+        asset_path = Path(str(asset.get("stored_path", "")))
+        if not asset_path.is_absolute():
+            asset_path = (PROJECT_ROOT / asset_path).resolve()
+        if not asset_path.exists():
+            self._send_error(HTTPStatus.NOT_FOUND, "模板 AI 资产文件不存在")
+            return
+        data = asset_path.read_bytes()
+        download_name = _safe_download_name(str(asset.get("file_name") or asset_path.name))
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", "application/octet-stream")
         self.send_header("Content-Disposition", f'attachment; filename="{download_name}"')

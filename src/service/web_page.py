@@ -321,7 +321,7 @@ INDEX_HTML = """<!doctype html>
       background: var(--soft);
       color: var(--ink);
       display: grid;
-      grid-template-columns: minmax(0, 1fr) auto;
+      grid-template-columns: minmax(0, 1fr);
       gap: 10px;
       align-items: center;
     }
@@ -348,16 +348,6 @@ INDEX_HTML = """<!doctype html>
       color: var(--muted);
       font-size: 12px;
     }
-    .template-actions {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-    }
-    .template-actions button {
-      min-height: 30px;
-      padding: 5px 9px;
-      font-size: 12px;
-    }
     .asset-panel-grid {
       display: grid;
       grid-template-columns: minmax(280px, 0.9fr) minmax(300px, 1.1fr);
@@ -365,7 +355,7 @@ INDEX_HTML = """<!doctype html>
       align-items: stretch;
     }
     .upload-box {
-      min-height: 236px;
+      min-height: 276px;
       padding: 16px;
       border: 1px dashed var(--line-strong);
       border-radius: 7px;
@@ -384,7 +374,7 @@ INDEX_HTML = """<!doctype html>
     .asset-list-head,
     .asset-row {
       display: grid;
-      grid-template-columns: 1.25fr 92px 86px;
+      grid-template-columns: minmax(0, 1.4fr) 122px 76px 122px;
       gap: 10px;
       align-items: center;
       padding: 10px 12px;
@@ -400,6 +390,21 @@ INDEX_HTML = """<!doctype html>
     .asset-name {
       overflow-wrap: anywhere;
       font-weight: 700;
+    }
+    .asset-actions {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .asset-actions button {
+      min-height: 30px;
+      padding: 5px 9px;
+      font-size: 12px;
+    }
+    .asset-note {
+      color: var(--muted);
+      font-size: 12px;
     }
     .preview-box {
       min-height: 154px;
@@ -636,20 +641,24 @@ INDEX_HTML = """<!doctype html>
                 </select>
               </div>
               <div class="field-full">
-                <label>上传.ai模版</label>
+                <label>上传.ai模板</label>
                 <div class="asset-panel-grid">
                   <div class="upload-box">
                     <div>
-                      <label for="primaryAiFile">主模板文件</label>
+                      <label for="referenceAiFile">原始参考模板（可选）</label>
+                      <input id="referenceAiFile" type="file" accept=".ai" />
+                    </div>
+                    <div>
+                      <label for="primaryAiFile">尺寸/作图区模板（渲染基准）</label>
                       <input id="primaryAiFile" type="file" accept=".ai" />
                     </div>
                     <div>
-                      <label for="assetAiFiles">附加模板文件</label>
+                      <label for="assetAiFiles">独立设计模板文件（可多选）</label>
                       <input id="assetAiFiles" type="file" accept=".ai" multiple />
                     </div>
                   </div>
                   <div class="asset-list">
-                    <div class="asset-list-head"><span>文件</span><span>类型</span><span>状态</span></div>
+                    <div class="asset-list-head"><span>文件</span><span>类型</span><span>状态</span><span>操作</span></div>
                     <div id="assetRows"></div>
                   </div>
                 </div>
@@ -843,6 +852,7 @@ INDEX_HTML = """<!doctype html>
       document.getElementById("refreshJobsPageBtn").addEventListener("click", loadJobs);
       document.getElementById("previewTemplateRuleBtn").addEventListener("click", renderTemplateRulePreviewFromServer);
       document.getElementById("saveTemplateBtn").addEventListener("click", saveTemplate);
+      document.getElementById("referenceAiFile").addEventListener("change", renderAssetRows);
       document.getElementById("assetAiFiles").addEventListener("change", renderAssetRows);
       document.getElementById("primaryAiFile").addEventListener("change", renderAssetRows);
       document.getElementById("templateRuleText").addEventListener("input", markTemplateRulePreviewStale);
@@ -941,10 +951,6 @@ INDEX_HTML = """<!doctype html>
             <strong>${escapeHtml(template.template_id)}</strong>
             <span>${escapeHtml(template.name || "-")}</span>
           </button>
-          <div class="template-actions">
-            <button class="btn-subtle" data-template-download="${escapeHtml(template.template_id)}">下载</button>
-            <button class="btn-secondary" data-template-delete="${escapeHtml(template.template_id)}">删除</button>
-          </div>
         </div>
       `).join("");
       target.querySelectorAll("[data-template-select]").forEach(button => {
@@ -955,12 +961,6 @@ INDEX_HTML = """<!doctype html>
           syncSelectedTemplate();
           switchPage("templates");
         });
-      });
-      target.querySelectorAll("[data-template-download]").forEach(button => {
-        button.addEventListener("click", () => downloadTemplate(button.dataset.templateDownload));
-      });
-      target.querySelectorAll("[data-template-delete]").forEach(button => {
-        button.addEventListener("click", () => deleteTemplate(button.dataset.templateDelete));
       });
     }
 
@@ -982,8 +982,8 @@ INDEX_HTML = """<!doctype html>
         ["名称", template.name],
         ["状态", displayStatus(template.status)],
         ["类型", displayType(template.template_type)],
-        ["主模板", template.template_ai ? "已配置" : "未配置"],
-        ["附加模板", `${(template.assets || []).length} 个`],
+        ["尺寸/作图区模板", template.template_ai ? "已配置" : "未配置"],
+        ["文件资产", `${(template.assets || []).length} 个`],
         ["特有规则", template.template_config ? "已配置" : "未配置"],
         ["规则状态", ruleCheck.complete ? "完整" : "待补充"],
         ["可渲染", ruleCheck.renderable ? "可以" : "不可以"],
@@ -999,6 +999,7 @@ INDEX_HTML = """<!doctype html>
       document.getElementById("templateName").value = template.name || "";
       document.getElementById("templateType").value = template.template_type || "pure_text_color_design";
       document.getElementById("templateStatus").value = template.status || "active";
+      document.getElementById("referenceAiFile").value = "";
       document.getElementById("primaryAiFile").value = "";
       document.getElementById("assetAiFiles").value = "";
       loadTemplateRuleText(template);
@@ -1032,15 +1033,29 @@ INDEX_HTML = """<!doctype html>
       const template = formTemplate();
       const rows = [];
       if (template && template.template_ai) {
-        rows.push({ name: fileName(template.template_ai), type: "主模板", status: "已保存" });
+        rows.push({
+          name: fileName(template.template_ai),
+          type: "尺寸/作图区模板",
+          status: "已保存",
+          action: "primary",
+          key: "primary"
+        });
       }
-      (template && template.assets ? template.assets : []).forEach(asset => {
-        rows.push({ name: asset.file_name || fileName(asset.stored_path), type: "附加模板", status: "已保存" });
+      (template && template.assets ? template.assets : []).forEach((asset, index) => {
+        rows.push({
+          name: asset.file_name || fileName(asset.stored_path),
+          type: asset.role || "独立设计模板",
+          status: displayAssetStatus(asset.status),
+          action: "asset",
+          key: String(index)
+        });
       });
+      const reference = document.getElementById("referenceAiFile").files[0];
+      if (reference) rows.push({ name: reference.name, type: "原始参考模板", status: "待上传", action: "pending" });
       const primary = document.getElementById("primaryAiFile").files[0];
-      if (primary) rows.push({ name: primary.name, type: "主模板", status: "待上传" });
+      if (primary) rows.push({ name: primary.name, type: "尺寸/作图区模板", status: "待上传", action: "pending" });
       Array.from(document.getElementById("assetAiFiles").files || []).forEach(file => {
-        rows.push({ name: file.name, type: "附加模板", status: "待上传" });
+        rows.push({ name: file.name, type: "独立设计模板", status: "待上传", action: "pending" });
       });
       const target = document.getElementById("assetRows");
       if (!rows.length) {
@@ -1052,8 +1067,53 @@ INDEX_HTML = """<!doctype html>
           <span class="asset-name">${escapeHtml(row.name || "-")}</span>
           <span>${escapeHtml(row.type)}</span>
           <span>${escapeHtml(row.status)}</span>
+          <span>${renderAssetActions(row)}</span>
         </div>
       `).join("");
+      target.querySelectorAll("[data-asset-download]").forEach(button => {
+        button.addEventListener("click", () => downloadTemplateAsset(button.dataset.assetDownload));
+      });
+      target.querySelectorAll("[data-asset-delete]").forEach(button => {
+        button.addEventListener("click", () => deleteTemplateAsset(button.dataset.assetDelete));
+      });
+    }
+
+    function renderAssetActions(row) {
+      if (row.action === "primary") {
+        return `
+          <span class="asset-actions">
+            <button class="btn-subtle" data-asset-download="primary">下载</button>
+            <button class="btn-secondary" disabled title="尺寸/作图区模板请通过重新上传覆盖">删除</button>
+          </span>
+        `;
+      }
+      if (row.action === "asset") {
+        return `
+          <span class="asset-actions">
+            <button class="btn-subtle" data-asset-download="${escapeHtml(row.key)}">下载</button>
+            <button class="btn-secondary" data-asset-delete="${escapeHtml(row.key)}">删除</button>
+          </span>
+        `;
+      }
+      return '<span class="asset-note">保存后可操作</span>';
+    }
+
+    function displayAssetStatus(status) {
+      const names = {
+        uploaded: "已保存",
+        active: "已保存",
+        draft: "草稿",
+        pending: "待上传"
+      };
+      return names[status] || status || "已保存";
+    }
+
+    function uploadedAssetCount() {
+      const template = formTemplate();
+      const existingCount = template && template.assets ? template.assets.length : 0;
+      const referenceCount = document.getElementById("referenceAiFile").files[0] ? 1 : 0;
+      const designCount = (document.getElementById("assetAiFiles").files || []).length;
+      return existingCount + referenceCount + designCount;
     }
 
     function renderTemplateRulePreview() {
@@ -1080,7 +1140,7 @@ INDEX_HTML = """<!doctype html>
           template_id: templateId,
           template_type: document.getElementById("templateType").value,
           natural_text: raw,
-          asset_count: (document.getElementById("assetAiFiles").files || []).length
+          asset_count: uploadedAssetCount()
         });
         const draft = payload.draft || {};
         state.templateRuleDraft = draft;
@@ -1139,6 +1199,8 @@ INDEX_HTML = """<!doctype html>
       form.append("status", document.getElementById("templateStatus").value);
       form.append("template_rules_text", ruleText);
       form.append("template_rules_json", templateRuleJsonText());
+      const reference = document.getElementById("referenceAiFile").files[0];
+      if (reference) form.append("reference_ai", reference);
       const primary = document.getElementById("primaryAiFile").files[0];
       if (primary) form.append("template_ai", primary);
       Array.from(document.getElementById("assetAiFiles").files || []).forEach(file => {
@@ -1147,6 +1209,9 @@ INDEX_HTML = """<!doctype html>
       try {
         const result = await postForm("/api/templates", form);
         state.selectedTemplateId = result.template.template_id;
+        document.getElementById("referenceAiFile").value = "";
+        document.getElementById("primaryAiFile").value = "";
+        document.getElementById("assetAiFiles").value = "";
         await loadTemplates(result.template.template_id);
         setMessage("templateSaveMessage", `已保存模板：${result.template.template_id}`, "ok");
       } catch (error) {
@@ -1159,6 +1224,7 @@ INDEX_HTML = """<!doctype html>
       document.getElementById("templateName").value = "";
       document.getElementById("templateType").value = "pure_text_color_design";
       document.getElementById("templateStatus").value = "active";
+      document.getElementById("referenceAiFile").value = "";
       document.getElementById("primaryAiFile").value = "";
       document.getElementById("assetAiFiles").value = "";
       document.getElementById("templateRuleText").value = "";
@@ -1169,26 +1235,31 @@ INDEX_HTML = """<!doctype html>
       setMessage("templateSaveMessage", "等待编辑", "");
     }
 
-    function downloadTemplate(templateId) {
-      if (!templateId) {
+    function downloadTemplateAsset(assetKey) {
+      const template = formTemplate();
+      if (!template) {
         setMessage("templateSaveMessage", "请先选择模板", "error");
         return;
       }
-      window.location.href = `/api/templates/${encodeURIComponent(templateId)}/download/template_ai`;
+      if (assetKey === "primary") {
+        window.location.href = `/api/templates/${encodeURIComponent(template.template_id)}/download/template_ai`;
+        return;
+      }
+      window.location.href = `/api/templates/${encodeURIComponent(template.template_id)}/assets/${encodeURIComponent(assetKey)}/download`;
     }
 
-    async function deleteTemplate(templateId) {
-      const template = state.templates.find(item => item.template_id === templateId);
+    async function deleteTemplateAsset(assetKey) {
+      const template = formTemplate();
       if (!template) return;
-      const confirmed = window.confirm(`确认删除模板 ${template.template_id}？\n\n只会移除系统注册记录，不会删除本地 .ai 文件。`);
+      const asset = (template.assets || [])[Number(assetKey)];
+      if (!asset) return;
+      const assetName = asset.file_name || fileName(asset.stored_path);
+      const confirmed = window.confirm(`确认删除文件资产 ${assetName}？\n\n只会移除当前模板中的资产登记，不会删除本地 .ai 文件。`);
       if (!confirmed) return;
       try {
-        await deleteJson(`/api/templates/${encodeURIComponent(template.template_id)}`);
-        if (state.selectedTemplateId === template.template_id) {
-          state.selectedTemplateId = "";
-        }
-        await loadTemplates();
-        setMessage("templateSaveMessage", `已删除模板注册：${template.template_id}`, "ok");
+        await deleteJson(`/api/templates/${encodeURIComponent(template.template_id)}/assets/${encodeURIComponent(assetKey)}`);
+        await loadTemplates(template.template_id);
+        setMessage("templateSaveMessage", `已移除文件资产：${assetName}`, "ok");
       } catch (error) {
         setMessage("templateSaveMessage", String(error.message || error), "error");
       }

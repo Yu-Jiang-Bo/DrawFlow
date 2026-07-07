@@ -79,17 +79,6 @@ class TemplateRegistry:
         self._write_config(raw)
         return self.get_template(normalized["template_id"])
 
-    def delete_template(self, template_id: str) -> bool:
-        raw = self._read_config()
-        templates = raw.get("templates", [])
-        kept = [entry for entry in templates if entry.get("template_id") != template_id]
-        if len(kept) == len(templates):
-            return False
-        raw["version"] = int(raw.get("version", 1) or 1)
-        raw["templates"] = kept
-        self._write_config(raw)
-        return True
-
     def save_uploaded_ai(self, template_id: str, filename: str, content: bytes) -> Path:
         if not filename.lower().endswith(".ai"):
             raise ValueError("模板文件必须是 .ai 格式")
@@ -101,7 +90,12 @@ class TemplateRegistry:
         output_path.write_bytes(content)
         return output_path
 
-    def save_uploaded_assets(self, template_id: str, uploads: List[Dict[str, object]]) -> List[Dict[str, Any]]:
+    def save_uploaded_assets(
+        self,
+        template_id: str,
+        uploads: List[Dict[str, object]],
+        role: str = "附加模板",
+    ) -> List[Dict[str, Any]]:
         if not uploads:
             return []
         asset_dir = self._template_dir(template_id) / "assets"
@@ -121,12 +115,30 @@ class TemplateRegistry:
                     "file_name": Path(filename).name,
                     "stored_path": self.to_config_path(output_path),
                     "asset_type": "ai_template",
-                    "role": "附加模板",
+                    "role": role.strip() or "附加模板",
                     "status": "uploaded",
                     "size_bytes": len(content),
                 }
             )
         return saved
+
+    def delete_template_asset(self, template_id: str, asset_index: int) -> Dict[str, Any]:
+        raw = self._read_config()
+        templates = raw.get("templates", [])
+        for item in templates:
+            if item.get("template_id") != template_id:
+                continue
+            assets = item.get("assets", [])
+            if not isinstance(assets, list):
+                assets = []
+                item["assets"] = assets
+            if asset_index < 0 or asset_index >= len(assets):
+                raise IndexError("模板 AI 资产不存在")
+            removed = assets.pop(asset_index)
+            raw["version"] = int(raw.get("version", 1) or 1)
+            self._write_config(raw)
+            return removed if isinstance(removed, dict) else {"value": removed}
+        raise KeyError(f"模板不存在: {template_id}")
 
     def save_template_config(self, template_id: str, content: str) -> Path | None:
         text = content.strip()

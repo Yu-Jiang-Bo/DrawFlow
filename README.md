@@ -77,7 +77,7 @@ http://127.0.0.1:8765
 
 ```text
 出图任务   # 上传订单表格，渲染完成后自动下载 AI 文件
-模板管理   # 登记模板信息，上传主 .ai 和多个附加 .ai 模板资产
+模板管理   # 登记模板信息，上传参考/作图区/独立设计 .ai 模板资产
 规则配置   # 查看部门规则，新增或编辑自然语言规则草稿
 任务记录   # 查看最近任务并下载历史输出
 ```
@@ -89,8 +89,9 @@ GET  /api/health
 GET  /api/templates
 GET  /api/templates/{template_id}/config
 GET  /api/templates/{template_id}/download/template_ai
+GET  /api/templates/{template_id}/assets/{asset_index}/download
 POST /api/templates
-DELETE /api/templates/{template_id}
+DELETE /api/templates/{template_id}/assets/{asset_index}
 POST /api/templates/rules/draft
 GET  /api/rules/department
 POST /api/rules/department/parse

@@ -28,8 +28,13 @@ def test_template_rule_editor_is_business_readable():
     assert "请先点击“生成预览”" in INDEX_HTML
 
 
-def test_template_list_has_download_and_delete_actions():
-    assert "data-template-download" in INDEX_HTML
-    assert "data-template-delete" in INDEX_HTML
-    assert "deleteTemplate(" in INDEX_HTML
+def test_template_asset_list_has_download_and_delete_actions():
+    assert "data-template-download" not in INDEX_HTML
+    assert "data-template-delete" not in INDEX_HTML
+    assert "data-asset-download" in INDEX_HTML
+    assert "data-asset-delete" in INDEX_HTML
+    assert "deleteTemplateAsset(" in INDEX_HTML
     assert "window.confirm" in INDEX_HTML
+    assert 'id="referenceAiFile"' in INDEX_HTML
+    assert "尺寸/作图区模板" in INDEX_HTML
+    assert "独立设计模板" in INDEX_HTML
