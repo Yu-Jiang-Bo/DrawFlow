@@ -1,7 +1,12 @@
 import json
 from pathlib import Path
 
-from src.service.rule_center import build_template_rule_draft, check_template_definition
+from src.service.rule_center import (
+    build_template_rule_draft,
+    check_template_definition,
+    curved_layout_overrides,
+    parse_dimensions,
+)
 from src.service.template_registry import TemplateRegistry
 
 
@@ -19,6 +24,49 @@ def test_template_rule_draft_extracts_curved_title_rules():
     assert draft["font_options"] == [f"F{i}" for i in range(1, 15)]
     assert draft["defaults"]["title"] == "Merry Christmas"
     assert any(slot["type"] == "text_on_curve" for slot in draft["slots"])
+
+
+def test_template_rule_draft_extracts_dimensions_from_business_text():
+    draft = build_template_rule_draft(
+        template_id="JJMB202509231236046265",
+        template_type="curved_title_text",
+        natural_text="Font Options 为 F1-F14；标题尺寸是 4*0.7cm，名字的尺寸是 1.6*0.5cm。",
+    )
+
+    assert draft["dimensions"]["title"]["width_mm"] == 40.0
+    assert draft["dimensions"]["title"]["height_mm"] == 7.0
+    assert draft["dimensions"]["name"]["width_mm"] == 16.0
+    assert draft["dimensions"]["name"]["height_mm"] == 5.0
+
+
+def test_curved_layout_overrides_reads_structured_or_raw_dimensions():
+    assert curved_layout_overrides(
+        {
+            "dimensions": {
+                "title": {"width_mm": 42, "height_mm": 8},
+                "name": {"width_mm": 18, "height_mm": 6},
+            }
+        }
+    ) == {
+        "title_width_mm": 42.0,
+        "title_height_mm": 8.0,
+        "name_width_mm": 18.0,
+        "name_height_mm": 6.0,
+    }
+
+    assert curved_layout_overrides({"raw_text": "标题尺寸为40mm*7mm；Name_Content 尺寸为16mm*5mm"}) == {
+        "title_width_mm": 40.0,
+        "title_height_mm": 7.0,
+        "name_width_mm": 16.0,
+        "name_height_mm": 5.0,
+    }
+
+
+def test_parse_dimensions_defaults_unit_to_centimeters():
+    dimensions = parse_dimensions("标题尺寸 4*0.7，姓名区域 1.6*0.5")
+
+    assert dimensions["title"]["width_mm"] == 40.0
+    assert dimensions["name"]["height_mm"] == 5.0
 
 
 def test_template_rule_check_reports_missing_asset_split_rules(tmp_path):

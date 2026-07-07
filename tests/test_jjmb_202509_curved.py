@@ -112,3 +112,42 @@ def test_build_task_can_keep_title_frames(tmp_path):
 
     assert task["layout"]["keep_title_frames"] is True
     assert task["font_map"]["F1"]["bounds_shape_ratio"] == {}
+
+
+def test_build_task_applies_layout_dimension_overrides(tmp_path):
+    report = tmp_path / "report.json"
+    report.write_text(
+        '{"entries":[{"status":"ok","font_option":"F1","font_name":"TestFont","baseline_ratio":{},"bounds_shape_ratio":{}}]}',
+        encoding="utf-8",
+    )
+    groups = group_items(
+        parse_items(
+            [
+                {
+                    "模板": "JJMB202509231236046265",
+                    "内部订单号": "ORDER1",
+                    "订单明细id": "1",
+                    "生产部门": "ZW",
+                    "定制信息": "Font Options:F1\nName:Kai",
+                }
+            ]
+        )
+    )
+
+    task = build_task(
+        report,
+        tmp_path / "out.ai",
+        groups,
+        columns=1,
+        layout_overrides={
+            "name_width_mm": 18,
+            "name_height_mm": 6,
+            "title_width_mm": 42,
+            "title_height_mm": 8,
+        },
+    )
+
+    assert task["layout"]["name_width_mm"] == 18.0
+    assert task["layout"]["name_height_mm"] == 6.0
+    assert task["layout"]["title_width_mm"] == 42.0
+    assert task["layout"]["title_height_mm"] == 8.0

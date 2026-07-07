@@ -23,7 +23,7 @@ from ..jjmb_202509_curved_main import (
 from ..jjmb_config_grouped_main import build_grouped_task
 from ..renderer.illustrator_bridge import IllustratorBridge
 from .job_store import JobStore
-from .rule_center import check_template_definition
+from .rule_center import check_template_definition, curved_layout_overrides, read_template_rule_config
 from .template_registry import TemplateDefinition, TemplateRegistry
 
 
@@ -175,11 +175,13 @@ class RenderService:
         rows = read_202509_curved_rows(order_file)
         items = parse_202509_curved_items(rows)
         groups = group_202509_curved_items(items)
+        template_rules = read_template_rule_config(template.template_rules_config)
         task = build_202509_curved_task(
             font_report=font_report,
             output_ai=output_ai,
             groups=groups,
             columns=request["columns"],
+            layout_overrides=curved_layout_overrides(template_rules),
         )
         task_file = job_dir / "render-task.json"
         self._write_json(task_file, task)

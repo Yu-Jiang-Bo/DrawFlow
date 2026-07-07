@@ -26,6 +26,8 @@ def test_template_rule_editor_is_business_readable():
     assert "新建空白" not in INDEX_HTML
     assert "templateRulePreviewSignature" in INDEX_HTML
     assert "请先点击“生成预览”" in INDEX_HTML
+    assert "尺寸规则" in INDEX_HTML
+    assert "describeDimensions" in INDEX_HTML
 
 
 def test_template_asset_list_has_download_and_delete_actions():

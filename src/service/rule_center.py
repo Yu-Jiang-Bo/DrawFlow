@@ -29,6 +29,25 @@ PIPELINE_CONFIG_REQUIRED = {
     "jjmb_202509_curved": True,
 }
 
+DIMENSION_PAIR_RE = re.compile(
+    r"(?P<width>\d+(?:\.\d+)?)\s*(?P<width_unit>mm|cm|\u6beb\u7c73|\u5398\u7c73)?"
+    r"\s*(?:\*|x|X|\u00d7|\uff0a)\s*"
+    r"(?P<height>\d+(?:\.\d+)?)\s*(?P<height_unit>mm|cm|\u6beb\u7c73|\u5398\u7c73)?",
+    re.I,
+)
+
+DIMENSION_TARGETS = {
+    "title": ("title", "\u6807\u9898", "\u5f2f\u66f2"),
+    "name": ("name", "name_content", "\u540d\u5b57", "\u59d3\u540d"),
+}
+
+UNIT_TO_MM = {
+    "mm": 1.0,
+    "\u6beb\u7c73": 1.0,
+    "cm": 10.0,
+    "\u5398\u7c73": 10.0,
+}
+
 
 def build_template_rule_draft(
     template_id: str,
@@ -46,6 +65,7 @@ def build_template_rule_draft(
     design_options = parse_design_options(raw)
     defaults = infer_defaults(raw)
     slots = infer_slots(mode, raw, capabilities, defaults)
+    dimensions = parse_dimensions(raw)
 
     return {
         "version": 1,
@@ -59,6 +79,7 @@ def build_template_rule_draft(
         "style_options": style_options,
         "design_options": design_options,
         "defaults": defaults,
+        "dimensions": dimensions,
         "slots": slots,
         "assets": {
             "mode": "split_ai" if mode == "asset_split" else "inline",
@@ -142,6 +163,55 @@ def read_template_rule_config(path_value: object) -> Dict[str, Any]:
     except (OSError, json.JSONDecodeError):
         return {}
     return payload if isinstance(payload, dict) else {}
+
+
+def parse_dimensions(text: str) -> Dict[str, Dict[str, object]]:
+    """Parse business-language size rules into millimeter dimensions."""
+
+    result: Dict[str, Dict[str, object]] = {}
+    for segment in re.split(r"[\r\n,，;；。]+", text or ""):
+        target = _dimension_target(segment)
+        if not target:
+            continue
+        match = DIMENSION_PAIR_RE.search(segment)
+        if not match:
+            continue
+        width_unit = _normalize_unit(match.group("width_unit"))
+        height_unit = _normalize_unit(match.group("height_unit"))
+        fallback_unit = height_unit or width_unit or _unit_hint(segment) or "cm"
+        width_mm = _dimension_value_to_mm(match.group("width"), width_unit or fallback_unit)
+        height_mm = _dimension_value_to_mm(match.group("height"), height_unit or fallback_unit)
+        if width_mm <= 0 or height_mm <= 0:
+            continue
+        result[target] = {
+            "width_mm": round(width_mm, 3),
+            "height_mm": round(height_mm, 3),
+            "source": segment.strip(),
+        }
+    return result
+
+
+def curved_layout_overrides(config: Dict[str, Any]) -> Dict[str, float]:
+    """Return JJMB202509 curved-title layout overrides from template rules."""
+
+    dimensions = config.get("dimensions")
+    if not isinstance(dimensions, dict):
+        dimensions = {}
+    if not dimensions and isinstance(config.get("raw_text"), str):
+        dimensions = parse_dimensions(config["raw_text"])
+
+    result: Dict[str, float] = {}
+    for target in ("name", "title"):
+        dimension = _dimension_entry(dimensions, target)
+        if not dimension:
+            continue
+        width = _positive_float(dimension.get("width_mm"))
+        height = _positive_float(dimension.get("height_mm"))
+        if width:
+            result[f"{target}_width_mm"] = width
+        if height:
+            result[f"{target}_height_mm"] = height
+    return result
 
 
 def infer_mode(template_type: str, text: str, asset_count: int = 0) -> str:
@@ -285,3 +355,52 @@ def _string_list(value: object) -> List[str]:
     if isinstance(value, str) and value.strip():
         return [value.strip()]
     return []
+
+
+def _dimension_target(segment: str) -> str:
+    lower = (segment or "").lower()
+    for target, tokens in DIMENSION_TARGETS.items():
+        if any(token in lower for token in tokens):
+            return target
+    return ""
+
+
+def _normalize_unit(value: object) -> str:
+    unit = str(value or "").strip().lower()
+    return unit if unit in UNIT_TO_MM else ""
+
+
+def _unit_hint(segment: str) -> str:
+    lower = (segment or "").lower()
+    if "\u6beb\u7c73" in lower or "mm" in lower:
+        return "mm"
+    if "\u5398\u7c73" in lower or "cm" in lower:
+        return "cm"
+    return ""
+
+
+def _dimension_value_to_mm(value: object, unit: str) -> float:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    return number * UNIT_TO_MM.get(unit, 10.0)
+
+
+def _dimension_entry(dimensions: Dict[str, Any], target: str) -> Dict[str, Any]:
+    candidates = [target, target.capitalize(), target.upper()]
+    if target == "name":
+        candidates.extend(["Name_Content", "NAME_CONTENT"])
+    for key in candidates:
+        value = dimensions.get(key)
+        if isinstance(value, dict):
+            return value
+    return {}
+
+
+def _positive_float(value: object) -> float:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    return number if number > 0 else 0.0

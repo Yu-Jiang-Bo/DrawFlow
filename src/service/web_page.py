@@ -1444,6 +1444,7 @@ INDEX_HTML = """<!doctype html>
           <div class="preview-chip"><span>设计选项</span><strong>${escapeHtml(displayOptions(draft.design_options))}</strong></div>
           <div class="preview-chip"><span>文字和图片位置</span><strong>${escapeHtml(slotText)}</strong></div>
           <div class="preview-chip"><span>默认内容</span><strong>${escapeHtml(describeDefaults(defaults))}</strong></div>
+          <div class="preview-chip"><span>尺寸规则</span><strong>${escapeHtml(describeDimensions(draft.dimensions || {}))}</strong></div>
           <div class="preview-chip"><span>处理能力</span><strong>${escapeHtml(describeCapabilities(draft.capabilities || []))}</strong></div>
           <div class="preview-chip"><span>解析来源</span><strong>${escapeHtml(parser.source === "llm" ? "LLM 编译" : "本地规则编译")}</strong></div>
         </div>
@@ -1472,6 +1473,24 @@ INDEX_HTML = """<!doctype html>
       if (defaults.font) parts.push(`字体 ${defaults.font}`);
       if (defaults.title) parts.push(`标题 ${defaults.title}`);
       return parts.join("；") || "无默认值";
+    }
+
+    function describeDimensions(dimensions) {
+      const parts = [];
+      if (dimensions.title) parts.push(`标题 ${formatDimension(dimensions.title)}`);
+      if (dimensions.name) parts.push(`名字 ${formatDimension(dimensions.name)}`);
+      return parts.join("；") || "未识别";
+    }
+
+    function formatDimension(dimension) {
+      const width = Number(dimension.width_mm || 0);
+      const height = Number(dimension.height_mm || 0);
+      if (!width || !height) return "未识别";
+      return `${trimNumber(width)}mm * ${trimNumber(height)}mm`;
+    }
+
+    function trimNumber(value) {
+      return Number(value.toFixed(3)).toString();
     }
 
     function describeCapabilities(capabilities) {

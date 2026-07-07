@@ -9,7 +9,7 @@ import re
 from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterable, List
+from typing import Dict, Iterable, List, Mapping
 
 from openpyxl import load_workbook
 
@@ -237,27 +237,33 @@ def build_task(
     groups: List[CurvedOrderGroup],
     columns: int,
     keep_title_frames: bool = False,
+    layout_overrides: Mapping[str, object] | None = None,
 ) -> Dict[str, object]:
     if not groups:
         raise ValueError("No renderable orders")
+    layout = {
+        "columns": max(columns, 1),
+        "margin_mm": 8.0,
+        "gap_mm": 18.0,
+        "item_gap_mm": 7.0,
+        "order_label_height_mm": 7.0,
+        "order_label_font_size_pt": 13.0,
+        "name_width_mm": 16.0,
+        "name_height_mm": 5.0,
+        "title_width_mm": 40.0,
+        "title_height_mm": 7.0,
+        "keep_title_frames": keep_title_frames,
+    }
+    for key in ("name_width_mm", "name_height_mm", "title_width_mm", "title_height_mm"):
+        value = _positive_number((layout_overrides or {}).get(key))
+        if value:
+            layout[key] = value
     return {
         "type": "jjmb_202509_curved",
         "font_map": load_font_map(font_report),
         "output_ai": str(output_ai),
         "groups": [group.to_json_dict() for group in groups],
-        "layout": {
-            "columns": max(columns, 1),
-            "margin_mm": 8.0,
-            "gap_mm": 18.0,
-            "item_gap_mm": 7.0,
-            "order_label_height_mm": 7.0,
-            "order_label_font_size_pt": 13.0,
-            "name_width_mm": 16.0,
-            "name_height_mm": 5.0,
-            "title_width_mm": 40.0,
-            "title_height_mm": 7.0,
-            "keep_title_frames": keep_title_frames,
-        },
+        "layout": layout,
         "fit": {
             "min_font_size_pt": 4.0,
             "max_font_size_pt": 80.0,
@@ -277,6 +283,14 @@ def build_task(
 def write_json(path: Path, payload: Dict[str, object]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _positive_number(value: object) -> float:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    return number if number > 0 else 0.0
 
 
 def parse_args() -> argparse.Namespace:
