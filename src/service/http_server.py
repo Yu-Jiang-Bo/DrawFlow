@@ -12,11 +12,12 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
-from ..jjmb_202508_main import DEPARTMENT_RULES_PATH
 from .job_store import JobStore
-from .paths import CONFIG_DIR, SERVICE_UPLOADS_DIR
+from .llm_rule_parser import LlmRuleParser
+from .paths import SERVICE_UPLOADS_DIR
 from .render_service import RenderService
 from .rule_center import build_template_rule_draft, check_template_definition
+from .rule_store import DepartmentRuleStore
 from .template_registry import TemplateRegistry
 from .web_page import INDEX_HTML as WORKBENCH_HTML
 
@@ -740,6 +741,8 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
     registry = TemplateRegistry()
     jobs = JobStore()
     service = RenderService(registry=registry, jobs=jobs)
+    rule_store = DepartmentRuleStore()
+    llm_parser = LlmRuleParser()
 
     def do_GET(self) -> None:
         path = urlparse(self.path).path
@@ -802,6 +805,18 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
         if path == "/api/rules/department/draft":
             try:
                 self._send_json(self._save_department_rule_draft(self._read_json()))
+            except Exception as exc:
+                self._send_error(HTTPStatus.BAD_REQUEST, str(exc))
+            return
+        if path == "/api/rules/department/parse":
+            try:
+                self._send_json(self._parse_department_rule_draft(self._read_json()))
+            except Exception as exc:
+                self._send_error(HTTPStatus.BAD_REQUEST, str(exc))
+            return
+        if path == "/api/rules/department/publish":
+            try:
+                self._send_json(self._publish_department_rule(self._read_json()))
             except Exception as exc:
                 self._send_error(HTTPStatus.BAD_REQUEST, str(exc))
             return
@@ -885,18 +900,31 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
         template_type = str(payload.get("template_type", "")).strip()
         natural_text = str(payload.get("natural_text", "")).strip()
         asset_count = int(payload.get("asset_count", 0) or 0)
+        context: dict[str, object] = {}
         if template_id:
             try:
                 template = self.registry.get_template(template_id)
                 template_type = template_type or template.template_type
                 asset_count = asset_count or len(template.assets)
+                context = self._template_payload(template)
             except KeyError:
                 pass
         if not template_id:
             raise ValueError("缺少 template_id")
         if not natural_text:
             raise ValueError("缺少自然语言规则说明")
-        draft = build_template_rule_draft(template_id, template_type, natural_text, asset_count)
+        fallback = build_template_rule_draft(template_id, template_type, natural_text, asset_count)
+        draft = self.llm_parser.parse(
+            kind="template_rule",
+            natural_text=natural_text,
+            context={
+                "template_id": template_id,
+                "template_type": template_type,
+                "asset_count": asset_count,
+                "template": context,
+            },
+            fallback=fallback,
+        )
         return {"draft": draft}
 
     def _register_template(self, fields: dict[str, str], files: dict[str, list[dict[str, object]]]) -> object:
@@ -959,13 +987,22 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
         rules_text = fields.get("template_rules_json", "").strip()
         natural_text = fields.get("template_rules_text", "").strip()
         template_type = fields.get("template_type", "").strip() or (existing.template_type if existing else "")
-        if natural_text:
+        if not rules_text and natural_text:
             rules_text = json.dumps(
-                build_template_rule_draft(
-                    template_id=template_id,
-                    template_type=template_type,
+                self.llm_parser.parse(
+                    kind="template_rule",
                     natural_text=natural_text,
-                    asset_count=asset_count,
+                    context={
+                        "template_id": template_id,
+                        "template_type": template_type,
+                        "asset_count": asset_count,
+                    },
+                    fallback=build_template_rule_draft(
+                        template_id=template_id,
+                        template_type=template_type,
+                        natural_text=natural_text,
+                        asset_count=asset_count,
+                    ),
                 ),
                 ensure_ascii=False,
             )
@@ -977,43 +1014,29 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
         return ""
 
     def _save_department_rule_draft(self, payload: dict[str, object]) -> dict[str, object]:
-        rule_name = str(payload.get("rule_name", "")).strip()
-        if not rule_name:
-            raise ValueError("缺少规则名称")
-        draft_path = CONFIG_DIR / "department_rule_drafts.json"
-        if draft_path.exists():
-            raw = json.loads(draft_path.read_text(encoding="utf-8"))
-        else:
-            raw = {"version": 1, "drafts": []}
-        drafts = [item for item in raw.get("drafts", []) if item.get("rule_name") != rule_name]
-        drafts.append(
-            {
-                "rule_name": rule_name,
-                "display_name": str(payload.get("display_name", "")).strip(),
-                "departments": _to_string_list(payload.get("departments", [])),
-                "match": str(payload.get("match", "exact")).strip() or "exact",
-                "label_fields": _to_string_list(payload.get("label_fields", [])),
-                "show_frame": _to_bool(payload.get("show_frame", False)),
-                "apply_color_to_artwork": _to_bool(payload.get("apply_color_to_artwork", False)),
-                "natural_text": str(payload.get("natural_text", "")).strip(),
-                "preview": str(payload.get("preview", "")).strip(),
-            }
+        return self.rule_store.save_draft(payload)
+
+    def _parse_department_rule_draft(self, payload: dict[str, object]) -> dict[str, object]:
+        natural_text = str(payload.get("natural_text", "")).strip()
+        if not natural_text:
+            raise ValueError("缺少自然语言规则说明")
+        fallback = self.rule_store.build_draft_from_text(payload)
+        draft = self.llm_parser.parse(
+            kind="department_rule",
+            natural_text=natural_text,
+            context={
+                "current_rules": self.rule_store.read().get("rules", []),
+                "manual_fields": payload,
+            },
+            fallback=fallback,
         )
-        raw["version"] = int(raw.get("version", 1) or 1)
-        raw["drafts"] = drafts
-        draft_path.parent.mkdir(parents=True, exist_ok=True)
-        draft_path.write_text(json.dumps(raw, ensure_ascii=False, indent=2), encoding="utf-8")
-        return {"ok": True, "drafts": len(drafts)}
+        return {"draft": draft}
+
+    def _publish_department_rule(self, payload: dict[str, object]) -> dict[str, object]:
+        return self.rule_store.publish(payload)
 
     def _read_department_rules(self) -> dict[str, object]:
-        payload = json.loads(DEPARTMENT_RULES_PATH.read_text(encoding="utf-8"))
-        draft_path = CONFIG_DIR / "department_rule_drafts.json"
-        if draft_path.exists():
-            draft_payload = json.loads(draft_path.read_text(encoding="utf-8"))
-            payload["drafts"] = draft_payload.get("drafts", [])
-        else:
-            payload["drafts"] = []
-        return payload
+        return self.rule_store.read()
 
     def _read_template_config(self, template_id: str) -> dict[str, object]:
         template = self.registry.get_template(template_id)
@@ -1092,26 +1115,6 @@ def _safe_download_name(value: str) -> str:
             chars.append("_")
     name = "".join(chars).strip("._")
     return name or "file"
-
-
-def _to_string_list(value: object) -> list[str]:
-    if isinstance(value, list):
-        return [str(item).strip() for item in value if str(item).strip()]
-    text = str(value or "").strip()
-    if not text:
-        return []
-    return [item.strip() for item in text.replace("，", ",").replace("、", ",").replace("/", ",").split(",") if item.strip()]
-
-
-def _to_bool(value: object) -> bool:
-    if isinstance(value, bool):
-        return value
-    text = str(value).strip().lower()
-    if text in {"1", "true", "yes", "on", "是"}:
-        return True
-    if text in {"0", "false", "no", "off", "否"}:
-        return False
-    return bool(value)
 
 
 def main() -> int:

@@ -89,8 +89,11 @@ GET  /api/health
 GET  /api/templates
 GET  /api/templates/{template_id}/config
 POST /api/templates
+POST /api/templates/rules/draft
 GET  /api/rules/department
+POST /api/rules/department/parse
 POST /api/rules/department/draft
+POST /api/rules/department/publish
 POST /api/render
 GET  /api/jobs
 GET  /api/jobs/{job_id}
@@ -108,6 +111,14 @@ config/department_rule_drafts.json     # 部门规则页面新增/编辑的草�
 ```
 
 正式部署时，这部分应迁移为数据库记录 + 共享文件存储。
+
+LLM 规则解析是可选能力。未配置时服务会回退到本地启发式解析；正式渲染不会调用 LLM。需要接入真实接口时配置：
+
+```powershell
+$env:CUSTOM_RENDERER_LLM_API_KEY="your-api-key"
+$env:CUSTOM_RENDERER_LLM_BASE_URL="https://your-llm-host/v1"
+$env:CUSTOM_RENDERER_LLM_MODEL="your-model"
+```
 
 `POST /api/render` 使用 `multipart/form-data` 上传订单表格：
 

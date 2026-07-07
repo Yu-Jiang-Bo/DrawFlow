@@ -632,6 +632,10 @@ INDEX_HTML = """<!doctype html>
                 <textarea id="templateRuleText" placeholder="例如：未选择颜色默认金色；未选择设计默认 Design2；Design2 字体逆时针旋转 15 度。"></textarea>
               </div>
               <div class="field-full">
+                <label for="templateRuleJson">结构化规则 JSON</label>
+                <textarea id="templateRuleJson" placeholder='{"version":1,"status":"draft","capabilities":["text_fit_box"]}'></textarea>
+              </div>
+              <div class="field-full">
                 <label>结构化预览</label>
                 <div class="preview-box" id="templateRulePreview"></div>
               </div>
@@ -656,6 +660,10 @@ INDEX_HTML = """<!doctype html>
           </div>
           <div class="panel-body">
             <div id="ruleCategories"></div>
+            <div style="margin-top:18px">
+              <label>全局/店铺规则摘要</label>
+              <div class="preview-box" id="globalRulesSummary"></div>
+            </div>
           </div>
         </section>
 
@@ -719,6 +727,7 @@ INDEX_HTML = """<!doctype html>
             <div class="actions">
               <button class="btn-subtle" id="previewRuleBtn">生成预览</button>
               <button class="btn-primary" id="saveRuleDraftBtn">保存草稿</button>
+              <button class="btn-primary" id="publishRuleBtn">保存为发布规则</button>
             </div>
             <div class="message" id="ruleSaveMessage">等待编辑</div>
           </div>
@@ -757,6 +766,8 @@ INDEX_HTML = """<!doctype html>
       jobs: [],
       departmentRules: [],
       ruleDrafts: [],
+      defaultRule: {},
+      shopRules: {},
       selectedTemplateId: "",
       selectedRuleName: "",
       ruleMode: "published"
@@ -811,8 +822,10 @@ INDEX_HTML = """<!doctype html>
       document.getElementById("assetAiFiles").addEventListener("change", renderAssetRows);
       document.getElementById("primaryAiFile").addEventListener("change", renderAssetRows);
       document.getElementById("templateRuleText").addEventListener("input", renderTemplateRulePreview);
-      document.getElementById("previewRuleBtn").addEventListener("click", renderRulePreview);
+      document.getElementById("templateRuleJson").addEventListener("input", renderTemplateRulePreview);
+      document.getElementById("previewRuleBtn").addEventListener("click", renderRulePreviewFromServer);
       document.getElementById("saveRuleDraftBtn").addEventListener("click", saveRuleDraft);
+      document.getElementById("publishRuleBtn").addEventListener("click", publishRule);
       document.getElementById("newRuleBtn").addEventListener("click", newRuleDraft);
       ["ruleName", "ruleDisplayName", "ruleDepartments", "ruleMatch", "ruleLabelFields", "ruleShowFrame", "ruleColorMode", "ruleNaturalText"].forEach(id => {
         document.getElementById(id).addEventListener("input", renderRulePreview);
@@ -856,11 +869,18 @@ INDEX_HTML = """<!doctype html>
       const payload = await getJson("/api/rules/department");
       state.departmentRules = payload.rules || [];
       state.ruleDrafts = payload.drafts || [];
+      state.defaultRule = payload.default || {};
+      state.shopRules = payload.shop_rules || {};
+      if (state.selectedRuleName && !selectedRule()) {
+        state.selectedRuleName = "";
+        state.ruleMode = "published";
+      }
       if (!state.selectedRuleName && state.departmentRules.length) {
         state.selectedRuleName = state.departmentRules[0].name;
         state.ruleMode = "published";
       }
       renderRuleCategories();
+      renderGlobalRulesSummary();
       syncSelectedRule();
     }
 
@@ -952,7 +972,9 @@ INDEX_HTML = """<!doctype html>
 
     async function loadTemplateRuleText(template) {
       const editor = document.getElementById("templateRuleText");
+      const jsonEditor = document.getElementById("templateRuleJson");
       editor.value = "";
+      jsonEditor.value = "";
       if (!template || !template.template_config) {
         renderTemplateRulePreview();
         return;
@@ -961,8 +983,10 @@ INDEX_HTML = """<!doctype html>
         const payload = await getJson(`/api/templates/${encodeURIComponent(template.template_id)}/config`);
         const config = payload.config || {};
         editor.value = config.raw_text || config.notes || config.description || "";
+        jsonEditor.value = payload.config ? JSON.stringify(config, null, 2) : "";
       } catch (error) {
         editor.value = "";
+        jsonEditor.value = "";
       }
       renderTemplateRulePreview();
     }
@@ -997,13 +1021,15 @@ INDEX_HTML = """<!doctype html>
 
     function renderTemplateRulePreview() {
       const payload = buildTemplateRulePayload();
+      const jsonText = document.getElementById("templateRuleJson").value.trim();
+      const jsonState = jsonText ? "已填写" : "未填写";
       const target = document.getElementById("templateRulePreview");
       target.innerHTML = `
         <div class="preview-grid">
           <div class="preview-chip"><span>默认颜色</span><strong>${escapeHtml(payload.defaults.color || "未识别")}</strong></div>
           <div class="preview-chip"><span>默认设计</span><strong>${escapeHtml(payload.defaults.design || "未识别")}</strong></div>
           <div class="preview-chip"><span>旋转规则</span><strong>${escapeHtml(payload.transforms.rotation || "未识别")}</strong></div>
-          <div class="preview-chip"><span>规则来源</span><strong>自然语言草稿</strong></div>
+          <div class="preview-chip"><span>结构化 JSON</span><strong>${escapeHtml(jsonState)}</strong></div>
         </div>
       `;
     }
@@ -1023,12 +1049,13 @@ INDEX_HTML = """<!doctype html>
           asset_count: (document.getElementById("assetAiFiles").files || []).length
         });
         const draft = payload.draft || {};
+        document.getElementById("templateRuleJson").value = JSON.stringify(draft, null, 2);
         document.getElementById("templateRulePreview").innerHTML = `
           <div class="preview-grid">
             <div class="preview-chip"><span>模板模式</span><strong>${escapeHtml(displayType(draft.mode))}</strong></div>
             <div class="preview-chip"><span>字体选项</span><strong>${escapeHtml((draft.font_options || []).join(" / ") || "未识别")}</strong></div>
             <div class="preview-chip"><span>能力模块</span><strong>${escapeHtml((draft.capabilities || []).join(" / ") || "未识别")}</strong></div>
-            <div class="preview-chip"><span>规则状态</span><strong>${escapeHtml(draft.status || "draft")}</strong></div>
+            <div class="preview-chip"><span>解析来源</span><strong>${escapeHtml((draft.parser && draft.parser.source) || "local")}</strong></div>
           </div>
         `;
       } catch (error) {
@@ -1052,6 +1079,12 @@ INDEX_HTML = """<!doctype html>
       };
     }
 
+    function templateRuleJsonText() {
+      const raw = document.getElementById("templateRuleJson").value.trim();
+      if (raw) return raw;
+      return JSON.stringify(buildTemplateRulePayload());
+    }
+
     async function saveTemplate() {
       setMessage("templateSaveMessage", "保存中", "");
       const templateId = document.getElementById("templateId").value.trim();
@@ -1066,7 +1099,7 @@ INDEX_HTML = """<!doctype html>
       form.append("template_type", document.getElementById("templateType").value);
       form.append("status", document.getElementById("templateStatus").value);
       form.append("template_rules_text", document.getElementById("templateRuleText").value.trim());
-      form.append("template_rules_json", JSON.stringify(buildTemplateRulePayload()));
+      form.append("template_rules_json", templateRuleJsonText());
       const primary = document.getElementById("primaryAiFile").files[0];
       if (primary) form.append("template_ai", primary);
       Array.from(document.getElementById("assetAiFiles").files || []).forEach(file => {
@@ -1090,6 +1123,7 @@ INDEX_HTML = """<!doctype html>
       document.getElementById("primaryAiFile").value = "";
       document.getElementById("assetAiFiles").value = "";
       document.getElementById("templateRuleText").value = "";
+      document.getElementById("templateRuleJson").value = "";
       document.getElementById("assetRows").innerHTML = '<div class="empty">暂无 .ai 模板资产</div>';
       renderTemplateRulePreview();
       setMessage("templateSaveMessage", "等待编辑", "");
@@ -1220,6 +1254,22 @@ INDEX_HTML = """<!doctype html>
       });
     }
 
+    function renderGlobalRulesSummary() {
+      const target = document.getElementById("globalRulesSummary");
+      const requirements = (state.shopRules && state.shopRules.global_requirements) || {};
+      const outputs = (state.shopRules && state.shopRules.department_output_requirements) || [];
+      const defaults = state.defaultRule || {};
+      target.innerHTML = `
+        <div class="preview-grid">
+          <div class="preview-chip"><span>默认标注字段</span><strong>${escapeHtml(displayLabelFields(defaults.label_fields || []))}</strong></div>
+          <div class="preview-chip"><span>默认带框</span><strong>${escapeHtml(defaults.show_frame ? "是" : "否")}</strong></div>
+          <div class="preview-chip"><span>转曲要求</span><strong>${escapeHtml(requirements.must_outline_text ? "需要" : "未声明")}</strong></div>
+          <div class="preview-chip"><span>合并去重</span><strong>${escapeHtml(requirements.must_pathfinder_merge ? "需要" : "未声明")}</strong></div>
+          <div class="preview-chip"><span>部门输出规则</span><strong>${escapeHtml(`${outputs.length} 条`)}</strong></div>
+        </div>
+      `;
+    }
+
     function syncSelectedRule() {
       const rule = selectedRule();
       if (!rule) {
@@ -1279,6 +1329,29 @@ INDEX_HTML = """<!doctype html>
       `;
     }
 
+    async function renderRulePreviewFromServer() {
+      const draft = buildRuleDraftPayload();
+      if (!draft.natural_text) {
+        renderRulePreview();
+        return;
+      }
+      setMessage("ruleSaveMessage", "解析中", "");
+      try {
+        const payload = await postJson("/api/rules/department/parse", draft);
+        const parsed = payload.draft || {};
+        fillRuleForm(parsed);
+        const source = parsed.parser && parsed.parser.source ? parsed.parser.source : "local";
+        renderRulePreview();
+        document.getElementById("rulePreview").insertAdjacentHTML(
+          "beforeend",
+          `<div class="preview-grid" style="margin-top:10px"><div class="preview-chip"><span>解析来源</span><strong>${escapeHtml(source)}</strong></div></div>`
+        );
+        setMessage("ruleSaveMessage", "已生成结构化预览，请确认后保存", "ok");
+      } catch (error) {
+        setMessage("ruleSaveMessage", String(error.message || error), "error");
+      }
+    }
+
     async function saveRuleDraft() {
       const draft = buildRuleDraftPayload();
       if (!draft.rule_name) {
@@ -1295,6 +1368,24 @@ INDEX_HTML = """<!doctype html>
         state.ruleMode = "draft";
         await loadRules();
         setMessage("ruleSaveMessage", "草稿已保存", "ok");
+      } catch (error) {
+        setMessage("ruleSaveMessage", String(error.message || error), "error");
+      }
+    }
+
+    async function publishRule() {
+      const draft = buildRuleDraftPayload();
+      if (!draft.rule_name) {
+        setMessage("ruleSaveMessage", "请填写规则名称", "error");
+        return;
+      }
+      setMessage("ruleSaveMessage", "保存发布规则中", "");
+      try {
+        await postJson("/api/rules/department/publish", draft);
+        state.selectedRuleName = draft.rule_name;
+        state.ruleMode = "published";
+        await loadRules();
+        setMessage("ruleSaveMessage", "发布规则已保存", "ok");
       } catch (error) {
         setMessage("ruleSaveMessage", String(error.message || error), "error");
       }
