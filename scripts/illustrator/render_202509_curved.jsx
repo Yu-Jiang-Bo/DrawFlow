@@ -137,7 +137,6 @@
         var tf = layer.textFrames.add();
         tf.contents = text;
         applyFont(tf, font.font_name);
-        applyStableNameTypography(tf);
         applyBlack(tf);
         tf.textRange.characterAttributes.size = 18;
         fitTextToRect(tf, [left + padding, top - padding, left + width - padding, top - height + padding], minFontSize, maxFontSize);
@@ -365,28 +364,6 @@
                 }
             }
         } catch (e0) {}
-    }
-
-    function applyStableNameTypography(tf) {
-        var attr = tf.textRange.characterAttributes;
-        setCharacterAttribute(attr, "ligature", false);
-        setCharacterAttribute(attr, "contextualLigature", false);
-        setCharacterAttribute(attr, "discretionaryLigature", false);
-        setCharacterAttribute(attr, "stylisticAlternates", false);
-        setCharacterAttribute(attr, "swash", false);
-        setCharacterAttribute(attr, "titling", false);
-        setCharacterAttribute(attr, "ordinals", false);
-        setCharacterAttribute(attr, "fractions", false);
-        setCharacterAttribute(attr, "connectionForms", false);
-        setCharacterAttribute(attr, "tracking", 0);
-        setCharacterAttribute(attr, "kerning", 0);
-        try { attr.alternateGlyphs = AlternateGlyphsForm.DEFAULTFORM; } catch (e0) {}
-        try { attr.kerningMethod = AutoKernType.NOAUTOKERN; } catch (e1) {}
-        try { attr.kerningMethod = "None"; } catch (e2) {}
-    }
-
-    function setCharacterAttribute(attr, name, value) {
-        try { attr[name] = value; } catch (e0) {}
     }
 
     function applyBlack(tf) {
