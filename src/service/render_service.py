@@ -23,7 +23,7 @@ from ..jjmb_202509_curved_main import (
 from ..jjmb_config_grouped_main import build_grouped_task
 from ..renderer.illustrator_bridge import IllustratorBridge
 from .job_store import JobStore
-from .rule_center import check_template_definition, curved_layout_overrides, read_template_rule_config
+from .rule_center import check_template_definition, curved_layout_overrides, output_color_mode, read_template_rule_config
 from .template_registry import TemplateDefinition, TemplateRegistry
 
 
@@ -99,12 +99,14 @@ class RenderService:
         rows = read_202508_rows(order_file)
         items = parse_202508_items(rows)
         groups = group_202508_items(items)
+        template_rules = read_template_rule_config(template.template_rules_config)
         task = build_202508_task(
             template_config=template_config,
             output_ai=output_ai,
             groups=groups,
             columns=request["columns"],
             show_style_boxes=not request["hide_boxes"],
+            color_mode=output_color_mode(template_rules),
         )
         task_file = job_dir / "render-task.json"
         self._write_json(task_file, task)
@@ -142,6 +144,7 @@ class RenderService:
             template_config=template_config,
             output_ai=output_ai,
             columns=request["columns"],
+            color_mode=output_color_mode(read_template_rule_config(template.template_rules_config)),
         )
         task_file = job_dir / "render-task.json"
         self._write_json(task_file, task.to_json_dict())
@@ -182,6 +185,7 @@ class RenderService:
             groups=groups,
             columns=request["columns"],
             layout_overrides=curved_layout_overrides(template_rules),
+            color_mode=output_color_mode(template_rules),
         )
         task_file = job_dir / "render-task.json"
         self._write_json(task_file, task)

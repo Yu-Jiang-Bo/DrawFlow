@@ -8,6 +8,8 @@
     if (task.type !== "config_grouped_text_sheet") throw new Error("Unsupported task type: " + task.type);
     var config = readJSON(String(task.template_config));
     if (!task.groups || task.groups.length === 0) throw new Error("No order groups");
+    var exportConfig = task.export || {};
+    var colorMode = outputColorMode(exportConfig.color_mode);
 
     try { app.userInteractionLevel = UserInteractionLevel.DONTDISPLAYALERTS; } catch (e) {}
 
@@ -49,9 +51,10 @@
         maxColumnHeight: maxColumnHeight,
         docWidth: docWidth,
         docHeight: docHeight,
+        colorMode: colorMode,
         sampleStyle: styleConfig(config, task.groups[0].items[0].style_option)
     };
-    var doc = app.documents.add(DocumentColorSpace.RGB, docWidth, docHeight);
+    var doc = app.documents.add(documentColorSpace(colorMode), docWidth, docHeight);
     var layer = doc.layers[0];
     layer.name = "GROUPED_OUTPUT";
 
@@ -95,7 +98,7 @@
         }
     }
 
-    if (task.export && task.export.outline_text) outlineAndClean(outlines);
+    if (exportConfig.outline_text) outlineAndClean(outlines);
     debugPayload.textFit = {
         count: fitStats.count,
         maxDeltaPt: fitStats.maxDeltaPt,
@@ -387,5 +390,14 @@
 
     function mmToPt(mm) {
         return mm * 72 / 25.4;
+    }
+
+    function outputColorMode(value) {
+        var mode = String(value || "CMYK").toUpperCase();
+        return mode === "RGB" ? "RGB" : "CMYK";
+    }
+
+    function documentColorSpace(mode) {
+        return mode === "CMYK" ? DocumentColorSpace.CMYK : DocumentColorSpace.RGB;
     }
 }());

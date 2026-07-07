@@ -232,6 +232,7 @@ class ConfigGroupedSheetRenderTask:
     groups: List[TemplateTextOrderGroup]
     color_name: str = "black"
     columns: int = 4
+    color_mode: str = "CMYK"
 
     def to_json_dict(self) -> Dict[str, Any]:
         if not self.template_config:
@@ -265,9 +266,15 @@ class ConfigGroupedSheetRenderTask:
             "export": {
                 "format": "ai",
                 "compatibility": "Illustrator 8",
+                "color_mode": _normalize_color_mode(self.color_mode),
                 "outline_text": True,
             },
             "debug": {
                 "report_path": str(self.output_ai.with_suffix(".debug.json")),
             },
         }
+
+
+def _normalize_color_mode(value: object) -> str:
+    text = str(value or "").strip().upper()
+    return text if text in {"CMYK", "RGB"} else "CMYK"

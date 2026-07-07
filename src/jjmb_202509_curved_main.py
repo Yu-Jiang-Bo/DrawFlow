@@ -239,6 +239,7 @@ def build_task(
     keep_title_frames: bool = False,
     keep_name_frames: bool = False,
     layout_overrides: Mapping[str, object] | None = None,
+    color_mode: str = "CMYK",
 ) -> Dict[str, object]:
     if not groups:
         raise ValueError("No renderable orders")
@@ -274,6 +275,7 @@ def build_task(
         "output": {
             "format": "ai",
             "compatibility": "Illustrator 8",
+            "color_mode": _normalize_color_mode(color_mode),
             "outline_text": True,
             "pathfinder_merge": True,
         },
@@ -296,6 +298,11 @@ def _positive_number(value: object) -> float:
     return number if number > 0 else 0.0
 
 
+def _normalize_color_mode(value: object) -> str:
+    text = str(value or "").strip().upper()
+    return text if text in {"CMYK", "RGB"} else "CMYK"
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Render JJMB202509231236046265 curved title orders")
     parser.add_argument("--xlsx", required=True)
@@ -304,6 +311,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--columns", type=int, default=5)
     parser.add_argument("--keep-title-frames", action="store_true")
     parser.add_argument("--keep-name-frames", action="store_true")
+    parser.add_argument("--color-mode", choices=["CMYK", "RGB"], default="CMYK")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--visible", action="store_true")
     return parser.parse_args()
@@ -324,6 +332,7 @@ def main() -> int:
             columns=args.columns,
             keep_title_frames=args.keep_title_frames,
             keep_name_frames=args.keep_name_frames,
+            color_mode=args.color_mode,
         )
         task_file = output_ai.parent / "render-tasks" / "jjmb-202509-curved-render-task.json"
         write_json(task_file, task)

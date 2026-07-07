@@ -1423,6 +1423,7 @@ INDEX_HTML = """<!doctype html>
         <div class="preview-grid">
           <div class="preview-chip"><span>默认标注字段</span><strong>${escapeHtml(displayLabelFields(defaults.label_fields || []))}</strong></div>
           <div class="preview-chip"><span>默认带框</span><strong>${escapeHtml(defaults.show_frame ? "是" : "否")}</strong></div>
+          <div class="preview-chip"><span>默认色彩模式</span><strong>${escapeHtml(requirements.default_output_color_mode || "CMYK")}</strong></div>
           <div class="preview-chip"><span>转曲要求</span><strong>${escapeHtml(requirements.must_outline_text ? "需要" : "未声明")}</strong></div>
           <div class="preview-chip"><span>合并去重</span><strong>${escapeHtml(requirements.must_pathfinder_merge ? "需要" : "未声明")}</strong></div>
           <div class="preview-chip"><span>部门输出规则</span><strong>${escapeHtml(`${outputs.length} 条`)}</strong></div>
@@ -1445,6 +1446,7 @@ INDEX_HTML = """<!doctype html>
           <div class="preview-chip"><span>文字和图片位置</span><strong>${escapeHtml(slotText)}</strong></div>
           <div class="preview-chip"><span>默认内容</span><strong>${escapeHtml(describeDefaults(defaults))}</strong></div>
           <div class="preview-chip"><span>尺寸规则</span><strong>${escapeHtml(describeDimensions(draft.dimensions || {}))}</strong></div>
+          <div class="preview-chip"><span>输出色彩</span><strong>${escapeHtml(describeOutputSettings(draft.output || {}))}</strong></div>
           <div class="preview-chip"><span>处理能力</span><strong>${escapeHtml(describeCapabilities(draft.capabilities || []))}</strong></div>
           <div class="preview-chip"><span>解析来源</span><strong>${escapeHtml(parser.source === "llm" ? "LLM 编译" : "本地规则编译")}</strong></div>
         </div>
@@ -1480,6 +1482,10 @@ INDEX_HTML = """<!doctype html>
       if (dimensions.title) parts.push(`标题 ${formatDimension(dimensions.title)}`);
       if (dimensions.name) parts.push(`名字 ${formatDimension(dimensions.name)}`);
       return parts.join("；") || "未识别";
+    }
+
+    function describeOutputSettings(output) {
+      return output.color_mode || "CMYK";
     }
 
     function formatDimension(dimension) {

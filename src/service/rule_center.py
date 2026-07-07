@@ -29,6 +29,9 @@ PIPELINE_CONFIG_REQUIRED = {
     "jjmb_202509_curved": True,
 }
 
+DEFAULT_OUTPUT_COLOR_MODE = "CMYK"
+OUTPUT_COLOR_MODES = {"CMYK", "RGB"}
+
 DIMENSION_PAIR_RE = re.compile(
     r"(?P<width>\d+(?:\.\d+)?)\s*(?P<width_unit>mm|cm|\u6beb\u7c73|\u5398\u7c73)?"
     r"\s*(?:\*|x|X|\u00d7|\uff0a)\s*"
@@ -66,6 +69,7 @@ def build_template_rule_draft(
     defaults = infer_defaults(raw)
     slots = infer_slots(mode, raw, capabilities, defaults)
     dimensions = parse_dimensions(raw)
+    output = infer_output_settings(raw)
 
     return {
         "version": 1,
@@ -80,6 +84,7 @@ def build_template_rule_draft(
         "design_options": design_options,
         "defaults": defaults,
         "dimensions": dimensions,
+        "output": output,
         "slots": slots,
         "assets": {
             "mode": "split_ai" if mode == "asset_split" else "inline",
@@ -212,6 +217,35 @@ def curved_layout_overrides(config: Dict[str, Any]) -> Dict[str, float]:
         if height:
             result[f"{target}_height_mm"] = height
     return result
+
+
+def infer_output_settings(text: str) -> Dict[str, str]:
+    return {"color_mode": infer_output_color_mode(text) or DEFAULT_OUTPUT_COLOR_MODE}
+
+
+def infer_output_color_mode(text: str) -> str:
+    upper = (text or "").upper()
+    if "RGB" in upper:
+        return "RGB"
+    if "CMYK" in upper:
+        return "CMYK"
+    return ""
+
+
+def output_color_mode(config: Dict[str, Any], default: str = DEFAULT_OUTPUT_COLOR_MODE) -> str:
+    output = config.get("output")
+    if isinstance(output, dict):
+        mode = _normalize_output_color_mode(output.get("color_mode"))
+        if mode:
+            return mode
+    mode = _normalize_output_color_mode(config.get("output_color_mode"))
+    if mode:
+        return mode
+    if isinstance(config.get("raw_text"), str):
+        mode = infer_output_color_mode(config["raw_text"])
+        if mode:
+            return mode
+    return _normalize_output_color_mode(default) or DEFAULT_OUTPUT_COLOR_MODE
 
 
 def infer_mode(template_type: str, text: str, asset_count: int = 0) -> str:
@@ -404,3 +438,8 @@ def _positive_float(value: object) -> float:
     except (TypeError, ValueError):
         return 0.0
     return number if number > 0 else 0.0
+
+
+def _normalize_output_color_mode(value: object) -> str:
+    mode = str(value or "").strip().upper()
+    return mode if mode in OUTPUT_COLOR_MODES else ""

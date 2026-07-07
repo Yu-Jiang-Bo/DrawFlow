@@ -11,6 +11,8 @@
     "interpretation": "表格中的“定制信息”指系统生成的实际效果图/作图内容，不是订单表里的原始定制文字。",
     "current_render_policy": "当前渲染仍只输出订单号、颜色标注和实际效果图；暂不按本节规则执行最终部门排版。",
     "global_requirements": {
+      "default_output_color_mode": "CMYK",
+      "allowed_output_color_modes": ["CMYK", "RGB"],
       "must_outline_text": true,
       "must_pathfinder_merge": true,
       "size_frame_text_path_overlap": true,

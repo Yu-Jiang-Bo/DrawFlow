@@ -292,6 +292,7 @@ def build_task(
     groups: List[ColorDesignOrderGroup],
     columns: int,
     show_style_boxes: bool,
+    color_mode: str = "CMYK",
 ) -> Dict[str, object]:
     if not groups:
         raise ValueError("没有可渲染订单")
@@ -321,6 +322,7 @@ def build_task(
         "output": {
             "format": "ai",
             "compatibility": "Illustrator 8",
+            "color_mode": _normalize_color_mode(color_mode),
             "outline_text": True,
             "pathfinder_merge": True,
         },
@@ -333,6 +335,11 @@ def build_task(
 def write_json(path: Path, payload: Dict[str, object]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _normalize_color_mode(value: object) -> str:
+    text = str(value or "").strip().upper()
+    return text if text in {"CMYK", "RGB"} else "CMYK"
 
 
 def export_template_config(template_ai: Path, output_json: Path, visible: bool) -> None:
@@ -362,6 +369,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--template-config", default="", help="template.config.json 输出/复用路径")
     parser.add_argument("--columns", type=int, default=4, help="订单组列数")
     parser.add_argument("--hide-boxes", action="store_true", help="不渲染测试尺寸框")
+    parser.add_argument("--color-mode", choices=["CMYK", "RGB"], default="CMYK", help="输出色彩模式")
     parser.add_argument("--skip-export", action="store_true", help="跳过模板配置导出")
     parser.add_argument("--dry-run", action="store_true", help="只生成任务，不渲染")
     parser.add_argument("--visible", action="store_true", help="显示 Illustrator")
@@ -389,6 +397,7 @@ def main() -> int:
             groups=groups,
             columns=args.columns,
             show_style_boxes=not args.hide_boxes,
+            color_mode=args.color_mode,
         )
         task_file = output_ai.parent / "render-tasks" / "jjmb-202508-render-task.json"
         write_json(task_file, task)

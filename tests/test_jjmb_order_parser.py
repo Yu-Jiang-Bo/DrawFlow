@@ -94,4 +94,16 @@ def test_grouped_sheet_groups_items_by_order_number(tmp_path):
     assert len(task.groups) == 1
     assert task.groups[0].order_no == "ORDER1"
     assert [item.text for item in task.groups[0].items] == ["A", "B", "B"]
-    assert task.to_json_dict()["layout"]["show_style_boxes"] is True
+    payload = task.to_json_dict()
+    assert payload["layout"]["show_style_boxes"] is True
+    assert payload["export"]["color_mode"] == "CMYK"
+
+    rgb_task = build_grouped_task(
+        xlsx_path=xlsx,
+        template_config=Path("template.config.json"),
+        output_ai=tmp_path / "out-rgb.ai",
+        columns=4,
+        color_mode="RGB",
+    )
+
+    assert rgb_task.to_json_dict()["export"]["color_mode"] == "RGB"

@@ -63,6 +63,7 @@ class LlmRuleParser:
                     "content": (
                         "你是制图规则解析器。只返回 JSON，不要返回解释。"
                         "不得编造业务字段，不确定的字段留空数组或空字符串。"
+                        "如果规则提到输出 RGB 或 CMYK，请在 output.color_mode 中返回 RGB 或 CMYK。"
                     ),
                 },
                 {

@@ -5,6 +5,7 @@ from src.service.rule_center import (
     build_template_rule_draft,
     check_template_definition,
     curved_layout_overrides,
+    output_color_mode,
     parse_dimensions,
 )
 from src.service.template_registry import TemplateRegistry
@@ -37,6 +38,19 @@ def test_template_rule_draft_extracts_dimensions_from_business_text():
     assert draft["dimensions"]["title"]["height_mm"] == 7.0
     assert draft["dimensions"]["name"]["width_mm"] == 16.0
     assert draft["dimensions"]["name"]["height_mm"] == 5.0
+
+
+def test_template_rule_draft_extracts_output_color_mode():
+    draft = build_template_rule_draft(
+        template_id="JJMB202607070001",
+        template_type="pure_text_color_design",
+        natural_text="最终输出 RGB 格式，仍然需要转曲去重。",
+    )
+
+    assert draft["output"]["color_mode"] == "RGB"
+    assert output_color_mode(draft) == "RGB"
+    assert output_color_mode({"raw_text": "生产输出 CMYK 文件"}) == "CMYK"
+    assert output_color_mode({}) == "CMYK"
 
 
 def test_curved_layout_overrides_reads_structured_or_raw_dimensions():

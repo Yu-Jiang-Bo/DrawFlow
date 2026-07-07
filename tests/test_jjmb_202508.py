@@ -116,6 +116,8 @@ def test_department_rules_are_loaded_from_config():
     assert "实际效果图" in shop_rules["interpretation"]
     assert "暂不按本节规则执行最终部门排版" in shop_rules["current_render_policy"]
     assert shop_rules["global_requirements"]["must_pathfinder_merge"] is True
+    assert shop_rules["global_requirements"]["default_output_color_mode"] == "CMYK"
+    assert shop_rules["global_requirements"]["allowed_output_color_modes"] == ["CMYK", "RGB"]
     assert shop_rules["global_requirements"]["size_frame_text_path_overlap"] is True
     assert "去重很重要" in shop_rules["global_requirements"]["outline_dedupe_note"]
     k_output = next(rule for rule in shop_rules["department_output_requirements"] if rule["name"] == "K")

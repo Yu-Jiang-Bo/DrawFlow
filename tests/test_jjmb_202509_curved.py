@@ -112,6 +112,7 @@ def test_build_task_can_keep_debug_frames(tmp_path):
 
     assert task["layout"]["keep_title_frames"] is True
     assert task["layout"]["keep_name_frames"] is True
+    assert task["output"]["color_mode"] == "CMYK"
     assert task["output"]["pathfinder_merge"] is True
     assert task["font_map"]["F1"]["bounds_shape_ratio"] == {}
 
@@ -141,6 +142,7 @@ def test_build_task_applies_layout_dimension_overrides(tmp_path):
         tmp_path / "out.ai",
         groups,
         columns=1,
+        color_mode="RGB",
         layout_overrides={
             "name_width_mm": 18,
             "name_height_mm": 6,
@@ -153,3 +155,4 @@ def test_build_task_applies_layout_dimension_overrides(tmp_path):
     assert task["layout"]["name_height_mm"] == 6.0
     assert task["layout"]["title_width_mm"] == 42.0
     assert task["layout"]["title_height_mm"] == 8.0
+    assert task["output"]["color_mode"] == "RGB"

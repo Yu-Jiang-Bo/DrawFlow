@@ -11,6 +11,7 @@
     var layout = task.layout || {};
     var fit = task.fit || {};
     var outputConfig = task.output || {};
+    var colorMode = outputColorMode(outputConfig.color_mode);
     var columns = Math.max(Number(layout.columns || 5), 1);
     var margin = mmToPt(Number(layout.margin_mm || 8));
     var gap = mmToPt(Number(layout.gap_mm || 18));
@@ -51,7 +52,7 @@
     var docWidth = margin * 2 + columns * columnWidth + (columns - 1) * gap;
     var docHeight = margin * 2 + maxColumnHeight;
 
-    var doc = app.documents.add(DocumentColorSpace.RGB, docWidth, docHeight);
+    var doc = app.documents.add(documentColorSpace(colorMode), docWidth, docHeight);
     var layer = doc.layers[0];
     layer.name = "JJMB202509231236046265_OUTPUT";
     var textItems = [];
@@ -96,6 +97,7 @@
         nameHeight: nameHeight,
         titleWidth: titleWidth,
         titleHeight: titleHeight,
+        colorMode: colorMode,
         keepNameFrames: keepNameFrames,
         keepTitleFrames: keepTitleFrames,
         pathfinderMerge: pathfinderMerge
@@ -515,5 +517,14 @@
 
     function mmToPt(mm) {
         return mm * 72 / 25.4;
+    }
+
+    function outputColorMode(value) {
+        var mode = String(value || "CMYK").toUpperCase();
+        return mode === "RGB" ? "RGB" : "CMYK";
+    }
+
+    function documentColorSpace(mode) {
+        return mode === "CMYK" ? DocumentColorSpace.CMYK : DocumentColorSpace.RGB;
     }
 }());

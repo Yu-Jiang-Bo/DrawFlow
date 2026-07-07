@@ -20,6 +20,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--template-config", required=True, help="template.config.json 路径")
     parser.add_argument("--output-ai", required=True, help="合并输出 AI 路径")
     parser.add_argument("--columns", type=int, default=4, help="每行订单组列数")
+    parser.add_argument("--color-mode", choices=["CMYK", "RGB"], default="CMYK", help="输出色彩模式")
     parser.add_argument("--dry-run", action="store_true", help="只生成任务，不调用 Illustrator")
     parser.add_argument("--visible", action="store_true", help="显示 Illustrator 窗口")
     return parser.parse_args()
@@ -30,6 +31,7 @@ def build_grouped_task(
     template_config: Path,
     output_ai: Path,
     columns: int,
+    color_mode: str = "CMYK",
 ) -> ConfigGroupedSheetRenderTask:
     rows = read_xlsx_rows(xlsx_path)
     order_items = parse_order_items(rows, template_id=TEMPLATE_ID)
@@ -60,6 +62,7 @@ def build_grouped_task(
         output_ai=output_ai,
         groups=groups,
         columns=max(columns, 1),
+        color_mode=color_mode,
     )
 
 
@@ -80,6 +83,7 @@ def main() -> int:
         template_config=Path(args.template_config).resolve(),
         output_ai=output_ai,
         columns=args.columns,
+        color_mode=args.color_mode,
     )
     task_file = write_task_file(task)
     item_count = sum(len(group.items) for group in task.groups)

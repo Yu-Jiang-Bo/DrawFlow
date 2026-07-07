@@ -8,6 +8,7 @@
     var config = readJSON(String(task.template_config));
     if (!task.groups || task.groups.length === 0) throw new Error("No order groups");
     var outputConfig = task.output || {};
+    var colorMode = outputColorMode(outputConfig.color_mode);
     var pathfinderMerge = outputConfig.pathfinder_merge !== false;
     var cleanupStats = { attempted: 0, failed: 0 };
 
@@ -67,11 +68,12 @@
         contentHeightPt: contentSize.height,
         compactLabelWidthPt: compactLabelWidth,
         groupLabelHeightPt: groupLabelHeight,
+        colorMode: colorMode,
         pathfinderMerge: pathfinderMerge,
         cleanupStats: cleanupStats
     };
 
-    var doc = app.documents.add(DocumentColorSpace.RGB, docWidth, docHeight);
+    var doc = app.documents.add(documentColorSpace(colorMode), docWidth, docHeight);
     var layer = doc.layers[0];
     layer.name = "JJMB202508261001394920_OUTPUT";
 
@@ -488,5 +490,14 @@
 
     function mmToPt(mm) {
         return mm * 72 / 25.4;
+    }
+
+    function outputColorMode(value) {
+        var mode = String(value || "CMYK").toUpperCase();
+        return mode === "RGB" ? "RGB" : "CMYK";
+    }
+
+    function documentColorSpace(mode) {
+        return mode === "CMYK" ? DocumentColorSpace.CMYK : DocumentColorSpace.RGB;
     }
 }());
