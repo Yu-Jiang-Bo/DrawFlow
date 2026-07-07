@@ -21,6 +21,7 @@
     var titleWidth = mmToPt(Number(layout.title_width_mm || 40));
     var titleHeight = mmToPt(Number(layout.title_height_mm || 7));
     var keepTitleFrames = layout.keep_title_frames === true;
+    var keepNameFrames = layout.keep_name_frames === true;
     var minFontSize = Number(fit.min_font_size_pt || 4);
     var maxFontSize = Number(fit.max_font_size_pt || 80);
     var padding = mmToPt(Number(fit.padding_mm || 0.2));
@@ -53,6 +54,7 @@
     layer.name = "JJMB202509231236046265_OUTPUT";
     var textItems = [];
     var pathItems = [];
+    var nameFrameItems = [];
     var titleFrameItems = [];
 
     for (var gi = 0; gi < groups.length; gi++) {
@@ -76,7 +78,7 @@
             if (item.text_type === "title") {
                 drawCurvedTitle(layer, String(item.text || ""), font, itemLeft, itemTop, width, heightForItem, textItems, pathItems, titleFrameItems);
             } else {
-                drawName(layer, String(item.text || ""), font, itemLeft, itemTop, width, heightForItem, textItems);
+                drawName(layer, String(item.text || ""), font, itemLeft, itemTop, width, heightForItem, textItems, nameFrameItems);
             }
             cursorTop = itemBottom - itemGap;
         }
@@ -91,13 +93,16 @@
         nameWidth: nameWidth,
         nameHeight: nameHeight,
         titleWidth: titleWidth,
-        titleHeight: titleHeight
+        titleHeight: titleHeight,
+        keepNameFrames: keepNameFrames,
+        keepTitleFrames: keepTitleFrames
     });
 
     if (task.output && task.output.outline_text) {
         outlineText(textItems);
         removeItems(pathItems);
     }
+    if (!keepNameFrames) removeItems(nameFrameItems);
     if (!keepTitleFrames) removeItems(titleFrameItems);
 
     var output = File(String(task.output_ai));
@@ -120,7 +125,9 @@
         textItems.push(tf);
     }
 
-    function drawName(layer, text, font, left, top, width, height, textItems) {
+    function drawName(layer, text, font, left, top, width, height, textItems, nameFrameItems) {
+        var frame = drawDebugRect(layer, "NAME_DEBUG_BOUNDS", left, top, width, height);
+        nameFrameItems.push(frame);
         var tf = layer.textFrames.add();
         tf.contents = text;
         applyFont(tf, font.font_name);
@@ -194,8 +201,12 @@
     }
 
     function drawFallbackTitleFrame(layer, left, top, width, height) {
+        return drawDebugRect(layer, "TITLE_DEBUG_BOUNDS", left, top, width, height);
+    }
+
+    function drawDebugRect(layer, name, left, top, width, height) {
         var rect = layer.pathItems.rectangle(top, left, width, height);
-        rect.name = "TITLE_DEBUG_BOUNDS";
+        rect.name = name;
         rect.filled = false;
         rect.stroked = true;
         rect.strokeWidth = 0.25;

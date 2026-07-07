@@ -88,7 +88,7 @@ def test_group_items_keeps_different_detail_rows_separate():
     ]
 
 
-def test_build_task_can_keep_title_frames(tmp_path):
+def test_build_task_can_keep_debug_frames(tmp_path):
     report = tmp_path / "report.json"
     report.write_text(
         '{"entries":[{"status":"ok","font_option":"F1","font_name":"TestFont","baseline_ratio":{},"bounds_shape_ratio":{}}]}',
@@ -108,9 +108,10 @@ def test_build_task_can_keep_title_frames(tmp_path):
         )
     )
 
-    task = build_task(report, tmp_path / "out.ai", groups, columns=1, keep_title_frames=True)
+    task = build_task(report, tmp_path / "out.ai", groups, columns=1, keep_title_frames=True, keep_name_frames=True)
 
     assert task["layout"]["keep_title_frames"] is True
+    assert task["layout"]["keep_name_frames"] is True
     assert task["font_map"]["F1"]["bounds_shape_ratio"] == {}
 
 
