@@ -7,7 +7,7 @@ from src.jjmb_config_grouped_main import build_grouped_task
 from src.render_task import RenderTaskError
 from src.service.job_store import JobStore
 from src.service.http_server import RenderRequestHandler
-from src.service.render_service import RenderService
+from src.service.render_service import RenderService, _design_font_options
 from src.service.template_registry import TemplateRegistry
 
 
@@ -293,6 +293,16 @@ def test_template_registry_saves_multiple_ai_assets(tmp_path):
     assert template.assets[0]["role"] == "独立设计模板"
     assert Path(template.assets[0]["stored_path"]).name == "design-a.ai"
     assert (storage_dir / "JJMB202607030002" / "assets" / "design-a.ai").exists()
+
+
+def test_render_service_reads_design_font_options_from_llm_rule_shape():
+    assert _design_font_options(
+        {
+            "design_options": {
+                "design_font_options": ["F10", "F11", "F12"],
+            }
+        }
+    ) == ["F10", "F11", "F12"]
 
 
 def test_template_registry_deletes_asset_registration_without_removing_files(tmp_path):

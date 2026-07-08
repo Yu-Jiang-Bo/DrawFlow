@@ -35,13 +35,38 @@ def build_grouped_task(
     color_mode: str = "CMYK",
     allowed_font_options: Iterable[str] | None = None,
     sheet_name: str | None = None,
+    design_font_options: Iterable[str] | None = None,
+    design_asset_path: Path | str | None = None,
 ) -> ConfigGroupedSheetRenderTask:
     rows = read_xlsx_rows(xlsx_path, sheet_name=sheet_name)
     order_items = parse_order_items(rows, template_id=TEMPLATE_ID)
     allowed_fonts = {str(value).strip() for value in (allowed_font_options or TEXT_FONT_OPTIONS) if str(value).strip()}
+    design_fonts = {str(value).strip() for value in (design_font_options or []) if str(value).strip()}
+    design_asset = str(Path(design_asset_path).resolve()) if design_asset_path else ""
     grouped: "OrderedDict[str, List[TemplateTextSheetItem]]" = OrderedDict()
     for order_item in order_items:
         if allowed_fonts and order_item.font_option not in allowed_fonts:
+            continue
+        if order_item.font_option in design_fonts:
+            if not design_asset:
+                raise RenderTaskError(f"字体选项 {order_item.font_option} 需要独立设计模板，但当前模板未配置设计资产")
+            values = [value.strip() for value in order_item.personalization_values if value.strip()]
+            if not values:
+                continue
+            grouped.setdefault(order_item.order_no, []).append(
+                TemplateTextSheetItem(
+                    order_no=order_item.order_no,
+                    detail_id=order_item.detail_id,
+                    text="|".join(values),
+                    font_option=order_item.font_option,
+                    style_option=order_item.style_option,
+                    quantity_index=1,
+                    render_kind="design_asset",
+                    text_parts=values,
+                    design_asset=design_asset,
+                    design_group=order_item.font_option,
+                )
+            )
             continue
         for index, text in enumerate(order_item.personalization_values, start=1):
             if not text.strip():

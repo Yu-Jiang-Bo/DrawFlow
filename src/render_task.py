@@ -148,6 +148,10 @@ class TemplateTextSheetItem:
     font_option: str
     style_option: str
     quantity_index: int = 1
+    render_kind: str = "text"
+    text_parts: List[str] | None = None
+    design_asset: str = ""
+    design_group: str = ""
 
     def to_json_dict(self) -> Dict[str, Any]:
         if not self.text:
@@ -156,14 +160,25 @@ class TemplateTextSheetItem:
             raise RenderTaskError("合并模板文字任务缺少 font_option")
         if not self.style_option:
             raise RenderTaskError("合并模板文字任务缺少 style_option")
-        return {
+        payload = {
             "order_no": self.order_no,
             "detail_id": self.detail_id,
             "quantity_index": self.quantity_index,
             "text": self.text,
             "font_option": self.font_option,
             "style_option": self.style_option,
+            "render_kind": self.render_kind,
         }
+        if self.text_parts:
+            payload["text_parts"] = list(self.text_parts)
+        if self.render_kind == "design_asset":
+            if not self.design_asset:
+                raise RenderTaskError("设计资产任务缺少 design_asset")
+            if not self.design_group:
+                raise RenderTaskError("设计资产任务缺少 design_group")
+            payload["design_asset"] = self.design_asset
+            payload["design_group"] = self.design_group
+        return payload
 
 
 @dataclass(frozen=True)

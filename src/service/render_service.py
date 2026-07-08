@@ -150,6 +150,8 @@ class RenderService:
             color_mode=output_color_mode(template_rules),
             allowed_font_options=_configured_font_options(template_rules, structure_config),
             sheet_name=request["sheet_name"] or None,
+            design_font_options=_design_font_options(template_rules),
+            design_asset_path=_design_asset_path(template),
         )
         task_file = job_dir / "render-task.json"
         self._write_json(task_file, task.to_json_dict())
@@ -275,4 +277,42 @@ def _configured_font_options(*configs: Dict[str, Any]) -> List[str] | None:
             options = [str(key).strip() for key in value if str(key).strip()]
             if options:
                 return options
+    return None
+
+
+def _design_font_options(config: Dict[str, Any]) -> List[str]:
+    values: List[str] = []
+    direct = config.get("design_font_options") if isinstance(config, dict) else None
+    if isinstance(direct, list):
+        values.extend(str(item).strip() for item in direct if str(item).strip())
+    nested = config.get("design_options") if isinstance(config, dict) else None
+    if isinstance(nested, dict):
+        nested_values = nested.get("design_font_options")
+        if isinstance(nested_values, list):
+            values.extend(str(item).strip() for item in nested_values if str(item).strip())
+    elif isinstance(nested, list):
+        values.extend(
+            str(item).strip()
+            for item in nested
+            if str(item).strip().upper().startswith("F")
+        )
+    seen = set()
+    result = []
+    for value in values:
+        if value not in seen:
+            result.append(value)
+            seen.add(value)
+    return result
+
+
+def _design_asset_path(template: TemplateDefinition) -> Path | None:
+    for asset in template.assets:
+        role = str(asset.get("role", ""))
+        if "独立设计" not in role:
+            continue
+        path = Path(str(asset.get("stored_path", "")))
+        if not path.is_absolute():
+            path = (Path(__file__).resolve().parents[2] / path).resolve()
+        if path.exists():
+            return path
     return None

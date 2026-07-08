@@ -78,7 +78,6 @@
         for (var j = 0; j < group.items.length; j++) {
             var item = group.items[j];
             var style = styleConfig(config, item.style_option);
-            var font = fontConfig(config, item.font_option);
             var styleWidth = styleWidthPt(style);
             var styleHeight = styleHeightPt(style);
             var boxLeft = groupLeft + (metric.width - styleWidth) / 2;
@@ -88,12 +87,18 @@
 
             if (showStyleBoxes) drawStyleBox(layer, boxLeft, boxTop, styleWidth, styleHeight, String(item.style_option || ""));
 
-            var tf = layer.textFrames.add();
-            tf.contents = String(item.text || "");
-            applyFontConfig(tf, font);
-            applyColor(tf, String(task.style && task.style.color_name || "black"));
-            var outline = renderOutlinedTextToRect(tf, [boxLeft + padding, boxTop - padding, boxRight - padding, boxBottom + padding], minFontSize, maxFontSize);
-            try { outline.name = String(item.order_no || "") + "_" + String(item.quantity_index || j + 1) + "_TEXT"; } catch (e0) {}
+            if (String(item.render_kind || "text") === "design_asset") {
+                var designItem = renderDesignAssetItem(layer, item, [boxLeft + padding, boxTop - padding, boxRight - padding, boxBottom + padding]);
+                try { designItem.name = String(item.order_no || "") + "_" + String(item.quantity_index || j + 1) + "_DESIGN"; } catch (eD0) {}
+            } else {
+                var font = fontConfig(config, item.font_option);
+                var tf = layer.textFrames.add();
+                tf.contents = String(item.text || "");
+                applyFontConfig(tf, font);
+                applyColor(tf, String(task.style && task.style.color_name || "black"));
+                var outline = renderOutlinedTextToRect(tf, [boxLeft + padding, boxTop - padding, boxRight - padding, boxBottom + padding], minFontSize, maxFontSize);
+                try { outline.name = String(item.order_no || "") + "_" + String(item.quantity_index || j + 1) + "_TEXT"; } catch (e0) {}
+            }
             cursorTop = boxBottom - itemGap;
         }
     }
@@ -188,6 +193,91 @@
         try { attr.horizontalScale = Number(font.horizontal_scale || 100); } catch (e2) {}
         try { attr.verticalScale = Number(font.vertical_scale || 100); } catch (e3) {}
         applyFont(tf, String(font.font_name || font.font_family || ""));
+    }
+
+    function renderDesignAssetItem(layer, item, rect) {
+        var assetPath = String(item.design_asset || "");
+        if (!assetPath) throw new Error("Design asset missing for: " + item.font_option);
+        var assetFile = File(assetPath);
+        if (!assetFile.exists) throw new Error("Design asset not found: " + assetPath);
+        var designDoc = app.open(assetFile);
+        var groupName = String(item.design_group || item.font_option || "");
+        var sourceGroup = findPageItemByName(designDoc, groupName);
+        if (!sourceGroup) {
+            designDoc.close(SaveOptions.DONOTSAVECHANGES);
+            throw new Error("Design group not found: " + groupName);
+        }
+        var copy = sourceGroup.duplicate(layer, ElementPlacement.PLACEATEND);
+        var parts = item.text_parts || [];
+        if (!parts.length && item.text) parts = String(item.text).split("|");
+        replaceDesignTexts(copy, parts);
+        designDoc.close(SaveOptions.DONOTSAVECHANGES);
+        fitPageItemToRect(copy, rect);
+        outlineTextFrames(copy);
+        cleanupOutline(copy);
+        recordFitDelta(fitPageItemToRect(copy, rect));
+        return copy;
+    }
+
+    function replaceDesignTexts(root, parts) {
+        var frames = [];
+        collectTextFrames(root, frames);
+        for (var i = 0; i < parts.length; i++) {
+            var slotName = "Text" + (i + 1);
+            var frame = findTextFrameByName(frames, slotName);
+            if (!frame && i < frames.length) frame = frames[i];
+            if (frame) frame.contents = String(parts[i] || "");
+        }
+    }
+
+    function findTextFrameByName(frames, name) {
+        var target = String(name || "").toLowerCase();
+        for (var i = 0; i < frames.length; i++) {
+            if (String(frames[i].name || "").toLowerCase() === target) return frames[i];
+        }
+        return null;
+    }
+
+    function collectTextFrames(item, out) {
+        if (!item) return;
+        if (item.typename === "TextFrame") {
+            out.push(item);
+            return;
+        }
+        if (!item.pageItems) return;
+        for (var i = 0; i < item.pageItems.length; i++) collectTextFrames(item.pageItems[i], out);
+    }
+
+    function outlineTextFrames(item) {
+        var frames = [];
+        collectTextFrames(item, frames);
+        for (var i = frames.length - 1; i >= 0; i--) {
+            try {
+                var outlined = frames[i].createOutline();
+                cleanupOutline(outlined);
+            } catch (e) {}
+        }
+    }
+
+    function findPageItemByName(doc, name) {
+        for (var l = 0; l < doc.layers.length; l++) {
+            var found = findInContainer(doc.layers[l], name);
+            if (found) return found;
+        }
+        return null;
+    }
+
+    function findInContainer(container, name) {
+        if (!container.pageItems) return null;
+        for (var i = 0; i < container.pageItems.length; i++) {
+            var item = container.pageItems[i];
+            if (item.name === name) return item;
+            if (item.pageItems) {
+                var found = findInContainer(item, name);
+                if (found) return found;
+            }
+        }
+        return null;
     }
 
     function applyFont(tf, fontName) {

@@ -158,3 +158,36 @@ def test_grouped_sheet_groups_items_by_order_number(tmp_path):
     )
 
     assert rgb_task.to_json_dict()["export"]["color_mode"] == "RGB"
+
+
+def test_grouped_sheet_keeps_design_font_as_single_asset_item(tmp_path):
+    xlsx = tmp_path / "orders.xlsx"
+    asset = tmp_path / "designs.ai"
+    asset.write_text("fake ai", encoding="utf-8")
+    from openpyxl import Workbook
+
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["内部订单号", "订单明细id", "购买数量", "模板", "定制信息"])
+    sheet.append(["ORDER1", "1", "1", "JJMB202603281027102517", "Style Option:Style 4\nFont Option:F10\nPersonalization:Tom|Jery"])
+    workbook.save(xlsx)
+
+    task = build_grouped_task(
+        xlsx_path=xlsx,
+        template_config=Path("template.config.json"),
+        output_ai=tmp_path / "design.ai",
+        columns=4,
+        allowed_font_options=[f"F{i}" for i in range(1, 13)],
+        design_font_options=["F10", "F11", "F12"],
+        design_asset_path=asset,
+    )
+
+    item = task.groups[0].items[0]
+    assert item.render_kind == "design_asset"
+    assert item.text == "Tom|Jery"
+    assert item.text_parts == ["Tom", "Jery"]
+    payload = task.to_json_dict()["groups"][0]["items"][0]
+    assert payload["render_kind"] == "design_asset"
+    assert payload["design_group"] == "F10"
+    assert payload["design_asset"] == str(asset.resolve())
+    assert payload["text_parts"] == ["Tom", "Jery"]
