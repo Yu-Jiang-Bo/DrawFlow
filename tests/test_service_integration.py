@@ -7,7 +7,12 @@ from src.jjmb_config_grouped_main import build_grouped_task
 from src.render_task import RenderTaskError
 from src.service.job_store import JobStore
 from src.service.http_server import RenderRequestHandler
-from src.service.render_service import RenderService, _design_font_options
+from src.service.render_service import (
+    RenderService,
+    _design_font_options,
+    _merge_202508_template_config,
+    _missing_202508_font_configs,
+)
 from src.service.template_registry import TemplateRegistry
 
 
@@ -303,6 +308,33 @@ def test_render_service_reads_design_font_options_from_llm_rule_shape():
             }
         }
     ) == ["F10", "F11", "F12"]
+
+
+def test_202508_template_config_merge_fills_missing_font_options():
+    base = {
+        "font_options": {
+            "F1": {"font_name": "Base Font"},
+        },
+        "design_options": {"Design1": {"box": "base"}},
+    }
+    reference = {
+        "font_options": {
+            "F1": {"font_name": "Reference Font"},
+            "F7": {"font_name": "Reference F7"},
+        }
+    }
+
+    merged = _merge_202508_template_config(base, reference)
+
+    assert merged["font_options"]["F1"]["font_name"] == "Base Font"
+    assert merged["font_options"]["F7"]["font_name"] == "Reference F7"
+    assert merged["design_options"] == {"Design1": {"box": "base"}}
+
+
+def test_202508_missing_font_configs_reports_used_options_only_once():
+    config = {"font_options": {"F1": {"font_name": "A"}}}
+
+    assert _missing_202508_font_configs(config, ["F1", "F7", "F7", ""]) == ["F7"]
 
 
 def test_template_registry_deletes_asset_registration_without_removing_files(tmp_path):

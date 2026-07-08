@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, Iterable, List
 
 from ..jjmb_202508_main import (
     build_task as build_202508_task,
@@ -95,11 +95,21 @@ class RenderService:
         template_config = job_dir / "template.config.json"
 
         if not request["dry_run"]:
+            if not template.template_ai:
+                raise RenderServiceError("模板缺少可用的 .ai 模板文件")
             export_202508_config(template.template_ai, template_config, request["visible"])
 
         rows = read_202508_rows(order_file, sheet_name=request["sheet_name"] or None)
         items = parse_202508_items(rows)
         groups = group_202508_items(items)
+        if not request["dry_run"]:
+            self._complete_202508_template_config(
+                template=template,
+                template_config=template_config,
+                groups=groups,
+                job_dir=job_dir,
+                visible=request["visible"],
+            )
         template_rules = read_template_rule_config(template.template_rules_config)
         task = build_202508_task(
             template_config=template_config,
@@ -115,12 +125,17 @@ class RenderService:
         if not request["dry_run"]:
             render_202508_task(task_file, request["visible"])
 
-        return {
-            "outputs": {
+        outputs = {
                 "output_ai": str(output_ai),
                 "template_config": str(template_config),
                 "render_task": str(task_file),
-            },
+        }
+        reference_config = job_dir / "reference-template.config.json"
+        if reference_config.exists():
+            outputs["reference_template_config"] = str(reference_config)
+
+        return {
+            "outputs": outputs,
             "stats": {
                 "groups": len(groups),
                 "items": sum(len(group.items) for group in groups),
@@ -239,6 +254,34 @@ class RenderService:
         script = Path(__file__).resolve().parents[2] / "scripts" / "illustrator" / "export_template_config.jsx"
         IllustratorBridge(visible=visible).render(script, task_file)
 
+    def _complete_202508_template_config(
+        self,
+        template: TemplateDefinition,
+        template_config: Path,
+        groups: Iterable[Any],
+        job_dir: Path,
+        visible: bool,
+    ) -> None:
+        config = read_template_rule_config(template_config)
+        used_fonts = _used_202508_font_options(groups)
+        missing = _missing_202508_font_configs(config, used_fonts)
+        if missing:
+            reference_ai = _reference_ai_asset_path(template)
+            if reference_ai:
+                reference_config = job_dir / "reference-template.config.json"
+                export_202508_config(reference_ai, reference_config, visible)
+                reference = read_template_rule_config(reference_config)
+                config = _merge_202508_template_config(config, reference)
+                self._write_json(template_config, config)
+                missing = _missing_202508_font_configs(config, used_fonts)
+        if missing:
+            joined = ", ".join(missing)
+            raise RenderServiceError(
+                "模板字体配置缺失，无法渲染："
+                f"{joined}。请确认尺寸/作图区模板包含字体区，"
+                "或上传包含 F1-F10 字体样本的原始参考模板。"
+            )
+
     def _write_json(self, path: Path, payload: Any) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -305,14 +348,81 @@ def _design_font_options(config: Dict[str, Any]) -> List[str]:
     return result
 
 
+def _used_202508_font_options(groups: Iterable[Any]) -> List[str]:
+    used: List[str] = []
+    seen = set()
+    for group in groups:
+        for item in getattr(group, "items", []) or []:
+            name = str(getattr(item, "font_option", "") or "").strip()
+            if name and name not in seen:
+                used.append(name)
+                seen.add(name)
+    return used
+
+
+def _missing_202508_font_configs(config: Dict[str, Any], font_options: Iterable[str]) -> List[str]:
+    fonts = config.get("font_options") if isinstance(config, dict) else {}
+    if not isinstance(fonts, dict):
+        fonts = {}
+    missing: List[str] = []
+    seen = set()
+    for font_option in font_options:
+        name = str(font_option or "").strip()
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        if not isinstance(fonts.get(name), dict):
+            missing.append(name)
+    return missing
+
+
+def _merge_202508_template_config(base: Dict[str, Any], reference: Dict[str, Any]) -> Dict[str, Any]:
+    merged = dict(base or {})
+    base_fonts = merged.get("font_options")
+    if not isinstance(base_fonts, dict):
+        base_fonts = {}
+    else:
+        base_fonts = dict(base_fonts)
+
+    reference_fonts = reference.get("font_options") if isinstance(reference, dict) else {}
+    if isinstance(reference_fonts, dict):
+        for name, payload in reference_fonts.items():
+            key = str(name or "").strip()
+            if key and key not in base_fonts:
+                base_fonts[key] = payload
+
+    merged["font_options"] = base_fonts
+    return merged
+
+
 def _design_asset_path(template: TemplateDefinition) -> Path | None:
     for asset in template.assets:
         role = str(asset.get("role", ""))
         if "独立设计" not in role:
             continue
-        path = Path(str(asset.get("stored_path", "")))
-        if not path.is_absolute():
-            path = (Path(__file__).resolve().parents[2] / path).resolve()
-        if path.exists():
+        path = _template_asset_path(asset)
+        if path and path.exists():
             return path
     return None
+
+
+def _reference_ai_asset_path(template: TemplateDefinition) -> Path | None:
+    role_tokens = ("原始参考", "参考模板", "reference")
+    for asset in template.assets:
+        role = str(asset.get("role", ""))
+        if not any(token.lower() in role.lower() for token in role_tokens):
+            continue
+        path = _template_asset_path(asset)
+        if path and path.exists():
+            return path
+    return None
+
+
+def _template_asset_path(asset: Dict[str, Any]) -> Path | None:
+    value = str(asset.get("stored_path", "") or "").strip()
+    if not value:
+        return None
+    path = Path(value)
+    if not path.is_absolute():
+        path = (Path(__file__).resolve().parents[2] / path).resolve()
+    return path
