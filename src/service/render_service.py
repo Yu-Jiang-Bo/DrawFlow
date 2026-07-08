@@ -23,6 +23,7 @@ from ..jjmb_202509_curved_main import (
 from ..jjmb_config_grouped_main import build_grouped_task
 from ..renderer.illustrator_bridge import IllustratorBridge
 from .job_store import JobStore
+from .llm_rule_parser import normalize_option_list
 from .rule_center import check_template_definition, curved_layout_overrides, output_color_mode, read_template_rule_config
 from .template_registry import TemplateDefinition, TemplateRegistry
 
@@ -312,32 +313,24 @@ def _to_bool(value: object) -> bool:
 def _configured_font_options(*configs: Dict[str, Any]) -> List[str] | None:
     for config in configs:
         value = config.get("font_options") if isinstance(config, dict) else None
-        if isinstance(value, list):
-            options = [str(item).strip() for item in value if str(item).strip()]
-            if options:
-                return options
-        if isinstance(value, dict):
-            options = [str(key).strip() for key in value if str(key).strip()]
-            if options:
-                return options
+        options = normalize_option_list(value)
+        if options:
+            return options
     return None
 
 
 def _design_font_options(config: Dict[str, Any]) -> List[str]:
     values: List[str] = []
     direct = config.get("design_font_options") if isinstance(config, dict) else None
-    if isinstance(direct, list):
-        values.extend(str(item).strip() for item in direct if str(item).strip())
+    values.extend(normalize_option_list(direct))
     nested = config.get("design_options") if isinstance(config, dict) else None
     if isinstance(nested, dict):
-        nested_values = nested.get("design_font_options")
-        if isinstance(nested_values, list):
-            values.extend(str(item).strip() for item in nested_values if str(item).strip())
+        values.extend(normalize_option_list(nested.get("design_font_options")))
     elif isinstance(nested, list):
         values.extend(
-            str(item).strip()
-            for item in nested
-            if str(item).strip().upper().startswith("F")
+            item
+            for item in normalize_option_list(nested)
+            if item.upper().startswith("F")
         )
     seen = set()
     result = []

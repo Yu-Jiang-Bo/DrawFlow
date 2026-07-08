@@ -7,7 +7,7 @@ import os
 import re
 import urllib.error
 import urllib.request
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 
 class LlmRuleParser:
@@ -46,17 +46,17 @@ class LlmRuleParser:
         if not self.configured:
             if require_llm:
                 raise RuntimeError("LLM 规则编译未配置，请设置 CUSTOM_RENDERER_LLM_API_KEY 和 CUSTOM_RENDERER_LLM_BASE_URL")
-            return with_parser_meta(fallback, source="local", configured=False)
+            return with_parser_meta(normalize_rule_draft(fallback), source="local", configured=False)
         try:
             parsed = self._call_llm(kind=kind, natural_text=natural_text, context=context)
         except Exception as exc:
             if require_llm:
                 raise RuntimeError(f"LLM 规则编译失败: {exc}") from exc
-            draft = with_parser_meta(fallback, source="local", configured=True)
+            draft = with_parser_meta(normalize_rule_draft(fallback), source="local", configured=True)
             draft["parser"]["llm_error"] = str(exc)
             return draft
         merged = merge_drafts(fallback, parsed)
-        return with_parser_meta(merged, source="llm", configured=True)
+        return with_parser_meta(normalize_rule_draft(merged), source="llm", configured=True)
 
     def _call_llm(self, *, kind: str, natural_text: str, context: Dict[str, Any]) -> Dict[str, Any]:
         endpoint = self._endpoint()
@@ -72,6 +72,8 @@ class LlmRuleParser:
                         "模板规则 JSON 字段必须尽量使用：version, template_id, mode, status, rule_source, raw_text, "
                         "capabilities, font_options, style_options, design_options, defaults, transforms, dimensions, "
                         "output, slots, assets。"
+                        "font_options、style_options、design_font_options、capabilities 必须返回字符串数组，"
+                        "例如 [\"F1\",\"F2\"]，不要返回对象数组。"
                         "如果业务把 F10-F12 这类字体选项描述为独立设计/设计款，也要保留在 font_options，"
                         "并在 design_options 或 design_font_options 中表达这些设计型字体选项。"
                         "如果规则提到 Text1/Text2/Text3 等变量，slots 中必须分别返回 replace_text 槽位。"
@@ -134,6 +136,86 @@ def merge_drafts(fallback: Dict[str, Any], parsed: Dict[str, Any]) -> Dict[str, 
         if value not in ("", [], {}, None):
             merged[key] = value
     return merged
+
+
+OPTION_VALUE_KEYS = (
+    "id",
+    "value",
+    "name",
+    "code",
+    "key",
+    "option",
+    "font_option",
+    "fontOption",
+    "style_option",
+    "styleOption",
+    "design_option",
+    "designOption",
+    "font",
+    "label",
+    "display_name",
+)
+
+
+def normalize_rule_draft(draft: Dict[str, Any]) -> Dict[str, Any]:
+    result = dict(draft or {})
+    for key in ("font_options", "style_options", "design_font_options", "capabilities"):
+        if key in result:
+            result[key] = normalize_option_list(result.get(key))
+
+    design_options = result.get("design_options")
+    if isinstance(design_options, list):
+        result["design_options"] = normalize_option_list(design_options)
+    elif isinstance(design_options, dict):
+        normalized_design = dict(design_options)
+        for key in ("design_font_options", "font_options", "style_options", "options"):
+            if key in normalized_design:
+                normalized_design[key] = normalize_option_list(normalized_design.get(key))
+        result["design_options"] = normalized_design
+
+    return result
+
+
+def normalize_option_list(value: Any) -> List[str]:
+    if value in (None, ""):
+        return []
+    if isinstance(value, dict):
+        for key in ("design_font_options", "font_options", "style_options", "options"):
+            nested = value.get(key)
+            if nested:
+                return normalize_option_list(nested)
+        direct = option_text(value)
+        if direct:
+            return [direct]
+        values = list(value.keys())
+    elif isinstance(value, list):
+        values = value
+    else:
+        values = [value]
+
+    result: List[str] = []
+    seen = set()
+    for item in values:
+        text = option_text(item)
+        if text and text not in seen:
+            result.append(text)
+            seen.add(text)
+    return result
+
+
+def option_text(value: Any) -> str:
+    if value in (None, ""):
+        return ""
+    if isinstance(value, (str, int, float)):
+        return str(value).strip()
+    if isinstance(value, dict):
+        for key in OPTION_VALUE_KEYS:
+            nested = value.get(key)
+            if isinstance(nested, (str, int, float)) and str(nested).strip():
+                return str(nested).strip()
+        if len(value) == 1:
+            return str(next(iter(value.keys()))).strip()
+    return ""
 
 
 def with_parser_meta(draft: Dict[str, Any], *, source: str, configured: bool) -> Dict[str, Any]:

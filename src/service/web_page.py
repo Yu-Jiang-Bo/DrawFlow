@@ -1803,24 +1803,72 @@ INDEX_HTML = """<!doctype html>
         outline_dedupe: "转曲去重",
         export_ai8: "输出 AI8"
       };
-      return (capabilities || []).map(item => names[item] || item).join("；") || "未识别";
+      return normalizeOptions(capabilities).map(item => names[item] || item).join("；") || "未识别";
     }
 
     function displayOptions(values) {
-      return Array.isArray(values) && values.length ? values.join(" / ") : "未识别";
+      const options = normalizeOptions(values);
+      return options.length ? options.join(" / ") : "未识别";
     }
 
     function mergeOptions(...groups) {
       const result = [];
       groups.forEach(group => {
-        if (Array.isArray(group)) {
-          group.forEach(value => {
-            const text = String(value || "").trim();
-            if (text && !result.includes(text)) result.push(text);
-          });
-        }
+        normalizeOptions(group).forEach(text => {
+          if (text && !result.includes(text)) result.push(text);
+        });
       });
       return result;
+    }
+
+    function normalizeOptions(values) {
+      const result = [];
+      const add = value => {
+        const text = optionText(value);
+        if (text && !result.includes(text)) result.push(text);
+      };
+      if (Array.isArray(values)) {
+        values.forEach(add);
+      } else if (values && typeof values === "object") {
+        ["design_font_options", "font_options", "style_options", "options"].forEach(key => {
+          if (Array.isArray(values[key])) values[key].forEach(add);
+        });
+        if (!result.length) {
+          Object.keys(values).forEach(key => add(key));
+        }
+      } else {
+        add(values);
+      }
+      return result;
+    }
+
+    function optionText(value) {
+      if (value === undefined || value === null || value === "") return "";
+      if (typeof value !== "object") return String(value).trim();
+      const keys = [
+        "id",
+        "value",
+        "name",
+        "code",
+        "key",
+        "option",
+        "font_option",
+        "fontOption",
+        "style_option",
+        "styleOption",
+        "design_option",
+        "designOption",
+        "font",
+        "label",
+        "display_name"
+      ];
+      for (const key of keys) {
+        if (value[key] !== undefined && value[key] !== null && value[key] !== "") {
+          return String(value[key]).trim();
+        }
+      }
+      const objectKeys = Object.keys(value);
+      return objectKeys.length === 1 ? objectKeys[0] : "";
     }
 
     function syncSelectedRule() {

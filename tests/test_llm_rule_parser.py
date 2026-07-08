@@ -48,6 +48,37 @@ def test_llm_parser_required_mode_returns_llm_source(monkeypatch):
     assert draft["parser"] == {"source": "llm", "llm_configured": True}
 
 
+def test_llm_parser_normalizes_object_option_arrays(monkeypatch):
+    parser = LlmRuleParser(api_key="key", base_url="https://example.test/v1")
+    monkeypatch.setattr(
+        parser,
+        "_call_llm",
+        lambda **kwargs: {
+            "font_options": [{"id": "F1"}, {"name": "F2"}, {"value": "F3"}],
+            "style_options": [{"code": "Style1"}, {"option": "Style2"}],
+            "design_font_options": [{"font_option": "F10"}, {"key": "F11"}],
+            "design_options": {
+                "design_font_options": [{"id": "F10"}, {"id": "F12"}],
+                "text_slots_mapping": {"F10": {"text1": "Text1"}},
+            },
+        },
+    )
+
+    draft = parser.parse(
+        kind="template_rule",
+        natural_text="Font Options 为 F1-F3，F10-F12 为设计",
+        context={},
+        fallback={"template_id": "JJMB1", "font_options": ["F1"]},
+        require_llm=True,
+    )
+
+    assert draft["font_options"] == ["F1", "F2", "F3"]
+    assert draft["style_options"] == ["Style1", "Style2"]
+    assert draft["design_font_options"] == ["F10", "F11"]
+    assert draft["design_options"]["design_font_options"] == ["F10", "F12"]
+    assert draft["design_options"]["text_slots_mapping"] == {"F10": {"text1": "Text1"}}
+
+
 def test_extract_json_object_from_markdown_response():
     payload = extract_json_object(
         """```json

@@ -9,6 +9,7 @@ from src.service.job_store import JobStore
 from src.service.http_server import RenderRequestHandler
 from src.service.render_service import (
     RenderService,
+    _configured_font_options,
     _design_font_options,
     _merge_202508_template_config,
     _missing_202508_font_configs,
@@ -308,6 +309,19 @@ def test_render_service_reads_design_font_options_from_llm_rule_shape():
             }
         }
     ) == ["F10", "F11", "F12"]
+
+
+def test_render_service_normalizes_object_option_rules():
+    config = {
+        "font_options": [{"id": "F1"}, {"name": "F2"}],
+        "design_font_options": [{"font_option": "F10"}],
+        "design_options": {
+            "design_font_options": [{"id": "F11"}],
+        },
+    }
+
+    assert _configured_font_options(config) == ["F1", "F2"]
+    assert _design_font_options(config) == ["F10", "F11"]
 
 
 def test_202508_template_config_merge_fills_missing_font_options():

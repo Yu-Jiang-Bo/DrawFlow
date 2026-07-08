@@ -29,6 +29,12 @@ def test_template_rule_compile_uses_progress_overlay():
     assert 'return ["提交规则内容", "调用规则编译", "生成业务说明", "完成收尾"]' in INDEX_HTML
 
 
+def test_template_rule_preview_normalizes_object_options():
+    assert "function normalizeOptions" in INDEX_HTML
+    assert "function optionText" in INDEX_HTML
+    assert 'values.join(" / ")' not in INDEX_HTML
+
+
 def test_template_form_lists_supported_template_types():
     for template_type in [
         "pure_text",
