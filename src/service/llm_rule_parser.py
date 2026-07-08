@@ -99,6 +99,7 @@ class LlmRuleParser:
             headers={
                 "Authorization": f"Bearer {self.api_key}",
                 "Content-Type": "application/json",
+                "User-Agent": "Mozilla/5.0 custom-renderer/1.0",
             },
             method="POST",
         )
