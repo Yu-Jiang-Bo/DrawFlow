@@ -41,7 +41,16 @@ DIMENSION_PAIR_RE = re.compile(
 
 DIMENSION_TARGETS = {
     "title": ("title", "\u6807\u9898", "\u5f2f\u66f2"),
-    "name": ("name", "name_content", "\u540d\u5b57", "\u59d3\u540d"),
+    "name": (
+        "name",
+        "name_content",
+        "text_box",
+        "\u540d\u5b57",
+        "\u59d3\u540d",
+        "\u6587\u5b57",
+        "\u6587\u5b57\u533a\u57df",
+        "\u5b9a\u5236\u533a\u57df",
+    ),
 }
 
 UNIT_TO_MM = {
@@ -64,12 +73,13 @@ def build_template_rule_draft(
     mode = infer_mode(template_type, raw, asset_count)
     capabilities = infer_capabilities(mode, raw, asset_count)
     font_options = parse_numbered_options(raw, "F", "font")
-    style_options = parse_numbered_options(raw, "Style", "style")
     design_options = parse_design_options(raw)
+    style_options = parse_style_options(raw, template_type, design_options)
     defaults = infer_defaults(raw)
     slots = infer_slots(mode, raw, capabilities, defaults)
     dimensions = parse_dimensions(raw)
     output = infer_output_settings(raw)
+    transforms = infer_transforms(raw)
 
     return {
         "version": 1,
@@ -83,6 +93,7 @@ def build_template_rule_draft(
         "style_options": style_options,
         "design_options": design_options,
         "defaults": defaults,
+        "transforms": transforms,
         "dimensions": dimensions,
         "output": output,
         "slots": slots,
@@ -290,7 +301,14 @@ def infer_slots(
     lower = text.lower()
     slots: List[Dict[str, Any]] = []
     if "text_fit_box" in capabilities:
-        slots.append({"name": "Name", "type": "text_fit_box", "source": "names"})
+        slot: Dict[str, Any] = {"name": "Name", "type": "text_fit_box", "source": "names"}
+        if "text_box" in lower:
+            slot["box"] = "text_box"
+        if "design" in lower:
+            slot["scope"] = "Design group"
+        if "text" in lower:
+            slot["content"] = "text"
+        slots.append(slot)
     if "text_on_curve" in capabilities:
         slots.append(
             {
@@ -319,14 +337,35 @@ def parse_numbered_options(text: str, prefix: str, kind: str) -> List[str]:
     return sorted(options, key=lambda value: int(re.search(r"\d+", value).group(0)))  # type: ignore[union-attr]
 
 
+def parse_style_options(text: str, template_type: str, design_options: List[str]) -> List[str]:
+    styles = parse_numbered_options(text, "Style", "style")
+    if styles:
+        return styles
+    lower = (text or "").lower()
+    design_is_size_box = (
+        template_type == "pure_text_color_design"
+        and design_options
+        and any(token in lower for token in ["text_box", "尺寸", "作图区", "作图框", "款式", "设计款式"])
+    )
+    return design_options if design_is_size_box else []
+
+
 def parse_design_options(text: str) -> List[str]:
     options = set()
-    for start, end in re.findall(r"(?:D|Design)\s*(\d+)\s*(?:-|~|到|至)\s*(?:D|Design)?\s*(\d+)", text, re.I):
+    range_re = re.compile(
+        r"(?P<prefix>Design|D)\s*(?P<start>\d+)\s*(?:-|~|到|至)\s*(?P<end_prefix>Design|D)?\s*(?P<end>\d+)",
+        re.I,
+    )
+    single_re = re.compile(r"(?P<prefix>Design|D)\s*(?P<value>\d+)", re.I)
+    for match in range_re.finditer(text or ""):
+        prefix = _design_prefix(match.group("prefix"), match.group("end_prefix"))
+        start = int(match.group("start"))
+        end = int(match.group("end"))
         for index in range(int(start), int(end) + 1):
-            options.add(f"D{index}")
-    for value in re.findall(r"(?:D|Design)\s*(\d+)", text, re.I):
-        options.add(f"D{int(value)}")
-    return sorted(options, key=lambda value: int(value[1:]))
+            options.add(f"{prefix}{index}")
+    for match in single_re.finditer(text or ""):
+        options.add(f"{_design_prefix(match.group('prefix'))}{int(match.group('value'))}")
+    return sorted(options, key=_design_sort_key)
 
 
 def infer_color(text: str) -> str:
@@ -347,10 +386,32 @@ def infer_color(text: str) -> str:
 
 
 def infer_design(text: str) -> str:
-    match = re.search(r"(?:默认|default).*?(?:D|Design)\s*(\d+)", text, re.I)
+    match = re.search(r"(?:默认|default).*?(?P<prefix>Design|D)\s*(?P<value>\d+)", text, re.I)
     if not match:
-        match = re.search(r"(?:D|Design)\s*(\d+)", text, re.I)
-    return f"D{int(match.group(1))}" if match else ""
+        match = re.search(r"(?P<prefix>Design|D)\s*(?P<value>\d+)", text, re.I)
+    return f"{_design_prefix(match.group('prefix'))}{int(match.group('value'))}" if match else ""
+
+
+def infer_transforms(text: str) -> Dict[str, Dict[str, object]]:
+    transforms: Dict[str, Dict[str, object]] = {}
+    rotation_re = re.compile(
+        r"(?P<prefix>Design|D)\s*(?P<value>\d+)(?P<body>[^。；;,\n]{0,80}?)旋转\s*(?P<degree>-?\d+(?:\.\d+)?)\s*(?:°|度)?",
+        re.I,
+    )
+    for match in rotation_re.finditer(text or ""):
+        option = f"{_design_prefix(match.group('prefix'))}{int(match.group('value'))}"
+        degree = float(match.group("degree"))
+        body = match.group("body") or ""
+        direction = "逆时针" if "逆时针" in body else "顺时针" if "顺时针" in body else ""
+        if direction == "逆时针":
+            degree = -abs(degree)
+        elif direction == "顺时针":
+            degree = abs(degree)
+        transforms[option] = {
+            "rotation_deg": degree,
+            "source": match.group(0).strip(),
+        }
+    return transforms
 
 
 def infer_font(text: str) -> str:
@@ -370,6 +431,18 @@ def infer_title(text: str) -> str:
     if "Merry Christmas" in text:
         return "Merry Christmas"
     return ""
+
+
+def _design_prefix(*values: object) -> str:
+    for value in values:
+        if str(value or "").strip().lower() == "design":
+            return "Design"
+    return "D"
+
+
+def _design_sort_key(value: str) -> tuple[int, str]:
+    match = re.search(r"\d+", value)
+    return (int(match.group(0)) if match else 0, value)
 
 
 def _has_slot(slots: List[object], slot_type: str) -> bool:

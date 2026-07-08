@@ -139,12 +139,15 @@ class RenderService:
                 raise RenderServiceError(f"模板配置不存在，无法 dry-run: {template_config}")
             self._export_generic_template_config(template.template_ai, template.template_id, template_config, request["visible"])
 
+        template_rules = read_template_rule_config(template.template_rules_config)
+        structure_config = read_template_rule_config(template_config)
         task = build_grouped_task(
             xlsx_path=order_file,
             template_config=template_config,
             output_ai=output_ai,
             columns=request["columns"],
-            color_mode=output_color_mode(read_template_rule_config(template.template_rules_config)),
+            color_mode=output_color_mode(template_rules),
+            allowed_font_options=_configured_font_options(template_rules, structure_config),
         )
         task_file = job_dir / "render-task.json"
         self._write_json(task_file, task.to_json_dict())
@@ -257,3 +260,17 @@ def _to_bool(value: object) -> bool:
     if text in {"1", "true", "yes", "on", "是"}:
         return True
     return bool(value)
+
+
+def _configured_font_options(*configs: Dict[str, Any]) -> List[str] | None:
+    for config in configs:
+        value = config.get("font_options") if isinstance(config, dict) else None
+        if isinstance(value, list):
+            options = [str(item).strip() for item in value if str(item).strip()]
+            if options:
+                return options
+        if isinstance(value, dict):
+            options = [str(key).strip() for key in value if str(key).strip()]
+            if options:
+                return options
+    return None

@@ -1675,6 +1675,7 @@ INDEX_HTML = """<!doctype html>
           <div class="preview-chip"><span>设计选项</span><strong>${escapeHtml(displayOptions(draft.design_options))}</strong></div>
           <div class="preview-chip"><span>文字和图片位置</span><strong>${escapeHtml(slotText)}</strong></div>
           <div class="preview-chip"><span>默认内容</span><strong>${escapeHtml(describeDefaults(defaults))}</strong></div>
+          <div class="preview-chip"><span>旋转规则</span><strong>${escapeHtml(describeTransforms(draft.transforms || {}))}</strong></div>
           <div class="preview-chip"><span>尺寸规则</span><strong>${escapeHtml(describeDimensions(draft.dimensions || {}))}</strong></div>
           <div class="preview-chip"><span>输出色彩</span><strong>${escapeHtml(describeOutputSettings(draft.output || {}))}</strong></div>
           <div class="preview-chip"><span>处理能力</span><strong>${escapeHtml(describeCapabilities(draft.capabilities || []))}</strong></div>
@@ -1694,8 +1695,11 @@ INDEX_HTML = """<!doctype html>
       };
       const type = typeNames[slot.type] || slot.type || "未知规则";
       const source = slot.source ? `，来源：${slot.source}` : "";
+      const scope = slot.scope ? `，范围：${slot.scope}` : "";
+      const content = slot.content ? `，内容对象：${slot.content}` : "";
+      const box = slot.box ? `，尺寸框：${slot.box}` : "";
       const fallback = slot.default ? `，默认：${slot.default}` : "";
-      return `${name}：${type}${source}${fallback}`;
+      return `${name}：${type}${source}${scope}${content}${box}${fallback}`;
     }
 
     function describeDefaults(defaults) {
@@ -1712,6 +1716,19 @@ INDEX_HTML = """<!doctype html>
       if (dimensions.title) parts.push(`标题 ${formatDimension(dimensions.title)}`);
       if (dimensions.name) parts.push(`名字 ${formatDimension(dimensions.name)}`);
       return parts.join("；") || "未识别";
+    }
+
+    function describeTransforms(transforms) {
+      const parts = [];
+      Object.keys(transforms || {}).forEach(key => {
+        const item = transforms[key] || {};
+        if (item.rotation_deg === undefined || item.rotation_deg === null || item.rotation_deg === "") return;
+        const degree = Number(item.rotation_deg);
+        if (!Number.isFinite(degree)) return;
+        const direction = degree < 0 ? "逆时针" : "顺时针";
+        parts.push(`${key} ${direction}${trimNumber(Math.abs(degree))}°`);
+      });
+      return parts.join("；") || "无";
     }
 
     function describeOutputSettings(output) {

@@ -6,11 +6,11 @@ import argparse
 import json
 from collections import OrderedDict
 from pathlib import Path
-from typing import List
+from typing import Iterable, List
 
 from .jjmb_order_parser import parse_order_items, read_xlsx_rows
 from .jjmb_template_main import TEMPLATE_ID, TEXT_FONT_OPTIONS
-from .render_task import ConfigGroupedSheetRenderTask, TemplateTextOrderGroup, TemplateTextSheetItem
+from .render_task import ConfigGroupedSheetRenderTask, RenderTaskError, TemplateTextOrderGroup, TemplateTextSheetItem
 from .renderer.illustrator_bridge import IllustratorBridge, IllustratorBridgeError
 
 
@@ -32,12 +32,14 @@ def build_grouped_task(
     output_ai: Path,
     columns: int,
     color_mode: str = "CMYK",
+    allowed_font_options: Iterable[str] | None = None,
 ) -> ConfigGroupedSheetRenderTask:
     rows = read_xlsx_rows(xlsx_path)
     order_items = parse_order_items(rows, template_id=TEMPLATE_ID)
+    allowed_fonts = {str(value).strip() for value in (allowed_font_options or TEXT_FONT_OPTIONS) if str(value).strip()}
     grouped: "OrderedDict[str, List[TemplateTextSheetItem]]" = OrderedDict()
     for order_item in order_items:
-        if order_item.font_option not in TEXT_FONT_OPTIONS:
+        if allowed_fonts and order_item.font_option not in allowed_fonts:
             continue
         for index, text in enumerate(order_item.personalization_values, start=1):
             if not text.strip():
@@ -57,6 +59,13 @@ def build_grouped_task(
         for order_no, items in grouped.items()
         if items
     ]
+    if not groups:
+        templates = sorted({str(row.get("模板", "")).strip() for row in rows if str(row.get("模板", "")).strip()})
+        seen = "、".join(templates[:5]) if templates else "未识别到模板列内容"
+        raise RenderTaskError(
+            f"订单表没有解析到可渲染内容。当前模板流程只支持 {TEMPLATE_ID} 的已配置字体选项；"
+            f"订单表中看到的模板为：{seen}。请确认出图页选择的模板和订单表模板列一致。"
+        )
     return ConfigGroupedSheetRenderTask(
         template_config=template_config,
         output_ai=output_ai,

@@ -98,6 +98,19 @@ def test_grouped_sheet_groups_items_by_order_number(tmp_path):
     assert payload["layout"]["show_style_boxes"] is True
     assert payload["export"]["color_mode"] == "CMYK"
 
+    design_task = build_grouped_task(
+        xlsx_path=xlsx,
+        template_config=Path("template.config.json"),
+        output_ai=tmp_path / "out-design.ai",
+        columns=4,
+        allowed_font_options=[f"F{i}" for i in range(1, 13)],
+    )
+
+    assert len(design_task.groups) == 2
+    assert design_task.groups[1].order_no == "ORDER2"
+    assert design_task.groups[1].items[0].font_option == "F10"
+    assert design_task.groups[1].items[0].text == "C"
+
     rgb_task = build_grouped_task(
         xlsx_path=xlsx,
         template_config=Path("template.config.json"),

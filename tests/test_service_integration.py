@@ -3,6 +3,8 @@ from pathlib import Path
 
 from openpyxl import Workbook
 
+from src.jjmb_config_grouped_main import build_grouped_task
+from src.render_task import RenderTaskError
 from src.service.job_store import JobStore
 from src.service.http_server import RenderRequestHandler
 from src.service.render_service import RenderService
@@ -340,6 +342,26 @@ def test_service_accepts_string_boolean_flags(tmp_path):
     task_path = Path(record["outputs"]["render_task"])
     task = json.loads(task_path.read_text(encoding="utf-8"))
     assert task["layout"]["show_style_boxes"] is True
+
+
+def test_grouped_pipeline_reports_template_mismatch_when_no_groups(tmp_path):
+    order_path = tmp_path / "orders.xlsx"
+    write_order_xlsx(order_path)
+
+    try:
+        build_grouped_task(
+            xlsx_path=order_path,
+            template_config=tmp_path / "template.config.json",
+            output_ai=tmp_path / "out.ai",
+            columns=4,
+        )
+    except RenderTaskError as exc:
+        message = str(exc)
+        assert "订单表没有解析到可渲染内容" in message
+        assert "JJMB202508261001394920" in message
+        assert "JJMB202603281027102517" in message
+    else:
+        raise AssertionError("template mismatch should fail with a readable error")
 
 
 def test_service_rejects_missing_order_file(tmp_path):

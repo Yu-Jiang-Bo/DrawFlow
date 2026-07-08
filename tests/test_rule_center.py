@@ -53,6 +53,32 @@ def test_template_rule_draft_extracts_output_color_mode():
     assert output_color_mode({}) == "CMYK"
 
 
+def test_template_rule_draft_extracts_design_boxes_dimensions_and_rotation():
+    draft = build_template_rule_draft(
+        template_id="JJMB202508261001394920",
+        template_type="pure_text_color_design",
+        natural_text=(
+            "字体选项共10项，原始参考模板的F1-F10。"
+            "设计款式在尺寸模板中标记出了Design1-3这三个编组，尺寸框对应每个编组中的text_box。"
+            "未选择颜色默认为金色，默认设计位置Design2，Design2需要字体逆时针旋转15°。"
+            "文字在尺寸模板对应的Design编组的text中，定制区域是对应Design的text_box。"
+            "文字区域尺寸为55mm*40mm。"
+        ),
+    )
+
+    assert draft["font_options"] == [f"F{i}" for i in range(1, 11)]
+    assert draft["style_options"] == ["Design1", "Design2", "Design3"]
+    assert draft["design_options"] == ["Design1", "Design2", "Design3"]
+    assert draft["defaults"]["color"] == "Gold"
+    assert draft["defaults"]["design"] == "Design2"
+    assert draft["dimensions"]["name"]["width_mm"] == 55.0
+    assert draft["dimensions"]["name"]["height_mm"] == 40.0
+    assert draft["transforms"]["Design2"]["rotation_deg"] == -15.0
+    assert draft["slots"][0]["scope"] == "Design group"
+    assert draft["slots"][0]["content"] == "text"
+    assert draft["slots"][0]["box"] == "text_box"
+
+
 def test_curved_layout_overrides_reads_structured_or_raw_dimensions():
     assert curved_layout_overrides(
         {
