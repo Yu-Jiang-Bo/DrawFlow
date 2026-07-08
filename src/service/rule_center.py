@@ -74,6 +74,7 @@ def build_template_rule_draft(
     capabilities = infer_capabilities(mode, raw, asset_count)
     font_options = parse_numbered_options(raw, "F", "font")
     design_options = parse_design_options(raw)
+    design_font_options = parse_design_font_options(raw)
     style_options = parse_style_options(raw, template_type, design_options)
     defaults = infer_defaults(raw)
     slots = infer_slots(mode, raw, capabilities, defaults)
@@ -92,6 +93,7 @@ def build_template_rule_draft(
         "font_options": font_options,
         "style_options": style_options,
         "design_options": design_options,
+        "design_font_options": design_font_options,
         "defaults": defaults,
         "transforms": transforms,
         "dimensions": dimensions,
@@ -141,7 +143,7 @@ def check_template_definition(template: Any) -> Dict[str, Any]:
     if mode == "asset_split":
         if not assets:
             missing.append({"code": "design_assets", "message": "缺少独立设计资产，例如 assets/D1.ai"})
-        if not config.get("design_options"):
+        if not config.get("design_options") and not config.get("design_font_options"):
             missing.append({"code": "design_options", "message": "缺少设计选项规则，例如 D1-D12"})
         if not _has_capability(capabilities, "place_ai_asset"):
             missing.append({"code": "place_ai_asset", "message": "缺少放置独立设计资产的能力声明"})
@@ -365,6 +367,16 @@ def parse_design_options(text: str) -> List[str]:
             options.add(f"{prefix}{index}")
     for match in single_re.finditer(text or ""):
         options.add(f"{_design_prefix(match.group('prefix'))}{int(match.group('value'))}")
+    return sorted(options, key=_design_sort_key)
+
+
+def parse_design_font_options(text: str) -> List[str]:
+    options = set()
+    for segment in re.split(r"[\r\n,，;；。]+", text or ""):
+        lower = segment.lower()
+        if "设计" not in segment and "design" not in lower and "asset" not in lower:
+            continue
+        options.update(parse_numbered_options(segment, "F", "font"))
     return sorted(options, key=_design_sort_key)
 
 

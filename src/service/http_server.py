@@ -964,6 +964,7 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
                 "template": context,
             },
             fallback=fallback,
+            require_llm=True,
         )
         return {"draft": draft}
 
@@ -976,8 +977,9 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
             except KeyError:
                 existing = None
 
-        template_ai, template_ai_role, template_ai_source = self._resolve_template_ai(fields, files, template_id, existing)
         assets = list(existing.assets) if existing else []
+        assets.extend(self._migrate_existing_primary_reference(template_id, existing, files))
+        template_ai, template_ai_role, template_ai_source = self._resolve_template_ai(fields, files, template_id, existing)
         if template_ai_source != "reference_upload":
             assets.extend(
                 self.registry.save_uploaded_assets(
@@ -1014,6 +1016,35 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
         if template_rules_config:
             item["template_rules_config"] = template_rules_config
         return self.registry.upsert_template(item)
+
+    def _migrate_existing_primary_reference(
+        self,
+        template_id: str,
+        existing: object | None,
+        files: dict[str, list[dict[str, object]]],
+    ) -> list[dict[str, object]]:
+        replacing_primary = bool(self._first_file(files, "template_ai"))
+        if not replacing_primary or not existing or not getattr(existing, "template_ai", None):
+            return []
+        role = str(getattr(existing, "template_ai_role", "") or "")
+        if role != "原始参考模板":
+            return []
+        source_path = Path(getattr(existing, "template_ai"))
+        if not source_path.exists():
+            return []
+        existing_assets = getattr(existing, "assets", []) or []
+        existing_paths = {
+            str(asset.get("stored_path", "")).strip()
+            for asset in existing_assets
+            if isinstance(asset, dict)
+        }
+        if self.registry.to_config_path(source_path) in existing_paths:
+            return []
+        return self.registry.save_uploaded_assets(
+            template_id,
+            [{"filename": source_path.name, "content": source_path.read_bytes()}],
+            role="原始参考模板",
+        )
 
     def _resolve_template_ai(
         self,
@@ -1057,6 +1088,8 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
         rules_text = fields.get("template_rules_json", "").strip()
         natural_text = fields.get("template_rules_text", "").strip()
         template_type = fields.get("template_type", "").strip() or (existing.template_type if existing else "")
+        if rules_text and natural_text:
+            self._ensure_llm_template_rule(rules_text)
         if not rules_text and natural_text:
             rules_text = json.dumps(
                 self.llm_parser.parse(
@@ -1073,6 +1106,7 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
                         natural_text=natural_text,
                         asset_count=asset_count,
                     ),
+                    require_llm=True,
                 ),
                 ensure_ascii=False,
             )
@@ -1082,6 +1116,16 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
         if existing and existing.template_rules_config:
             return self.registry.to_config_path(existing.template_rules_config)
         return ""
+
+    def _ensure_llm_template_rule(self, rules_text: str) -> None:
+        try:
+            payload = json.loads(rules_text)
+        except json.JSONDecodeError as exc:
+            raise ValueError("模板特有规则 JSON 格式不正确，请重新生成预览") from exc
+        parser = payload.get("parser") if isinstance(payload, dict) else None
+        source = parser.get("source") if isinstance(parser, dict) else ""
+        if source != "llm":
+            raise ValueError("模板特有规则必须先通过 LLM 生成预览，不能保存本地解析草稿")
 
     def _save_department_rule_draft(self, payload: dict[str, object]) -> dict[str, object]:
         return self.rule_store.save_draft(payload)

@@ -1679,7 +1679,7 @@ INDEX_HTML = """<!doctype html>
           <div class="preview-chip"><span>模板类型</span><strong>${escapeHtml(displayType(draft.mode || draft.template_type || ""))}</strong></div>
           <div class="preview-chip"><span>字体选项</span><strong>${escapeHtml(displayOptions(draft.font_options))}</strong></div>
           <div class="preview-chip"><span>款式/尺寸框</span><strong>${escapeHtml(displayOptions(draft.style_options))}</strong></div>
-          <div class="preview-chip"><span>设计选项</span><strong>${escapeHtml(displayOptions(draft.design_options))}</strong></div>
+          <div class="preview-chip"><span>设计选项</span><strong>${escapeHtml(displayOptions(mergeOptions(draft.design_options, draft.design_font_options)))}</strong></div>
           <div class="preview-chip"><span>文字和图片位置</span><strong>${escapeHtml(slotText)}</strong></div>
           <div class="preview-chip"><span>默认内容</span><strong>${escapeHtml(describeDefaults(defaults))}</strong></div>
           <div class="preview-chip"><span>旋转规则</span><strong>${escapeHtml(describeTransforms(draft.transforms || {}))}</strong></div>
@@ -1769,6 +1769,19 @@ INDEX_HTML = """<!doctype html>
 
     function displayOptions(values) {
       return Array.isArray(values) && values.length ? values.join(" / ") : "未识别";
+    }
+
+    function mergeOptions(...groups) {
+      const result = [];
+      groups.forEach(group => {
+        if (Array.isArray(group)) {
+          group.forEach(value => {
+            const text = String(value || "").trim();
+            if (text && !result.includes(text)) result.push(text);
+          });
+        }
+      });
+      return result;
     }
 
     function syncSelectedRule() {

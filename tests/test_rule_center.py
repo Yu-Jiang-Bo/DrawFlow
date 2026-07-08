@@ -79,6 +79,19 @@ def test_template_rule_draft_extracts_design_boxes_dimensions_and_rotation():
     assert draft["slots"][0]["box"] == "text_box"
 
 
+def test_template_rule_draft_extracts_design_font_options():
+    draft = build_template_rule_draft(
+        template_id="JJMB202603281027102517",
+        template_type="pure_text_style",
+        natural_text="字体选项共F1-F9，F10-F12是字体设计，参考独立设计模板。",
+        asset_count=1,
+    )
+
+    assert draft["mode"] == "asset_split"
+    assert draft["font_options"] == [f"F{i}" for i in range(1, 13)]
+    assert draft["design_font_options"] == ["F10", "F11", "F12"]
+
+
 def test_curved_layout_overrides_reads_structured_or_raw_dimensions():
     assert curved_layout_overrides(
         {
@@ -129,6 +142,44 @@ def test_template_rule_check_reports_missing_asset_split_rules(tmp_path):
     assert check["complete"] is False
     assert check["renderable"] is False
     assert {item["code"] for item in check["missing"]} >= {"design_assets", "design_options", "place_ai_asset"}
+
+
+def test_template_rule_check_accepts_design_font_options(tmp_path):
+    ai_path = tmp_path / "template.ai"
+    config_path = tmp_path / "template.rules.json"
+    asset_path = tmp_path / "design.ai"
+    ai_path.write_text("fake ai", encoding="utf-8")
+    asset_path.write_text("fake design", encoding="utf-8")
+    config_path.write_text(
+        json.dumps(
+            {
+                "mode": "asset_split",
+                "status": "draft",
+                "capabilities": ["place_ai_asset", "replace_text", "scale_to_box"],
+                "font_options": ["F1", "F10"],
+                "design_font_options": ["F10"],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    registry = TemplateRegistry(tmp_path / "templates.json", tmp_path / "templates")
+    template = registry.upsert_template(
+        {
+            "template_id": "ASSET002",
+            "name": "asset split",
+            "template_type": "asset_split",
+            "status": "draft",
+            "template_ai": str(ai_path),
+            "template_rules_config": str(config_path),
+            "assets": [{"file_name": "design.ai", "stored_path": str(asset_path), "role": "独立设计模板"}],
+        }
+    )
+
+    check = check_template_definition(template)
+
+    assert check["complete"] is True
+    assert check["renderable"] is True
 
 
 def test_legacy_pipeline_is_renderable_but_not_rule_complete(tmp_path):

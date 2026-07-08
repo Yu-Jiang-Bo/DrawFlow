@@ -41,12 +41,17 @@ class LlmRuleParser:
         natural_text: str,
         context: Dict[str, Any],
         fallback: Dict[str, Any],
+        require_llm: bool = False,
     ) -> Dict[str, Any]:
         if not self.configured:
+            if require_llm:
+                raise RuntimeError("LLM 规则编译未配置，请设置 CUSTOM_RENDERER_LLM_API_KEY 和 CUSTOM_RENDERER_LLM_BASE_URL")
             return with_parser_meta(fallback, source="local", configured=False)
         try:
             parsed = self._call_llm(kind=kind, natural_text=natural_text, context=context)
         except Exception as exc:
+            if require_llm:
+                raise RuntimeError(f"LLM 规则编译失败: {exc}") from exc
             draft = with_parser_meta(fallback, source="local", configured=True)
             draft["parser"]["llm_error"] = str(exc)
             return draft
@@ -64,6 +69,13 @@ class LlmRuleParser:
                         "你是制图规则解析器。只返回 JSON，不要返回解释。"
                         "不得编造业务字段，不确定的字段留空数组或空字符串。"
                         "如果规则提到输出 RGB 或 CMYK，请在 output.color_mode 中返回 RGB 或 CMYK。"
+                        "模板规则 JSON 字段必须尽量使用：version, template_id, mode, status, rule_source, raw_text, "
+                        "capabilities, font_options, style_options, design_options, defaults, transforms, dimensions, "
+                        "output, slots, assets。"
+                        "如果业务把 F10-F12 这类字体选项描述为独立设计/设计款，也要保留在 font_options，"
+                        "并在 design_options 或 design_font_options 中表达这些设计型字体选项。"
+                        "如果规则提到 Text1/Text2/Text3 等变量，slots 中必须分别返回 replace_text 槽位。"
+                        "如果规则提到 Style1-5 或作图区尺寸框，style_options 必须返回 Style1 等规范值。"
                     ),
                 },
                 {

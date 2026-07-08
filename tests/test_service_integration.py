@@ -173,6 +173,38 @@ def test_register_template_uses_reference_ai_when_size_template_is_empty(tmp_pat
     assert template.assets == []
 
 
+def test_register_template_keeps_existing_reference_when_size_template_is_added(tmp_path):
+    handler = object.__new__(RenderRequestHandler)
+    handler.registry = TemplateRegistry(tmp_path / "templates.json", tmp_path / "templates")
+
+    first = handler._register_template(
+        {
+            "template_id": "JJMB202607030015",
+            "name": "先传原始参考模板",
+            "template_type": "pure_text_color_design",
+            "status": "active",
+        },
+        {"reference_ai": [{"filename": "source.ai", "content": b"source ai"}]},
+    )
+
+    updated = handler._register_template(
+        {
+            "template_id": first.template_id,
+            "name": first.name,
+            "template_type": first.template_type,
+            "status": "active",
+        },
+        {"template_ai": [{"filename": "layout.ai", "content": b"layout ai"}]},
+    )
+
+    assert updated.template_ai and updated.template_ai.read_bytes() == b"layout ai"
+    assert updated.template_ai_role == "尺寸/作图区模板"
+    assert len(updated.assets) == 1
+    assert updated.assets[0]["role"] == "原始参考模板"
+    reference_copy = Path(updated.assets[0]["stored_path"])
+    assert reference_copy.read_bytes() == b"source ai"
+
+
 def test_register_template_keeps_reference_ai_as_asset_when_size_template_exists(tmp_path):
     handler = object.__new__(RenderRequestHandler)
     handler.registry = TemplateRegistry(tmp_path / "templates.json", tmp_path / "templates")
@@ -220,7 +252,7 @@ def test_register_template_saves_rules_without_overwriting_structure_config(tmp_
             "name": "曲线标题模板",
             "template_type": "curved_title_text",
             "status": "active",
-            "template_rules_json": '{"raw_text":"业务规则","font_options":["F14"]}',
+            "template_rules_json": '{"raw_text":"业务规则","font_options":["F14"],"parser":{"source":"llm"}}',
             "template_rules_text": "业务规则",
         },
         {},
