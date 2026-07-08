@@ -5,6 +5,7 @@ from src.jjmb_config_grouped_main import build_grouped_task
 from src.jjmb_order_parser import (
     parse_custom_info,
     parse_order_items,
+    read_xlsx_rows,
     split_personalization,
 )
 from src.jjmb_template_main import expand_values
@@ -27,6 +28,7 @@ def test_split_personalization_by_lines_and_pipe():
     assert split_personalization("A\nB\nC") == ["A", "B", "C"]
     assert split_personalization("A|B|C") == ["A", "B", "C"]
     assert split_personalization("1. Payt\n2. Ave\n3) Ken\n4\u3001Luc") == ["Payt", "Ave", "Ken", "Luc"]
+    assert split_personalization("Jiuwan|04.12.2026") == ["Jiuwan", "04.12.2026"]
 
 
 def test_parse_order_items_normalizes_options():
@@ -49,6 +51,42 @@ def test_parse_order_items_normalizes_options():
     assert items[0].style_option == "Style2"
     assert items[0].font_option == "F3"
     assert items[0].personalization_values == ["Mr Clarke", "Mrs Clarke"]
+
+
+def test_parse_order_items_from_named_sheet_split_columns(tmp_path):
+    xlsx = tmp_path / "orders.xlsx"
+    from openpyxl import Workbook
+
+    workbook = Workbook()
+    sheet1 = workbook.active
+    sheet1.title = "Sheet1"
+    sheet1.append(["内部订单号", "订单明细id", "购买数量", "模板", "定制信息"])
+    sheet1.append(["OLD", "1", "1", "JJMB202603281027102517", "Style Option:Style 1\nFont Option:F1\nPersonalization:Old"])
+    sheet2 = workbook.create_sheet("Sheet2")
+    sheet2.append(["内部订单号", "订单明细id", "购买数量", "模板", "Style Option", "Font Option", "Personalization"])
+    sheet2.append(["ORDER2", "2", "1", "JJMB202603281027102517", "Style 4", "F10", "Tom|Jery"])
+    workbook.save(xlsx)
+
+    rows = read_xlsx_rows(xlsx, sheet_name="Sheet2")
+    items = parse_order_items(rows, template_id="JJMB202603281027102517")
+
+    assert len(items) == 1
+    assert items[0].order_no == "ORDER2"
+    assert items[0].style_option == "Style4"
+    assert items[0].font_option == "F10"
+    assert items[0].personalization_values == ["Tom", "Jery"]
+
+    task = build_grouped_task(
+        xlsx_path=xlsx,
+        template_config=Path("template.config.json"),
+        output_ai=tmp_path / "sheet2.ai",
+        columns=4,
+        allowed_font_options=[f"F{i}" for i in range(1, 13)],
+        sheet_name="Sheet2",
+    )
+
+    assert task.groups[0].order_no == "ORDER2"
+    assert [item.text for item in task.groups[0].items] == ["Tom", "Jery"]
 
 
 def test_expand_values_does_not_duplicate_by_quantity():

@@ -660,6 +660,10 @@ INDEX_HTML = """<!doctype html>
                 <label for="orderFile">订单表格</label>
                 <input id="orderFile" type="file" accept=".xlsx,.xls,.csv" />
               </div>
+              <div class="field-full">
+                <label for="sheetName">工作表名称</label>
+                <input id="sheetName" placeholder="默认第一个工作表，例如 Sheet2" />
+              </div>
             </div>
             <div class="actions">
               <button class="btn-secondary" id="resetTaskBtn" title="清空当前订单文件和任务结果，不删除任务记录">重置</button>
@@ -1421,6 +1425,8 @@ INDEX_HTML = """<!doctype html>
       const payload = new FormData();
       payload.append("template_id", templateId);
       payload.append("order_file", file);
+      const sheetName = document.getElementById("sheetName").value.trim();
+      if (sheetName) payload.append("sheet_name", sheetName);
       if (dryRun) payload.append("dry_run", "true");
       setTaskRunning(dryRun);
       showRenderProgress(dryRun);
@@ -1568,6 +1574,7 @@ INDEX_HTML = """<!doctype html>
 
     function resetTaskResult() {
       document.getElementById("orderFile").value = "";
+      document.getElementById("sheetName").value = "";
       document.getElementById("resultJobId").textContent = "-";
       document.getElementById("resultStatus").textContent = "待提交";
       document.getElementById("resultItems").textContent = "-";

@@ -79,6 +79,7 @@ class RenderService:
         return {
             "template_id": template_id,
             "order_file": str(order_file.resolve()),
+            "sheet_name": str(payload.get("sheet_name", "") or "").strip(),
             "columns": int(payload.get("columns") or template.default_columns),
             "hide_boxes": _to_bool(payload.get("hide_boxes", template.default_hide_boxes)),
             "dry_run": _to_bool(payload.get("dry_run", False)),
@@ -96,7 +97,7 @@ class RenderService:
         if not request["dry_run"]:
             export_202508_config(template.template_ai, template_config, request["visible"])
 
-        rows = read_202508_rows(order_file)
+        rows = read_202508_rows(order_file, sheet_name=request["sheet_name"] or None)
         items = parse_202508_items(rows)
         groups = group_202508_items(items)
         template_rules = read_template_rule_config(template.template_rules_config)
@@ -148,6 +149,7 @@ class RenderService:
             columns=request["columns"],
             color_mode=output_color_mode(template_rules),
             allowed_font_options=_configured_font_options(template_rules, structure_config),
+            sheet_name=request["sheet_name"] or None,
         )
         task_file = job_dir / "render-task.json"
         self._write_json(task_file, task.to_json_dict())
@@ -178,7 +180,7 @@ class RenderService:
         if not font_report or not font_report.exists():
             raise RenderServiceError(f"曲线标题字体报告不存在: {font_report}")
 
-        rows = read_202509_curved_rows(order_file)
+        rows = read_202509_curved_rows(order_file, sheet_name=request["sheet_name"] or None)
         items = parse_202509_curved_items(rows)
         groups = group_202509_curved_items(items)
         template_rules = read_template_rule_config(template.template_rules_config)

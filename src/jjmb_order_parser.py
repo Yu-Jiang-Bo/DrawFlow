@@ -18,6 +18,12 @@ FIELD_ALIASES = {
     "custom_info": ["定制信息"],
 }
 
+SPLIT_CUSTOM_FIELD_ALIASES = {
+    "style_option": ["Style Option", "Style", "style_option", "款式", "设计款式"],
+    "font_option": ["Font Option", "Font Options", "Font", "font_option", "字体", "字体选项"],
+    "personalization": ["Personalization", "Name", "Names", "定制内容", "定制信息", "名字"],
+}
+
 
 @dataclass(frozen=True)
 class JJMBOrderItem:
@@ -93,6 +99,24 @@ def parse_custom_info(value: str) -> Dict[str, str]:
     return result
 
 
+def parse_split_custom_columns(row: Dict[str, str], base: Dict[str, str] | None = None) -> Dict[str, str]:
+    result = dict(base or {"style_option": "", "font_option": "", "personalization": ""})
+    for target, aliases in SPLIT_CUSTOM_FIELD_ALIASES.items():
+        if result.get(target):
+            continue
+        result[target] = first_row_value(row, aliases)
+    return result
+
+
+def first_row_value(row: Dict[str, str], aliases: List[str]) -> str:
+    lower_map = {key.strip().lower(): value for key, value in row.items()}
+    for alias in aliases:
+        value = lower_map.get(alias.strip().lower(), "")
+        if value:
+            return value
+    return ""
+
+
 def normalize_option(value: str, prefix: str) -> str:
     compact = re.sub(r"\s+", "", value or "")
     match = re.search(re.escape(prefix) + r"(\d+)", compact, re.I)
@@ -121,7 +145,7 @@ def split_personalization(value: str) -> List[str]:
 
 
 def strip_list_marker(value: str) -> str:
-    return re.sub(r"^\s*\d{1,3}\s*[\.\)\]\u3001:-]\s*", "", value or "").strip()
+    return re.sub(r"^\s*\d{1,3}\s*(?:\.\s+|[\)\]\u3001:-]\s*)", "", value or "").strip()
 
 
 def parse_order_items(rows: Iterable[Dict[str, str]], template_id: str | None = None) -> List[JJMBOrderItem]:
@@ -130,7 +154,7 @@ def parse_order_items(rows: Iterable[Dict[str, str]], template_id: str | None = 
         normalized = normalize_row(row)
         if template_id and normalized["template"] != template_id:
             continue
-        custom = parse_custom_info(normalized["custom_info"])
+        custom = parse_split_custom_columns(row, parse_custom_info(normalized["custom_info"]))
         style = normalize_option(custom["style_option"], "Style")
         font = normalize_option(custom["font_option"], "F")
         values = split_personalization(custom["personalization"])

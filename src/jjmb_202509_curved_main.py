@@ -57,9 +57,9 @@ class CurvedOrderGroup:
         }
 
 
-def read_xlsx_rows(path: Path) -> List[Dict[str, str]]:
+def read_xlsx_rows(path: Path, sheet_name: str | None = None) -> List[Dict[str, str]]:
     workbook = load_workbook(path, data_only=True)
-    sheet = workbook[workbook.sheetnames[0]]
+    sheet = workbook[sheet_name] if sheet_name else workbook[workbook.sheetnames[0]]
     rows = list(sheet.iter_rows(values_only=True))
     if not rows:
         return []
