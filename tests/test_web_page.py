@@ -14,9 +14,19 @@ def test_render_page_exposes_parse_test_and_render_actions():
 def test_render_page_has_progress_overlay():
     assert 'id="renderProgressOverlay"' in INDEX_HTML
     assert 'id="progressBar"' in INDEX_HTML
-    assert "showRenderProgress" in INDEX_HTML
-    assert "tickRenderProgress" in INDEX_HTML
+    assert "showProgress" in INDEX_HTML
+    assert "tickProgress" in INDEX_HTML
     assert "调用 Illustrator" in INDEX_HTML
+    assert "生成 AI 文件" in INDEX_HTML
+    assert 'return ["上传订单表格", "解析订单字段", "调用 Illustrator", "生成 AI 文件", "完成收尾"]' in INDEX_HTML
+
+
+def test_template_rule_compile_uses_progress_overlay():
+    assert 'showProgress("templateRule")' in INDEX_HTML
+    assert "正在编译模板规则" in INDEX_HTML
+    assert "正在调用规则编译服务，请不要重复点击" in INDEX_HTML
+    assert "setTemplateRulePreviewDisabled" in INDEX_HTML
+    assert 'return ["提交规则内容", "调用规则编译", "生成业务说明", "完成收尾"]' in INDEX_HTML
 
 
 def test_template_form_lists_supported_template_types():

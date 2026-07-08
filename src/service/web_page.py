@@ -932,9 +932,9 @@ INDEX_HTML = """<!doctype html>
       templateRuleDraft: null,
       templateRulePreviewSignature: ""
     };
-    let renderProgressTimer = null;
-    let renderProgressValue = 0;
-    let renderProgressMode = "render";
+    let progressTimer = null;
+    let progressValue = 0;
+    let progressMode = "render";
 
     const typeNames = {
       pure_text: "纯文字模板",
@@ -1268,6 +1268,8 @@ INDEX_HTML = """<!doctype html>
         return;
       }
       try {
+        setTemplateRulePreviewDisabled(true);
+        showProgress("templateRule");
         setMessage("templateSaveMessage", "正在编译规则", "");
         const payload = await postJson("/api/templates/rules/draft", {
           template_id: templateId,
@@ -1279,10 +1281,18 @@ INDEX_HTML = """<!doctype html>
         state.templateRuleDraft = draft;
         state.templateRulePreviewSignature = raw;
         renderTemplateRulePreview();
+        completeProgress(true);
         setMessage("templateSaveMessage", "规则已编译，请确认说明后保存", "ok");
       } catch (error) {
+        failProgress();
         setMessage("templateSaveMessage", String(error.message || error), "error");
+      } finally {
+        setTemplateRulePreviewDisabled(false);
       }
+    }
+
+    function setTemplateRulePreviewDisabled(disabled) {
+      document.getElementById("previewTemplateRuleBtn").disabled = disabled;
     }
 
     function markTemplateRulePreviewStale() {
@@ -1429,14 +1439,14 @@ INDEX_HTML = """<!doctype html>
       if (sheetName) payload.append("sheet_name", sheetName);
       if (dryRun) payload.append("dry_run", "true");
       setTaskRunning(dryRun);
-      showRenderProgress(dryRun);
+      showProgress(dryRun ? "dryRun" : "render");
       try {
         const result = await postForm("/api/render", payload);
-        completeRenderProgress(result.status === "completed");
+        completeProgress(result.status === "completed");
         renderTaskResult(result);
         await loadJobs();
       } catch (error) {
-        failRenderProgress();
+        failProgress();
         document.getElementById("resultStatus").textContent = "失败";
         setMessage("taskMessage", String(error.message || error), "error");
       } finally {
@@ -1459,27 +1469,51 @@ INDEX_HTML = """<!doctype html>
       });
     }
 
-    function showRenderProgress(dryRun) {
-      renderProgressMode = dryRun ? "dryRun" : "render";
-      renderProgressValue = 0;
+    function showProgress(mode) {
+      progressMode = mode;
+      progressValue = 0;
       const overlay = document.getElementById("renderProgressOverlay");
       overlay.classList.add("active");
       overlay.setAttribute("aria-hidden", "false");
-      document.getElementById("progressTitle").textContent = dryRun ? "正在解析订单" : "正在生成效果图";
-      document.getElementById("progressSubtitle").textContent = dryRun ? "正在检查字段、分组和渲染任务" : "Illustrator 正在处理，请不要关闭软件";
+      document.getElementById("progressTitle").textContent = progressTitle(mode);
+      document.getElementById("progressSubtitle").textContent = progressSubtitle(mode);
       renderProgressSteps(0);
       updateRenderProgress(6, progressStages()[0]);
-      clearInterval(renderProgressTimer);
-      renderProgressTimer = setInterval(tickRenderProgress, 900);
+      clearInterval(progressTimer);
+      progressTimer = setInterval(tickProgress, 900);
     }
 
-    function tickRenderProgress() {
-      const cap = renderProgressMode === "dryRun" ? 88 : 94;
-      const next = Math.min(cap, renderProgressValue + progressIncrement(renderProgressValue));
+    function tickProgress() {
+      const cap = progressCap();
+      const next = Math.min(cap, progressValue + progressIncrement(progressValue));
       updateRenderProgress(next, stageForProgress(next));
     }
 
+    function progressTitle(mode) {
+      if (mode === "dryRun") return "正在解析订单";
+      if (mode === "templateRule") return "正在编译模板规则";
+      return "正在生成效果图";
+    }
+
+    function progressSubtitle(mode) {
+      if (mode === "dryRun") return "正在检查字段、分组和渲染任务";
+      if (mode === "templateRule") return "正在调用规则编译服务，请不要重复点击";
+      return "Illustrator 正在生成 AI 文件，请不要关闭软件";
+    }
+
+    function progressCap() {
+      if (progressMode === "dryRun") return 88;
+      if (progressMode === "templateRule") return 92;
+      return 96;
+    }
+
     function progressIncrement(value) {
+      if (progressMode === "render") {
+        if (value < 24) return 8;
+        if (value < 46) return 5;
+        if (value < 68) return 3;
+        return 1;
+      }
       if (value < 28) return 9;
       if (value < 58) return 6;
       if (value < 78) return 3;
@@ -1487,33 +1521,42 @@ INDEX_HTML = """<!doctype html>
     }
 
     function progressStages() {
-      if (renderProgressMode === "dryRun") {
+      if (progressMode === "dryRun") {
         return ["上传订单表格", "解析订单字段", "生成 render task", "等待返回结果"];
       }
-      return ["上传订单表格", "解析订单字段", "调用 Illustrator", "生成 AI 文件", "等待返回结果"];
+      if (progressMode === "templateRule") {
+        return ["提交规则内容", "调用规则编译", "生成业务说明", "完成收尾"];
+      }
+      return ["上传订单表格", "解析订单字段", "调用 Illustrator", "生成 AI 文件", "完成收尾"];
     }
 
     function stageForProgress(value) {
       const stages = progressStages();
-      if (renderProgressMode === "dryRun") {
+      if (progressMode === "dryRun") {
         if (value < 28) return stages[0];
         if (value < 58) return stages[1];
         if (value < 82) return stages[2];
         return stages[3];
       }
-      if (value < 22) return stages[0];
-      if (value < 42) return stages[1];
-      if (value < 74) return stages[2];
-      if (value < 92) return stages[3];
+      if (progressMode === "templateRule") {
+        if (value < 24) return stages[0];
+        if (value < 72) return stages[1];
+        if (value < 94) return stages[2];
+        return stages[3];
+      }
+      if (value < 18) return stages[0];
+      if (value < 36) return stages[1];
+      if (value < 52) return stages[2];
+      if (value < 98) return stages[3];
       return stages[4];
     }
 
     function updateRenderProgress(value, stage) {
-      renderProgressValue = Math.max(0, Math.min(100, Math.round(value)));
-      document.getElementById("progressBar").style.width = `${renderProgressValue}%`;
-      document.getElementById("progressPercent").textContent = `${renderProgressValue}%`;
+      progressValue = Math.max(0, Math.min(100, Math.round(value)));
+      document.getElementById("progressBar").style.width = `${progressValue}%`;
+      document.getElementById("progressPercent").textContent = `${progressValue}%`;
       document.getElementById("progressStage").textContent = stage;
-      renderProgressSteps(renderProgressValue);
+      renderProgressSteps(progressValue);
     }
 
     function renderProgressSteps(value) {
@@ -1527,10 +1570,10 @@ INDEX_HTML = """<!doctype html>
       }).join("");
     }
 
-    function completeRenderProgress(success) {
-      clearInterval(renderProgressTimer);
-      renderProgressTimer = null;
-      updateRenderProgress(success ? 100 : renderProgressValue, success ? "处理完成" : "处理失败");
+    function completeProgress(success) {
+      clearInterval(progressTimer);
+      progressTimer = null;
+      updateRenderProgress(success ? 100 : progressValue, success ? "处理完成" : "处理失败");
       if (success) {
         setTimeout(hideRenderProgress, 550);
       } else {
@@ -1538,10 +1581,10 @@ INDEX_HTML = """<!doctype html>
       }
     }
 
-    function failRenderProgress() {
-      clearInterval(renderProgressTimer);
-      renderProgressTimer = null;
-      updateRenderProgress(renderProgressValue || 100, "处理失败");
+    function failProgress() {
+      clearInterval(progressTimer);
+      progressTimer = null;
+      updateRenderProgress(progressValue || 100, "处理失败");
       setTimeout(hideRenderProgress, 900);
     }
 
