@@ -6,6 +6,17 @@ def test_render_page_exposes_parse_test_and_render_actions():
     assert "解析测试" in INDEX_HTML
     assert "生成效果图" in INDEX_HTML
     assert "/download/render_task" in INDEX_HTML
+    assert "render-task-panel" in INDEX_HTML
+    assert "只解析订单并生成 render task JSON" in INDEX_HTML
+    assert "清空当前订单文件和任务结果" in INDEX_HTML
+
+
+def test_render_page_has_progress_overlay():
+    assert 'id="renderProgressOverlay"' in INDEX_HTML
+    assert 'id="progressBar"' in INDEX_HTML
+    assert "showRenderProgress" in INDEX_HTML
+    assert "tickRenderProgress" in INDEX_HTML
+    assert "调用 Illustrator" in INDEX_HTML
 
 
 def test_template_form_lists_supported_template_types():

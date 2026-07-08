@@ -179,6 +179,15 @@ INDEX_HTML = """<!doctype html>
     .panel-body {
       padding: 18px;
     }
+    .render-task-panel .panel-body {
+      min-height: 430px;
+      display: flex;
+      flex-direction: column;
+    }
+    .render-task-panel .form-grid {
+      flex: 1;
+      align-content: start;
+    }
     .form-grid {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -186,7 +195,7 @@ INDEX_HTML = """<!doctype html>
     }
     .field-full { grid-column: 1 / -1; }
     .task-upload {
-      min-height: 104px;
+      min-height: 150px;
       padding: 18px;
       border: 1px dashed var(--line-strong);
       border-radius: 7px;
@@ -493,6 +502,103 @@ INDEX_HTML = """<!doctype html>
     .download-link:hover {
       text-decoration: underline;
     }
+    .progress-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 60;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      background: rgba(23, 33, 43, 0.42);
+    }
+    .progress-overlay.active {
+      display: flex;
+    }
+    .progress-dialog {
+      width: min(520px, 100%);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      box-shadow: 0 22px 60px rgba(23, 33, 43, 0.24);
+      overflow: hidden;
+    }
+    .progress-head {
+      padding: 18px 20px;
+      border-bottom: 1px solid var(--line);
+      background: #fbfcfe;
+    }
+    .progress-title {
+      margin: 0;
+      font-size: 16px;
+      font-weight: 700;
+      letter-spacing: 0;
+    }
+    .progress-subtitle {
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .progress-body {
+      padding: 20px;
+      display: grid;
+      gap: 14px;
+    }
+    .progress-track {
+      height: 10px;
+      border-radius: 999px;
+      background: #e9eef5;
+      overflow: hidden;
+    }
+    .progress-bar {
+      width: 0%;
+      height: 100%;
+      border-radius: 999px;
+      background: var(--primary);
+      transition: width 240ms ease;
+    }
+    .progress-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .progress-stage {
+      color: var(--ink);
+      font-weight: 700;
+    }
+    .progress-steps {
+      display: grid;
+      gap: 8px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+    .progress-steps li {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .progress-steps li::before {
+      content: "";
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #c9d4e2;
+    }
+    .progress-steps li.active {
+      color: var(--ink);
+      font-weight: 700;
+    }
+    .progress-steps li.active::before {
+      background: var(--primary);
+    }
+    .progress-steps li.done::before {
+      background: var(--success);
+    }
     @media (max-width: 960px) {
       .header-inner, .shell { width: min(100vw - 24px, 1320px); }
       .tabs { overflow-x: auto; }
@@ -539,7 +645,7 @@ INDEX_HTML = """<!doctype html>
 
     <section class="page active" id="page-render">
       <div class="grid two">
-        <section class="panel">
+        <section class="panel render-task-panel">
           <div class="panel-header">
             <h2 class="panel-title">出图任务</h2>
             <span class="status-badge" id="renderTemplateBadge">未选择模板</span>
@@ -556,9 +662,9 @@ INDEX_HTML = """<!doctype html>
               </div>
             </div>
             <div class="actions">
-              <button class="btn-secondary" id="resetTaskBtn">重置</button>
-              <button class="btn-subtle" id="dryRunBtn">解析测试</button>
-              <button class="btn-primary" id="renderBtn">生成效果图</button>
+              <button class="btn-secondary" id="resetTaskBtn" title="清空当前订单文件和任务结果，不删除任务记录">重置</button>
+              <button class="btn-subtle" id="dryRunBtn" title="只解析订单并生成 render task JSON，不调用 Illustrator 出图">解析测试</button>
+              <button class="btn-primary" id="renderBtn" title="解析订单并调用 Illustrator 生成 AI 效果图">生成效果图</button>
             </div>
             <div class="result-strip">
               <div class="result-cell"><span>任务编号</span><strong id="resultJobId">-</strong></div>
@@ -791,6 +897,23 @@ INDEX_HTML = """<!doctype html>
     </section>
   </main>
 
+  <div class="progress-overlay" id="renderProgressOverlay" aria-hidden="true">
+    <div class="progress-dialog" role="status" aria-live="polite">
+      <div class="progress-head">
+        <h2 class="progress-title" id="progressTitle">正在处理</h2>
+        <div class="progress-subtitle" id="progressSubtitle">请保持 Illustrator 可用</div>
+      </div>
+      <div class="progress-body">
+        <div class="progress-track"><div class="progress-bar" id="progressBar"></div></div>
+        <div class="progress-row">
+          <span class="progress-stage" id="progressStage">准备任务</span>
+          <span id="progressPercent">0%</span>
+        </div>
+        <ul class="progress-steps" id="progressSteps"></ul>
+      </div>
+    </div>
+  </div>
+
   <script>
     const state = {
       templates: [],
@@ -805,6 +928,9 @@ INDEX_HTML = """<!doctype html>
       templateRuleDraft: null,
       templateRulePreviewSignature: ""
     };
+    let renderProgressTimer = null;
+    let renderProgressValue = 0;
+    let renderProgressMode = "render";
 
     const typeNames = {
       pure_text: "纯文字模板",
@@ -1297,13 +1423,18 @@ INDEX_HTML = """<!doctype html>
       payload.append("order_file", file);
       if (dryRun) payload.append("dry_run", "true");
       setTaskRunning(dryRun);
+      showRenderProgress(dryRun);
       try {
         const result = await postForm("/api/render", payload);
+        completeRenderProgress(result.status === "completed");
         renderTaskResult(result);
         await loadJobs();
       } catch (error) {
+        failRenderProgress();
         document.getElementById("resultStatus").textContent = "失败";
         setMessage("taskMessage", String(error.message || error), "error");
+      } finally {
+        setRenderButtonsDisabled(false);
       }
     }
 
@@ -1312,7 +1443,106 @@ INDEX_HTML = """<!doctype html>
       document.getElementById("resultStatus").textContent = dryRun ? "解析中" : "运行中";
       document.getElementById("resultItems").textContent = "-";
       document.getElementById("resultDownload").textContent = "-";
+      setRenderButtonsDisabled(true);
       setMessage("taskMessage", dryRun ? "正在解析订单和模板规则" : "正在渲染", "");
+    }
+
+    function setRenderButtonsDisabled(disabled) {
+      ["resetTaskBtn", "dryRunBtn", "renderBtn"].forEach(id => {
+        document.getElementById(id).disabled = disabled;
+      });
+    }
+
+    function showRenderProgress(dryRun) {
+      renderProgressMode = dryRun ? "dryRun" : "render";
+      renderProgressValue = 0;
+      const overlay = document.getElementById("renderProgressOverlay");
+      overlay.classList.add("active");
+      overlay.setAttribute("aria-hidden", "false");
+      document.getElementById("progressTitle").textContent = dryRun ? "正在解析订单" : "正在生成效果图";
+      document.getElementById("progressSubtitle").textContent = dryRun ? "正在检查字段、分组和渲染任务" : "Illustrator 正在处理，请不要关闭软件";
+      renderProgressSteps(0);
+      updateRenderProgress(6, progressStages()[0]);
+      clearInterval(renderProgressTimer);
+      renderProgressTimer = setInterval(tickRenderProgress, 900);
+    }
+
+    function tickRenderProgress() {
+      const cap = renderProgressMode === "dryRun" ? 88 : 94;
+      const next = Math.min(cap, renderProgressValue + progressIncrement(renderProgressValue));
+      updateRenderProgress(next, stageForProgress(next));
+    }
+
+    function progressIncrement(value) {
+      if (value < 28) return 9;
+      if (value < 58) return 6;
+      if (value < 78) return 3;
+      return 1;
+    }
+
+    function progressStages() {
+      if (renderProgressMode === "dryRun") {
+        return ["上传订单表格", "解析订单字段", "生成 render task", "等待返回结果"];
+      }
+      return ["上传订单表格", "解析订单字段", "调用 Illustrator", "生成 AI 文件", "等待返回结果"];
+    }
+
+    function stageForProgress(value) {
+      const stages = progressStages();
+      if (renderProgressMode === "dryRun") {
+        if (value < 28) return stages[0];
+        if (value < 58) return stages[1];
+        if (value < 82) return stages[2];
+        return stages[3];
+      }
+      if (value < 22) return stages[0];
+      if (value < 42) return stages[1];
+      if (value < 74) return stages[2];
+      if (value < 92) return stages[3];
+      return stages[4];
+    }
+
+    function updateRenderProgress(value, stage) {
+      renderProgressValue = Math.max(0, Math.min(100, Math.round(value)));
+      document.getElementById("progressBar").style.width = `${renderProgressValue}%`;
+      document.getElementById("progressPercent").textContent = `${renderProgressValue}%`;
+      document.getElementById("progressStage").textContent = stage;
+      renderProgressSteps(renderProgressValue);
+    }
+
+    function renderProgressSteps(value) {
+      const current = stageForProgress(value);
+      const stages = progressStages();
+      const target = document.getElementById("progressSteps");
+      target.innerHTML = stages.map(stage => {
+        const done = stages.indexOf(stage) < stages.indexOf(current);
+        const active = stage === current;
+        return `<li class="${done ? "done" : ""} ${active ? "active" : ""}">${escapeHtml(stage)}</li>`;
+      }).join("");
+    }
+
+    function completeRenderProgress(success) {
+      clearInterval(renderProgressTimer);
+      renderProgressTimer = null;
+      updateRenderProgress(success ? 100 : renderProgressValue, success ? "处理完成" : "处理失败");
+      if (success) {
+        setTimeout(hideRenderProgress, 550);
+      } else {
+        setTimeout(hideRenderProgress, 900);
+      }
+    }
+
+    function failRenderProgress() {
+      clearInterval(renderProgressTimer);
+      renderProgressTimer = null;
+      updateRenderProgress(renderProgressValue || 100, "处理失败");
+      setTimeout(hideRenderProgress, 900);
+    }
+
+    function hideRenderProgress() {
+      const overlay = document.getElementById("renderProgressOverlay");
+      overlay.classList.remove("active");
+      overlay.setAttribute("aria-hidden", "true");
     }
 
     function renderTaskResult(result) {
