@@ -1,14 +1,14 @@
 from src.service.web_page import INDEX_HTML
 
 
-def test_render_page_exposes_parse_test_and_render_actions():
-    assert 'id="dryRunBtn"' in INDEX_HTML
-    assert "解析测试" in INDEX_HTML
+def test_render_page_exposes_single_render_action():
+    assert 'id="dryRunBtn"' not in INDEX_HTML
+    assert 'id="resetTaskBtn"' not in INDEX_HTML
     assert "生成效果图" in INDEX_HTML
     assert "/download/render_task" in INDEX_HTML
     assert "render-task-panel" in INDEX_HTML
-    assert "只解析订单并生成 render task JSON" in INDEX_HTML
-    assert "清空当前订单文件和任务结果" in INDEX_HTML
+    assert "只解析订单并生成 render task JSON" not in INDEX_HTML
+    assert "清空当前订单文件和任务结果" not in INDEX_HTML
 
 
 def test_render_page_has_progress_overlay():

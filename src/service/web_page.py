@@ -666,8 +666,6 @@ INDEX_HTML = """<!doctype html>
               </div>
             </div>
             <div class="actions">
-              <button class="btn-secondary" id="resetTaskBtn" title="清空当前订单文件和任务结果，不删除任务记录">重置</button>
-              <button class="btn-subtle" id="dryRunBtn" title="只解析订单并生成 render task JSON，不调用 Illustrator 出图">解析测试</button>
               <button class="btn-primary" id="renderBtn" title="解析订单并调用 Illustrator 生成 AI 效果图">生成效果图</button>
             </div>
             <div class="result-strip">
@@ -975,9 +973,7 @@ INDEX_HTML = """<!doctype html>
         state.selectedTemplateId = event.target.value;
         syncSelectedTemplate();
       });
-      document.getElementById("dryRunBtn").addEventListener("click", () => submitRender(true));
       document.getElementById("renderBtn").addEventListener("click", () => submitRender(false));
-      document.getElementById("resetTaskBtn").addEventListener("click", resetTaskResult);
       document.getElementById("refreshJobsBtn").addEventListener("click", loadJobs);
       document.getElementById("refreshJobsPageBtn").addEventListener("click", loadJobs);
       document.getElementById("previewTemplateRuleBtn").addEventListener("click", renderTemplateRulePreviewFromServer);
@@ -1464,7 +1460,7 @@ INDEX_HTML = """<!doctype html>
     }
 
     function setRenderButtonsDisabled(disabled) {
-      ["resetTaskBtn", "dryRunBtn", "renderBtn"].forEach(id => {
+      ["renderBtn"].forEach(id => {
         document.getElementById(id).disabled = disabled;
       });
     }
