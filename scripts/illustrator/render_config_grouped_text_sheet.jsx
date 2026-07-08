@@ -21,9 +21,9 @@
     var orderLabelFontSize = Number(layout.order_label_font_size_pt || 12);
     var itemGap = mmToPt(Number(layout.item_gap_mm || 4));
     var showStyleBoxes = layout.show_style_boxes !== false;
-    var padding = mmToPt(Number(task.fit && task.fit.padding_mm || 1));
-    var minFontSize = Number(task.fit && task.fit.min_font_size_pt || 4);
-    var maxFontSize = Number(task.fit && task.fit.max_font_size_pt || 300);
+    var padding = mmToPt(numberOrDefault(task.fit && task.fit.padding_mm, 1));
+    var minFontSize = numberOrDefault(task.fit && task.fit.min_font_size_pt, 4);
+    var maxFontSize = numberOrDefault(task.fit && task.fit.max_font_size_pt, 300);
 
     var groupMetrics = [];
     var maxGroupWidth = 0;
@@ -489,5 +489,10 @@
 
     function documentColorSpace(mode) {
         return mode === "CMYK" ? DocumentColorSpace.CMYK : DocumentColorSpace.RGB;
+    }
+
+    function numberOrDefault(value, fallback) {
+        var number = Number(value);
+        return isNaN(number) ? fallback : number;
     }
 }());
