@@ -15,13 +15,15 @@ def test_jsx_isolates_an_unsupported_object_and_continues_scan():
 const fs = require('fs');
 const source = fs.readFileSync({json.dumps(str(script_path))}, 'utf8').replace(/^#target.*\\r?\\n/, '');
 const writes = {{}};
+const NativeJSON = JSON;
+global.JSON = undefined;
 global.$ = {{ getenv: () => 'task.json' }};
 global.File = function(path) {{
   return {{
     fsName: path,
     exists: true,
     open: () => true,
-    read: () => JSON.stringify({{ input_ai: 'input.ai', output_json: 'out.json' }}),
+    read: () => NativeJSON.stringify({{ input_ai: 'input.ai', output_json: 'out.json' }}),
     write: text => {{ writes[path] = text; }},
     close: () => undefined
   }};
@@ -43,11 +45,11 @@ global.app = {{ open: () => ({{
 }}) }};
 global.SaveOptions = {{ DONOTSAVECHANGES: 0 }};
 new Function(source)();
-const scan = JSON.parse(writes['out.json']);
+const scan = NativeJSON.parse(writes['out.json']);
 if (scan.items.length !== 2) throw new Error('scan did not continue');
 if (scan.items[1].name !== 'Name1') throw new Error('good object missing');
 if (scan.scan_errors.length !== 1) throw new Error('isolated error missing');
-console.log(JSON.stringify({{ items: scan.items.length, errors: scan.scan_errors.length }}));
+console.log(NativeJSON.stringify({{ items: scan.items.length, errors: scan.scan_errors.length }}));
 """
 
     result = subprocess.run([node, "-e", harness], capture_output=True, text=True, check=False)
@@ -56,8 +58,8 @@ console.log(JSON.stringify({{ items: scan.items.length, errors: scan.scan_errors
     assert json.loads(result.stdout) == {"items": 2, "errors": 1}
 
 
-def test_jsx_uses_strict_json_parsing_without_eval():
+def test_jsx_uses_extend_script_json_fallback():
     script = Path("scripts/illustrator/inspect_rule_pack.jsx").read_text(encoding="utf-8")
 
-    assert "JSON.parse unavailable" in script
-    assert "eval(" not in script
+    assert "JSON.parse" in script
+    assert 'eval("(" + text + ")"' in script

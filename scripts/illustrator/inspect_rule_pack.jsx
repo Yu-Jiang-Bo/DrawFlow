@@ -160,8 +160,8 @@
         if (!file.open("r")) throw new Error("Cannot open task file: " + path);
         var text = file.read();
         file.close();
-        if (typeof JSON === "undefined" || !JSON.parse) throw new Error("JSON.parse unavailable");
-        return JSON.parse(text);
+        if (typeof JSON !== "undefined" && JSON.parse) return JSON.parse(text);
+        return eval("(" + text + ")");
     }
 
     function writeText(file, text) {
