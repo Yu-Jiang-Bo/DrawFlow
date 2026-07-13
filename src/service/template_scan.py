@@ -28,9 +28,12 @@ def build_rule_draft_from_scan(scan: Mapping[str, Any], *, template_id: str = ""
 
     items = _dict_list(scan.get("items"))
     options, option_sources, untrusted_suggestions = _collect_options(items)
+    asset_mappings, asset_mapping_issues = _collect_design_asset_mappings(
+        items, options["design_font_options"]
+    )
     targets = _collect_text_targets(items)
     dimensions = _collect_dimensions(items, options["style_options"])
-    capabilities = _collect_capabilities(targets, items, dimensions)
+    capabilities = _collect_capabilities(targets, items, dimensions, asset_mappings)
     flat_rule = {
         "template_id": template_id or _template_id(scan),
         "profile": infer_profile(
@@ -47,7 +50,10 @@ def build_rule_draft_from_scan(scan: Mapping[str, Any], *, template_id: str = ""
         "dimensions": dimensions,
         "slots": targets,
         "capabilities": capabilities,
-        "unresolved_items": _unresolved_items(options, targets, untrusted_suggestions),
+        "asset_mappings": asset_mappings,
+        "unresolved_items": _unresolved_items(
+            options, targets, untrusted_suggestions, asset_mapping_issues
+        ),
     }
     pack = normalize_template_rule_pack(flat_rule)
     scan_version = str(scan.get("scan_version") or scan_fingerprint(scan))
@@ -58,7 +64,9 @@ def build_rule_draft_from_scan(scan: Mapping[str, Any], *, template_id: str = ""
     pack["audit"] = {
         "source_format": "ai_scan_draft",
         "source_ai": str(_dict(scan.get("document")).get("source_ai") or ""),
-        "field_sources": _field_sources(options, option_sources, targets, dimensions),
+        "field_sources": _field_sources(
+            options, option_sources, targets, dimensions, asset_mappings
+        ),
         "untrusted_suggestions": untrusted_suggestions,
         "confirmed_at": "",
     }
@@ -101,9 +109,11 @@ def scan_fingerprint(scan: Mapping[str, Any]) -> str:
 def _collect_options(
     items: Iterable[Mapping[str, Any]],
 ) -> tuple[Dict[str, list[str]], Dict[str, set[str]], Dict[str, list[str]]]:
-    found = {"font_options": set(), "style_options": set(), "design_options": set()}
-    sources = {"font_options": set(), "style_options": set(), "design_options": set()}
-    suggestions = {"font_options": set(), "style_options": set(), "design_options": set()}
+    roles = ("font_options", "style_options", "design_options", "design_font_options")
+    found = {role: set() for role in roles}
+    sources = {role: set() for role in roles}
+    suggestions = {role: set() for role in roles}
+    independent_design_fonts: set[str] = set()
     for item in items:
         if not _is_trusted_item(item):
             continue
@@ -122,13 +132,60 @@ def _collect_options(
             if source_key == "text":
                 suggestions[role].add(option)
                 continue
+            if role == "font_options" and _is_design_asset_group(item):
+                independent_design_fonts.add(option)
+                continue
             found[role].add(option)
             sources[role].add(source_key)
+    matched_design_fonts = independent_design_fonts & found["font_options"]
+    found["design_font_options"].update(matched_design_fonts)
+    if matched_design_fonts:
+        sources["design_font_options"].add("independent_design_group")
     return (
         {key: sorted(values, key=_numbered_sort_key) for key, values in found.items()},
         sources,
         {key: sorted(values, key=_numbered_sort_key) for key, values in suggestions.items() if values},
     )
+
+
+def _collect_design_asset_mappings(
+    items: Iterable[Mapping[str, Any]],
+    design_font_options: Iterable[str],
+) -> tuple[list[Dict[str, str]], list[Dict[str, str]]]:
+    """Map named F groups in independent design files to their owning asset."""
+
+    allowed_options = {str(value).strip() for value in design_font_options if str(value).strip()}
+    candidates: Dict[str, set[tuple[str, str]]] = {}
+    for item in items:
+        if not _is_trusted_item(item) or not _is_design_asset_group(item):
+            continue
+        name = str(item.get("name") or "").strip()
+        match = OPTION_RE.fullmatch(name)
+        if not match or _option_prefix(match.group(1)) != "F":
+            continue
+        source_ai = str(item.get("source_ai") or "").strip()
+        if not source_ai:
+            continue
+        option = f"F{int(match.group(2))}"
+        if option not in allowed_options:
+            continue
+        candidates.setdefault(option, set()).add((Path(source_ai).name, name))
+
+    mappings: list[Dict[str, str]] = []
+    issues: list[Dict[str, str]] = []
+    for option in sorted(candidates, key=_numbered_sort_key):
+        matches = sorted(candidates[option])
+        if len(matches) != 1:
+            issues.append(
+                {
+                    "code": "design_asset_mapping",
+                    "message": f"Independent design font {option} needs an asset mapping confirmation.",
+                }
+            )
+            continue
+        asset, group = matches[0]
+        mappings.append({"option": option, "asset": asset, "group": group})
+    return mappings, issues
 
 
 def _collect_text_targets(items: Iterable[Mapping[str, Any]]) -> list[Dict[str, Any]]:
@@ -183,6 +240,7 @@ def _collect_capabilities(
     targets: Iterable[Mapping[str, Any]],
     items: Iterable[Mapping[str, Any]],
     dimensions: Mapping[str, Any],
+    asset_mappings: Iterable[Mapping[str, Any]],
 ) -> list[str]:
     capabilities = set()
     for target in targets:
@@ -194,6 +252,8 @@ def _collect_capabilities(
         for item in items
     ):
         capabilities.add("text_on_curve")
+    if any(asset_mappings):
+        capabilities.add("place_ai_asset")
     return sorted(value for value in capabilities if value)
 
 
@@ -211,6 +271,7 @@ def _unresolved_items(
     options: Mapping[str, list[str]],
     targets: list[Dict[str, Any]],
     untrusted_suggestions: Mapping[str, list[str]],
+    asset_mapping_issues: Iterable[Mapping[str, str]],
 ) -> list[Dict[str, str]]:
     unresolved = [{"code": "confirmation_required", "message": "自动提取结果需要用户确认后才能保存"}]
     if infer_profile(options) == PROFILE_UNCLASSIFIED:
@@ -219,6 +280,7 @@ def _unresolved_items(
         unresolved.append({"code": "text_targets", "message": "未识别到已命名的可编辑文字目标"})
     if any(untrusted_suggestions.values()):
         unresolved.append({"code": "option_group_names", "message": "发现画面文字标签建议，需要确认并命名对应对象编组"})
+    unresolved.extend(dict(item) for item in asset_mapping_issues)
     return unresolved
 
 
@@ -227,6 +289,7 @@ def _field_sources(
     option_sources: Mapping[str, set[str]],
     targets: list[Dict[str, Any]],
     dimensions: Mapping[str, Any],
+    asset_mappings: list[Dict[str, str]],
 ) -> Dict[str, Any]:
     sources: Dict[str, Any] = {}
     for role, values in options.items():
@@ -249,6 +312,12 @@ def _field_sources(
             "suggestion": deepcopy(dict(dimensions)),
             "modified": False,
         }
+    if asset_mappings:
+        sources["rules.asset_mappings"] = {
+            "source": "independent_design_group",
+            "suggestion": deepcopy(asset_mappings),
+            "modified": False,
+        }
     return sources
 
 
@@ -267,6 +336,11 @@ def _is_library_option(item: Mapping[str, Any], value: str) -> bool:
 
 def _is_trusted_item(item: Mapping[str, Any]) -> bool:
     return item.get("hidden") is not True and item.get("locked") is not True
+
+
+def _is_design_asset_group(item: Mapping[str, Any]) -> bool:
+    role = str(item.get("source_role") or "")
+    return "\u72ec\u7acb\u8bbe\u8ba1" in role and str(item.get("type") or "") == "GroupItem"
 
 def _option_prefix(value: str) -> str:
     lower = value.lower()

@@ -908,9 +908,10 @@ INDEX_HTML = """<!doctype html>
                         <label for="optionGroup1Role">角色</label>
                         <select id="optionGroup1Role" data-option-group-role>
                           <option value="font_options">字体组</option>
+                          <option value="design_font_options">独立设计字体</option>
                           <option value="design_options">设计组</option>
                           <option value="style_options">尺寸/版式组</option>
-                          <option value="">忽略</option>
+                          <option value="">请选择角色</option>
                         </select>
                       </div>
                     </div>
@@ -922,8 +923,9 @@ INDEX_HTML = """<!doctype html>
                       <div>
                         <label for="optionGroup2Role">角色</label>
                         <select id="optionGroup2Role" data-option-group-role>
-                          <option value="">忽略</option>
+                          <option value="">请选择角色</option>
                           <option value="font_options">字体组</option>
+                          <option value="design_font_options">独立设计字体</option>
                           <option value="design_options">设计组</option>
                           <option value="style_options">尺寸/版式组</option>
                         </select>
@@ -937,14 +939,24 @@ INDEX_HTML = """<!doctype html>
                       <div>
                         <label for="optionGroup3Role">角色</label>
                         <select id="optionGroup3Role" data-option-group-role>
-                          <option value="">忽略</option>
+                          <option value="">请选择角色</option>
                           <option value="font_options">字体组</option>
+                          <option value="design_font_options">独立设计字体</option>
                           <option value="design_options">设计组</option>
                           <option value="style_options">尺寸/版式组</option>
                         </select>
                       </div>
                     </div>
                   </div>
+                </div>
+
+                <div class="rule-section">
+                  <div class="rule-section-head">
+                    <h3 class="rule-section-title">独立设计资产映射</h3>
+                    <button class="btn-subtle rule-add-btn" id="addDesignAssetMappingBtn" type="button">+ 添加映射</button>
+                  </div>
+                  <p class="rule-section-note">仅填写“独立设计字体”使用的文件和 AI 编组。系统会在扫描到独立设计模板中的同名 F 编组时预填；如有误可直接修改。</p>
+                  <div class="structured-table" id="designAssetMappingRows"></div>
                 </div>
 
                 <div class="rule-section">
@@ -1259,6 +1271,7 @@ INDEX_HTML = """<!doctype html>
       templateRuleBaseConfig: null,
       templateOnboarding: null,
       optionGroupsTouched: false,
+      assetMappingsTouched: false,
       dimensionRowsTouched: false,
       textSequenceRowsTouched: false,
       templateRulesDescriptionDirty: false
@@ -1374,6 +1387,10 @@ INDEX_HTML = """<!doctype html>
         state.optionGroupsTouched = true;
         addOptionGroupRow();
       });
+      document.getElementById("addDesignAssetMappingBtn").addEventListener("click", () => {
+        state.assetMappingsTouched = true;
+        addDesignAssetMappingRow();
+      });
       document.getElementById("restoreSuggestionsBtn").addEventListener("click", restoreRuleSuggestions);
       document.getElementById("rescanTemplateBtn").addEventListener("click", rescanTemplate);
       document.getElementById("addDimensionRowBtn").addEventListener("click", addDimensionRow);
@@ -1429,6 +1446,18 @@ INDEX_HTML = """<!doctype html>
           state.optionGroupsTouched = true;
           renderTemplateRulePreview();
         });
+      });
+      const mappingRows = document.getElementById("designAssetMappingRows");
+      mappingRows.addEventListener("input", () => {
+        state.assetMappingsTouched = true;
+        renderTemplateRulePreview();
+      });
+      mappingRows.addEventListener("click", event => {
+        const button = event.target.closest("[data-remove-design-asset-mapping]");
+        if (!button) return;
+        button.closest(".structured-row").remove();
+        state.assetMappingsTouched = true;
+        renderTemplateRulePreview();
       });
       ["dimensionRows", "textSequenceRows"].forEach(id => {
         const container = document.getElementById(id);
@@ -2018,7 +2047,7 @@ INDEX_HTML = """<!doctype html>
       if (!source) throw new Error("缺少扫描草稿，不能确认模板");
       const rules = buildTemplateRulePayload();
       rules.order_bindings = parseJsonField("orderBindingsJson", {});
-      rules.asset_mappings = parseJsonField("assetMappingsJson", []);
+      rules.asset_mappings = collectDesignAssetMappings();
       rules.text_policies = parseJsonField("textPoliciesJson", {});
       rules.transforms = parseJsonField("outputTransformsJson", {});
       const unresolved = ((source.validation && source.validation.unresolved_items) || []).filter(item => {
@@ -2074,8 +2103,11 @@ INDEX_HTML = """<!doctype html>
       );
       const overrides = collectOverrides();
       const fontOptions = optionsByRole(optionGroups, "font_options");
+      const designFontOptions = optionsByRole(optionGroups, "design_font_options");
       const designOptions = optionsByRole(optionGroups, "design_options");
       const styleOptions = optionsByRole(optionGroups, "style_options");
+      const collectedAssetMappings = collectDesignAssetMappings();
+      const baseAssetMappings = Array.isArray(baseConfig.asset_mappings) ? baseConfig.asset_mappings : [];
       const baseDefaults = isPlainObject(baseConfig.defaults) ? baseConfig.defaults : {};
       const defaults = {
         ...baseDefaults,
@@ -2097,8 +2129,14 @@ INDEX_HTML = """<!doctype html>
         raw_text: state.dimensionRowsTouched ? "" : (baseConfig.raw_text || ""),
         option_groups: optionGroups,
         font_options: state.optionGroupsTouched ? fontOptions : (fontOptions.length ? fontOptions : normalizeOptions(baseConfig.font_options)),
+        design_font_options: state.optionGroupsTouched
+          ? designFontOptions
+          : (designFontOptions.length ? designFontOptions : normalizeOptions(baseConfig.design_font_options)),
         design_options: state.optionGroupsTouched ? designOptions : mergeDesignOptions(baseConfig.design_options, designOptions),
         style_options: state.optionGroupsTouched ? styleOptions : (styleOptions.length ? styleOptions : normalizeOptions(baseConfig.style_options)),
+        asset_mappings: state.assetMappingsTouched
+          ? collectedAssetMappings
+          : (collectedAssetMappings.length ? collectedAssetMappings : baseAssetMappings),
         dimension_mode: baseConfig.dimension_mode || "object",
         dimensions,
         slots,
@@ -2207,6 +2245,31 @@ INDEX_HTML = """<!doctype html>
         role: roles[index] ? roles[index].value : "",
         options: expandOptionRange(input.value.trim())
       })).filter(item => item.name && item.role);
+    }
+
+    function setDesignAssetMappingRows(mappings) {
+      const target = document.getElementById("designAssetMappingRows");
+      target.innerHTML = "";
+      (Array.isArray(mappings) ? mappings : []).forEach(mapping => addDesignAssetMappingRow(mapping));
+    }
+
+    function addDesignAssetMappingRow(mapping = {}) {
+      const row = document.createElement("div");
+      row.className = "structured-row";
+      row.innerHTML = `
+        <div><label>独立设计字体</label><input data-design-asset-option placeholder="例如 F10" value="${escapeHtml(mapping.option || "")}" /></div>
+        <div><label>独立设计文件</label><input data-design-asset-file placeholder="例如 design-f10.ai" value="${escapeHtml(mapping.asset || "")}" /></div>
+        <div><label>AI 编组</label><input data-design-asset-group placeholder="例如 F10" value="${escapeHtml(mapping.group || mapping.ai_group || "")}" /></div>
+        <div><label>操作</label><button class="btn-subtle" type="button" data-remove-design-asset-mapping>移除</button></div>`;
+      document.getElementById("designAssetMappingRows").appendChild(row);
+    }
+
+    function collectDesignAssetMappings() {
+      return Array.from(document.querySelectorAll("#designAssetMappingRows .structured-row")).map(row => ({
+        option: row.querySelector("[data-design-asset-option]").value.trim(),
+        asset: row.querySelector("[data-design-asset-file]").value.trim(),
+        group: row.querySelector("[data-design-asset-group]").value.trim()
+      })).filter(mapping => mapping.option || mapping.asset || mapping.group);
     }
 
     function expandOptionRange(value) {
@@ -2414,6 +2477,7 @@ INDEX_HTML = """<!doctype html>
         <div class="preview-grid">
           <div class="preview-chip"><span>规则状态</span><strong>${escapeHtml(missing.length ? "待补充" : "完整")}</strong></div>
           <div class="preview-chip"><span>字体组</span><strong>${escapeHtml(displayOptions(draft.font_options))}</strong></div>
+          <div class="preview-chip"><span>独立设计字体</span><strong>${escapeHtml(displayOptions(draft.design_font_options))}</strong></div>
           <div class="preview-chip"><span>设计组</span><strong>${escapeHtml(displayOptions(draft.design_options))}</strong></div>
           <div class="preview-chip"><span>尺寸/版式组</span><strong>${escapeHtml(displayOptions(draft.style_options))}</strong></div>
           <div class="preview-chip"><span>尺寸对象</span><strong>${escapeHtml(displayDimensionTargets(draft.dimensions || {}))}</strong></div>
@@ -2445,10 +2509,11 @@ INDEX_HTML = """<!doctype html>
     function displayOptionGroupRole(value) {
       const names = {
         font_options: "字体组",
+        design_font_options: "独立设计字体",
         design_options: "设计组",
         style_options: "尺寸/版式组"
       };
-      return names[value] || "忽略";
+      return names[value] || "未选择";
     }
 
     function displayOverrides(items) {
@@ -2469,6 +2534,8 @@ INDEX_HTML = """<!doctype html>
 
     function resetTemplateRuleFields() {
       setOptionGroupRows([{ name: "", role: "font_options" }]);
+      setDesignAssetMappingRows([]);
+      state.assetMappingsTouched = false;
       setDimensionRows(defaultDimensionRows());
       setTextSequenceRows(defaultTextSequenceRows());
       document.getElementById("defaultFont").value = "";
@@ -2510,7 +2577,8 @@ INDEX_HTML = """<!doctype html>
       row.innerHTML = `
         <div><label>编号组</label><input data-option-group-name placeholder="例如 F1-F10" value="${escapeHtml(group.name || "")}" /></div>
         <div><label>角色</label><select data-option-group-role>
-          <option value="">忽略</option><option value="font_options">字体组</option>
+          <option value="">请选择角色</option><option value="font_options">字体组</option>
+          <option value="design_font_options">独立设计字体</option>
           <option value="design_options">设计组</option><option value="style_options">尺寸/版式组</option>
         </select></div>
         <div><label>操作</label><button class="btn-subtle" type="button" data-remove-option-group>移除</button></div>`;
@@ -2550,7 +2618,7 @@ INDEX_HTML = """<!doctype html>
 
     function prefillScannedOptionSuggestions(rules, fieldSources) {
       const next = { ...(rules || {}) };
-      ["font_options", "design_options", "style_options"].forEach(key => {
+      ["font_options", "design_font_options", "design_options", "style_options"].forEach(key => {
         if (normalizeOptions(next[key]).length) return;
         const source = fieldSources && fieldSources[`rules.${key}`];
         const suggestion = source && typeof source === "object" ? normalizeOptions(source.suggestion) : [];
@@ -2683,6 +2751,7 @@ INDEX_HTML = """<!doctype html>
       if (!value || typeof value !== "object") return "暂无规则来源记录";
       const labels = {
         "rules.font_options": "字体选项",
+        "rules.design_font_options": "独立设计字体",
         "rules.design_options": "设计选项",
         "rules.style_options": "尺寸/版式选项",
         "rules.dimensions": "尺寸规则",
@@ -2742,6 +2811,7 @@ INDEX_HTML = """<!doctype html>
 
     function fillTemplateRuleFields(config) {
       state.optionGroupsTouched = false;
+      state.assetMappingsTouched = false;
       const groups = Array.isArray(config.option_groups) && config.option_groups.length
         ? config.option_groups
         : legacyOptionGroups(config);
@@ -2749,6 +2819,7 @@ INDEX_HTML = """<!doctype html>
         name: group.name || compactOptionRange(group.options || group.values || []),
         role: group.role || ""
       })));
+      setDesignAssetMappingRows(config.asset_mappings || []);
 
       const dimensionRows = Object.entries(config.dimensions || {}).map(([key, value]) => {
         const unit = value.unit || "cm";
@@ -2793,6 +2864,9 @@ INDEX_HTML = """<!doctype html>
       const groups = [];
       if (config.font_options && config.font_options.length) {
         groups.push({ name: compactOptionRange(config.font_options), role: "font_options", options: config.font_options });
+      }
+      if (config.design_font_options && config.design_font_options.length) {
+        groups.push({ name: compactOptionRange(config.design_font_options), role: "design_font_options", options: config.design_font_options });
       }
       if (config.design_options && config.design_options.length) {
         groups.push({ name: compactOptionRange(normalizeOptions(config.design_options)), role: "design_options", options: normalizeOptions(config.design_options) });

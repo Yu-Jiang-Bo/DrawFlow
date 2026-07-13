@@ -48,6 +48,7 @@ def check_rule_pack(
     pack = normalize_template_rule_pack(payload, template_id=template_id)
     errors: list[Dict[str, str]] = []
     warnings: list[Dict[str, str]] = []
+    rules = pack["rules"]
     resolved_id = str(pack["template"].get("template_id") or "").strip()
     if template_id and resolved_id != template_id:
         errors.append(_issue("template_id", "Template ID does not match the onboarding record."))
@@ -57,7 +58,6 @@ def check_rule_pack(
     if profile == PROFILE_UNCLASSIFIED or definition is None:
         errors.append(_issue("profile", "Select a supported template profile."))
     else:
-        rules = pack["rules"]
         for section in definition.required_rule_sections:
             if not rules.get(section):
                 errors.append(_issue(section, f"Profile requires rules.{section}."))
@@ -70,6 +70,8 @@ def check_rule_pack(
         if not isinstance(item, Mapping):
             continue
         code = str(item.get("code") or "unresolved").strip()
+        if code == "design_asset_mapping" and _has_complete_design_asset_mappings(rules):
+            continue
         issue = _issue(code, str(item.get("message") or "Unresolved onboarding item."))
         (warnings if code in ADVISORY_CODES else errors).append(issue)
 
@@ -379,9 +381,14 @@ def _validate_editable_sections(
             errors.append(_issue("validation_sample", "Validation expected does not match mapped sample output."))
 
     mappings = rules.get("asset_mappings", [])
+    design_font_options = {
+        str(value).strip()
+        for value in rules.get("design_font_options", [])
+        if str(value).strip()
+    }
     known_options = {
         str(value)
-        for field in ("font_options", "design_options", "style_options")
+        for field in ("font_options", "design_font_options", "design_options", "style_options")
         for value in rules.get(field, [])
     }
     known_assets = {
@@ -407,6 +414,19 @@ def _validate_editable_sections(
             errors.append(_issue("asset_mappings", f"Asset mapping references unknown option: {option}"))
         if known_assets and asset not in known_assets and not any(value.endswith("/" + asset) for value in known_assets):
             errors.append(_issue("asset_mappings", f"Asset mapping references unknown asset: {asset}"))
+    if design_font_options:
+        mapped_options = {
+            str(mapping.get("option") or "").strip()
+            for mapping in mappings if isinstance(mapping, Mapping)
+        }
+        missing_design_mappings = sorted(design_font_options - mapped_options)
+        if missing_design_mappings:
+            errors.append(
+                _issue(
+                    "asset_mappings",
+                    "Independent design fonts require asset mappings: " + ", ".join(missing_design_mappings),
+                )
+            )
 
     split_policy = policies.get("split", {}) if isinstance(policies, Mapping) else {}
     for mapping in rules.get("slot_mappings", []):
@@ -429,6 +449,27 @@ def _validate_editable_sections(
         max_parts = split_policy.get("max_parts")
         if isinstance(sequence_index, int) and isinstance(max_parts, int) and sequence_index > max_parts:
             errors.append(_issue("slot_mappings", "sequence_index cannot exceed split max_parts."))
+
+
+def _has_complete_design_asset_mappings(rules: Mapping[str, Any]) -> bool:
+    design_fonts = {
+        str(value).strip()
+        for value in rules.get("design_font_options", [])
+        if str(value).strip()
+    }
+    if not design_fonts:
+        return False
+    mappings = rules.get("asset_mappings", [])
+    if not isinstance(mappings, list):
+        return False
+    mapped_options = {
+        str(mapping.get("option") or "").strip()
+        for mapping in mappings
+        if isinstance(mapping, Mapping)
+        and str(mapping.get("asset") or "").strip()
+        and str(mapping.get("group") or mapping.get("ai_group") or "").strip()
+    }
+    return design_fonts <= mapped_options
 
 
 def _predict_sample_output(rules: Mapping[str, Any], sample_input: Mapping[str, Any]) -> Dict[str, Any]:

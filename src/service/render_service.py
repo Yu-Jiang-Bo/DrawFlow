@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Dict, Iterable, List
+from typing import Any, Dict, Iterable, List, Mapping
 
 from ..jjmb_202508_main import (
     build_task as build_202508_task,
@@ -202,6 +202,8 @@ class RenderService:
 
         template_rules = read_template_rule_config(template.template_rules_config)
         structure_config = read_template_rule_config(template_config)
+        design_fonts = _design_font_options(template_rules)
+        has_design_mapping_rules = isinstance(template_rules.get("asset_mappings"), list)
         task = build_grouped_task(
             xlsx_path=order_file,
             template_config=template_config,
@@ -210,8 +212,12 @@ class RenderService:
             color_mode=output_color_mode(template_rules),
             allowed_font_options=_configured_font_options(template_rules, structure_config),
             sheet_name=request["sheet_name"] or None,
-            design_font_options=_design_font_options(template_rules),
+            design_font_options=design_fonts,
             design_asset_path=_design_asset_path(template),
+            design_asset_mappings=(
+                _design_asset_mappings(template, template_rules, design_fonts)
+                if has_design_mapping_rules else None
+            ),
         )
         task_file = job_dir / "render-task.json"
         self._write_json(task_file, task.to_json_dict())
@@ -441,6 +447,45 @@ def _design_asset_path(template: TemplateDefinition) -> Path | None:
         if path and path.exists():
             return path
     return None
+
+
+def _design_asset_mappings(
+    template: TemplateDefinition,
+    rules: Mapping[str, Any],
+    design_font_options: Iterable[str],
+) -> Dict[str, Dict[str, str]]:
+    """Resolve editable option-to-asset mappings before creating a render task."""
+
+    design_fonts = {str(value).strip() for value in design_font_options if str(value).strip()}
+    mappings = rules.get("asset_mappings", []) if isinstance(rules, Mapping) else []
+    if not design_fonts or not isinstance(mappings, list):
+        return {}
+
+    assets: Dict[str, Path] = {}
+    for asset in template.assets:
+        if "独立设计" not in str(asset.get("role", "")):
+            continue
+        path = _template_asset_path(asset)
+        if path is None:
+            continue
+        for key in (str(asset.get("file_name", "")), str(asset.get("stored_path", "")), path.name, str(path)):
+            if key:
+                assets[key] = path
+
+    resolved: Dict[str, Dict[str, str]] = {}
+    for mapping in mappings:
+        if not isinstance(mapping, Mapping):
+            continue
+        option = str(mapping.get("option") or "").strip()
+        if option not in design_fonts:
+            continue
+        asset_key = str(mapping.get("asset") or "").strip()
+        path = assets.get(asset_key)
+        resolved[option] = {
+            "path": str(path.resolve()) if path and path.exists() else "",
+            "group": str(mapping.get("group") or mapping.get("ai_group") or option).strip(),
+        }
+    return resolved
 
 
 def _reference_ai_asset_path(template: TemplateDefinition) -> Path | None:

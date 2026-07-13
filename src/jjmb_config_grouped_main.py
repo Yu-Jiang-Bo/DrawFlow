@@ -6,7 +6,7 @@ import argparse
 import json
 from collections import OrderedDict
 from pathlib import Path
-from typing import Iterable, List
+from typing import Iterable, List, Mapping
 
 from .jjmb_order_parser import parse_order_items, read_xlsx_rows
 from .jjmb_template_main import TEMPLATE_ID, TEXT_FONT_OPTIONS
@@ -37,18 +37,31 @@ def build_grouped_task(
     sheet_name: str | None = None,
     design_font_options: Iterable[str] | None = None,
     design_asset_path: Path | str | None = None,
+    design_asset_mappings: Mapping[str, Mapping[str, str]] | None = None,
 ) -> ConfigGroupedSheetRenderTask:
     rows = read_xlsx_rows(xlsx_path, sheet_name=sheet_name)
     order_items = parse_order_items(rows, template_id=TEMPLATE_ID)
     allowed_fonts = {str(value).strip() for value in (allowed_font_options or TEXT_FONT_OPTIONS) if str(value).strip()}
     design_fonts = {str(value).strip() for value in (design_font_options or []) if str(value).strip()}
     design_asset = str(Path(design_asset_path).resolve()) if design_asset_path else ""
+    design_mappings = None if design_asset_mappings is None else dict(design_asset_mappings)
     grouped: "OrderedDict[str, List[TemplateTextSheetItem]]" = OrderedDict()
     for order_item in order_items:
         if allowed_fonts and order_item.font_option not in allowed_fonts:
             continue
         if order_item.font_option in design_fonts:
-            if not design_asset:
+            mapping = design_mappings.get(order_item.font_option) if design_mappings is not None else None
+            if design_mappings is not None and not isinstance(mapping, Mapping):
+                raise RenderTaskError(
+                    f"字体选项 {order_item.font_option} 缺少独立设计资产映射，请在模板规则中确认对应文件和编组"
+                )
+            mapped_asset = str(mapping.get("path") or "") if isinstance(mapping, Mapping) else design_asset
+            design_group = str(mapping.get("group") or order_item.font_option) if isinstance(mapping, Mapping) else order_item.font_option
+            if not mapped_asset:
+                if isinstance(mapping, Mapping):
+                    raise RenderTaskError(
+                        f"字体选项 {order_item.font_option} 的独立设计资产映射指向不存在的文件，请重新扫描或修改映射"
+                    )
                 raise RenderTaskError(f"字体选项 {order_item.font_option} 需要独立设计模板，但当前模板未配置设计资产")
             values = [value.strip() for value in order_item.personalization_values if value.strip()]
             if not values:
@@ -63,8 +76,8 @@ def build_grouped_task(
                     quantity_index=1,
                     render_kind="design_asset",
                     text_parts=values,
-                    design_asset=design_asset,
-                    design_group=order_item.font_option,
+                    design_asset=mapped_asset,
+                    design_group=design_group,
                 )
             )
             continue

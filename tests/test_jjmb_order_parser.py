@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from src.jjmb_combined_main import combined_personalization_text
 from src.jjmb_config_grouped_main import build_grouped_task
 from src.jjmb_order_parser import (
@@ -8,6 +10,7 @@ from src.jjmb_order_parser import (
     read_xlsx_rows,
     split_personalization,
 )
+from src.render_task import RenderTaskError
 from src.jjmb_template_main import expand_values
 
 
@@ -191,3 +194,53 @@ def test_grouped_sheet_keeps_design_font_as_single_asset_item(tmp_path):
     assert payload["design_group"] == "F10"
     assert payload["design_asset"] == str(asset.resolve())
     assert payload["text_parts"] == ["Tom", "Jery"]
+
+
+def test_grouped_sheet_uses_rule_selected_design_asset_and_group(tmp_path):
+    xlsx = tmp_path / "orders.xlsx"
+    asset = tmp_path / "f10-design.ai"
+    asset.write_text("fake ai", encoding="utf-8")
+    from openpyxl import Workbook
+
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["内部订单号", "订单明细id", "购买数量", "模板", "定制信息"])
+    sheet.append(["ORDER1", "1", "1", "JJMB202603281027102517", "Style Option:Style 4\nFont Option:F10\nPersonalization:Tom|Jery"])
+    workbook.save(xlsx)
+
+    task = build_grouped_task(
+        xlsx_path=xlsx,
+        template_config=Path("template.config.json"),
+        output_ai=tmp_path / "design.ai",
+        columns=4,
+        allowed_font_options=["F10"],
+        design_font_options=["F10"],
+        design_asset_mappings={"F10": {"path": str(asset), "group": "F10-artwork"}},
+    )
+
+    item = task.groups[0].items[0]
+    assert item.design_asset == str(asset)
+    assert item.design_group == "F10-artwork"
+
+    with pytest.raises(RenderTaskError, match="映射指向不存在的文件"):
+        build_grouped_task(
+            xlsx_path=xlsx,
+            template_config=Path("template.config.json"),
+            output_ai=tmp_path / "missing-design.ai",
+            columns=4,
+            allowed_font_options=["F10"],
+            design_font_options=["F10"],
+            design_asset_mappings={"F10": {"path": "", "group": "F10-artwork"}},
+        )
+
+    with pytest.raises(RenderTaskError, match="缺少独立设计资产映射"):
+        build_grouped_task(
+            xlsx_path=xlsx,
+            template_config=Path("template.config.json"),
+            output_ai=tmp_path / "unmapped-design.ai",
+            columns=4,
+            allowed_font_options=["F10"],
+            design_font_options=["F10"],
+            design_asset_path=asset,
+            design_asset_mappings={},
+        )

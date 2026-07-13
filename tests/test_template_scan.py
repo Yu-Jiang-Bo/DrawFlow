@@ -73,6 +73,38 @@ def test_text_labels_are_suggestions_but_require_group_confirmation():
     assert pack["audit"]["untrusted_suggestions"]["font_options"] == ["F2"]
 
 
+def test_independent_design_groups_create_design_font_and_asset_suggestions():
+    scan = {
+        "document": {"source_ai": "C:/templates/main.ai"},
+        "items": [
+            {"type": "GroupItem", "name": "F1", "source_role": "原始参考模板"},
+            {"type": "GroupItem", "name": "F10", "source_role": "原始参考模板"},
+            {
+                "type": "GroupItem",
+                "name": "F10",
+                "source_role": "独立设计模板",
+                "source_ai": "C:/templates/assets/design-f10.ai",
+            },
+            {
+                "type": "GroupItem",
+                "name": "F11",
+                "source_role": "独立设计模板",
+                "source_ai": "C:/templates/assets/design-f10.ai",
+            },
+        ],
+    }
+
+    pack = build_rule_draft_from_scan(scan)
+
+    assert pack["rules"]["font_options"] == ["F1", "F10"]
+    assert pack["rules"]["design_font_options"] == ["F10"]
+    assert pack["rules"]["asset_mappings"] == [
+        {"option": "F10", "asset": "design-f10.ai", "group": "F10"},
+    ]
+    assert "place_ai_asset" in pack["capabilities"]
+    assert pack["audit"]["field_sources"]["rules.design_font_options"]["suggestion"] == ["F10"]
+
+
 def test_path_text_adds_curve_capability():
     scan = sample_scan()
     scan["items"].append(

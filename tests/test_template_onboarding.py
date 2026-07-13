@@ -161,6 +161,35 @@ def test_check_rejects_unsupported_policy_empty_asset_catalog_and_wrong_sample_r
     assert "expected does not match" in messages
 
 
+def test_check_requires_asset_mapping_for_each_independent_design_font():
+    pack = ready_pack()
+    pack["rules"]["design_font_options"] = ["F10", "F11"]
+    pack["assets"] = {"items": [{"file_name": "design-f10.ai"}], "policy": {"mode": "split_ai"}}
+    pack["rules"]["asset_mappings"] = [{"option": "F10", "asset": "design-f10.ai", "group": "F10"}]
+
+    result = check_rule_pack(pack, template_id="DEMO001")
+
+    assert any(
+        item["code"] == "asset_mappings" and "F11" in item["message"]
+        for item in result["errors"]
+    )
+
+
+def test_check_clears_scan_mapping_blocker_after_user_completes_mapping():
+    pack = ready_pack()
+    pack["rules"]["design_font_options"] = ["F10"]
+    pack["assets"] = {"items": [{"file_name": "design-f10.ai"}], "policy": {"mode": "split_ai"}}
+    pack["rules"]["asset_mappings"] = [{"option": "F10", "asset": "design-f10.ai", "group": "F10"}]
+    pack["validation"]["unresolved_items"] = [
+        {"code": "design_asset_mapping", "message": "Confirm the independent design mapping."}
+    ]
+
+    result = check_rule_pack(pack, template_id="DEMO001")
+
+    assert result["ok"] is True
+    assert not any(item["code"] == "design_asset_mapping" for item in result["errors"])
+
+
 def test_validation_sample_applies_delimiter_and_sequence_index():
     pack = ready_pack()
     pack["rules"]["text_targets"] = [

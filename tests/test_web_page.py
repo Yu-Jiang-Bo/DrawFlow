@@ -221,12 +221,19 @@ def test_template_rules_prefill_fixed_options_before_optional_supplement():
     assert "将补充说明生成草稿" in INDEX_HTML
     assert "生成草稿不会覆盖已填写内容" in INDEX_HTML
     assert "function prefillScannedOptionSuggestions" in INDEX_HTML
-    assert '["font_options", "design_options", "style_options"]' in INDEX_HTML
+    assert '["font_options", "design_font_options", "design_options", "style_options"]' in INDEX_HTML
+    assert 'value="design_font_options"' in INDEX_HTML
+    assert "独立设计字体" in INDEX_HTML
+    assert ">忽略</option>" not in INDEX_HTML
+    assert 'id="designAssetMappingRows"' in INDEX_HTML
+    assert "collectDesignAssetMappings" in INDEX_HTML
+    assert 'data-design-asset-group' in INDEX_HTML
     assert "function compactOptionRange" in INDEX_HTML
     assert "return numbers.length === 1" in INDEX_HTML
     assert "optionGroupsTouched: false" in INDEX_HTML
     assert "state.optionGroupsTouched = true" in INDEX_HTML
     assert "font_options: state.optionGroupsTouched ? fontOptions" in INDEX_HTML
+    assert "design_font_options: state.optionGroupsTouched" in INDEX_HTML
     assert "const current = buildTemplateRulePayload();" in INDEX_HTML
     assert "!hasConfiguredRuleValue(merged[key])" in INDEX_HTML
 
