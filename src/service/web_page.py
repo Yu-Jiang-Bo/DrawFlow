@@ -145,6 +145,10 @@ INDEX_HTML = """<!doctype html>
       grid-template-columns: minmax(0, 1.35fr) minmax(360px, 0.9fr);
       align-items: start;
     }
+    .render-layout {
+      max-width: 860px;
+      margin: 0 auto;
+    }
     .grid.template-layout {
       grid-template-columns: minmax(260px, 0.7fr) minmax(0, 1.6fr);
       align-items: start;
@@ -180,12 +184,12 @@ INDEX_HTML = """<!doctype html>
       padding: 18px;
     }
     .render-task-panel .panel-body {
-      min-height: 430px;
+      min-height: 0;
       display: flex;
       flex-direction: column;
     }
     .render-task-panel .form-grid {
-      flex: 1;
+      flex: none;
       align-content: start;
     }
     .form-grid {
@@ -195,7 +199,7 @@ INDEX_HTML = """<!doctype html>
     }
     .field-full { grid-column: 1 / -1; }
     .task-upload {
-      min-height: 150px;
+      min-height: 118px;
       padding: 18px;
       border: 1px dashed var(--line-strong);
       border-radius: 7px;
@@ -209,6 +213,14 @@ INDEX_HTML = """<!doctype html>
       margin-top: 18px;
       padding-top: 16px;
       border-top: 1px solid var(--line);
+    }
+    .render-task-panel .actions {
+      margin-top: 14px;
+      padding-top: 14px;
+    }
+    .render-task-panel .btn-primary {
+      min-width: 142px;
+      min-height: 40px;
     }
     .btn-primary {
       color: #fff;
@@ -270,30 +282,6 @@ INDEX_HTML = """<!doctype html>
       margin: 0;
       overflow-wrap: anywhere;
     }
-    .result-strip {
-      display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 12px;
-      margin-top: 16px;
-    }
-    .result-cell {
-      min-height: 70px;
-      padding: 12px;
-      border: 1px solid var(--line);
-      border-radius: 6px;
-      background: var(--soft);
-    }
-    .result-cell span {
-      display: block;
-      margin-bottom: 5px;
-      color: var(--muted);
-      font-size: 12px;
-    }
-    .result-cell strong {
-      display: block;
-      overflow-wrap: anywhere;
-      font-size: 13px;
-    }
     .list {
       display: grid;
       gap: 10px;
@@ -320,6 +308,13 @@ INDEX_HTML = """<!doctype html>
     .template-list {
       display: grid;
       gap: 8px;
+    }
+    .template-list-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 12px;
     }
     .template-row {
       width: 100%;
@@ -415,6 +410,104 @@ INDEX_HTML = """<!doctype html>
       color: var(--muted);
       font-size: 12px;
     }
+    .rule-section {
+      margin-top: 18px;
+      padding-top: 18px;
+      border-top: 1px solid var(--line);
+    }
+    .rule-section-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 10px;
+    }
+    .rule-section-title {
+      margin: 0;
+      color: var(--ink);
+      font-size: 14px;
+      font-weight: 700;
+      letter-spacing: 0;
+    }
+    .rule-section-note {
+      margin: -6px 0 12px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.5;
+    }
+    .structured-table {
+      display: grid;
+      gap: 8px;
+    }
+    .structured-row {
+      display: grid;
+      grid-template-columns: minmax(130px, 1fr) minmax(120px, 0.8fr) minmax(120px, 0.8fr) minmax(90px, 0.5fr);
+      gap: 8px;
+      align-items: end;
+    }
+    .structured-row.dynamic {
+      padding: 10px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #fbfcfe;
+    }
+    .structured-row.two {
+      grid-template-columns: minmax(160px, 1fr) minmax(160px, 1fr);
+    }
+    .structured-row.three {
+      grid-template-columns: minmax(150px, 1fr) minmax(130px, 0.8fr) minmax(130px, 0.8fr);
+    }
+    .structured-row.dimension {
+      grid-template-columns: minmax(150px, 1.1fr) minmax(100px, 0.7fr) minmax(100px, 0.7fr) minmax(90px, 0.5fr) 42px;
+    }
+    .structured-row.sequence {
+      grid-template-columns: minmax(120px, 0.9fr) minmax(110px, 0.8fr) minmax(70px, 0.45fr) minmax(120px, 0.9fr) minmax(80px, 0.5fr) minmax(80px, 0.5fr) 42px;
+    }
+    .structured-row label {
+      margin-bottom: 4px;
+    }
+    .rule-add-btn {
+      min-height: 32px;
+      padding: 6px 10px;
+      white-space: nowrap;
+    }
+    .row-remove-btn {
+      width: 36px;
+      min-height: 36px;
+      padding: 0;
+      border: 1px solid #d6dfe9;
+      border-radius: 7px;
+      background: #fff;
+      color: var(--muted);
+      font-size: 18px;
+      line-height: 1;
+    }
+    .row-remove-btn:hover {
+      border-color: #efb0aa;
+      color: var(--danger);
+      background: #fff7f6;
+    }
+    .advanced-rule-box {
+      margin-top: 14px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #fff;
+      overflow: hidden;
+    }
+    .advanced-rule-box summary {
+      padding: 12px 14px;
+      cursor: pointer;
+      color: #394756;
+      font-weight: 700;
+      background: var(--soft);
+    }
+    .advanced-rule-body {
+      padding: 14px;
+    }
+    .advanced-rule-body textarea {
+      min-height: 92px;
+      resize: vertical;
+    }
     .preview-box {
       min-height: 154px;
       padding: 13px;
@@ -502,20 +595,24 @@ INDEX_HTML = """<!doctype html>
     .download-link:hover {
       text-decoration: underline;
     }
-    .progress-overlay {
+    .progress-overlay,
+    .error-overlay {
       position: fixed;
       inset: 0;
-      z-index: 60;
       display: none;
       align-items: center;
       justify-content: center;
       padding: 24px;
       background: rgba(23, 33, 43, 0.42);
     }
-    .progress-overlay.active {
+    .progress-overlay { z-index: 60; }
+    .error-overlay { z-index: 70; }
+    .progress-overlay.active,
+    .error-overlay.active {
       display: flex;
     }
-    .progress-dialog {
+    .progress-dialog,
+    .error-dialog {
       width: min(520px, 100%);
       border: 1px solid var(--line);
       border-radius: 8px;
@@ -523,13 +620,26 @@ INDEX_HTML = """<!doctype html>
       box-shadow: 0 22px 60px rgba(23, 33, 43, 0.24);
       overflow: hidden;
     }
+    .error-dialog {
+      width: min(460px, 100%);
+    }
     .progress-head {
       padding: 18px 20px;
       border-bottom: 1px solid var(--line);
       background: #fbfcfe;
     }
+    .error-head {
+      padding: 18px 20px 10px;
+    }
     .progress-title {
       margin: 0;
+      font-size: 16px;
+      font-weight: 700;
+      letter-spacing: 0;
+    }
+    .error-title {
+      margin: 0;
+      color: var(--danger);
       font-size: 16px;
       font-weight: 700;
       letter-spacing: 0;
@@ -543,6 +653,21 @@ INDEX_HTML = """<!doctype html>
       padding: 20px;
       display: grid;
       gap: 14px;
+    }
+    .error-body {
+      padding: 0 20px 20px;
+      display: grid;
+      gap: 16px;
+    }
+    .error-text {
+      margin: 0;
+      color: var(--ink);
+      line-height: 1.6;
+      overflow-wrap: anywhere;
+    }
+    .error-actions {
+      display: flex;
+      justify-content: flex-end;
     }
     .progress-track {
       height: 10px;
@@ -607,8 +732,11 @@ INDEX_HTML = """<!doctype html>
       .grid.rule-layout,
       .form-grid,
       .asset-panel-grid,
-      .result-strip,
       .preview-grid,
+      .structured-row,
+      .structured-row.two,
+      .structured-row.three,
+      .structured-row.sequence,
       .rule-detail-grid {
         grid-template-columns: 1fr;
       }
@@ -644,7 +772,7 @@ INDEX_HTML = """<!doctype html>
     </nav>
 
     <section class="page active" id="page-render">
-      <div class="grid two">
+      <div class="render-layout">
         <section class="panel render-task-panel">
           <div class="panel-header">
             <h2 class="panel-title">出图任务</h2>
@@ -668,37 +796,8 @@ INDEX_HTML = """<!doctype html>
             <div class="actions">
               <button class="btn-primary" id="renderBtn" title="解析订单并调用 Illustrator 生成 AI 效果图">生成效果图</button>
             </div>
-            <div class="result-strip">
-              <div class="result-cell"><span>任务编号</span><strong id="resultJobId">-</strong></div>
-              <div class="result-cell"><span>渲染状态</span><strong id="resultStatus">待提交</strong></div>
-              <div class="result-cell"><span>渲染项数</span><strong id="resultItems">-</strong></div>
-              <div class="result-cell"><span>下载状态</span><strong id="resultDownload">-</strong></div>
-            </div>
-            <div class="message" id="taskMessage">等待提交</div>
           </div>
         </section>
-
-        <aside class="grid">
-          <section class="panel">
-            <div class="panel-header">
-              <h2 class="panel-title">当前模板状态</h2>
-              <span class="status-badge" id="templateStatusBadge">-</span>
-            </div>
-            <div class="panel-body">
-              <dl class="definition-list" id="renderTemplateStatus"></dl>
-            </div>
-          </section>
-
-          <section class="panel">
-            <div class="panel-header">
-              <h2 class="panel-title">最近任务</h2>
-              <button class="btn-subtle" id="refreshJobsBtn">刷新</button>
-            </div>
-            <div class="panel-body">
-              <div class="list" id="recentJobs"></div>
-            </div>
-          </section>
-        </aside>
       </div>
     </section>
 
@@ -710,6 +809,9 @@ INDEX_HTML = """<!doctype html>
             <span class="status-badge" id="templateCountBadge">0 个</span>
           </div>
           <div class="panel-body">
+            <div class="template-list-head">
+              <button class="btn-primary" id="newTemplateBtn">新增模板</button>
+            </div>
             <div class="template-list" id="templateList"></div>
           </div>
         </section>
@@ -717,7 +819,6 @@ INDEX_HTML = """<!doctype html>
         <section class="panel">
           <div class="panel-header">
             <h2 class="panel-title">新增或编辑模板</h2>
-            <span class="status-badge">纯文字模板</span>
           </div>
           <div class="panel-body">
             <div class="form-grid">
@@ -728,25 +829,6 @@ INDEX_HTML = """<!doctype html>
               <div>
                 <label for="templateName">模板名称</label>
                 <input id="templateName" placeholder="例如：皮质钥匙扣文字模板" />
-              </div>
-              <div>
-                <label for="templateType">模板类型</label>
-                <select id="templateType">
-                  <option value="pure_text">纯文字模板</option>
-                  <option value="pure_text_color_design">纯文字颜色/设计位置模板</option>
-                  <option value="pure_text_style">纯文字作图区模板</option>
-                  <option value="curved_title_text">弯曲标题文字模板</option>
-                  <option value="annotated_ai">标准标注 AI 模板</option>
-                  <option value="asset_split">独立设计资产模板</option>
-                </select>
-              </div>
-              <div>
-                <label for="templateStatus">状态</label>
-                <select id="templateStatus">
-                  <option value="active">启用</option>
-                  <option value="draft">草稿</option>
-                  <option value="disabled">停用</option>
-                </select>
               </div>
               <div class="field-full">
                 <label>上传.ai模板</label>
@@ -772,16 +854,152 @@ INDEX_HTML = """<!doctype html>
                 </div>
               </div>
               <div class="field-full">
-                <label for="templateRuleText">模板特有规则</label>
-                <textarea id="templateRuleText" placeholder="例如：未选择颜色默认金色；未选择设计默认 Design2；Design2 字体逆时针旋转 15 度。"></textarea>
-              </div>
-              <div class="field-full">
-                <label>编译后的规则说明</label>
-                <div class="preview-box" id="templateRulePreview"></div>
+                <div class="rule-section">
+                  <h3 class="rule-section-title">选项组角色</h3>
+                  <p class="rule-section-note">填写模板中出现的编号组，例如 F1-F10、D1-D12、Design1-Design12、Style1-Style5，并指定它在渲染中扮演什么角色。</p>
+                  <div class="structured-table" id="optionGroupRows">
+                    <div class="structured-row two">
+                      <div>
+                        <label for="optionGroup1Name">编号组 1</label>
+                        <input id="optionGroup1Name" data-option-group-name placeholder="例如 F1-F10" />
+                      </div>
+                      <div>
+                        <label for="optionGroup1Role">角色</label>
+                        <select id="optionGroup1Role" data-option-group-role>
+                          <option value="font_options">字体组</option>
+                          <option value="design_options">设计组</option>
+                          <option value="style_options">尺寸/版式组</option>
+                          <option value="">忽略</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div class="structured-row two">
+                      <div>
+                        <label for="optionGroup2Name">编号组 2</label>
+                        <input id="optionGroup2Name" data-option-group-name placeholder="例如 Design1-Design12" />
+                      </div>
+                      <div>
+                        <label for="optionGroup2Role">角色</label>
+                        <select id="optionGroup2Role" data-option-group-role>
+                          <option value="">忽略</option>
+                          <option value="font_options">字体组</option>
+                          <option value="design_options">设计组</option>
+                          <option value="style_options">尺寸/版式组</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div class="structured-row two">
+                      <div>
+                        <label for="optionGroup3Name">编号组 3</label>
+                        <input id="optionGroup3Name" data-option-group-name placeholder="例如 Style1-Style5" />
+                      </div>
+                      <div>
+                        <label for="optionGroup3Role">角色</label>
+                        <select id="optionGroup3Role" data-option-group-role>
+                          <option value="">忽略</option>
+                          <option value="font_options">字体组</option>
+                          <option value="design_options">设计组</option>
+                          <option value="style_options">尺寸/版式组</option>
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="rule-section">
+                  <div class="rule-section-head">
+                    <h3 class="rule-section-title">尺寸规则</h3>
+                    <button class="btn-subtle rule-add-btn" id="addDimensionRowBtn" type="button">+ 添加尺寸</button>
+                  </div>
+                  <div class="structured-table" id="dimensionRows"></div>
+                </div>
+
+                <div class="rule-section">
+                  <div class="rule-section-head">
+                    <h3 class="rule-section-title">字段拆分与变量序列</h3>
+                    <button class="btn-subtle rule-add-btn" id="addTextSequenceRowBtn" type="button">+ 添加字段规则</button>
+                  </div>
+                  <p class="rule-section-note">订单字段可按分隔符拆分，并按顺序写入 AI 模板中的变量序列，例如 Name 字段写入 Name1、Name2、Name3。</p>
+                  <div class="structured-table" id="textSequenceRows"></div>
+                </div>
+
+                <div class="rule-section">
+                  <h3 class="rule-section-title">默认值</h3>
+                  <div class="form-grid">
+                    <div>
+                      <label for="defaultFont">默认字体</label>
+                      <input id="defaultFont" placeholder="例如 F1" />
+                    </div>
+                    <div>
+                      <label for="defaultDesign">默认设计</label>
+                      <input id="defaultDesign" placeholder="例如 Design1" />
+                    </div>
+                    <div>
+                      <label for="defaultStyle">默认尺寸/版式</label>
+                      <input id="defaultStyle" placeholder="例如 Style1" />
+                    </div>
+                    <div>
+                      <label for="defaultColor">默认颜色</label>
+                      <input id="defaultColor" placeholder="例如 Gold" />
+                    </div>
+                    <div class="field-full">
+                      <label for="outputColorMode">输出色彩</label>
+                      <select id="outputColorMode">
+                        <option value="CMYK">CMYK</option>
+                        <option value="RGB">RGB</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="rule-section">
+                  <h3 class="rule-section-title">特殊处理</h3>
+                  <div class="structured-table" id="overrideRows">
+                    <div class="structured-row three">
+                      <div><label>对象/选项</label><input data-override-target placeholder="例如 F3" /></div>
+                      <div>
+                        <label>处理方式</label>
+                        <select data-override-action>
+                          <option value="">无</option>
+                          <option value="bold">加粗</option>
+                          <option value="uppercase">转大写</option>
+                          <option value="no_width_compress">禁止压缩字宽</option>
+                          <option value="fixed_color">固定颜色</option>
+                        </select>
+                      </div>
+                      <div><label>补充值</label><input data-override-value placeholder="可选" /></div>
+                    </div>
+                    <div class="structured-row three">
+                      <div><input data-override-target placeholder="例如 F7" /></div>
+                      <div>
+                        <select data-override-action>
+                          <option value="">无</option>
+                          <option value="bold">加粗</option>
+                          <option value="uppercase">转大写</option>
+                          <option value="no_width_compress">禁止压缩字宽</option>
+                          <option value="fixed_color">固定颜色</option>
+                        </select>
+                      </div>
+                      <div><input data-override-value placeholder="可选" /></div>
+                    </div>
+                  </div>
+                  <details class="advanced-rule-box">
+                    <summary>高级例外规则（可选）</summary>
+                    <div class="advanced-rule-body">
+                      <label for="templateAdvancedRules">例外说明</label>
+                      <textarea id="templateAdvancedRules" placeholder="例如：Design5 的第二行文字需要向上偏移 2mm。这里仅作为待确认说明保存，不会直接自动参与出图。"></textarea>
+                    </div>
+                  </details>
+                </div>
+
+                <div class="rule-section">
+                  <h3 class="rule-section-title">规则检查结果</h3>
+                  <div class="preview-box" id="templateRulePreview"></div>
+                </div>
               </div>
             </div>
             <div class="actions">
-              <button class="btn-subtle" id="previewTemplateRuleBtn">生成预览</button>
+              <button class="btn-subtle" id="checkTemplateRuleBtn">检查规则</button>
               <button class="btn-primary" id="saveTemplateBtn">保存模板</button>
             </div>
             <div class="message" id="templateSaveMessage">等待编辑</div>
@@ -916,6 +1134,20 @@ INDEX_HTML = """<!doctype html>
     </div>
   </div>
 
+  <div class="error-overlay" id="renderErrorOverlay" aria-hidden="true">
+    <div class="error-dialog" role="alertdialog" aria-labelledby="renderErrorTitle" aria-describedby="renderErrorText">
+      <div class="error-head">
+        <h2 class="error-title" id="renderErrorTitle">生成失败</h2>
+      </div>
+      <div class="error-body">
+        <p class="error-text" id="renderErrorText">请检查模板和订单表格后重试。</p>
+        <div class="error-actions">
+          <button class="btn-primary" id="closeRenderErrorBtn">我知道了</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <script>
     const state = {
       templates: [],
@@ -928,7 +1160,9 @@ INDEX_HTML = """<!doctype html>
       selectedRuleName: "",
       ruleMode: "published",
       templateRuleDraft: null,
-      templateRulePreviewSignature: ""
+      templateRuleBaseConfig: null,
+      dimensionRowsTouched: false,
+      textSequenceRowsTouched: false
     };
     let progressTimer = null;
     let progressValue = 0;
@@ -974,14 +1208,17 @@ INDEX_HTML = """<!doctype html>
         syncSelectedTemplate();
       });
       document.getElementById("renderBtn").addEventListener("click", () => submitRender(false));
-      document.getElementById("refreshJobsBtn").addEventListener("click", loadJobs);
       document.getElementById("refreshJobsPageBtn").addEventListener("click", loadJobs);
-      document.getElementById("previewTemplateRuleBtn").addEventListener("click", renderTemplateRulePreviewFromServer);
+      document.getElementById("closeRenderErrorBtn").addEventListener("click", hideRenderError);
+      document.getElementById("newTemplateBtn").addEventListener("click", newTemplate);
+      document.getElementById("checkTemplateRuleBtn").addEventListener("click", checkTemplateRule);
       document.getElementById("saveTemplateBtn").addEventListener("click", saveTemplate);
+      document.getElementById("addDimensionRowBtn").addEventListener("click", addDimensionRow);
+      document.getElementById("addTextSequenceRowBtn").addEventListener("click", addTextSequenceRow);
       document.getElementById("referenceAiFile").addEventListener("change", renderAssetRows);
       document.getElementById("assetAiFiles").addEventListener("change", renderAssetRows);
       document.getElementById("primaryAiFile").addEventListener("change", renderAssetRows);
-      document.getElementById("templateRuleText").addEventListener("input", markTemplateRulePreviewStale);
+      bindTemplateRuleInputs();
       document.getElementById("previewRuleBtn").addEventListener("click", renderRulePreviewFromServer);
       document.getElementById("saveRuleDraftBtn").addEventListener("click", saveRuleDraft);
       document.getElementById("publishRuleBtn").addEventListener("click", publishRule);
@@ -992,6 +1229,157 @@ INDEX_HTML = """<!doctype html>
       });
     }
 
+    function bindTemplateRuleInputs() {
+      const selectors = [
+        "#optionGroupRows input",
+        "#optionGroupRows select",
+        "#defaultFont",
+        "#defaultDesign",
+        "#defaultStyle",
+        "#defaultColor",
+        "#outputColorMode",
+        "#overrideRows input",
+        "#overrideRows select",
+        "#templateAdvancedRules"
+      ];
+      document.querySelectorAll(selectors.join(",")).forEach(element => {
+        element.addEventListener("input", renderTemplateRulePreview);
+        element.addEventListener("change", renderTemplateRulePreview);
+      });
+      ["dimensionRows", "textSequenceRows"].forEach(id => {
+        const container = document.getElementById(id);
+        container.addEventListener("input", () => {
+          markDynamicRowsTouched(id);
+          renderTemplateRulePreview();
+        });
+        container.addEventListener("change", () => {
+          markDynamicRowsTouched(id);
+          renderTemplateRulePreview();
+        });
+        container.addEventListener("click", event => {
+          const dimensionButton = event.target.closest("[data-remove-dimension-row]");
+          if (dimensionButton) {
+            removeDynamicRuleRow(dimensionButton, "dimensionRows");
+            return;
+          }
+          const sequenceButton = event.target.closest("[data-remove-text-sequence-row]");
+          if (sequenceButton) {
+            removeDynamicRuleRow(sequenceButton, "textSequenceRows");
+          }
+        });
+      });
+    }
+
+    function addDimensionRow() {
+      state.dimensionRowsTouched = true;
+      const rows = collectDimensionRows({ includeEmpty: true });
+      rows.push(blankDimensionRow());
+      setDimensionRows(rows);
+      renderTemplateRulePreview();
+    }
+
+    function addTextSequenceRow() {
+      state.textSequenceRowsTouched = true;
+      const rows = collectTextSequenceRows({ includeEmpty: true });
+      rows.push(blankTextSequenceRow());
+      setTextSequenceRows(rows);
+      renderTemplateRulePreview();
+    }
+
+    function removeDynamicRuleRow(button, rowType) {
+      markDynamicRowsTouched(rowType);
+      const row = button.closest(".structured-row");
+      if (row) row.remove();
+      renderTemplateRulePreview();
+    }
+
+    function markDynamicRowsTouched(rowType) {
+      if (rowType === "dimensionRows") {
+        state.dimensionRowsTouched = true;
+      } else if (rowType === "textSequenceRows") {
+        state.textSequenceRowsTouched = true;
+      }
+    }
+
+    function setDimensionRows(rows) {
+      const items = rows && rows.length ? rows : defaultDimensionRows();
+      document.getElementById("dimensionRows").innerHTML = items
+        .map((row, index) => renderDimensionRow(row, index))
+        .join("");
+    }
+
+    function setTextSequenceRows(rows) {
+      const items = rows && rows.length ? rows : defaultTextSequenceRows();
+      document.getElementById("textSequenceRows").innerHTML = items
+        .map((row, index) => renderTextSequenceRow(row, index))
+        .join("");
+    }
+
+    function renderDimensionRow(row, index) {
+      const placeholders = [
+        { target: "例如 Style1", width: "5", height: "5" },
+        { target: "例如 Name", width: "6", height: "7" },
+        { target: "例如 Title 或 Design1", width: "", height: "" }
+      ];
+      const hint = placeholders[index] || placeholders[0];
+      const unit = row.unit || "cm";
+      return `
+        <div class="structured-row dynamic dimension" data-dimension-row>
+          <div><label>尺寸对象</label><input data-dimension-target placeholder="${hint.target}" value="${escapeHtml(row.target || "")}" /></div>
+          <div><label>宽</label><input data-dimension-width placeholder="${hint.width}" value="${escapeHtml(row.width || "")}" /></div>
+          <div><label>高</label><input data-dimension-height placeholder="${hint.height}" value="${escapeHtml(row.height || "")}" /></div>
+          <div>
+            <label>单位</label>
+            <select data-dimension-unit>
+              <option value="cm" ${selectedAttr(unit, "cm")}>cm</option>
+              <option value="mm" ${selectedAttr(unit, "mm")}>mm</option>
+            </select>
+          </div>
+          <div><button class="row-remove-btn" type="button" data-remove-dimension-row aria-label="删除尺寸规则">×</button></div>
+        </div>
+      `;
+    }
+
+    function renderTextSequenceRow(row, index) {
+      const hints = [
+        { scope: "例如 Design1", field: "例如 Name", delimiter: "|", prefix: "例如 Name", start: "1", count: "3" },
+        { scope: "例如 Design2", field: "例如 Name", delimiter: "|", prefix: "例如 Name", start: "1", count: "2" },
+        { scope: "可留空", field: "例如 Title", delimiter: "可留空", prefix: "例如 Title", start: "1", count: "1" }
+      ];
+      const hint = hints[index] || hints[0];
+      return `
+        <div class="structured-row dynamic sequence" data-text-sequence-row>
+          <div><label>适用设计/选项</label><input data-text-sequence-scope placeholder="${hint.scope}" value="${escapeHtml(row.scope || "")}" /></div>
+          <div><label>订单字段</label><input data-text-sequence-field placeholder="${hint.field}" value="${escapeHtml(row.field || "")}" /></div>
+          <div><label>分隔符</label><input data-text-sequence-delimiter placeholder="${hint.delimiter}" value="${escapeHtml(row.delimiter || "")}" /></div>
+          <div><label>变量前缀</label><input data-text-sequence-prefix placeholder="${hint.prefix}" value="${escapeHtml(row.variable_prefix || "")}" /></div>
+          <div><label>起始编号</label><input data-text-sequence-start placeholder="${hint.start}" value="${escapeHtml(row.start_index || "")}" /></div>
+          <div><label>数量</label><input data-text-sequence-count placeholder="${hint.count}" value="${escapeHtml(row.count || "")}" /></div>
+          <div><button class="row-remove-btn" type="button" data-remove-text-sequence-row aria-label="删除字段拆分规则">×</button></div>
+        </div>
+      `;
+    }
+
+    function selectedAttr(current, expected) {
+      return current === expected ? "selected" : "";
+    }
+
+    function blankDimensionRow() {
+      return { target: "", width: "", height: "", unit: "cm" };
+    }
+
+    function blankTextSequenceRow() {
+      return { scope: "", field: "", delimiter: "", variable_prefix: "", start_index: "", count: "" };
+    }
+
+    function defaultDimensionRows() {
+      return [blankDimensionRow()];
+    }
+
+    function defaultTextSequenceRows() {
+      return [blankTextSequenceRow()];
+    }
+
     function switchPage(name) {
       document.querySelectorAll("[data-page-tab]").forEach(button => {
         button.classList.toggle("active", button.dataset.pageTab === name);
@@ -999,6 +1387,19 @@ INDEX_HTML = """<!doctype html>
       document.querySelectorAll(".page").forEach(page => {
         page.classList.toggle("active", page.id === `page-${name}`);
       });
+    }
+
+    function newTemplate() {
+      state.selectedTemplateId = "";
+      state.templateRuleDraft = null;
+      state.templateRuleBaseConfig = null;
+      state.dimensionRowsTouched = false;
+      state.textSequenceRowsTouched = false;
+      clearTemplateForm();
+      renderTemplateOptions();
+      renderTemplateList();
+      switchPage("templates");
+      setMessage("templateSaveMessage", "正在新增模板，填写基础信息和规则后保存", "");
     }
 
     async function checkHealth() {
@@ -1046,7 +1447,6 @@ INDEX_HTML = """<!doctype html>
     async function loadJobs() {
       const payload = await getJson("/api/jobs");
       state.jobs = payload.jobs || [];
-      renderRecentJobs();
       renderJobsTable();
     }
 
@@ -1094,29 +1494,11 @@ INDEX_HTML = """<!doctype html>
       const template = selectedTemplate();
       if (!template) {
         document.getElementById("renderTemplateBadge").textContent = "未选择模板";
-        document.getElementById("templateStatusBadge").textContent = "-";
-        document.getElementById("renderTemplateStatus").innerHTML = '<div class="empty">暂无模板</div>';
         clearTemplateForm();
         return;
       }
       document.getElementById("renderTemplate").value = template.template_id;
       document.getElementById("renderTemplateBadge").textContent = displayType(template.template_type);
-      document.getElementById("templateStatusBadge").textContent = displayStatus(template.status);
-      const ruleCheck = template.rule_check || {};
-      document.getElementById("renderTemplateStatus").innerHTML = definitionHtml([
-        ["模板 ID", template.template_id],
-        ["名称", template.name],
-        ["状态", displayStatus(template.status)],
-        ["类型", displayType(template.template_type)],
-        ["渲染基准 AI", template.template_ai ? displayTemplateAiRole(template) : "未配置"],
-        ["文件资产", `${(template.assets || []).length} 个`],
-        ["结构配置", template.template_config ? "已配置" : "未配置"],
-        ["特有规则", template.template_rules_config ? "已配置" : "未配置"],
-        ["规则状态", ruleCheck.complete ? "完整" : "待补充"],
-        ["可渲染", ruleCheck.renderable ? "可以" : "不可以"],
-        ["缺失规则", displayMissingRules(ruleCheck.missing || [])],
-        ["规则提示", (ruleCheck.warnings || []).join("；") || "-"]
-      ]);
       fillTemplateForm(template);
       renderTemplateList();
     }
@@ -1124,8 +1506,6 @@ INDEX_HTML = """<!doctype html>
     function fillTemplateForm(template) {
       document.getElementById("templateId").value = template.template_id || "";
       document.getElementById("templateName").value = template.name || "";
-      document.getElementById("templateType").value = template.template_type || "pure_text_color_design";
-      document.getElementById("templateStatus").value = template.status || "active";
       document.getElementById("referenceAiFile").value = "";
       document.getElementById("primaryAiFile").value = "";
       document.getElementById("assetAiFiles").value = "";
@@ -1134,10 +1514,11 @@ INDEX_HTML = """<!doctype html>
     }
 
     async function loadTemplateRuleText(template) {
-      const editor = document.getElementById("templateRuleText");
-      editor.value = "";
       state.templateRuleDraft = null;
-      state.templateRulePreviewSignature = "";
+      state.templateRuleBaseConfig = null;
+      state.dimensionRowsTouched = false;
+      state.textSequenceRowsTouched = false;
+      resetTemplateRuleFields();
       if (!template || !(template.template_rules_config || template.template_config)) {
         renderTemplateRulePreview();
         return;
@@ -1145,13 +1526,13 @@ INDEX_HTML = """<!doctype html>
       try {
         const payload = await getJson(`/api/templates/${encodeURIComponent(template.template_id)}/config`);
         const config = payload.config || {};
-        editor.value = config.raw_text || config.notes || config.description || "";
         state.templateRuleDraft = payload.config || null;
-        state.templateRulePreviewSignature = editor.value.trim();
+        state.templateRuleBaseConfig = config;
+        fillTemplateRuleFields(config);
       } catch (error) {
-        editor.value = "";
         state.templateRuleDraft = null;
-        state.templateRulePreviewSignature = "";
+        state.templateRuleBaseConfig = null;
+        resetTemplateRuleFields();
       }
       renderTemplateRulePreview();
     }
@@ -1247,75 +1628,582 @@ INDEX_HTML = """<!doctype html>
 
     function renderTemplateRulePreview() {
       const target = document.getElementById("templateRulePreview");
-      const raw = document.getElementById("templateRuleText").value.trim();
-      if (!state.templateRuleDraft) {
-        target.innerHTML = '<div class="empty">请先输入模板规则并点击“生成预览”。系统会把规则编译成可确认的说明，不需要你查看 JSON。</div>';
-        return;
-      }
-      const stale = raw !== state.templateRulePreviewSignature;
-      target.innerHTML = renderReadableTemplateRule(state.templateRuleDraft, stale);
+      const draft = buildTemplateRulePayload();
+      state.templateRuleDraft = draft;
+      target.innerHTML = renderTemplateRuleCheck(draft);
     }
 
-    async function renderTemplateRulePreviewFromServer() {
-      const raw = document.getElementById("templateRuleText").value.trim();
-      const templateId = document.getElementById("templateId").value.trim();
-      if (!templateId || !raw) {
-        renderTemplateRulePreview();
-        return;
-      }
-      try {
-        setTemplateRulePreviewDisabled(true);
-        showProgress("templateRule");
-        setMessage("templateSaveMessage", "正在编译规则", "");
-        const payload = await postJson("/api/templates/rules/draft", {
-          template_id: templateId,
-          template_type: document.getElementById("templateType").value,
-          natural_text: raw,
-          asset_count: uploadedAssetCount()
-        });
-        const draft = payload.draft || {};
-        state.templateRuleDraft = draft;
-        state.templateRulePreviewSignature = raw;
-        renderTemplateRulePreview();
-        completeProgress(true);
-        setMessage("templateSaveMessage", "规则已编译，请确认说明后保存", "ok");
-      } catch (error) {
-        failProgress();
-        setMessage("templateSaveMessage", String(error.message || error), "error");
-      } finally {
-        setTemplateRulePreviewDisabled(false);
-      }
-    }
-
-    function setTemplateRulePreviewDisabled(disabled) {
-      document.getElementById("previewTemplateRuleBtn").disabled = disabled;
-    }
-
-    function markTemplateRulePreviewStale() {
+    function checkTemplateRule() {
       renderTemplateRulePreview();
-      if (document.getElementById("templateRuleText").value.trim()) {
-        setMessage("templateSaveMessage", "规则内容已修改，请先生成预览再保存", "");
-      }
+      const missing = templateRuleMissingItems(state.templateRuleDraft || {});
+      setMessage(
+        "templateSaveMessage",
+        missing.length ? "规则还不完整，请先补齐检查结果中的缺失项" : "规则检查通过，可以保存模板",
+        missing.length ? "error" : "ok"
+      );
     }
 
     function buildTemplateRulePayload() {
-      const raw = document.getElementById("templateRuleText").value.trim();
+      const baseConfig = isPlainObject(state.templateRuleBaseConfig) ? state.templateRuleBaseConfig : {};
+      const optionGroups = collectOptionGroups();
+      const collectedDimensions = collectDimensions();
+      const dimensions = state.dimensionRowsTouched
+        ? collectedDimensions
+        : mergeDimensions(baseConfig.dimensions, collectedDimensions);
+      const baseTextSequences = Array.isArray(baseConfig.text_sequences) && baseConfig.text_sequences.length
+        ? baseConfig.text_sequences
+        : legacyTextSequences(baseConfig);
+      const collectedTextSequences = collectTextSequences();
+      const textSequences = state.textSequenceRowsTouched
+        ? mergeTextSequences([], collectedTextSequences)
+        : mergeTextSequences(baseTextSequences, collectedTextSequences);
+      const sequenceSlotMappings = slotMappingsFromTextSequences(textSequences);
+      const legacySlotMappingRows = !state.textSequenceRowsTouched && Array.isArray(baseConfig.slot_mappings) && baseConfig.slot_mappings.length
+        ? baseConfig.slot_mappings
+        : (!state.textSequenceRowsTouched ? legacySlotMappings(baseConfig.slots || []) : []);
+      const slotMappings = sequenceSlotMappings.length ? sequenceSlotMappings : legacySlotMappingRows;
+      const slots = buildSlotsFromMappings(
+        slotMappings,
+        state.textSequenceRowsTouched && !slotMappings.length ? [] : baseConfig.slots
+      );
+      const overrides = collectOverrides();
+      const fontOptions = optionsByRole(optionGroups, "font_options");
+      const designOptions = optionsByRole(optionGroups, "design_options");
+      const styleOptions = optionsByRole(optionGroups, "style_options");
+      const baseDefaults = isPlainObject(baseConfig.defaults) ? baseConfig.defaults : {};
+      const defaults = {
+        ...baseDefaults,
+        font: document.getElementById("defaultFont").value.trim(),
+        design: document.getElementById("defaultDesign").value.trim(),
+        style: document.getElementById("defaultStyle").value.trim(),
+        color: document.getElementById("defaultColor").value.trim()
+      };
+      const advancedText = document.getElementById("templateAdvancedRules").value.trim();
       return {
+        ...baseConfig,
+        version: 2,
         template_id: document.getElementById("templateId").value.trim(),
-        rule_source: "natural_language",
-        raw_text: raw,
-        defaults: {
-          color: inferColor(raw),
-          design: inferDesign(raw)
+        mode: inferTemplateTypeFromForm(),
+        template_type: inferTemplateTypeFromForm(),
+        status: "draft",
+        rule_source: "structured_form",
+        raw_text: state.dimensionRowsTouched ? "" : (baseConfig.raw_text || ""),
+        option_groups: optionGroups,
+        font_options: fontOptions.length ? fontOptions : normalizeOptions(baseConfig.font_options),
+        design_options: mergeDesignOptions(baseConfig.design_options, designOptions),
+        style_options: styleOptions.length ? styleOptions : normalizeOptions(baseConfig.style_options),
+        dimension_mode: baseConfig.dimension_mode || "object",
+        dimensions,
+        slots,
+        text_sequences: textSequences,
+        slot_mappings: slotMappings,
+        defaults,
+        option_overrides: {
+          ...(isPlainObject(baseConfig.option_overrides) ? baseConfig.option_overrides : {}),
+          ...overrides
         },
-        transforms: {
-          rotation: inferRotation(raw)
+        output: {
+          ...(isPlainObject(baseConfig.output) ? baseConfig.output : {}),
+          color_mode: document.getElementById("outputColorMode").value
+        },
+        exceptions: {
+          ...(isPlainObject(baseConfig.exceptions) ? baseConfig.exceptions : {}),
+          note: advancedText,
+          status: advancedText ? "manual_review" : "none"
+        },
+        assets: buildAssetsRulePayload(baseConfig),
+        parser: {
+          ...(isPlainObject(baseConfig.parser) ? baseConfig.parser : {}),
+          source: "structured_form"
         }
       };
     }
 
+    function isPlainObject(value) {
+      return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+    }
+
+    function mergeDesignOptions(existing, optionValues) {
+      const options = optionValues.length ? optionValues : normalizeOptions(existing);
+      if (isPlainObject(existing)) {
+        const merged = { ...existing };
+        if (optionValues.length) {
+          if (Array.isArray(merged.design_font_options)) {
+            merged.design_font_options = optionValues;
+          } else {
+            merged.options = optionValues;
+          }
+        }
+        return merged;
+      }
+      return options;
+    }
+
+    function buildSlotsFromMappings(slotMappings, existingSlots) {
+      const slots = Array.isArray(existingSlots) ? existingSlots : [];
+      if (!slotMappings.length) return slots.slice();
+      return slotMappings.map(item => {
+        const match = slots.find(slot => (
+          slot.name === item.slot ||
+          slot.source === item.field ||
+          slot.field === item.field
+        )) || {};
+        return {
+          ...match,
+          name: item.slot,
+          type: match.type || "text_fit_box",
+          source: item.field,
+          field: item.field,
+          scope: item.scope || match.scope || "",
+          delimiter: item.delimiter || match.delimiter || "",
+          sequence_index: item.sequence_index || match.sequence_index || null
+        };
+      });
+    }
+
+    function buildAssetsRulePayload(baseConfig) {
+      if (Array.isArray(baseConfig.assets)) return baseConfig.assets;
+      const count = uploadedAssetCount();
+      const baseAssets = isPlainObject(baseConfig.assets) ? baseConfig.assets : {};
+      return {
+        ...baseAssets,
+        mode: count > 0 ? "split_ai" : (baseAssets.mode || "inline"),
+        count
+      };
+    }
+
+    function mergeDimensions(existing, visibleDimensions) {
+      const base = isPlainObject(existing) ? { ...existing } : {};
+      return Object.keys(visibleDimensions || {}).length ? visibleDimensions : base;
+    }
+
+    function mergeTextSequences(existing, visibleSequences) {
+      const base = (Array.isArray(existing) ? existing : []).map(item => ({ ...item }));
+      const visible = Array.isArray(visibleSequences) ? visibleSequences : [];
+      if (!visible.length) return base;
+      return visible.map(sequence => {
+        const normalized = { ...sequence };
+        delete normalized.row_index;
+        return normalized;
+      }).filter(item => item.field && Array.isArray(item.variables) && item.variables.length);
+    }
+
     function templateRuleJsonText() {
-      return JSON.stringify(state.templateRuleDraft || buildTemplateRulePayload());
+      return JSON.stringify(buildTemplateRulePayload());
+    }
+
+    function collectOptionGroups() {
+      const names = Array.from(document.querySelectorAll("[data-option-group-name]"));
+      const roles = Array.from(document.querySelectorAll("[data-option-group-role]"));
+      return names.map((input, index) => ({
+        name: input.value.trim(),
+        role: roles[index] ? roles[index].value : "",
+        options: expandOptionRange(input.value.trim())
+      })).filter(item => item.name && item.role);
+    }
+
+    function expandOptionRange(value) {
+      const text = String(value || "").trim();
+      const range = text.match(/^([A-Za-z]+)\\s*(\\d+)\\s*-\\s*(?:[A-Za-z]+)?\\s*(\\d+)$/);
+      if (!range) {
+        return splitList(text);
+      }
+      const prefix = range[1];
+      const start = Number(range[2]);
+      const end = Number(range[3]);
+      if (!Number.isFinite(start) || !Number.isFinite(end) || end < start || end - start > 100) {
+        return [text];
+      }
+      const result = [];
+      for (let index = start; index <= end; index += 1) {
+        result.push(`${prefix}${index}`);
+      }
+      return result;
+    }
+
+    function splitList(value) {
+      return String(value || "")
+        .split(/[,，/、\\s]+/)
+        .map(item => item.trim())
+        .filter(Boolean);
+    }
+
+    function optionsByRole(optionGroups, role) {
+      const result = [];
+      optionGroups.filter(group => group.role === role).forEach(group => {
+        group.options.forEach(option => {
+          if (!result.includes(option)) result.push(option);
+        });
+      });
+      return result;
+    }
+
+    function collectDimensions() {
+      const result = {};
+      collectDimensionRows().forEach(row => {
+        const target = row.target;
+        const width = Number(row.width);
+        const height = Number(row.height);
+        const unit = row.unit || "cm";
+        if (!target || !width || !height) return;
+        const scale = unit === "cm" ? 10 : 1;
+        result[target] = {
+          width_mm: Number((width * scale).toFixed(3)),
+          height_mm: Number((height * scale).toFixed(3)),
+          unit
+        };
+      });
+      return result;
+    }
+
+    function collectDimensionRows(options = {}) {
+      return Array.from(document.querySelectorAll("[data-dimension-row]")).map(row => {
+        const target = row.querySelector("[data-dimension-target]")?.value.trim() || "";
+        const width = row.querySelector("[data-dimension-width]")?.value.trim() || "";
+        const height = row.querySelector("[data-dimension-height]")?.value.trim() || "";
+        const unit = row.querySelector("[data-dimension-unit]")?.value || "cm";
+        return { target, width, height, unit };
+      }).filter(row => options.includeEmpty || row.target || row.width || row.height);
+    }
+
+    function collectTextSequences() {
+      return collectTextSequenceRows().map((row, index) => {
+        const field = row.field;
+        const variablePrefix = row.variable_prefix;
+        const countValue = Number(row.count);
+        const count = Number.isFinite(countValue) && countValue > 0 ? Math.floor(countValue) : 1;
+        const startText = row.start_index;
+        const startValue = Number(startText);
+        const startIndex = startText && Number.isFinite(startValue) ? Math.floor(startValue) : null;
+        const delimiter = row.delimiter;
+        const variables = buildSequenceVariables(variablePrefix, startIndex, count);
+        return {
+          row_index: index,
+          scope: row.scope,
+          field,
+          delimiter: delimiter || (count > 1 ? "|" : ""),
+          variable_prefix: variablePrefix,
+          start_index: startIndex,
+          count,
+          variables
+        };
+      }).filter(item => item.field && item.variable_prefix && item.variables.length);
+    }
+
+    function collectTextSequenceRows(options = {}) {
+      return Array.from(document.querySelectorAll("[data-text-sequence-row]")).map(row => ({
+        scope: row.querySelector("[data-text-sequence-scope]")?.value.trim() || "",
+        field: row.querySelector("[data-text-sequence-field]")?.value.trim() || "",
+        delimiter: row.querySelector("[data-text-sequence-delimiter]")?.value.trim() || "",
+        variable_prefix: row.querySelector("[data-text-sequence-prefix]")?.value.trim() || "",
+        start_index: row.querySelector("[data-text-sequence-start]")?.value.trim() || "",
+        count: row.querySelector("[data-text-sequence-count]")?.value.trim() || ""
+      })).filter(row => (
+        options.includeEmpty ||
+        row.scope ||
+        row.field ||
+        row.delimiter ||
+        row.variable_prefix ||
+        row.start_index ||
+        row.count
+      ));
+    }
+
+    function buildSequenceVariables(prefix, startIndex, count) {
+      if (!prefix) return [];
+      if (count <= 1 && startIndex === null) return [prefix];
+      const firstIndex = startIndex === null ? 1 : startIndex;
+      return Array.from({ length: count }, (_, offset) => `${prefix}${firstIndex + offset}`);
+    }
+
+    function slotMappingsFromTextSequences(sequences) {
+      const rows = [];
+      (Array.isArray(sequences) ? sequences : []).forEach(sequence => {
+        (sequence.variables || []).forEach((variable, index) => {
+          rows.push({
+            field: sequence.field,
+            slot: variable,
+            scope: sequence.scope || "",
+            delimiter: sequence.delimiter || "",
+            sequence_index: index + 1
+          });
+        });
+      });
+      return rows;
+    }
+
+    function collectOverrides() {
+      const targets = Array.from(document.querySelectorAll("[data-override-target]"));
+      const actions = Array.from(document.querySelectorAll("[data-override-action]"));
+      const values = Array.from(document.querySelectorAll("[data-override-value]"));
+      const result = {};
+      targets.forEach((input, index) => {
+        const target = input.value.trim();
+        const action = actions[index] ? actions[index].value : "";
+        const value = values[index] ? values[index].value.trim() : "";
+        if (!target || !action) return;
+        result[target] = { action };
+        if (action === "bold") result[target].bold = true;
+        if (action === "uppercase") result[target].uppercase = true;
+        if (action === "no_width_compress") result[target].no_width_compress = true;
+        if (action === "fixed_color" && value) result[target].color = value;
+        if (value) result[target].value = value;
+      });
+      return result;
+    }
+
+    function inferTemplateTypeFromForm() {
+      const existingTemplate = formTemplate();
+      if (existingTemplate && existingTemplate.template_type) return existingTemplate.template_type;
+      if (state.templateRuleBaseConfig && (state.templateRuleBaseConfig.template_type || state.templateRuleBaseConfig.mode)) {
+        return state.templateRuleBaseConfig.template_type || state.templateRuleBaseConfig.mode;
+      }
+      const optionGroups = collectOptionGroups();
+      const hasDesignAssets = uploadedAssetCount() > 0;
+      const hasDesignGroup = optionGroups.some(group => group.role === "design_options");
+      const hasStyleGroup = optionGroups.some(group => group.role === "style_options");
+      if (hasDesignAssets) return "asset_split";
+      if (hasDesignGroup) return "annotated_ai";
+      if (hasStyleGroup) return "pure_text_style";
+      return "pure_text_color_design";
+    }
+
+    function templateRuleMissingItems(draft) {
+      const missing = [];
+      const strict = !isEditingExistingTemplate();
+      if (!draft.template_id) missing.push("模板 ID");
+      if (strict && (!draft.font_options || !draft.font_options.length)) missing.push("字体组");
+      if (strict && !hasSlotsOrMappings(draft)) missing.push("字段拆分与变量序列");
+      if (strict && (!draft.defaults || !draft.defaults.font)) missing.push("默认字体");
+      if (strict && draft.dimension_mode && !hasMeaningfulDimensions(draft.dimensions)) missing.push("至少一个尺寸规则");
+      return missing;
+    }
+
+    function isEditingExistingTemplate() {
+      return Boolean(formTemplate() || state.templateRuleBaseConfig);
+    }
+
+    function hasSlotsOrMappings(draft) {
+      return Boolean(
+        (Array.isArray(draft.slot_mappings) && draft.slot_mappings.length) ||
+        (Array.isArray(draft.slots) && draft.slots.length) ||
+        (Array.isArray(draft.text_sequences) && draft.text_sequences.length)
+      );
+    }
+
+    function hasMeaningfulDimensions(dimensions) {
+      if (!isPlainObject(dimensions)) return false;
+      return Object.values(dimensions).some(value => {
+        if (!isPlainObject(value)) return false;
+        return Number(value.width_mm || 0) > 0 || Number(value.height_mm || 0) > 0 || Boolean(value.source);
+      });
+    }
+
+    function renderTemplateRuleCheck(draft) {
+      const missing = templateRuleMissingItems(draft);
+      const optionGroups = draft.option_groups || [];
+      const advancedNote = draft.exceptions && draft.exceptions.note ? "有高级例外，需要人工确认" : "无";
+      return `
+        <div class="preview-grid">
+          <div class="preview-chip"><span>规则状态</span><strong>${escapeHtml(missing.length ? "待补充" : "完整")}</strong></div>
+          <div class="preview-chip"><span>字体组</span><strong>${escapeHtml(displayOptions(draft.font_options))}</strong></div>
+          <div class="preview-chip"><span>设计组</span><strong>${escapeHtml(displayOptions(draft.design_options))}</strong></div>
+          <div class="preview-chip"><span>尺寸/版式组</span><strong>${escapeHtml(displayOptions(draft.style_options))}</strong></div>
+          <div class="preview-chip"><span>尺寸对象</span><strong>${escapeHtml(displayDimensionTargets(draft.dimensions || {}))}</strong></div>
+          <div class="preview-chip"><span>字段拆分</span><strong>${escapeHtml(displayTextSequences(draft.text_sequences || []))}</strong></div>
+          <div class="preview-chip"><span>默认值</span><strong>${escapeHtml(describeDefaults(draft.defaults || {}))}</strong></div>
+          <div class="preview-chip"><span>特殊处理</span><strong>${escapeHtml(displayOverrides(draft.option_overrides || {}))}</strong></div>
+          <div class="preview-chip"><span>高级例外</span><strong>${escapeHtml(advancedNote)}</strong></div>
+          <div class="preview-chip"><span>已填写选项组</span><strong>${escapeHtml(optionGroups.map(group => `${group.name}=${displayOptionGroupRole(group.role)}`).join("；") || "未填写")}</strong></div>
+          <div class="preview-chip"><span>缺失项</span><strong>${escapeHtml(missing.join("；") || "无")}</strong></div>
+        </div>
+      `;
+    }
+
+    function displayDimensionTargets(dimensions) {
+      const keys = Object.keys(dimensions || {});
+      return keys.length ? keys.join(" / ") : "未填写";
+    }
+
+    function displayTextSequences(items) {
+      if (!Array.isArray(items) || !items.length) return "未填写";
+      return items.map(item => {
+        const scope = item.scope ? `${item.scope}: ` : "";
+        const variables = Array.isArray(item.variables) ? item.variables.join("/") : "";
+        const delimiter = item.delimiter ? ` 按 ${item.delimiter} 拆分` : "";
+        return `${scope}${item.field}${delimiter} -> ${variables}`;
+      }).join("；");
+    }
+
+    function displayOptionGroupRole(value) {
+      const names = {
+        font_options: "字体组",
+        design_options: "设计组",
+        style_options: "尺寸/版式组"
+      };
+      return names[value] || "忽略";
+    }
+
+    function displayOverrides(items) {
+      const keys = Object.keys(items || {});
+      if (!keys.length) return "无";
+      return keys.map(key => `${key}: ${displayOverrideAction(items[key].action)}`).join("；");
+    }
+
+    function displayOverrideAction(value) {
+      const names = {
+        bold: "加粗",
+        uppercase: "转大写",
+        no_width_compress: "禁止压缩字宽",
+        fixed_color: "固定颜色"
+      };
+      return names[value] || value || "-";
+    }
+
+    function resetTemplateRuleFields() {
+      document.querySelectorAll("[data-option-group-name]").forEach(input => { input.value = ""; });
+      document.querySelectorAll("[data-option-group-role]").forEach((select, index) => {
+        select.value = index === 0 ? "font_options" : "";
+      });
+      setDimensionRows(defaultDimensionRows());
+      setTextSequenceRows(defaultTextSequenceRows());
+      document.getElementById("defaultFont").value = "";
+      document.getElementById("defaultDesign").value = "";
+      document.getElementById("defaultStyle").value = "";
+      document.getElementById("defaultColor").value = "";
+      document.getElementById("outputColorMode").value = "CMYK";
+      document.querySelectorAll("[data-override-target], [data-override-value]").forEach(input => { input.value = ""; });
+      document.querySelectorAll("[data-override-action]").forEach(select => { select.value = ""; });
+      document.getElementById("templateAdvancedRules").value = "";
+    }
+
+    function fillTemplateRuleFields(config) {
+      resetTemplateRuleFields();
+      const groups = Array.isArray(config.option_groups) && config.option_groups.length
+        ? config.option_groups
+        : legacyOptionGroups(config);
+      const groupInputs = Array.from(document.querySelectorAll("[data-option-group-name]"));
+      const groupRoles = Array.from(document.querySelectorAll("[data-option-group-role]"));
+      groups.slice(0, groupInputs.length).forEach((group, index) => {
+        groupInputs[index].value = group.name || compactOptionRange(group.options || []);
+        groupRoles[index].value = group.role || "";
+      });
+
+      const dimensionRows = Object.entries(config.dimensions || {}).map(([key, value]) => {
+        const unit = value.unit || "cm";
+        const scale = unit === "cm" ? 10 : 1;
+        return {
+          target: key,
+          width: value.width_mm ? trimNumber(Number(value.width_mm) / scale) : "",
+          height: value.height_mm ? trimNumber(Number(value.height_mm) / scale) : "",
+          unit
+        };
+      });
+      setDimensionRows(dimensionRows.length ? dimensionRows : defaultDimensionRows());
+
+      fillTextSequenceFields(
+        Array.isArray(config.text_sequences) && config.text_sequences.length
+          ? config.text_sequences
+          : legacyTextSequences(config)
+      );
+
+      const defaults = config.defaults || {};
+      document.getElementById("defaultFont").value = defaults.font || "";
+      document.getElementById("defaultDesign").value = defaults.design || "";
+      document.getElementById("defaultStyle").value = defaults.style || "";
+      document.getElementById("defaultColor").value = defaults.color || "";
+      document.getElementById("outputColorMode").value = (config.output && config.output.color_mode) || "CMYK";
+
+      const overrideEntries = Object.entries(config.option_overrides || {});
+      const overrideTargets = Array.from(document.querySelectorAll("[data-override-target]"));
+      const overrideActions = Array.from(document.querySelectorAll("[data-override-action]"));
+      const overrideValues = Array.from(document.querySelectorAll("[data-override-value]"));
+      overrideEntries.slice(0, overrideTargets.length).forEach(([key, value], index) => {
+        overrideTargets[index].value = key;
+        overrideActions[index].value = value.action || inferOverrideAction(value);
+        overrideValues[index].value = value.value || value.color || "";
+      });
+
+      document.getElementById("templateAdvancedRules").value = (config.exceptions && config.exceptions.note) || config.raw_text || "";
+    }
+
+    function legacyOptionGroups(config) {
+      const groups = [];
+      if (config.font_options && config.font_options.length) {
+        groups.push({ name: compactOptionRange(config.font_options), role: "font_options", options: config.font_options });
+      }
+      if (config.design_options && config.design_options.length) {
+        groups.push({ name: compactOptionRange(normalizeOptions(config.design_options)), role: "design_options", options: normalizeOptions(config.design_options) });
+      }
+      if (config.style_options && config.style_options.length) {
+        groups.push({ name: compactOptionRange(config.style_options), role: "style_options", options: config.style_options });
+      }
+      return groups;
+    }
+
+    function fillTextSequenceFields(sequences) {
+      const rows = (Array.isArray(sequences) ? sequences : []).map(sequence => ({
+        scope: sequence.scope || "",
+        field: sequence.field || sequence.source || "",
+        delimiter: sequence.delimiter || "",
+        variable_prefix: sequence.variable_prefix || inferSequencePrefix(sequence.variables || [sequence.slot || sequence.name || ""]),
+        start_index: sequence.start_index || inferSequenceStart(sequence.variables || []) || "",
+        count: sequence.count || (Array.isArray(sequence.variables) ? sequence.variables.length : 1)
+      }));
+      setTextSequenceRows(rows.length ? rows : defaultTextSequenceRows());
+    }
+
+    function legacyTextSequences(config) {
+      if (Array.isArray(config.text_sequences) && config.text_sequences.length) return config.text_sequences;
+      const mappings = Array.isArray(config.slot_mappings) && config.slot_mappings.length
+        ? config.slot_mappings
+        : legacySlotMappings(config.slots || []);
+      return mappings.map(mapping => {
+        const slot = mapping.slot || mapping.name || "";
+        return {
+          scope: mapping.scope || "",
+          field: mapping.field || mapping.source || "",
+          delimiter: mapping.delimiter || "",
+          variable_prefix: inferSequencePrefix([slot]) || slot,
+          start_index: inferSequenceStart([slot]),
+          count: 1,
+          variables: slot ? [slot] : []
+        };
+      }).filter(item => item.field && item.variables.length);
+    }
+
+    function inferSequencePrefix(variables) {
+      const first = Array.isArray(variables) && variables.length ? String(variables[0] || "") : "";
+      const match = first.match(/^(.+?)(\\d+)$/);
+      return match ? match[1] : first;
+    }
+
+    function inferSequenceStart(variables) {
+      const first = Array.isArray(variables) && variables.length ? String(variables[0] || "") : "";
+      const match = first.match(/^.+?(\\d+)$/);
+      return match ? Number(match[1]) : null;
+    }
+
+    function legacySlotMappings(slots) {
+      return (Array.isArray(slots) ? slots : []).map(slot => ({
+        field: slot.source || "",
+        slot: slot.name || ""
+      })).filter(item => item.field && item.slot);
+    }
+
+    function compactOptionRange(options) {
+      const optionValues = normalizeOptions(options);
+      if (!optionValues.length) return "";
+      return optionValues.join(" / ");
+    }
+
+    function inferOverrideAction(value) {
+      if (!value || typeof value !== "object") return "";
+      if (value.bold) return "bold";
+      if (value.uppercase) return "uppercase";
+      if (value.no_width_compress) return "no_width_compress";
+      if (value.color) return "fixed_color";
+      return value.action || "";
     }
 
     async function saveTemplate() {
@@ -1326,17 +2214,20 @@ INDEX_HTML = """<!doctype html>
         setMessage("templateSaveMessage", "请填写模板 ID 和模板名称", "error");
         return;
       }
-      const ruleText = document.getElementById("templateRuleText").value.trim();
-      if (ruleText && (!state.templateRuleDraft || state.templateRulePreviewSignature !== ruleText)) {
-        setMessage("templateSaveMessage", "模板规则已修改，请先点击“生成预览”，确认编译后的规则说明后再保存", "error");
+      const draft = buildTemplateRulePayload();
+      const missing = templateRuleMissingItems(draft);
+      if (missing.length) {
+        state.templateRuleDraft = draft;
+        renderTemplateRulePreview();
+        setMessage("templateSaveMessage", `规则还不完整：${missing.join("、")}`, "error");
         return;
       }
       const form = new FormData();
       form.append("template_id", templateId);
       form.append("name", name);
-      form.append("template_type", document.getElementById("templateType").value);
-      form.append("status", document.getElementById("templateStatus").value);
-      form.append("template_rules_text", ruleText);
+      form.append("template_type", draft.template_type);
+      form.append("status", "active");
+      form.append("template_rules_text", "");
       form.append("template_rules_json", templateRuleJsonText());
       const reference = document.getElementById("referenceAiFile").files[0];
       if (reference) form.append("reference_ai", reference);
@@ -1361,15 +2252,15 @@ INDEX_HTML = """<!doctype html>
     function clearTemplateForm() {
       document.getElementById("templateId").value = "";
       document.getElementById("templateName").value = "";
-      document.getElementById("templateType").value = "pure_text_color_design";
-      document.getElementById("templateStatus").value = "active";
       document.getElementById("referenceAiFile").value = "";
       document.getElementById("primaryAiFile").value = "";
       document.getElementById("assetAiFiles").value = "";
-      document.getElementById("templateRuleText").value = "";
       state.templateRuleDraft = null;
-      state.templateRulePreviewSignature = "";
+      state.templateRuleBaseConfig = null;
+      state.dimensionRowsTouched = false;
+      state.textSequenceRowsTouched = false;
       document.getElementById("assetRows").innerHTML = '<div class="empty">暂无 .ai 模板资产</div>';
+      resetTemplateRuleFields();
       renderTemplateRulePreview();
       setMessage("templateSaveMessage", "等待编辑", "");
     }
@@ -1418,14 +2309,15 @@ INDEX_HTML = """<!doctype html>
     }
 
     async function submitRender(dryRun) {
+      hideRenderError();
       const file = document.getElementById("orderFile").files[0];
       const templateId = document.getElementById("renderTemplate").value;
       if (!templateId) {
-        setMessage("taskMessage", "请先选择模板", "error");
+        showRenderError("请先选择要使用的模板。");
         return;
       }
       if (!file) {
-        setMessage("taskMessage", "请上传订单表格", "error");
+        showRenderError("请先上传订单表格。");
         return;
       }
       const payload = new FormData();
@@ -1443,20 +2335,14 @@ INDEX_HTML = """<!doctype html>
         await loadJobs();
       } catch (error) {
         failProgress();
-        document.getElementById("resultStatus").textContent = "失败";
-        setMessage("taskMessage", String(error.message || error), "error");
+        showRenderError(error);
       } finally {
         setRenderButtonsDisabled(false);
       }
     }
 
     function setTaskRunning(dryRun) {
-      document.getElementById("resultJobId").textContent = "-";
-      document.getElementById("resultStatus").textContent = dryRun ? "解析中" : "运行中";
-      document.getElementById("resultItems").textContent = "-";
-      document.getElementById("resultDownload").textContent = "-";
       setRenderButtonsDisabled(true);
-      setMessage("taskMessage", dryRun ? "正在解析订单和模板规则" : "正在渲染", "");
     }
 
     function setRenderButtonsDisabled(disabled) {
@@ -1487,19 +2373,16 @@ INDEX_HTML = """<!doctype html>
 
     function progressTitle(mode) {
       if (mode === "dryRun") return "正在解析订单";
-      if (mode === "templateRule") return "正在编译模板规则";
       return "正在生成效果图";
     }
 
     function progressSubtitle(mode) {
       if (mode === "dryRun") return "正在检查字段、分组和渲染任务";
-      if (mode === "templateRule") return "正在调用规则编译服务，请不要重复点击";
       return "Illustrator 正在生成 AI 文件，请不要关闭软件";
     }
 
     function progressCap() {
       if (progressMode === "dryRun") return 88;
-      if (progressMode === "templateRule") return 92;
       return 96;
     }
 
@@ -1520,9 +2403,6 @@ INDEX_HTML = """<!doctype html>
       if (progressMode === "dryRun") {
         return ["上传订单表格", "解析订单字段", "生成 render task", "等待返回结果"];
       }
-      if (progressMode === "templateRule") {
-        return ["提交规则内容", "调用规则编译", "生成业务说明", "完成收尾"];
-      }
       return ["上传订单表格", "解析订单字段", "调用 Illustrator", "生成 AI 文件", "完成收尾"];
     }
 
@@ -1532,12 +2412,6 @@ INDEX_HTML = """<!doctype html>
         if (value < 28) return stages[0];
         if (value < 58) return stages[1];
         if (value < 82) return stages[2];
-        return stages[3];
-      }
-      if (progressMode === "templateRule") {
-        if (value < 24) return stages[0];
-        if (value < 72) return stages[1];
-        if (value < 94) return stages[2];
         return stages[3];
       }
       if (value < 18) return stages[0];
@@ -1590,54 +2464,66 @@ INDEX_HTML = """<!doctype html>
       overlay.setAttribute("aria-hidden", "true");
     }
 
+    function showRenderError(error) {
+      const message = explainRenderError(error);
+      document.getElementById("renderErrorText").textContent = message;
+      const overlay = document.getElementById("renderErrorOverlay");
+      overlay.classList.add("active");
+      overlay.setAttribute("aria-hidden", "false");
+    }
+
+    function hideRenderError() {
+      const overlay = document.getElementById("renderErrorOverlay");
+      overlay.classList.remove("active");
+      overlay.setAttribute("aria-hidden", "true");
+    }
+
+    function explainRenderError(error) {
+      const raw = String(error && error.message ? error.message : error || "").trim();
+      const text = raw.toLowerCase();
+      if (!raw) {
+        return "生成效果图失败。请检查模板、订单表格和规则配置后再试一次。";
+      }
+      if (/^(请|系统|当前|模板|订单|Illustrator|生成)/.test(raw)) {
+        return raw;
+      }
+      if (/font config not found|missing font|字体|font/.test(text)) {
+        return "模板缺少本次订单需要的字体样本或字体规则。请在模板管理中检查字体组是否完整，再重新生成。";
+      }
+      if (/template|模板|rule|规则|config|配置/.test(text)) {
+        return "当前模板的文件或规则还没有配置完整。请先到模板管理中检查模板文件、尺寸框和规则配置。";
+      }
+      if (/order|excel|csv|sheet|表格|工作表|字段/.test(text)) {
+        return "订单表格无法正确读取。请确认文件格式、工作表名称和表格字段是否正确。";
+      }
+      if (/illustrator|com|ai file|ai 文件|render|渲染/.test(text)) {
+        return "Illustrator 没有成功生成效果图。请确认 Illustrator 可以正常打开，模板文件没有被占用，然后再试一次。";
+      }
+      return `生成效果图失败。${cleanErrorText(raw)}`;
+    }
+
+    function cleanErrorText(value) {
+      return String(value || "")
+        .replace(/^Error:\\s*/i, "")
+        .replace(/\\s+/g, " ")
+        .slice(0, 180);
+    }
+
     function renderTaskResult(result) {
-      document.getElementById("resultJobId").textContent = result.job_id || "-";
-      document.getElementById("resultStatus").textContent = displayStatus(result.status);
-      document.getElementById("resultItems").textContent = result.stats && result.stats.items !== undefined ? result.stats.items : "-";
       if (result.status === "completed" && result.outputs && result.outputs.output_ai) {
-        document.getElementById("resultDownload").textContent = "下载中";
-        setMessage("taskMessage", "渲染完成，AI 文件开始下载", "ok");
         window.location.href = `/api/jobs/${encodeURIComponent(result.job_id)}/download/output_ai`;
       } else if (result.status === "completed" && result.outputs && result.outputs.render_task) {
-        const link = `/api/jobs/${encodeURIComponent(result.job_id)}/download/render_task`;
-        document.getElementById("resultDownload").innerHTML = `<a class="download-link" href="${link}">下载解析 JSON</a>`;
-        setMessage("taskMessage", "解析测试完成，可下载解析 JSON 检查字段、分组和渲染项", "ok");
+        window.location.href = `/api/jobs/${encodeURIComponent(result.job_id)}/download/render_task`;
       } else if (result.status === "failed") {
-        document.getElementById("resultDownload").textContent = "-";
-        setMessage("taskMessage", result.error || "渲染失败", "error");
+        showRenderError(result.error || "渲染失败");
       } else {
-        document.getElementById("resultDownload").textContent = "-";
-        setMessage("taskMessage", "任务已提交", "");
+        showRenderError("系统没有返回可下载的效果图，请检查模板和订单表格后重试。");
       }
     }
 
     function resetTaskResult() {
       document.getElementById("orderFile").value = "";
       document.getElementById("sheetName").value = "";
-      document.getElementById("resultJobId").textContent = "-";
-      document.getElementById("resultStatus").textContent = "待提交";
-      document.getElementById("resultItems").textContent = "-";
-      document.getElementById("resultDownload").textContent = "-";
-      setMessage("taskMessage", "等待提交", "");
-    }
-
-    function renderRecentJobs() {
-      const target = document.getElementById("recentJobs");
-      const jobs = state.jobs.slice(0, 5);
-      if (!jobs.length) {
-        target.innerHTML = '<div class="empty">暂无任务</div>';
-        return;
-      }
-      target.innerHTML = jobs.map(job => {
-        const request = job.request || {};
-        const stats = job.stats || {};
-        return `
-          <div class="list-item">
-            <div class="item-head"><span>${escapeHtml(job.job_id)}</span><span class="status-badge ${job.status === "completed" ? "success" : ""}">${escapeHtml(displayStatus(job.status))}</span></div>
-            <div class="item-meta">${escapeHtml(request.template_id || "-")} / ${stats.items !== undefined ? stats.items : "-"} 项</div>
-          </div>
-        `;
-      }).join("");
     }
 
     function renderJobsTable() {
@@ -1707,47 +2593,6 @@ INDEX_HTML = """<!doctype html>
       `;
     }
 
-    function renderReadableTemplateRule(draft, stale) {
-      const slots = Array.isArray(draft.slots) ? draft.slots : [];
-      const slotText = slots.length ? slots.map(describeSlot).join("；") : "暂未识别到明确作图区域";
-      const defaults = draft.defaults || {};
-      const parser = draft.parser || {};
-      return `
-        ${stale ? '<div class="message error" style="margin-bottom:10px">规则文字已修改，请重新生成预览后再保存。</div>' : ""}
-        <div class="preview-grid">
-          <div class="preview-chip"><span>模板类型</span><strong>${escapeHtml(displayType(draft.mode || draft.template_type || ""))}</strong></div>
-          <div class="preview-chip"><span>字体选项</span><strong>${escapeHtml(displayOptions(draft.font_options))}</strong></div>
-          <div class="preview-chip"><span>款式/尺寸框</span><strong>${escapeHtml(displayOptions(draft.style_options))}</strong></div>
-          <div class="preview-chip"><span>设计选项</span><strong>${escapeHtml(displayOptions(mergeOptions(draft.design_options, draft.design_font_options)))}</strong></div>
-          <div class="preview-chip"><span>文字和图片位置</span><strong>${escapeHtml(slotText)}</strong></div>
-          <div class="preview-chip"><span>默认内容</span><strong>${escapeHtml(describeDefaults(defaults))}</strong></div>
-          <div class="preview-chip"><span>旋转规则</span><strong>${escapeHtml(describeTransforms(draft.transforms || {}))}</strong></div>
-          <div class="preview-chip"><span>尺寸规则</span><strong>${escapeHtml(describeDimensions(draft.dimensions || {}))}</strong></div>
-          <div class="preview-chip"><span>输出色彩</span><strong>${escapeHtml(describeOutputSettings(draft.output || {}))}</strong></div>
-          <div class="preview-chip"><span>处理能力</span><strong>${escapeHtml(describeCapabilities(draft.capabilities || []))}</strong></div>
-          <div class="preview-chip"><span>解析来源</span><strong>${escapeHtml(parser.source === "llm" ? "LLM 编译" : "本地规则编译")}</strong></div>
-        </div>
-      `;
-    }
-
-    function describeSlot(slot) {
-      const name = slot.name || "未命名区域";
-      const typeNames = {
-        text_fit_box: "普通文字按作图框适配",
-        text_on_curve: "标题文字按曲线居中",
-        place_ai_asset: "放入独立设计文件",
-        replace_text: "替换设计内文字",
-        image_slot: "填充图片/照片"
-      };
-      const type = typeNames[slot.type] || slot.type || "未知规则";
-      const source = slot.source ? `，来源：${slot.source}` : "";
-      const scope = slot.scope ? `，范围：${slot.scope}` : "";
-      const content = slot.content ? `，内容对象：${slot.content}` : "";
-      const box = slot.box ? `，尺寸框：${slot.box}` : "";
-      const fallback = slot.default ? `，默认：${slot.default}` : "";
-      return `${name}：${type}${source}${scope}${content}${box}${fallback}`;
-    }
-
     function describeDefaults(defaults) {
       const parts = [];
       if (defaults.color) parts.push(`颜色 ${defaults.color}`);
@@ -1757,68 +2602,13 @@ INDEX_HTML = """<!doctype html>
       return parts.join("；") || "无默认值";
     }
 
-    function describeDimensions(dimensions) {
-      const parts = [];
-      if (dimensions.title) parts.push(`标题 ${formatDimension(dimensions.title)}`);
-      if (dimensions.name) parts.push(`名字 ${formatDimension(dimensions.name)}`);
-      return parts.join("；") || "未识别";
-    }
-
-    function describeTransforms(transforms) {
-      const parts = [];
-      Object.keys(transforms || {}).forEach(key => {
-        const item = transforms[key] || {};
-        if (item.rotation_deg === undefined || item.rotation_deg === null || item.rotation_deg === "") return;
-        const degree = Number(item.rotation_deg);
-        if (!Number.isFinite(degree)) return;
-        const direction = degree < 0 ? "逆时针" : "顺时针";
-        parts.push(`${key} ${direction}${trimNumber(Math.abs(degree))}°`);
-      });
-      return parts.join("；") || "无";
-    }
-
-    function describeOutputSettings(output) {
-      return output.color_mode || "CMYK";
-    }
-
-    function formatDimension(dimension) {
-      const width = Number(dimension.width_mm || 0);
-      const height = Number(dimension.height_mm || 0);
-      if (!width || !height) return "未识别";
-      return `${trimNumber(width)}mm * ${trimNumber(height)}mm`;
-    }
-
     function trimNumber(value) {
       return Number(value.toFixed(3)).toString();
-    }
-
-    function describeCapabilities(capabilities) {
-      const names = {
-        text_fit_box: "文字适配作图框",
-        text_on_curve: "文字沿曲线居中",
-        replace_text: "替换变量文字",
-        place_ai_asset: "放置设计 AI 文件",
-        image_slot: "图片槽位",
-        scale_to_box: "按尺寸框缩放",
-        outline_dedupe: "转曲去重",
-        export_ai8: "输出 AI8"
-      };
-      return normalizeOptions(capabilities).map(item => names[item] || item).join("；") || "未识别";
     }
 
     function displayOptions(values) {
       const options = normalizeOptions(values);
       return options.length ? options.join(" / ") : "未识别";
-    }
-
-    function mergeOptions(...groups) {
-      const result = [];
-      groups.forEach(group => {
-        normalizeOptions(group).forEach(text => {
-          if (text && !result.includes(text)) result.push(text);
-        });
-      });
-      return result;
     }
 
     function normalizeOptions(values) {
@@ -2109,24 +2899,6 @@ INDEX_HTML = """<!doctype html>
       return parseList(value).map(field => reverseNames[field] || field);
     }
 
-    function inferColor(text) {
-      if (/金色|Gold/i.test(text)) return "Gold";
-      if (/黑色|Black/i.test(text)) return "Black";
-      if (/白色|White/i.test(text)) return "White";
-      if (/玫瑰金|Rose/i.test(text)) return "Rose gold";
-      return "";
-    }
-
-    function inferDesign(text) {
-      const match = text.match(/Design\\s*([0-9]+)/i) || text.match(/设计\\s*([0-9]+)/);
-      return match ? `Design${match[1]}` : "";
-    }
-
-    function inferRotation(text) {
-      const match = text.match(/(-?\\d+)\\s*度/) || text.match(/(-?\\d+)\\s*°/);
-      return match ? `${match[1]}°` : "";
-    }
-
     function fileName(path) {
       return String(path || "").split(/[\\\\/]/).pop() || "-";
     }
@@ -2148,12 +2920,13 @@ INDEX_HTML = """<!doctype html>
 
     function setMessage(id, text, stateName) {
       const target = document.getElementById(id);
+      if (!target) return;
       target.className = `message ${stateName || ""}`.trim();
       target.textContent = text;
     }
 
     init().catch(error => {
-      setMessage("taskMessage", String(error.message || error), "error");
+      showRenderError(error);
     });
   </script>
 </body>
