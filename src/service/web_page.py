@@ -1880,7 +1880,7 @@ INDEX_HTML = """<!doctype html>
         lines.push("待补充：");
         unresolved.forEach(item => lines.push(`- ${item}`));
       }
-      document.getElementById("templateExtractionSummary").textContent = lines.join("\n");
+      document.getElementById("templateExtractionSummary").textContent = lines.join("\\n");
     }
 
     async function checkTemplateRule() {
@@ -2457,7 +2457,7 @@ INDEX_HTML = """<!doctype html>
       return Object.entries(value).map(([key, item]) => {
         const label = labels[key] || key.replace(/_/g, " ");
         return `${label}：${formatReadableValue(item)}`;
-      }).join("\n");
+      }).join("\\n");
     }
 
     function formatFieldSources(value) {
@@ -2467,7 +2467,7 @@ INDEX_HTML = """<!doctype html>
         const status = source.modified ? "人工已修改" : "沿用系统建议";
         const suggestion = source.suggestion == null ? "" : `；系统建议：${formatReadableValue(source.suggestion)}`;
         return `${field}：${status}${suggestion}`;
-      }).join("\n");
+      }).join("\\n");
     }
 
     function formatReadableValue(value) {
