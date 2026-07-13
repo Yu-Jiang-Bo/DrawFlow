@@ -1090,8 +1090,15 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
         assets.extend(
             self.registry.save_uploaded_assets(
                 template_id,
+                files.get("design_font_assets", []),
+                role="独立设计字体资源",
+            )
+        )
+        assets.extend(
+            self.registry.save_uploaded_assets(
+                template_id,
                 files.get("template_assets", []),
-                role="独立设计模板",
+                role="独立设计资源",
             )
         )
         template_config = fields.get("template_config", "").strip()

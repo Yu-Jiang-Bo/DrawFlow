@@ -877,7 +877,11 @@ INDEX_HTML = """<!doctype html>
                       <input id="primaryAiFile" type="file" accept=".ai" />
                     </div>
                     <div>
-                      <label for="assetAiFiles">独立设计模板文件（可选，可多选）</label>
+                      <label for="designFontAiFiles">独立设计字体资源（可选，可多选）</label>
+                      <input id="designFontAiFiles" type="file" accept=".ai" multiple />
+                    </div>
+                    <div>
+                      <label for="assetAiFiles">独立设计资源（可选，可多选）</label>
                       <input id="assetAiFiles" type="file" accept=".ai" multiple />
                     </div>
                   </div>
@@ -952,10 +956,10 @@ INDEX_HTML = """<!doctype html>
 
                 <div class="rule-section">
                   <div class="rule-section-head">
-                    <h3 class="rule-section-title">独立设计资产映射</h3>
+                    <h3 class="rule-section-title">独立资源映射</h3>
                     <button class="btn-subtle rule-add-btn" id="addDesignAssetMappingBtn" type="button">+ 添加映射</button>
                   </div>
-                  <p class="rule-section-note">仅填写“独立设计字体”使用的文件和 AI 编组。系统会在扫描到独立设计模板中的同名 F 编组时预填；如有误可直接修改。</p>
+                  <p class="rule-section-note">填写订单选项、资源文件和 AI 编组的对应关系。独立设计字体和独立设计资源均可映射；扫描只提供候选，最终以这里确认的映射为准。</p>
                   <div class="structured-table" id="designAssetMappingRows"></div>
                 </div>
 
@@ -1396,6 +1400,7 @@ INDEX_HTML = """<!doctype html>
       document.getElementById("addDimensionRowBtn").addEventListener("click", addDimensionRow);
       document.getElementById("addTextSequenceRowBtn").addEventListener("click", addTextSequenceRow);
       document.getElementById("referenceAiFile").addEventListener("change", renderAssetRows);
+      document.getElementById("designFontAiFiles").addEventListener("change", renderAssetRows);
       document.getElementById("assetAiFiles").addEventListener("change", renderAssetRows);
       document.getElementById("primaryAiFile").addEventListener("change", renderAssetRows);
       bindTemplateRuleInputs();
@@ -1753,6 +1758,7 @@ INDEX_HTML = """<!doctype html>
       document.getElementById("templateName").value = template.name || "";
       document.getElementById("referenceAiFile").value = "";
       document.getElementById("primaryAiFile").value = "";
+      document.getElementById("designFontAiFiles").value = "";
       document.getElementById("assetAiFiles").value = "";
       loadTemplateRuleText(template);
       renderAssetRows();
@@ -1846,8 +1852,11 @@ INDEX_HTML = """<!doctype html>
       if (reference) rows.push({ name: reference.name, type: "原始参考模板", status: "本次选择，待上传并扫描", action: "pending" });
       const primary = document.getElementById("primaryAiFile").files[0];
       if (primary) rows.push({ name: primary.name, type: "尺寸/作图区模板", status: "本次选择，待上传并扫描", action: "pending" });
+      Array.from(document.getElementById("designFontAiFiles").files || []).forEach(file => {
+        rows.push({ name: file.name, type: "独立设计字体资源", status: "本次选择，待上传并扫描", action: "pending" });
+      });
       Array.from(document.getElementById("assetAiFiles").files || []).forEach(file => {
-        rows.push({ name: file.name, type: "独立设计模板", status: "本次选择，待上传并扫描", action: "pending" });
+        rows.push({ name: file.name, type: "独立设计资源", status: "本次选择，待上传并扫描", action: "pending" });
       });
       const target = document.getElementById("assetRows");
       if (!rows.length) {
@@ -1935,7 +1944,7 @@ INDEX_HTML = """<!doctype html>
       const existingDesignCount = template && template.assets
         ? template.assets.filter(asset => String(asset.role || "").includes("独立设计")).length
         : 0;
-      const designCount = (document.getElementById("assetAiFiles").files || []).length;
+      const designCount = (document.getElementById("designFontAiFiles").files || []).length + (document.getElementById("assetAiFiles").files || []).length;
       return existingDesignCount + designCount;
     }
 
@@ -2957,8 +2966,9 @@ INDEX_HTML = """<!doctype html>
       const existingTemplate = formTemplate();
       const reference = document.getElementById("referenceAiFile").files[0];
       const primary = document.getElementById("primaryAiFile").files[0];
+      const designFontFiles = Array.from(document.getElementById("designFontAiFiles").files || []);
       const assetFiles = Array.from(document.getElementById("assetAiFiles").files || []);
-      const hasPendingFiles = Boolean(reference || primary || assetFiles.length);
+      const hasPendingFiles = Boolean(reference || primary || designFontFiles.length || assetFiles.length);
 
       if (!templateId || !name) {
         setMessage("templateSaveMessage", "请填写模板 ID 和模板名称", "error");
@@ -2984,6 +2994,7 @@ INDEX_HTML = """<!doctype html>
       form.append("status", "draft");
       if (reference) form.append("reference_ai", reference);
       if (primary) form.append("template_ai", primary);
+      designFontFiles.forEach(file => form.append("design_font_assets", file));
       assetFiles.forEach(file => form.append("template_assets", file));
 
       let registeredTemplateId = "";
@@ -2997,6 +3008,7 @@ INDEX_HTML = """<!doctype html>
         const scan = await postJson("/api/templates/" + encodeURIComponent(registeredTemplateId) + "/scan", {});
         document.getElementById("referenceAiFile").value = "";
         document.getElementById("primaryAiFile").value = "";
+        document.getElementById("designFontAiFiles").value = "";
         document.getElementById("assetAiFiles").value = "";
         await loadTemplates(registeredTemplateId);
         if (!scan.scan_ok) {
@@ -3008,6 +3020,7 @@ INDEX_HTML = """<!doctype html>
         if (registeredTemplateId) {
           document.getElementById("referenceAiFile").value = "";
           document.getElementById("primaryAiFile").value = "";
+          document.getElementById("designFontAiFiles").value = "";
           document.getElementById("assetAiFiles").value = "";
           try {
             await loadTemplates(registeredTemplateId);
@@ -3049,6 +3062,7 @@ INDEX_HTML = """<!doctype html>
       const hasPendingFiles = Boolean(
         document.getElementById("referenceAiFile").files[0] ||
         document.getElementById("primaryAiFile").files[0] ||
+        document.getElementById("designFontAiFiles").files.length ||
         document.getElementById("assetAiFiles").files.length
       );
       if (hasPendingFiles) {
@@ -3109,6 +3123,7 @@ INDEX_HTML = """<!doctype html>
       document.getElementById("templateName").value = "";
       document.getElementById("referenceAiFile").value = "";
       document.getElementById("primaryAiFile").value = "";
+      document.getElementById("designFontAiFiles").value = "";
       document.getElementById("assetAiFiles").value = "";
       state.templateRuleDraft = null;
       state.templateRuleBaseConfig = null;

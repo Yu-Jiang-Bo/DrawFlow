@@ -113,7 +113,8 @@ def _collect_options(
     found = {role: set() for role in roles}
     sources = {role: set() for role in roles}
     suggestions = {role: set() for role in roles}
-    independent_design_fonts: set[str] = set()
+    explicit_design_fonts: set[str] = set()
+    legacy_design_fonts: set[str] = set()
     for item in items:
         if not _is_trusted_item(item):
             continue
@@ -132,14 +133,20 @@ def _collect_options(
             if source_key == "text":
                 suggestions[role].add(option)
                 continue
-            if role == "font_options" and _is_design_asset_group(item):
-                independent_design_fonts.add(option)
+            if role == "font_options" and _is_design_font_asset_group(item):
+                explicit_design_fonts.add(option)
+                continue
+            if role == "font_options" and _is_legacy_design_asset_group(item):
+                legacy_design_fonts.add(option)
                 continue
             found[role].add(option)
             sources[role].add(source_key)
-    matched_design_fonts = independent_design_fonts & found["font_options"]
-    found["design_font_options"].update(matched_design_fonts)
-    if matched_design_fonts:
+    # New resource roles are explicit. Legacy "独立设计模板" keeps the safer
+    # cross-file match so previously uploaded assets do not become active unexpectedly.
+    matched_design_fonts = legacy_design_fonts & found["font_options"]
+    design_font_options = explicit_design_fonts | matched_design_fonts
+    found["design_font_options"].update(design_font_options)
+    if design_font_options:
         sources["design_font_options"].add("independent_design_group")
     return (
         {key: sorted(values, key=_numbered_sort_key) for key, values in found.items()},
@@ -157,7 +164,9 @@ def _collect_design_asset_mappings(
     allowed_options = {str(value).strip() for value in design_font_options if str(value).strip()}
     candidates: Dict[str, set[tuple[str, str]]] = {}
     for item in items:
-        if not _is_trusted_item(item) or not _is_design_asset_group(item):
+        if not _is_trusted_item(item) or not (
+            _is_design_font_asset_group(item) or _is_legacy_design_asset_group(item)
+        ):
             continue
         name = str(item.get("name") or "").strip()
         match = OPTION_RE.fullmatch(name)
@@ -338,9 +347,14 @@ def _is_trusted_item(item: Mapping[str, Any]) -> bool:
     return item.get("hidden") is not True and item.get("locked") is not True
 
 
-def _is_design_asset_group(item: Mapping[str, Any]) -> bool:
+def _is_design_font_asset_group(item: Mapping[str, Any]) -> bool:
     role = str(item.get("source_role") or "")
-    return "\u72ec\u7acb\u8bbe\u8ba1" in role and str(item.get("type") or "") == "GroupItem"
+    return "独立设计字体" in role and str(item.get("type") or "") == "GroupItem"
+
+
+def _is_legacy_design_asset_group(item: Mapping[str, Any]) -> bool:
+    role = str(item.get("source_role") or "")
+    return role == "独立设计模板" and str(item.get("type") or "") == "GroupItem"
 
 def _option_prefix(value: str) -> str:
     lower = value.lower()

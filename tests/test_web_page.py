@@ -228,6 +228,10 @@ def test_template_rules_prefill_fixed_options_before_optional_supplement():
     assert 'id="designAssetMappingRows"' in INDEX_HTML
     assert "collectDesignAssetMappings" in INDEX_HTML
     assert 'data-design-asset-group' in INDEX_HTML
+    assert 'id="designFontAiFiles"' in INDEX_HTML
+    assert "独立设计字体资源" in INDEX_HTML
+    assert "独立设计资源（可选，可多选）" in INDEX_HTML
+    assert 'form.append("design_font_assets", file)' in INDEX_HTML
     assert "function compactOptionRange" in INDEX_HTML
     assert "return numbers.length === 1" in INDEX_HTML
     assert "optionGroupsTouched: false" in INDEX_HTML
@@ -266,5 +270,5 @@ def test_template_asset_list_has_download_and_delete_actions():
     assert "简单模板可只传这一项" in INDEX_HTML
     assert "尺寸/作图区模板（可选" in INDEX_HTML
     assert "尺寸/作图区模板" in INDEX_HTML
-    assert "独立设计模板" in INDEX_HTML
+    assert "独立设计资源" in INDEX_HTML
     assert "displayTemplateAiRole" in INDEX_HTML

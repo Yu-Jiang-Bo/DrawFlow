@@ -105,6 +105,28 @@ def test_independent_design_groups_create_design_font_and_asset_suggestions():
     assert pack["audit"]["field_sources"]["rules.design_font_options"]["suggestion"] == ["F10"]
 
 
+def test_design_font_resource_creates_candidate_without_primary_name_match():
+    pack = build_rule_draft_from_scan(
+        {
+            "document": {"source_ai": "C:/templates/main.ai"},
+            "items": [
+                {
+                    "type": "GroupItem",
+                    "name": "F12",
+                    "source_role": "独立设计字体资源",
+                    "source_ai": "C:/templates/assets/font-f12.ai",
+                },
+            ],
+        }
+    )
+
+    assert pack["rules"]["font_options"] == []
+    assert pack["rules"]["design_font_options"] == ["F12"]
+    assert pack["rules"]["asset_mappings"] == [
+        {"option": "F12", "asset": "font-f12.ai", "group": "F12"},
+    ]
+
+
 def test_path_text_adds_curve_capability():
     scan = sample_scan()
     scan["items"].append(
