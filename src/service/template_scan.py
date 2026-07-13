@@ -80,6 +80,8 @@ def build_scan_summary(scan: Mapping[str, Any]) -> Dict[str, Any]:
             })
     return {
         "document": deepcopy(_dict(scan.get("document"))),
+        "documents": deepcopy(scan.get("documents", [])) if isinstance(scan.get("documents"), list) else [],
+        "source_files": deepcopy(scan.get("source_files", [])) if isinstance(scan.get("source_files"), list) else [],
         "layer_count": len(_dict_list(scan.get("layers"))),
         "item_count": len(items),
         "type_counts": type_counts,

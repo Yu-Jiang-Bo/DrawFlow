@@ -854,7 +854,8 @@ INDEX_HTML = """<!doctype html>
                 <input id="templateName" placeholder="例如：皮质钥匙扣文字模板" />
               </div>
               <div class="field-full">
-                <label>上传.ai模板</label>
+                <label>上传并扫描 .ai 模板</label>
+                <p class="rule-section-note">先选择文件，再点击底部按钮。系统会先保存全部文件和角色，再自动扫描；扫描失败也会保留草稿和已保存文件。</p>
                 <div class="asset-panel-grid">
                   <div class="upload-box">
                     <div>
@@ -948,7 +949,10 @@ INDEX_HTML = """<!doctype html>
                     <div><label for="scanVersion">扫描版本</label><input id="scanVersion" readonly /></div>
                     <div class="field-full"><label for="scanEvidence">原始扫描证据（只读）</label><textarea id="scanEvidence" readonly></textarea></div>
                     <div class="field-full"><label for="fieldSources">字段来源与人工修改状态（只读）</label><textarea id="fieldSources" readonly></textarea></div>
-                    <div class="field-full"><button class="btn-subtle" id="restoreSuggestionsBtn" type="button">恢复系统建议</button></div>
+                    <div class="field-full">
+                      <button class="btn-subtle" id="restoreSuggestionsBtn" type="button">恢复系统建议</button>
+                      <button class="btn-subtle" id="rescanTemplateBtn" type="button" hidden>重新扫描已保存文件</button>
+                    </div>
                   </div>
                 </div>
 
@@ -1333,6 +1337,7 @@ INDEX_HTML = """<!doctype html>
       document.getElementById("saveTemplateBtn").addEventListener("click", saveTemplate);
       document.getElementById("addOptionGroupBtn").addEventListener("click", () => addOptionGroupRow());
       document.getElementById("restoreSuggestionsBtn").addEventListener("click", restoreRuleSuggestions);
+      document.getElementById("rescanTemplateBtn").addEventListener("click", rescanTemplate);
       document.getElementById("addDimensionRowBtn").addEventListener("click", addDimensionRow);
       document.getElementById("addTextSequenceRowBtn").addEventListener("click", addTextSequenceRow);
       document.getElementById("referenceAiFile").addEventListener("change", renderAssetRows);
@@ -1681,6 +1686,17 @@ INDEX_HTML = """<!doctype html>
       renderAssetRows();
     }
 
+    function updateTemplateWorkflowState(hasDraft) {
+      const saveButton = document.getElementById("saveTemplateBtn");
+      if (saveButton) saveButton.textContent = hasDraft ? "确认并保存" : "上传文件并扫描";
+      const rescanButton = document.getElementById("rescanTemplateBtn");
+      if (rescanButton) {
+        const savedTemplate = Boolean(selectedTemplate());
+        rescanButton.hidden = !savedTemplate;
+        rescanButton.disabled = !savedTemplate;
+      }
+    }
+
     async function loadTemplateRuleText(template) {
       state.templateRuleDraft = null;
       state.templateRuleBaseConfig = null;
@@ -1688,6 +1704,7 @@ INDEX_HTML = """<!doctype html>
       state.dimensionRowsTouched = false;
       state.textSequenceRowsTouched = false;
       resetTemplateRuleFields();
+      updateTemplateWorkflowState(false);
       if (template) {
         try {
           const onboarding = await getJson(`/api/templates/${encodeURIComponent(template.template_id)}/onboarding`);
@@ -1699,6 +1716,7 @@ INDEX_HTML = """<!doctype html>
             fillTemplateRuleFields(pack.rules || {});
             fillOnboardingFields(pack, onboarding.versions || [], onboarding.scan_evidence || {});
             renderTemplateRulePreview();
+            updateTemplateWorkflowState(true);
             return;
           }
           fillOnboardingFields(null, onboarding.versions || [], onboarding.scan_evidence || {});
@@ -1708,6 +1726,7 @@ INDEX_HTML = """<!doctype html>
       }
       if (!template || !(template.template_rules_config || template.template_config)) {
         renderTemplateRulePreview();
+        updateTemplateWorkflowState(false);
         return;
       }
       try {
@@ -1722,6 +1741,7 @@ INDEX_HTML = """<!doctype html>
         resetTemplateRuleFields();
       }
       renderTemplateRulePreview();
+      updateTemplateWorkflowState(false);
     }
 
     function renderAssetRows() {
@@ -1747,11 +1767,11 @@ INDEX_HTML = """<!doctype html>
         });
       });
       const reference = document.getElementById("referenceAiFile").files[0];
-      if (reference) rows.push({ name: reference.name, type: "原始参考模板", status: "待上传", action: "pending" });
+      if (reference) rows.push({ name: reference.name, type: "原始参考模板", status: "本次选择，待上传并扫描", action: "pending" });
       const primary = document.getElementById("primaryAiFile").files[0];
-      if (primary) rows.push({ name: primary.name, type: "尺寸/作图区模板", status: "待上传", action: "pending" });
+      if (primary) rows.push({ name: primary.name, type: "尺寸/作图区模板", status: "本次选择，待上传并扫描", action: "pending" });
       Array.from(document.getElementById("assetAiFiles").files || []).forEach(file => {
-        rows.push({ name: file.name, type: "独立设计模板", status: "待上传", action: "pending" });
+        rows.push({ name: file.name, type: "独立设计模板", status: "本次选择，待上传并扫描", action: "pending" });
       });
       const target = document.getElementById("assetRows");
       if (!rows.length) {
@@ -1792,6 +1812,32 @@ INDEX_HTML = """<!doctype html>
         `;
       }
       return '<span class="asset-note">保存后可操作</span>';
+    }
+
+    async function rescanTemplate() {
+      const templateId = document.getElementById("templateId").value.trim();
+      if (!templateId || !selectedTemplate()) {
+        setMessage("templateSaveMessage", "请先保存模板文件，再重新扫描", "error");
+        return;
+      }
+      setMessage("templateSaveMessage", "正在扫描已保存的模板文件，请稍候", "");
+      try {
+        const result = await postJson("/api/templates/" + encodeURIComponent(templateId) + "/scan", {});
+        await loadTemplates(templateId);
+        if (result.scan_ok) {
+          setMessage("templateSaveMessage", "扫描完成，已生成规则草稿，请核对后确认保存", "ok");
+        } else {
+          setMessage(
+            "templateSaveMessage",
+            "扫描未完全成功，文件和草稿已保留：" +
+              (result.scan_error || "请检查 Illustrator 和模板文件后重试") +
+              "。可点击“重新扫描已保存文件”继续",
+            "error"
+          );
+        }
+      } catch (error) {
+        setMessage("templateSaveMessage", String(error.message || error), "error");
+      }
     }
 
     function displayAssetStatus(status) {
@@ -2701,8 +2747,10 @@ INDEX_HTML = """<!doctype html>
       Array.from(document.getElementById("assetAiFiles").files || []).forEach(file => {
         form.append("template_assets", file);
       });
+      let registeredTemplateId = "";
       try {
         const result = await postForm("/api/templates", form);
+        registeredTemplateId = result.template.template_id;
         state.selectedTemplateId = result.template.template_id;
         if (hasScanDraft && canonicalPack) {
           await postJson(`/api/templates/${encodeURIComponent(templateId)}/rules/confirm`, {
@@ -2725,7 +2773,26 @@ INDEX_HTML = """<!doctype html>
           "ok"
         );
       } catch (error) {
-        setMessage("templateSaveMessage", String(error.message || error), "error");
+        if (registeredTemplateId) {
+          document.getElementById("referenceAiFile").value = "";
+          document.getElementById("primaryAiFile").value = "";
+          document.getElementById("assetAiFiles").value = "";
+          try {
+            await loadTemplates(registeredTemplateId);
+          } catch (refreshError) {
+            setMessage("templateSaveMessage", String(refreshError.message || refreshError), "error");
+            return;
+          }
+          setMessage(
+            "templateSaveMessage",
+            "文件已保存为草稿，但扫描未完成：" +
+              String(error.message || error) +
+              "。可点击“重新扫描已保存文件”继续",
+            "error"
+          );
+        } else {
+          setMessage("templateSaveMessage", String(error.message || error), "error");
+        }
       }
     }
 
@@ -2740,6 +2807,7 @@ INDEX_HTML = """<!doctype html>
       state.dimensionRowsTouched = false;
       state.textSequenceRowsTouched = false;
       document.getElementById("assetRows").innerHTML = '<div class="empty">暂无 .ai 模板资产</div>';
+      updateTemplateWorkflowState(false);
       resetTemplateRuleFields();
       renderTemplateRulePreview();
       setMessage("templateSaveMessage", "等待编辑", "");

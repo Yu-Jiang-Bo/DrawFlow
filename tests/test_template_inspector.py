@@ -85,6 +85,51 @@ def test_inspector_injects_registered_assets_into_rule_pack(tmp_path):
     assert state["draft"]["assets"]["policy"]["mode"] == "split_ai"
 
 
+def test_inspector_scans_primary_and_registered_asset_sources(tmp_path):
+    registry, template = registered_template(tmp_path)
+    assets = registry.save_uploaded_assets(
+        "DEMO001", [{"filename": "design-1.ai", "content": b"asset"}], role="独立设计模板"
+    )
+    template = registry.upsert_template({**template.to_json_dict(), "assets": assets})
+
+    state = TemplateInspector(lambda **kwargs: FakeBridge(**kwargs)).scan(
+        template, TemplateOnboardingStore(registry.storage_dir)
+    )
+
+    sources = state["scan_evidence"]["source_files"]
+    assert [source["source_role"] for source in sources] == ["尺寸/作图区模板", "独立设计模板"]
+    assert len(state["scan_evidence"]["items"]) == 4
+    assert {item["source_role"] for item in state["scan_evidence"]["items"]} == {
+        "尺寸/作图区模板",
+        "独立设计模板",
+    }
+
+
+def test_inspector_keeps_primary_results_when_asset_scan_fails(tmp_path):
+    registry, template = registered_template(tmp_path)
+    assets = registry.save_uploaded_assets(
+        "DEMO001", [{"filename": "design-1.ai", "content": b"asset"}], role="独立设计模板"
+    )
+    template = registry.upsert_template({**template.to_json_dict(), "assets": assets})
+
+    class PartialBridge(FakeBridge):
+        def render(self, script, task_path):
+            task = json.loads(task_path.read_text(encoding="utf-8"))
+            if str(task["input_ai"]).endswith("design-1.ai"):
+                raise RuntimeError("asset scan failed")
+            super().render(script, task_path)
+
+    state = TemplateInspector(lambda **kwargs: PartialBridge(**kwargs)).scan(
+        template, TemplateOnboardingStore(registry.storage_dir)
+    )
+
+    assert state["scan_ok"] is False
+    assert "asset scan failed" in state["scan_error"]
+    assert state["scan_evidence"]["items"][0]["source_role"] == "尺寸/作图区模板"
+    assert state["scan_evidence"]["source_files"][0]["scan_ok"] is True
+    assert state["scan_evidence"]["source_files"][1]["scan_ok"] is False
+
+
 def test_concurrent_scans_use_distinct_task_directories(tmp_path):
     registry, template = registered_template(tmp_path)
     task_paths = []

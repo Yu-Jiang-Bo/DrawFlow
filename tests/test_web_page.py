@@ -118,6 +118,9 @@ def test_template_onboarding_requires_scan_check_and_confirmation():
     assert "profileWrapper.hidden = true" in INDEX_HTML
     assert 'id="templateRuleDescription"' in INDEX_HTML
     assert "extractTemplateRules" in INDEX_HTML
+    assert 'id="rescanTemplateBtn"' in INDEX_HTML
+    assert "rescanTemplate" in INDEX_HTML
+    assert "文件已保存为草稿，但扫描未完成" in INDEX_HTML
     assert "templateRulesDescriptionDirty" in INDEX_HTML
     assert "formatScanEvidence" in INDEX_HTML
     assert "formatFieldSources" in INDEX_HTML
