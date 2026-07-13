@@ -2821,9 +2821,10 @@ INDEX_HTML = """<!doctype html>
     function fillTemplateRuleFields(config) {
       state.optionGroupsTouched = false;
       state.assetMappingsTouched = false;
-      const groups = Array.isArray(config.option_groups) && config.option_groups.length
+      const savedGroups = Array.isArray(config.option_groups) && config.option_groups.length
         ? config.option_groups
         : legacyOptionGroups(config);
+      const groups = mergeScannedOptionGroups(savedGroups, config);
       setOptionGroupRows(groups.map(group => ({
         name: group.name || compactOptionRange(group.options || group.values || []),
         role: group.role || ""
@@ -2884,6 +2885,29 @@ INDEX_HTML = """<!doctype html>
         groups.push({ name: compactOptionRange(config.style_options), role: "style_options", options: config.style_options });
       }
       return groups;
+    }
+
+    function mergeScannedOptionGroups(groups, config) {
+      const merged = (Array.isArray(groups) ? groups : []).map(group => ({ ...group }));
+      const scannedByRole = {
+        font_options: normalizeOptions(config.font_options),
+        design_font_options: normalizeOptions(config.design_font_options),
+        design_options: normalizeOptions(config.design_options),
+        style_options: normalizeOptions(config.style_options)
+      };
+      Object.entries(scannedByRole).forEach(([role, scanned]) => {
+        if (!scanned.length) return;
+        const index = merged.findIndex(group => group && group.role === role);
+        if (index < 0) {
+          merged.push({ name: compactOptionRange(scanned), role, options: scanned });
+          return;
+        }
+        const group = merged[index];
+        const existing = normalizeOptions(group.options || group.values || expandOptionRange(group.name || ""));
+        const options = normalizeOptions([...existing, ...scanned]);
+        merged[index] = { ...group, name: compactOptionRange(options), options };
+      });
+      return merged;
     }
 
     function fillTextSequenceFields(sequences) {

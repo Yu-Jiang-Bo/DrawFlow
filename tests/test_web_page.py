@@ -221,6 +221,9 @@ def test_template_rules_prefill_fixed_options_before_optional_supplement():
     assert "将补充说明生成草稿" in INDEX_HTML
     assert "生成草稿不会覆盖已填写内容" in INDEX_HTML
     assert "function prefillScannedOptionSuggestions" in INDEX_HTML
+    assert "function mergeScannedOptionGroups" in INDEX_HTML
+    assert "const groups = mergeScannedOptionGroups(savedGroups, config);" in INDEX_HTML
+    assert "font_options: normalizeOptions(config.font_options)" in INDEX_HTML
     assert '["font_options", "design_font_options", "design_options", "style_options"]' in INDEX_HTML
     assert 'value="design_font_options"' in INDEX_HTML
     assert "独立设计字体" in INDEX_HTML
