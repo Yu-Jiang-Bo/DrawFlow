@@ -1021,6 +1021,8 @@ INDEX_HTML = """<!doctype html>
                     <h3 class="rule-section-title">尺寸规则</h3>
                     <button class="btn-subtle rule-add-btn" id="addDimensionRowBtn" type="button">+ 添加尺寸</button>
                   </div>
+                  <div class="structured-row three"><div><label for="dimensionMode">尺寸模式</label><select id="dimensionMode"><option value="object">按尺寸/版式选项</option><option value="fixed">固定制图尺寸</option></select></div><div><label for="fixedWidth">固定宽度</label><input id="fixedWidth" type="number" min="0" step="0.1" placeholder="mm" /></div><div><label for="fixedHeight">固定高度</label><input id="fixedHeight" type="number" min="0" step="0.1" placeholder="mm" /></div></div>
+                  <p class="rule-section-note">固定尺寸模板选择“固定制图尺寸”，只填写一次宽高；不需要填写尺寸对象或订单 Style Option。</p>
                   <div class="structured-table" id="dimensionRows"></div>
                 </div>
 
@@ -1398,6 +1400,17 @@ INDEX_HTML = """<!doctype html>
       document.getElementById("restoreSuggestionsBtn").addEventListener("click", restoreRuleSuggestions);
       document.getElementById("rescanTemplateBtn").addEventListener("click", rescanTemplate);
       document.getElementById("addDimensionRowBtn").addEventListener("click", addDimensionRow);
+      document.getElementById("dimensionMode").addEventListener("change", () => {
+        state.dimensionRowsTouched = true;
+        syncDimensionMode();
+        renderTemplateRulePreview();
+      });
+      ["fixedWidth", "fixedHeight"].forEach(id => {
+        document.getElementById(id).addEventListener("input", () => {
+          state.dimensionRowsTouched = true;
+          renderTemplateRulePreview();
+        });
+      });
       document.getElementById("addTextSequenceRowBtn").addEventListener("click", addTextSequenceRow);
       document.getElementById("referenceAiFile").addEventListener("change", renderAssetRows);
       document.getElementById("designFontAiFiles").addEventListener("change", renderAssetRows);
@@ -1524,6 +1537,13 @@ INDEX_HTML = """<!doctype html>
       document.getElementById("dimensionRows").innerHTML = items
         .map((row, index) => renderDimensionRow(row, index))
         .join("");
+      syncDimensionMode();
+    }
+
+    function syncDimensionMode() {
+      const fixed = document.getElementById("dimensionMode").value === "fixed";
+      document.getElementById("dimensionRows").hidden = fixed;
+      document.getElementById("addDimensionRowBtn").hidden = fixed;
     }
 
     function setTextSequenceRows(rows) {
@@ -2043,7 +2063,9 @@ INDEX_HTML = """<!doctype html>
         );
         const issues = [...(result.errors || []), ...(result.warnings || [])];
         document.getElementById("templateRulePreview").innerHTML = renderOnboardingIssues(result, issues);
-        setMessage("templateSaveMessage", result.ok ? "后端检查通过，等待你最终确认" : "仍有阻断项，不能启用模板", result.ok ? "ok" : "error");
+        const blockers = (result.errors || []).map(formatRuleBlocker).filter(Boolean);
+        const blockerText = blockers.length ? blockers.slice(0, 3).join("；") : "请查看下方规则检查结果";
+        setMessage("templateSaveMessage", result.ok ? "后端检查通过，等待你最终确认" : `不能启用：${blockerText}${blockers.length > 3 ? "；请查看下方规则检查结果" : ""}`, result.ok ? "ok" : "error");
         return Boolean(result.ok);
       } catch (error) {
         setMessage("templateSaveMessage", String(error.message || error), "error");
@@ -2087,13 +2109,22 @@ INDEX_HTML = """<!doctype html>
       return `<div class="preview-chip"><span>后端检查</span><strong>${result.ok ? "通过" : "未通过"}</strong></div><ul>${rows}</ul>`;
     }
 
+    function formatRuleBlocker(item) {
+      const code = String((item && item.code) || "");
+      const names = { profile: "请选择模板规则类型", text_targets: "补充文字目标", option_group_names: "补充选项组角色", order_bindings: "补充订单字段绑定", text_policies: "补充文字适配/拆分规则", validation_sample: "补充验证样例", exceptions: "处理高级例外", scan_failed: "重新扫描模板" };
+      return names[code] || String((item && item.message) || "规则配置不完整");
+    }
+
     function buildTemplateRulePayload() {
       const baseConfig = isPlainObject(state.templateRuleBaseConfig) ? state.templateRuleBaseConfig : {};
       const optionGroups = collectOptionGroups();
-      const collectedDimensions = collectDimensions();
-      const dimensions = state.dimensionRowsTouched
+      const dimensionMode = document.getElementById("dimensionMode").value;
+      const collectedDimensions = dimensionMode === "fixed" ? collectFixedDimensions() : collectDimensions();
+      const dimensions = dimensionMode === "fixed"
         ? collectedDimensions
-        : mergeDimensions(baseConfig.dimensions, collectedDimensions);
+        : (state.dimensionRowsTouched
+          ? collectedDimensions
+          : mergeDimensions(baseConfig.dimensions, collectedDimensions));
       const baseTextSequences = Array.isArray(baseConfig.text_sequences) && baseConfig.text_sequences.length
         ? baseConfig.text_sequences
         : legacyTextSequences(baseConfig);
@@ -2146,7 +2177,7 @@ INDEX_HTML = """<!doctype html>
         asset_mappings: state.assetMappingsTouched
           ? collectedAssetMappings
           : (collectedAssetMappings.length ? collectedAssetMappings : baseAssetMappings),
-        dimension_mode: baseConfig.dimension_mode || "object",
+        dimension_mode: dimensionMode,
         dimensions,
         slots,
         text_sequences: textSequences,
@@ -2335,6 +2366,21 @@ INDEX_HTML = """<!doctype html>
       return result;
     }
 
+    function collectFixedDimensions() {
+      const width = Number(document.getElementById("fixedWidth").value);
+      const height = Number(document.getElementById("fixedHeight").value);
+      if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+        return {};
+      }
+      return {
+        Fixed: {
+          width_mm: Number(width.toFixed(3)),
+          height_mm: Number(height.toFixed(3)),
+          unit: "mm"
+        }
+      };
+    }
+
     function collectDimensionRows(options = {}) {
       return Array.from(document.querySelectorAll("[data-dimension-row]")).map(row => {
         const target = row.querySelector("[data-dimension-target]")?.value.trim() || "";
@@ -2454,7 +2500,8 @@ INDEX_HTML = """<!doctype html>
       if (strict && (!draft.font_options || !draft.font_options.length)) missing.push("字体组");
       if (strict && !hasSlotsOrMappings(draft)) missing.push("字段拆分与变量序列");
       if (strict && (!draft.defaults || !draft.defaults.font)) missing.push("默认字体");
-      if (strict && draft.dimension_mode && !hasMeaningfulDimensions(draft.dimensions)) missing.push("至少一个尺寸规则");
+      if (draft.dimension_mode === "fixed" && !hasFixedDimensions(draft.dimensions)) missing.push("固定宽度和固定高度");
+      if (strict && draft.dimension_mode !== "fixed" && draft.dimension_mode && !hasMeaningfulDimensions(draft.dimensions)) missing.push("至少一个尺寸规则");
       return missing;
     }
 
@@ -2478,6 +2525,11 @@ INDEX_HTML = """<!doctype html>
       });
     }
 
+    function hasFixedDimensions(dimensions) {
+      const fixed = isPlainObject(dimensions) ? dimensions.Fixed : null;
+      return isPlainObject(fixed) && Number(fixed.width_mm || 0) > 0 && Number(fixed.height_mm || 0) > 0;
+    }
+
     function renderTemplateRuleCheck(draft) {
       const missing = templateRuleMissingItems(draft);
       const optionGroups = draft.option_groups || [];
@@ -2489,7 +2541,7 @@ INDEX_HTML = """<!doctype html>
           <div class="preview-chip"><span>独立设计字体</span><strong>${escapeHtml(displayOptions(draft.design_font_options))}</strong></div>
           <div class="preview-chip"><span>设计组</span><strong>${escapeHtml(displayOptions(draft.design_options))}</strong></div>
           <div class="preview-chip"><span>尺寸/版式组</span><strong>${escapeHtml(displayOptions(draft.style_options))}</strong></div>
-          <div class="preview-chip"><span>尺寸对象</span><strong>${escapeHtml(displayDimensionTargets(draft.dimensions || {}))}</strong></div>
+          <div class="preview-chip"><span>尺寸对象</span><strong>${escapeHtml(displayDimensionTargets(draft.dimensions || {}, draft.dimension_mode))}</strong></div>
           <div class="preview-chip"><span>字段拆分</span><strong>${escapeHtml(displayTextSequences(draft.text_sequences || []))}</strong></div>
           <div class="preview-chip"><span>默认值</span><strong>${escapeHtml(describeDefaults(draft.defaults || {}))}</strong></div>
           <div class="preview-chip"><span>特殊处理</span><strong>${escapeHtml(displayOverrides(draft.option_overrides || {}))}</strong></div>
@@ -2500,7 +2552,11 @@ INDEX_HTML = """<!doctype html>
       `;
     }
 
-    function displayDimensionTargets(dimensions) {
+    function displayDimensionTargets(dimensions, mode = "") {
+      if (mode === "fixed" && hasFixedDimensions(dimensions)) {
+        const fixed = dimensions.Fixed;
+        return `固定尺寸 ${trimNumber(Number(fixed.width_mm))}mm x ${trimNumber(Number(fixed.height_mm))}mm`;
+      }
       const keys = Object.keys(dimensions || {});
       return keys.length ? keys.join(" / ") : "未填写";
     }
@@ -2545,6 +2601,9 @@ INDEX_HTML = """<!doctype html>
       setOptionGroupRows([{ name: "", role: "font_options" }]);
       setDesignAssetMappingRows([]);
       state.assetMappingsTouched = false;
+      document.getElementById("dimensionMode").value = "object";
+      document.getElementById("fixedWidth").value = "";
+      document.getElementById("fixedHeight").value = "";
       setDimensionRows(defaultDimensionRows());
       setTextSequenceRows(defaultTextSequenceRows());
       document.getElementById("defaultFont").value = "";
@@ -2831,7 +2890,8 @@ INDEX_HTML = """<!doctype html>
       })));
       setDesignAssetMappingRows(config.asset_mappings || []);
 
-      const dimensionRows = Object.entries(config.dimensions || {}).map(([key, value]) => {
+      const fixed = config.dimension_mode === "fixed" && (config.dimensions || {}).Fixed;
+      const dimensionRows = Object.entries(config.dimensions || {}).filter(([key]) => !(fixed && key === "Fixed")).map(([key, value]) => {
         const unit = value.unit || "cm";
         const scale = unit === "cm" ? 10 : 1;
         return {
@@ -2841,7 +2901,11 @@ INDEX_HTML = """<!doctype html>
           unit
         };
       });
+      document.getElementById("dimensionMode").value = fixed ? "fixed" : "object";
+      document.getElementById("fixedWidth").value = fixed ? trimNumber(Number(fixed.width_mm || 0)) : "";
+      document.getElementById("fixedHeight").value = fixed ? trimNumber(Number(fixed.height_mm || 0)) : "";
       setDimensionRows(dimensionRows.length ? dimensionRows : defaultDimensionRows());
+      syncDimensionMode();
 
       fillTextSequenceFields(
         Array.isArray(config.text_sequences) && config.text_sequences.length

@@ -93,7 +93,11 @@ def test_template_rule_editor_is_business_readable():
     assert "data-text-sequence-count" in INDEX_HTML
     assert "data-slot-source" not in INDEX_HTML
     assert "槽位映射" not in INDEX_HTML
-    assert "尺寸模式" not in INDEX_HTML
+    assert "尺寸模式" in INDEX_HTML
+    assert "固定制图尺寸" in INDEX_HTML
+    assert 'id="dimensionMode"' in INDEX_HTML
+    assert 'id="fixedWidth"' in INDEX_HTML
+    assert 'id="fixedHeight"' in INDEX_HTML
     assert "data-override-target" in INDEX_HTML
     assert "结构化规则 JSON" not in INDEX_HTML
     assert "新建空白" not in INDEX_HTML
@@ -101,6 +105,21 @@ def test_template_rule_editor_is_business_readable():
     assert "输出色彩" in INDEX_HTML
     assert "rule_source: \"structured_form\"" in INDEX_HTML
     assert "buildCanonicalRulePack" in INDEX_HTML
+
+
+def test_template_rule_supports_fixed_dimensions():
+    assert 'option value="fixed">固定制图尺寸</option>' in INDEX_HTML
+    assert "collectFixedDimensions" in INDEX_HTML
+    assert "dimension_mode: dimensionMode" in INDEX_HTML
+    assert "dimensions.Fixed" in INDEX_HTML
+    assert "固定宽度和固定高度" in INDEX_HTML
+    assert "syncDimensionMode" in INDEX_HTML
+    assert 'document.getElementById("dimensionRows").hidden = fixed' in INDEX_HTML
+    assert 'document.getElementById("addDimensionRowBtn").hidden = fixed' in INDEX_HTML
+    assert '!(fixed && key === "Fixed")' in INDEX_HTML
+    assert "displayDimensionTargets(draft.dimensions || {}, draft.dimension_mode)" in INDEX_HTML
+    assert 'document.getElementById("fixedWidth").value = fixed' in INDEX_HTML
+    assert 'document.getElementById("fixedHeight").value = fixed' in INDEX_HTML
 
 
 def test_template_onboarding_requires_scan_check_and_confirmation():
