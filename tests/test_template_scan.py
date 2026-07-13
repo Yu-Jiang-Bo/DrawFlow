@@ -177,3 +177,11 @@ def test_scan_identity_helpers_are_stable(tmp_path):
     assert template_output_key(path, root).endswith(".ai-" + template_output_key(path, root).split(".ai-")[-1])
     assert scan_fingerprint(sample_scan()) == scan_fingerprint(sample_scan())
     assert Path(path).stem == "demo"
+
+
+def test_scan_fingerprint_changes_when_object_content_changes():
+    first = sample_scan()
+    second = sample_scan()
+    second["items"][0]["name"] = "F9"
+
+    assert scan_fingerprint(first) != scan_fingerprint(second)

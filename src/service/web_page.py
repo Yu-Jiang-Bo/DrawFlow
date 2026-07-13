@@ -855,7 +855,10 @@ INDEX_HTML = """<!doctype html>
               </div>
               <div class="field-full">
                 <div class="rule-section">
-                  <h3 class="rule-section-title">选项组角色</h3>
+                  <div class="rule-section-head">
+                    <h3 class="rule-section-title">选项组角色</h3>
+                    <button class="btn-subtle rule-add-btn" id="addOptionGroupBtn" type="button">+ 添加选项组</button>
+                  </div>
                   <p class="rule-section-note">填写模板中出现的编号组，例如 F1-F10、D1-D12、Design1-Design12、Style1-Style5，并指定它在渲染中扮演什么角色。</p>
                   <div class="structured-table" id="optionGroupRows">
                     <div class="structured-row two">
@@ -904,6 +907,40 @@ INDEX_HTML = """<!doctype html>
                       </div>
                     </div>
                   </div>
+                </div>
+
+                <div class="rule-section">
+                  <h3 class="rule-section-title">扫描证据与模板类型</h3>
+                  <div class="form-grid">
+                    <div>
+                      <label for="templateProfile">Profile</label>
+                      <select id="templateProfile">
+                        <option value="unclassified">待人工分类</option>
+                        <option value="pure_text">纯文字</option>
+                        <option value="fixed_font_design">设计加固定字体</option>
+                        <option value="composite">尺寸/设计/字体/颜色复合</option>
+                        <option value="bundle">套装</option>
+                      </select>
+                    </div>
+                    <div><label for="scanVersion">扫描版本</label><input id="scanVersion" readonly /></div>
+                    <div class="field-full"><label for="scanEvidence">原始扫描证据（只读）</label><textarea id="scanEvidence" readonly></textarea></div>
+                    <div class="field-full"><label for="fieldSources">字段来源与人工修改状态（只读）</label><textarea id="fieldSources" readonly></textarea></div>
+                    <div class="field-full"><button class="btn-subtle" id="restoreSuggestionsBtn" type="button">恢复系统建议</button></div>
+                  </div>
+                </div>
+
+                <div class="rule-section">
+                  <h3 class="rule-section-title">映射、文字策略与验证样例</h3>
+                  <p class="rule-section-note">以下规则均可编辑；JSON 格式错误会阻止检查与确认。</p>
+                  <div class="form-grid">
+                    <div><label for="orderBindingsJson">订单字段绑定</label><textarea id="orderBindingsJson" placeholder='{"text":"定制信息"}'></textarea></div>
+                    <div><label for="assetMappingsJson">设计/资产映射</label><textarea id="assetMappingsJson" placeholder='[{"option":"Design1","asset":"design-1.ai"}]'></textarea></div>
+                    <div><label for="textPoliciesJson">文字适配/拆分策略</label><textarea id="textPoliciesJson" placeholder='{"fit":"scale_to_box"}'></textarea></div>
+                    <div><label for="outputTransformsJson">输出处理</label><textarea id="outputTransformsJson" placeholder='{"color_mode":"CMYK"}'></textarea></div>
+                    <div class="field-full"><label for="validationSampleJson">验证样例</label><textarea id="validationSampleJson" placeholder='{"input":{},"expected":{}}'></textarea></div>
+                    <div class="field-full"><label for="templateChangeSummary">本次确认说明</label><input id="templateChangeSummary" placeholder="例如：核对对象命名并补齐 Design 映射" /></div>
+                  </div>
+                  <div class="preview-box" id="templateVersionHistory">尚无已确认版本</div>
                 </div>
 
                 <div class="rule-section">
@@ -988,6 +1025,8 @@ INDEX_HTML = """<!doctype html>
                     <div class="advanced-rule-body">
                       <label for="templateAdvancedRules">例外说明</label>
                       <textarea id="templateAdvancedRules" placeholder="例如：Design5 的第二行文字需要向上偏移 2mm。这里仅作为待确认说明保存，不会直接自动参与出图。"></textarea>
+                      <label for="templateExceptionStatus">例外状态</label>
+                      <select id="templateExceptionStatus"><option value="none">无例外</option><option value="resolved">已解决</option><option value="manual_review">待人工处理（阻止启用）</option></select>
                     </div>
                   </details>
                 </div>
@@ -1000,7 +1039,7 @@ INDEX_HTML = """<!doctype html>
             </div>
             <div class="actions">
               <button class="btn-subtle" id="checkTemplateRuleBtn">检查规则</button>
-              <button class="btn-primary" id="saveTemplateBtn">保存模板</button>
+              <button class="btn-primary" id="saveTemplateBtn">确认并保存</button>
             </div>
             <div class="message" id="templateSaveMessage">等待编辑</div>
           </div>
@@ -1161,6 +1200,7 @@ INDEX_HTML = """<!doctype html>
       ruleMode: "published",
       templateRuleDraft: null,
       templateRuleBaseConfig: null,
+      templateOnboarding: null,
       dimensionRowsTouched: false,
       textSequenceRowsTouched: false
     };
@@ -1213,6 +1253,8 @@ INDEX_HTML = """<!doctype html>
       document.getElementById("newTemplateBtn").addEventListener("click", newTemplate);
       document.getElementById("checkTemplateRuleBtn").addEventListener("click", checkTemplateRule);
       document.getElementById("saveTemplateBtn").addEventListener("click", saveTemplate);
+      document.getElementById("addOptionGroupBtn").addEventListener("click", () => addOptionGroupRow());
+      document.getElementById("restoreSuggestionsBtn").addEventListener("click", restoreRuleSuggestions);
       document.getElementById("addDimensionRowBtn").addEventListener("click", addDimensionRow);
       document.getElementById("addTextSequenceRowBtn").addEventListener("click", addTextSequenceRow);
       document.getElementById("referenceAiFile").addEventListener("change", renderAssetRows);
@@ -1238,13 +1280,29 @@ INDEX_HTML = """<!doctype html>
         "#defaultStyle",
         "#defaultColor",
         "#outputColorMode",
+        "#templateProfile",
+        "#orderBindingsJson",
+        "#assetMappingsJson",
+        "#textPoliciesJson",
+        "#outputTransformsJson",
+        "#validationSampleJson",
         "#overrideRows input",
         "#overrideRows select",
-        "#templateAdvancedRules"
+        "#templateAdvancedRules",
+        "#templateExceptionStatus"
       ];
       document.querySelectorAll(selectors.join(",")).forEach(element => {
         element.addEventListener("input", renderTemplateRulePreview);
         element.addEventListener("change", renderTemplateRulePreview);
+      });
+      document.getElementById("optionGroupRows").addEventListener("click", event => {
+        const button = event.target.closest("[data-remove-option-group]");
+        if (!button) return;
+        button.closest(".structured-row").remove();
+        renderTemplateRulePreview();
+      });
+      ["input", "change"].forEach(eventName => {
+        document.getElementById("optionGroupRows").addEventListener(eventName, renderTemplateRulePreview);
       });
       ["dimensionRows", "textSequenceRows"].forEach(id => {
         const container = document.getElementById(id);
@@ -1453,7 +1511,7 @@ INDEX_HTML = """<!doctype html>
     function renderTemplateOptions() {
       const select = document.getElementById("renderTemplate");
       select.innerHTML = "";
-      state.templates.forEach(template => {
+      state.templates.filter(template => template.status === "active").forEach(template => {
         const option = document.createElement("option");
         option.value = template.template_id;
         option.textContent = `${template.template_id} | ${template.name}`;
@@ -1477,6 +1535,8 @@ INDEX_HTML = """<!doctype html>
             <strong>${escapeHtml(template.template_id)}</strong>
             <span>${escapeHtml(template.name || "-")}</span>
           </button>
+          <button class="btn-subtle" data-template-disable="${escapeHtml(template.template_id)}">停用</button>
+          <button class="btn-secondary" data-template-remove="${escapeHtml(template.template_id)}">移除</button>
         </div>
       `).join("");
       target.querySelectorAll("[data-template-select]").forEach(button => {
@@ -1488,6 +1548,35 @@ INDEX_HTML = """<!doctype html>
           switchPage("templates");
         });
       });
+      target.querySelectorAll("[data-template-disable]").forEach(button => {
+        button.addEventListener("click", () => disableTemplate(button.dataset.templateDisable));
+      });
+      target.querySelectorAll("[data-template-remove]").forEach(button => {
+        button.addEventListener("click", () => removeTemplate(button.dataset.templateRemove));
+      });
+    }
+
+    async function disableTemplate(templateId) {
+      const confirmation = window.prompt(`输入模板 ID ${templateId} 确认停用。文件不会被删除。`);
+      if (confirmation !== templateId) return;
+      try {
+        await postJson(`/api/templates/${encodeURIComponent(templateId)}/disable`, { confirmation });
+        await loadTemplates(templateId);
+      } catch (error) {
+        setMessage("templateSaveMessage", String(error.message || error), "error");
+      }
+    }
+
+    async function removeTemplate(templateId) {
+      const confirmation = window.prompt(`输入模板 ID ${templateId} 确认移除登记。所有本地文件都会保留，可用于恢复。`);
+      if (confirmation !== templateId) return;
+      try {
+        await deleteJson(`/api/templates/${encodeURIComponent(templateId)}`, { confirmation });
+        state.selectedTemplateId = "";
+        await loadTemplates();
+      } catch (error) {
+        setMessage("templateSaveMessage", String(error.message || error), "error");
+      }
     }
 
     function syncSelectedTemplate() {
@@ -1516,9 +1605,28 @@ INDEX_HTML = """<!doctype html>
     async function loadTemplateRuleText(template) {
       state.templateRuleDraft = null;
       state.templateRuleBaseConfig = null;
+      state.templateOnboarding = null;
       state.dimensionRowsTouched = false;
       state.textSequenceRowsTouched = false;
       resetTemplateRuleFields();
+      if (template) {
+        try {
+          const onboarding = await getJson(`/api/templates/${encodeURIComponent(template.template_id)}/onboarding`);
+          state.templateOnboarding = onboarding;
+          if (onboarding.draft) {
+            const pack = onboarding.draft;
+            state.templateRuleDraft = pack;
+            state.templateRuleBaseConfig = pack.rules || {};
+            fillTemplateRuleFields(pack.rules || {});
+            fillOnboardingFields(pack, onboarding.versions || [], onboarding.scan_evidence || {});
+            renderTemplateRulePreview();
+            return;
+          }
+          fillOnboardingFields(null, onboarding.versions || [], onboarding.scan_evidence || {});
+        } catch (error) {
+          state.templateOnboarding = null;
+        }
+      }
       if (!template || !(template.template_rules_config || template.template_config)) {
         renderTemplateRulePreview();
         return;
@@ -1633,14 +1741,63 @@ INDEX_HTML = """<!doctype html>
       target.innerHTML = renderTemplateRuleCheck(draft);
     }
 
-    function checkTemplateRule() {
+    async function checkTemplateRule() {
       renderTemplateRulePreview();
-      const missing = templateRuleMissingItems(state.templateRuleDraft || {});
-      setMessage(
-        "templateSaveMessage",
-        missing.length ? "规则还不完整，请先补齐检查结果中的缺失项" : "规则检查通过，可以保存模板",
-        missing.length ? "error" : "ok"
-      );
+      const templateId = document.getElementById("templateId").value.trim();
+      if (!templateId || !state.templateOnboarding || !state.templateOnboarding.draft) {
+        setMessage("templateSaveMessage", "请先保存模板并完成 AI 扫描，再检查规则", "error");
+        return false;
+      }
+      try {
+        const result = await postJson(`/api/templates/${encodeURIComponent(templateId)}/rules/check`, {
+          pack: buildCanonicalRulePack()
+        });
+        state.templateRuleDraft = result.pack;
+        document.getElementById("fieldSources").value = prettyJson((result.pack.audit && result.pack.audit.field_sources) || {});
+        const issues = [...(result.errors || []), ...(result.warnings || [])];
+        document.getElementById("templateRulePreview").innerHTML = renderOnboardingIssues(result, issues);
+        setMessage("templateSaveMessage", result.ok ? "后端检查通过，等待你最终确认" : "仍有阻断项，不能启用模板", result.ok ? "ok" : "error");
+        return Boolean(result.ok);
+      } catch (error) {
+        setMessage("templateSaveMessage", String(error.message || error), "error");
+        return false;
+      }
+    }
+
+    function buildCanonicalRulePack() {
+      const source = state.templateOnboarding && state.templateOnboarding.draft;
+      if (!source) throw new Error("缺少扫描草稿，不能确认模板");
+      const rules = buildTemplateRulePayload();
+      rules.order_bindings = parseJsonField("orderBindingsJson", {});
+      rules.asset_mappings = parseJsonField("assetMappingsJson", []);
+      rules.text_policies = parseJsonField("textPoliciesJson", {});
+      rules.transforms = parseJsonField("outputTransformsJson", {});
+      const unresolved = ((source.validation && source.validation.unresolved_items) || []).filter(item => {
+        if (item.code === "profile") return document.getElementById("templateProfile").value === "unclassified";
+        if (item.code === "text_targets") return !hasSlotsOrMappings(rules);
+        if (item.code === "option_group_names") return !rules.option_groups.length;
+        return item.code !== "confirmation_required";
+      });
+      return {
+        ...source,
+        template: { ...source.template, template_id: document.getElementById("templateId").value.trim(), profile: document.getElementById("templateProfile").value },
+        structure: source.structure,
+        rules,
+        validation: { ...source.validation, status: "draft", unresolved_items: unresolved, sample: parseJsonField("validationSampleJson", {}) },
+        audit: source.audit
+      };
+    }
+
+    function parseJsonField(id, fallback) {
+      const text = document.getElementById(id).value.trim();
+      if (!text) return fallback;
+      try { return JSON.parse(text); }
+      catch (error) { throw new Error(`${document.querySelector(`label[for="${id}"]`).textContent} JSON 格式错误`); }
+    }
+
+    function renderOnboardingIssues(result, issues) {
+      const rows = issues.length ? issues.map(item => `<li>${escapeHtml(item.code)}：${escapeHtml(item.message)}</li>`).join("") : "<li>无阻断项</li>";
+      return `<div class="preview-chip"><span>后端检查</span><strong>${result.ok ? "通过" : "未通过"}</strong></div><ul>${rows}</ul>`;
     }
 
     function buildTemplateRulePayload() {
@@ -1709,7 +1866,7 @@ INDEX_HTML = """<!doctype html>
         exceptions: {
           ...(isPlainObject(baseConfig.exceptions) ? baseConfig.exceptions : {}),
           note: advancedText,
-          status: advancedText ? "manual_review" : "none"
+          status: document.getElementById("templateExceptionStatus").value || (advancedText ? "manual_review" : "none")
         },
         assets: buildAssetsRulePayload(baseConfig),
         parser: {
@@ -2061,10 +2218,7 @@ INDEX_HTML = """<!doctype html>
     }
 
     function resetTemplateRuleFields() {
-      document.querySelectorAll("[data-option-group-name]").forEach(input => { input.value = ""; });
-      document.querySelectorAll("[data-option-group-role]").forEach((select, index) => {
-        select.value = index === 0 ? "font_options" : "";
-      });
+      setOptionGroupRows([{ name: "", role: "font_options" }]);
       setDimensionRows(defaultDimensionRows());
       setTextSequenceRows(defaultTextSequenceRows());
       document.getElementById("defaultFont").value = "";
@@ -2075,19 +2229,104 @@ INDEX_HTML = """<!doctype html>
       document.querySelectorAll("[data-override-target], [data-override-value]").forEach(input => { input.value = ""; });
       document.querySelectorAll("[data-override-action]").forEach(select => { select.value = ""; });
       document.getElementById("templateAdvancedRules").value = "";
+      document.getElementById("templateExceptionStatus").value = "none";
+      document.getElementById("templateProfile").value = "unclassified";
+      document.getElementById("scanVersion").value = "";
+      document.getElementById("scanEvidence").value = "";
+      document.getElementById("fieldSources").value = "";
+      document.getElementById("orderBindingsJson").value = "{}";
+      document.getElementById("assetMappingsJson").value = "[]";
+      document.getElementById("textPoliciesJson").value = "{}";
+      document.getElementById("outputTransformsJson").value = "{}";
+      document.getElementById("validationSampleJson").value = "{}";
+      document.getElementById("templateChangeSummary").value = "";
+      document.getElementById("templateVersionHistory").textContent = "尚无已确认版本";
+    }
+
+    function setOptionGroupRows(groups) {
+      const target = document.getElementById("optionGroupRows");
+      target.innerHTML = "";
+      (groups.length ? groups : [{ name: "", role: "" }]).forEach(group => addOptionGroupRow(group));
+    }
+
+    function addOptionGroupRow(group = {}) {
+      const row = document.createElement("div");
+      row.className = "structured-row three";
+      row.innerHTML = `
+        <div><label>编号组</label><input data-option-group-name placeholder="例如 F1-F10" value="${escapeHtml(group.name || "")}" /></div>
+        <div><label>角色</label><select data-option-group-role>
+          <option value="">忽略</option><option value="font_options">字体组</option>
+          <option value="design_options">设计组</option><option value="style_options">尺寸/版式组</option>
+        </select></div>
+        <div><label>操作</label><button class="btn-subtle" type="button" data-remove-option-group>移除</button></div>`;
+      row.querySelector("[data-option-group-role]").value = group.role || "";
+      document.getElementById("optionGroupRows").appendChild(row);
+    }
+
+    function fillOnboardingFields(pack, versions, rawScan = {}) {
+      const structure = pack && pack.structure ? pack.structure : {};
+      const audit = pack && pack.audit ? pack.audit : {};
+      const rules = pack && pack.rules ? pack.rules : {};
+      document.getElementById("templateProfile").value = (pack && pack.template && pack.template.profile) || "unclassified";
+      document.getElementById("scanVersion").value = structure.scan_version || "";
+      document.getElementById("scanEvidence").value = prettyJson(Object.keys(rawScan).length ? rawScan : (structure.evidence || {}));
+      document.getElementById("fieldSources").value = prettyJson(audit.field_sources || {});
+      document.getElementById("orderBindingsJson").value = prettyJson(rules.order_bindings || {});
+      document.getElementById("assetMappingsJson").value = prettyJson(rules.asset_mappings || []);
+      document.getElementById("textPoliciesJson").value = prettyJson(rules.text_policies || {});
+      document.getElementById("outputTransformsJson").value = prettyJson(rules.transforms || {});
+      document.getElementById("validationSampleJson").value = prettyJson((pack && pack.validation && pack.validation.sample) || {});
+      const history = document.getElementById("templateVersionHistory");
+      history.innerHTML = versions.length
+        ? versions.map(item => `<div>v${item.version} ${escapeHtml(item.event)} ${escapeHtml(item.created_at || "")} <button class="btn-subtle" type="button" data-rule-rollback="${item.version}">回滚到此版本</button></div>`).join("")
+        : "尚无已确认版本";
+      history.querySelectorAll("[data-rule-rollback]").forEach(button => {
+        button.addEventListener("click", () => rollbackRuleVersion(Number(button.dataset.ruleRollback)));
+      });
+    }
+
+    function prettyJson(value) {
+      return JSON.stringify(value == null ? {} : value, null, 2);
+    }
+
+    async function rollbackRuleVersion(version) {
+      const templateId = document.getElementById("templateId").value.trim();
+      if (!templateId || !window.confirm(`确认回滚到规则版本 v${version}？回滚操作本身也会生成新版本。`)) return;
+      try {
+        await postJson(`/api/templates/${encodeURIComponent(templateId)}/rules/rollback`, {
+          version,
+          change_summary: `User rollback to version ${version}`
+        });
+        await loadTemplateRuleText(formTemplate());
+        setMessage("templateSaveMessage", `已回滚到 v${version}，并保留完整版本历史`, "ok");
+      } catch (error) {
+        setMessage("templateSaveMessage", String(error.message || error), "error");
+      }
+    }
+
+    function restoreRuleSuggestions() {
+      const pack = state.templateOnboarding && state.templateOnboarding.draft;
+      if (!pack) return;
+      const rules = { ...(pack.rules || {}) };
+      const sources = (pack.audit && pack.audit.field_sources) || {};
+      Object.entries(sources).forEach(([field, details]) => {
+        if (!field.startsWith("rules.") || !details || !("suggestion" in details)) return;
+        rules[field.slice("rules.".length)] = details.suggestion;
+      });
+      state.templateRuleBaseConfig = rules;
+      fillTemplateRuleFields(rules);
+      renderTemplateRulePreview();
+      setMessage("templateSaveMessage", "已恢复扫描建议，仍需检查并确认", "");
     }
 
     function fillTemplateRuleFields(config) {
-      resetTemplateRuleFields();
       const groups = Array.isArray(config.option_groups) && config.option_groups.length
         ? config.option_groups
         : legacyOptionGroups(config);
-      const groupInputs = Array.from(document.querySelectorAll("[data-option-group-name]"));
-      const groupRoles = Array.from(document.querySelectorAll("[data-option-group-role]"));
-      groups.slice(0, groupInputs.length).forEach((group, index) => {
-        groupInputs[index].value = group.name || compactOptionRange(group.options || []);
-        groupRoles[index].value = group.role || "";
-      });
+      setOptionGroupRows(groups.map(group => ({
+        name: group.name || compactOptionRange(group.options || group.values || []),
+        role: group.role || ""
+      })));
 
       const dimensionRows = Object.entries(config.dimensions || {}).map(([key, value]) => {
         const unit = value.unit || "cm";
@@ -2125,6 +2364,7 @@ INDEX_HTML = """<!doctype html>
       });
 
       document.getElementById("templateAdvancedRules").value = (config.exceptions && config.exceptions.note) || config.raw_text || "";
+      document.getElementById("templateExceptionStatus").value = (config.exceptions && config.exceptions.status) || "none";
     }
 
     function legacyOptionGroups(config) {
@@ -2207,7 +2447,7 @@ INDEX_HTML = """<!doctype html>
     }
 
     async function saveTemplate() {
-      setMessage("templateSaveMessage", "保存中", "");
+      setMessage("templateSaveMessage", "处理中", "");
       const templateId = document.getElementById("templateId").value.trim();
       const name = document.getElementById("templateName").value.trim();
       if (!templateId || !name) {
@@ -2215,20 +2455,52 @@ INDEX_HTML = """<!doctype html>
         return;
       }
       const draft = buildTemplateRulePayload();
+      const hasScanDraft = Boolean(state.templateOnboarding && state.templateOnboarding.draft);
       const missing = templateRuleMissingItems(draft);
-      if (missing.length) {
+      if (hasScanDraft && missing.length) {
         state.templateRuleDraft = draft;
         renderTemplateRulePreview();
         setMessage("templateSaveMessage", `规则还不完整：${missing.join("、")}`, "error");
+        return;
+      }
+      let canonicalPack = null;
+      if (hasScanDraft) {
+        try {
+          canonicalPack = buildCanonicalRulePack();
+        } catch (error) {
+          setMessage("templateSaveMessage", String(error.message || error), "error");
+          return;
+        }
+        if (!(await checkTemplateRule())) return;
+      }
+      const existingTemplate = formTemplate();
+      const hasPendingFiles = Boolean(
+        document.getElementById("referenceAiFile").files[0] ||
+        document.getElementById("primaryAiFile").files[0] ||
+        document.getElementById("assetAiFiles").files.length
+      );
+      if (hasScanDraft && existingTemplate && existingTemplate.status === "active") {
+        if (hasPendingFiles || name !== existingTemplate.name) {
+          setMessage("templateSaveMessage", "请先停用模板，再修改文件或基础信息；规则修改可直接确认", "error");
+          return;
+        }
+        try {
+          await postJson(`/api/templates/${encodeURIComponent(templateId)}/rules/confirm`, {
+            pack: canonicalPack,
+            change_summary: document.getElementById("templateChangeSummary").value.trim()
+          });
+          await loadTemplates(templateId);
+          setMessage("templateSaveMessage", `已发布新规则版本：${templateId}`, "ok");
+        } catch (error) {
+          setMessage("templateSaveMessage", String(error.message || error), "error");
+        }
         return;
       }
       const form = new FormData();
       form.append("template_id", templateId);
       form.append("name", name);
       form.append("template_type", draft.template_type);
-      form.append("status", "active");
-      form.append("template_rules_text", "");
-      form.append("template_rules_json", templateRuleJsonText());
+      form.append("status", "draft");
       const reference = document.getElementById("referenceAiFile").files[0];
       if (reference) form.append("reference_ai", reference);
       const primary = document.getElementById("primaryAiFile").files[0];
@@ -2239,11 +2511,26 @@ INDEX_HTML = """<!doctype html>
       try {
         const result = await postForm("/api/templates", form);
         state.selectedTemplateId = result.template.template_id;
+        if (hasScanDraft && canonicalPack) {
+          await postJson(`/api/templates/${encodeURIComponent(templateId)}/rules/confirm`, {
+            pack: canonicalPack,
+            change_summary: document.getElementById("templateChangeSummary").value.trim()
+          });
+        } else {
+          const scan = await postJson(`/api/templates/${encodeURIComponent(templateId)}/scan`, {});
+          if (!scan.scan_ok) {
+            throw new Error(`AI 扫描失败，模板保持草稿：${scan.scan_error || "未知错误"}`);
+          }
+        }
         document.getElementById("referenceAiFile").value = "";
         document.getElementById("primaryAiFile").value = "";
         document.getElementById("assetAiFiles").value = "";
         await loadTemplates(result.template.template_id);
-        setMessage("templateSaveMessage", `已保存模板：${result.template.template_id}`, "ok");
+        setMessage(
+          "templateSaveMessage",
+          hasScanDraft ? `已确认并启用模板：${result.template.template_id}` : `扫描草稿已生成：${result.template.template_id}，请核对并修改后再次点击确认`,
+          "ok"
+        );
       } catch (error) {
         setMessage("templateSaveMessage", String(error.message || error), "error");
       }
@@ -2836,8 +3123,13 @@ INDEX_HTML = """<!doctype html>
       return text ? JSON.parse(text) : {};
     }
 
-    async function deleteJson(url) {
-      const response = await fetch(url, { method: "DELETE" });
+    async function deleteJson(url, body = null) {
+      const options = { method: "DELETE" };
+      if (body) {
+        options.headers = { "Content-Type": "application/json" };
+        options.body = JSON.stringify(body);
+      }
+      const response = await fetch(url, options);
       const text = await response.text();
       if (!response.ok) throw new Error(extractError(text));
       return text ? JSON.parse(text) : {};

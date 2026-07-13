@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
+from functools import wraps
 from pathlib import Path
 from typing import Any, Dict, List
 
 from .paths import CONFIG_DIR, PROJECT_ROOT, TEMPLATE_STORAGE_DIR
+from .template_locks import TEMPLATE_STATE_LOCK
 
 
 TEMPLATES_CONFIG = CONFIG_DIR / "templates.json"
@@ -19,6 +21,16 @@ DEFAULT_PIPELINES = {
     "annotated_ai": "generic_rules_only",
     "asset_split": "generic_rules_only",
 }
+_REGISTRY_LOCK = TEMPLATE_STATE_LOCK
+
+
+def _registry_locked(method):
+    @wraps(method)
+    def wrapped(*args, **kwargs):
+        with _REGISTRY_LOCK:
+            return method(*args, **kwargs)
+
+    return wrapped
 
 
 @dataclass(frozen=True)
@@ -62,18 +74,32 @@ class TemplateRegistry:
         self.config_path = Path(config_path)
         self.storage_dir = Path(storage_dir)
 
+    @_registry_locked
     def list_templates(self) -> List[TemplateDefinition]:
         raw = self._read_config()
         templates = raw.get("templates", [])
         return [self._parse_template(item) for item in templates if isinstance(item, dict)]
 
+    @_registry_locked
     def get_template(self, template_id: str) -> TemplateDefinition:
         for template in self.list_templates():
             if template.template_id == template_id:
                 return template
         raise KeyError(f"模板不存在: {template_id}")
 
+    @_registry_locked
+    def validate_template_id(self, template_id: str) -> None:
+        candidate_id = str(template_id or "").strip()
+        if not candidate_id or _safe_segment(candidate_id) != candidate_id:
+            raise ValueError("template_id may only contain letters, numbers, '-' and '_'.")
+        for existing in self._read_config().get("templates", []):
+            existing_id = str(existing.get("template_id", "")).strip()
+            if existing_id.casefold() == candidate_id.casefold() and existing_id != candidate_id:
+                raise ValueError(f"Template ID differs only by case from existing template: {existing_id}")
+
+    @_registry_locked
     def upsert_template(self, item: Dict[str, Any]) -> TemplateDefinition:
+        self.validate_template_id(str(item.get("template_id", "")))
         normalized = self._normalize_template_item(item)
         raw = self._read_config()
         templates = [entry for entry in raw.get("templates", []) if entry.get("template_id") != normalized["template_id"]]
@@ -83,6 +109,7 @@ class TemplateRegistry:
         self._write_config(raw)
         return self.get_template(normalized["template_id"])
 
+    @_registry_locked
     def save_uploaded_ai(self, template_id: str, filename: str, content: bytes) -> Path:
         if not filename.lower().endswith(".ai"):
             raise ValueError("模板文件必须是 .ai 格式")
@@ -94,6 +121,7 @@ class TemplateRegistry:
         output_path.write_bytes(content)
         return output_path
 
+    @_registry_locked
     def save_uploaded_assets(
         self,
         template_id: str,
@@ -126,6 +154,7 @@ class TemplateRegistry:
             )
         return saved
 
+    @_registry_locked
     def delete_template_asset(self, template_id: str, asset_index: int) -> Dict[str, Any]:
         raw = self._read_config()
         templates = raw.get("templates", [])
@@ -139,11 +168,13 @@ class TemplateRegistry:
             if asset_index < 0 or asset_index >= len(assets):
                 raise IndexError("模板 AI 资产不存在")
             removed = assets.pop(asset_index)
+            item["status"] = "draft"
             raw["version"] = int(raw.get("version", 1) or 1)
             self._write_config(raw)
             return removed if isinstance(removed, dict) else {"value": removed}
         raise KeyError(f"模板不存在: {template_id}")
 
+    @_registry_locked
     def delete_template_ai(self, template_id: str) -> Dict[str, Any]:
         raw = self._read_config()
         templates = raw.get("templates", [])
@@ -156,6 +187,7 @@ class TemplateRegistry:
             role = str(item.get("template_ai_role", "尺寸/作图区模板") or "尺寸/作图区模板").strip()
             item["template_ai"] = ""
             item["template_ai_role"] = ""
+            item["status"] = "draft"
             raw["version"] = int(raw.get("version", 1) or 1)
             self._write_config(raw)
             return {
@@ -167,6 +199,58 @@ class TemplateRegistry:
             }
         raise KeyError(f"模板不存在: {template_id}")
 
+    @_registry_locked
+    def set_template_status(self, template_id: str, status: str) -> TemplateDefinition:
+        raw = self._read_config()
+        for item in raw.get("templates", []):
+            if item.get("template_id") == template_id:
+                item["status"] = str(status or "draft").strip()
+                self._write_config(raw)
+                return self.get_template(template_id)
+        raise KeyError(f"Template does not exist: {template_id}")
+
+    @_registry_locked
+    def remove_template_record(self, template_id: str) -> Dict[str, Any]:
+        """Remove registry metadata while retaining all files for recovery."""
+
+        raw = self._read_config()
+        templates = raw.get("templates", [])
+        for index, item in enumerate(templates):
+            if item.get("template_id") == template_id:
+                removed = templates.pop(index)
+                self._write_config(raw)
+                return removed
+        raise KeyError(f"Template does not exist: {template_id}")
+
+    @_registry_locked
+    def apply_confirmed_rule_pack(
+        self,
+        template_id: str,
+        pack: Dict[str, Any],
+        *,
+        activate: bool,
+    ) -> TemplateDefinition:
+        """Publish a confirmed pack to the runtime config path and optionally activate it."""
+
+        raw = self._read_config()
+        target = next(
+            (item for item in raw.get("templates", []) if item.get("template_id") == template_id),
+            None,
+        )
+        if target is None:
+            raise KeyError(f"Template does not exist: {template_id}")
+        output_path = self._template_dir(template_id) / "template.rules.json"
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = output_path.with_suffix(".json.tmp")
+        temporary.write_text(json.dumps(pack, ensure_ascii=False, indent=2), encoding="utf-8")
+        temporary.replace(output_path)
+        target["template_rules_config"] = self.to_config_path(output_path)
+        if activate:
+            target["status"] = "active"
+        self._write_config(raw)
+        return self.get_template(template_id)
+
+    @_registry_locked
     def save_template_config(self, template_id: str, content: str) -> Path | None:
         text = content.strip()
         if not text:
@@ -178,6 +262,7 @@ class TemplateRegistry:
         output_path.write_text(json.dumps(parsed, ensure_ascii=False, indent=2), encoding="utf-8")
         return output_path
 
+    @_registry_locked
     def save_template_rules_config(self, template_id: str, content: str) -> Path | None:
         text = content.strip()
         if not text:
@@ -238,7 +323,9 @@ class TemplateRegistry:
 
     def _write_config(self, raw: Dict[str, Any]) -> None:
         self.config_path.parent.mkdir(parents=True, exist_ok=True)
-        self.config_path.write_text(json.dumps(raw, ensure_ascii=False, indent=2), encoding="utf-8")
+        temporary = self.config_path.with_suffix(self.config_path.suffix + ".tmp")
+        temporary.write_text(json.dumps(raw, ensure_ascii=False, indent=2), encoding="utf-8")
+        temporary.replace(self.config_path)
 
     def _normalize_template_item(self, item: Dict[str, Any]) -> Dict[str, Any]:
         template_id = str(item.get("template_id", "")).strip()
@@ -249,6 +336,8 @@ class TemplateRegistry:
         template_ai = str(item.get("template_ai", "")).strip()
         if not template_id:
             raise ValueError("缺少 template_id")
+        if _safe_segment(template_id) != template_id:
+            raise ValueError("template_id may only contain letters, numbers, '-' and '_'.")
         if not name:
             raise ValueError("缺少模板名称")
         if not template_type:
@@ -279,7 +368,7 @@ class TemplateRegistry:
 
     def _template_dir(self, template_id: str) -> Path:
         safe_id = _safe_segment(template_id)
-        if not safe_id:
+        if not safe_id or safe_id != str(template_id).strip():
             raise ValueError("模板 ID 不合法")
         return self.storage_dir / safe_id
 

@@ -19,6 +19,9 @@ from .render_service import RenderService
 from .rule_center import build_template_rule_draft, check_template_definition
 from .rule_store import DepartmentRuleStore
 from .template_registry import TemplateRegistry
+from .template_onboarding import TemplateOnboardingStore
+from .template_inspector import TemplateInspector
+from .template_publication import TemplatePublicationService
 from .web_page import INDEX_HTML as WORKBENCH_HTML
 
 
@@ -743,6 +746,7 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
     service = RenderService(registry=registry, jobs=jobs)
     rule_store = DepartmentRuleStore()
     llm_parser = LlmRuleParser()
+    template_inspector = TemplateInspector()
 
     def do_GET(self) -> None:
         path = urlparse(self.path).path
@@ -754,6 +758,14 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
             return
         if path == "/api/templates":
             self._send_json({"templates": [self._template_payload(item) for item in self.registry.list_templates()]})
+            return
+        if path.startswith("/api/templates/") and path.endswith("/onboarding"):
+            template_id = unquote(path.split("/")[3])
+            try:
+                self.registry.get_template(template_id)
+                self._send_json(self._onboarding_store().get_state(template_id))
+            except KeyError as exc:
+                self._send_error(HTTPStatus.NOT_FOUND, str(exc))
             return
         if path.startswith("/api/templates/") and path.endswith("/rules/status"):
             template_id = unquote(path.split("/")[3])
@@ -846,6 +858,66 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
             except Exception as exc:
                 self._send_error(HTTPStatus.BAD_REQUEST, str(exc))
             return
+        parts = path.strip("/").split("/")
+        if len(parts) == 5 and parts[:2] == ["api", "templates"]:
+            template_id = unquote(parts[2])
+            action = "/".join(parts[3:])
+            try:
+                payload = self._read_json()
+                self.registry.get_template(template_id)
+                if action == "rules/check":
+                    self._send_json(self._onboarding_store().check(template_id, payload.get("pack", payload)))
+                    return
+                if action == "rules/confirm":
+                    record = self._publication_service().confirm(
+                        template_id,
+                        payload.get("pack", payload),
+                        change_summary=str(payload.get("change_summary") or ""),
+                    )
+                    self._send_json({**record, "template": self._template_payload(record["template"])})
+                    return
+                if action == "rules/rollback":
+                    record = self._publication_service().rollback(
+                        template_id,
+                        int(payload.get("version", 0) or 0),
+                        change_summary=str(payload.get("change_summary") or ""),
+                    )
+                    self._send_json({**record, "template": self._template_payload(record["template"])})
+                    return
+            except KeyError as exc:
+                self._send_error(HTTPStatus.NOT_FOUND, str(exc))
+                return
+            except (TypeError, ValueError) as exc:
+                self._send_error(HTTPStatus.BAD_REQUEST, str(exc))
+                return
+        if len(parts) == 4 and parts[:2] == ["api", "templates"] and parts[3] == "scan":
+            template_id = unquote(parts[2])
+            try:
+                payload = self._read_json()
+                template = self.registry.get_template(template_id)
+                state = self.template_inspector.scan(
+                    template,
+                    self._onboarding_store(),
+                    visible=bool(payload.get("visible", False)),
+                )
+                self._send_json(state)
+            except KeyError as exc:
+                self._send_error(HTTPStatus.NOT_FOUND, str(exc))
+            except (TypeError, ValueError) as exc:
+                self._send_error(HTTPStatus.BAD_REQUEST, str(exc))
+            return
+        if len(parts) == 4 and parts[:2] == ["api", "templates"] and parts[3] == "disable":
+            template_id = unquote(parts[2])
+            try:
+                payload = self._read_json()
+                self._require_template_confirmation(template_id, payload)
+                template = self.registry.set_template_status(template_id, "disabled")
+                self._send_json({"template": self._template_payload(template)})
+            except KeyError as exc:
+                self._send_error(HTTPStatus.NOT_FOUND, str(exc))
+            except ValueError as exc:
+                self._send_error(HTTPStatus.BAD_REQUEST, str(exc))
+            return
         if path != "/api/render":
             self._send_error(HTTPStatus.NOT_FOUND, "not found")
             return
@@ -866,6 +938,17 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
                 self._send_error(HTTPStatus.NOT_FOUND, str(exc))
             return
         parts = path.strip("/").split("/")
+        if len(parts) == 3 and parts[:2] == ["api", "templates"]:
+            template_id = unquote(parts[2])
+            try:
+                self._require_template_confirmation(template_id, self._read_json())
+                removed = self.registry.remove_template_record(template_id)
+                self._send_json({"ok": True, "template": removed, "files_retained": True})
+            except KeyError as exc:
+                self._send_error(HTTPStatus.NOT_FOUND, str(exc))
+            except ValueError as exc:
+                self._send_error(HTTPStatus.BAD_REQUEST, str(exc))
+            return
         if len(parts) == 5 and parts[0] == "api" and parts[1] == "templates" and parts[3] == "assets":
             try:
                 asset = self.registry.delete_template_asset(unquote(parts[2]), int(parts[4]))
@@ -882,6 +965,17 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length", "0") or "0")
         body = self.rfile.read(length).decode("utf-8") if length else "{}"
         return json.loads(body or "{}")
+
+    def _onboarding_store(self) -> TemplateOnboardingStore:
+        return TemplateOnboardingStore(self.registry.storage_dir)
+
+    def _publication_service(self) -> TemplatePublicationService:
+        return TemplatePublicationService(self.registry, self._onboarding_store())
+
+    @staticmethod
+    def _require_template_confirmation(template_id: str, payload: dict[str, object]) -> None:
+        if str(payload.get("confirmation") or "").strip() != template_id:
+            raise ValueError("Type the template ID to confirm this operation.")
 
     def _read_template_payload(self) -> tuple[dict[str, str], dict[str, list[dict[str, object]]]]:
         content_type = self.headers.get("Content-Type", "")
@@ -970,12 +1064,15 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
 
     def _register_template(self, fields: dict[str, str], files: dict[str, list[dict[str, object]]]) -> object:
         template_id = fields.get("template_id", "").strip()
+        self.registry.validate_template_id(template_id)
         existing = None
         if template_id:
             try:
                 existing = self.registry.get_template(template_id)
             except KeyError:
                 existing = None
+        if existing and existing.status == "active":
+            raise ValueError("Disable the active template before changing files or metadata.")
 
         assets = list(existing.assets) if existing else []
         assets.extend(self._migrate_existing_primary_reference(template_id, existing, files))
@@ -998,13 +1095,17 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
         template_config = fields.get("template_config", "").strip()
         if not template_config and existing and existing.template_config:
             template_config = self.registry.to_config_path(existing.template_config)
-        template_rules_config = self._save_template_rules(fields, template_id, existing, _design_asset_count(assets))
+        template_rules_config = (
+            self.registry.to_config_path(existing.template_rules_config)
+            if existing and existing.template_rules_config
+            else ""
+        )
         item = {
             "template_id": template_id,
             "name": fields.get("name", "").strip() or (existing.name if existing else ""),
             "template_type": fields.get("template_type", "").strip() or (existing.template_type if existing else ""),
             "pipeline": fields.get("pipeline", "").strip() or (existing.pipeline if existing else ""),
-            "status": fields.get("status", "").strip() or (existing.status if existing else "draft"),
+            "status": "draft",
             "template_ai": template_ai,
             "template_ai_role": template_ai_role,
             "default_columns": fields.get("default_columns", existing.default_columns if existing else 4),
@@ -1077,55 +1178,6 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
             )
             return self.registry.to_config_path(output_path), "原始参考模板", "reference_upload"
         raise ValueError("请至少上传原始参考模板或尺寸/作图区模板")
-
-    def _save_template_rules(
-        self,
-        fields: dict[str, str],
-        template_id: str,
-        existing: object | None,
-        asset_count: int = 0,
-    ) -> str:
-        rules_text = fields.get("template_rules_json", "").strip()
-        natural_text = fields.get("template_rules_text", "").strip()
-        template_type = fields.get("template_type", "").strip() or (existing.template_type if existing else "")
-        if rules_text and natural_text:
-            self._ensure_llm_template_rule(rules_text)
-        if not rules_text and natural_text:
-            rules_text = json.dumps(
-                self.llm_parser.parse(
-                    kind="template_rule",
-                    natural_text=natural_text,
-                    context={
-                        "template_id": template_id,
-                        "template_type": template_type,
-                        "asset_count": asset_count,
-                    },
-                    fallback=build_template_rule_draft(
-                        template_id=template_id,
-                        template_type=template_type,
-                        natural_text=natural_text,
-                        asset_count=asset_count,
-                    ),
-                    require_llm=True,
-                ),
-                ensure_ascii=False,
-            )
-        if rules_text:
-            config_path = self.registry.save_template_rules_config(template_id, rules_text)
-            return self.registry.to_config_path(config_path) if config_path else ""
-        if existing and existing.template_rules_config:
-            return self.registry.to_config_path(existing.template_rules_config)
-        return ""
-
-    def _ensure_llm_template_rule(self, rules_text: str) -> None:
-        try:
-            payload = json.loads(rules_text)
-        except json.JSONDecodeError as exc:
-            raise ValueError("模板特有规则 JSON 格式不正确，请重新生成预览") from exc
-        parser = payload.get("parser") if isinstance(payload, dict) else None
-        source = parser.get("source") if isinstance(parser, dict) else ""
-        if source != "llm":
-            raise ValueError("模板特有规则必须先通过 LLM 生成预览，不能保存本地解析草稿")
 
     def _save_department_rule_draft(self, payload: dict[str, object]) -> dict[str, object]:
         return self.rule_store.save_draft(payload)

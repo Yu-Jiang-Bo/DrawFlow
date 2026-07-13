@@ -28,6 +28,9 @@ from .rule_center import check_template_definition, curved_layout_overrides, out
 from .template_registry import TemplateDefinition, TemplateRegistry
 
 
+SUPPORTED_RENDER_PIPELINES = frozenset({"jjmb_202508", "jjmb_202603_grouped", "jjmb_202509_curved"})
+
+
 class RenderServiceError(RuntimeError):
     """Raised when a backend render request cannot be completed."""
 
@@ -77,6 +80,10 @@ class RenderService:
         if not order_file.exists():
             raise RenderServiceError(f"订单文件不存在: {order_file}")
         template = self.registry.get_template(template_id)
+        if template.status != "active":
+            raise RenderServiceError(f"Template is not active: {template_id}")
+        if template.pipeline not in SUPPORTED_RENDER_PIPELINES:
+            raise RenderServiceError(f"Template pipeline is not executable: {template.pipeline}")
         return {
             "template_id": template_id,
             "order_file": str(order_file.resolve()),

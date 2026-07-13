@@ -65,7 +65,7 @@ def test_template_form_hides_type_and_status_from_user():
     assert 'id="templateType"' not in INDEX_HTML
     assert 'id="templateStatus"' not in INDEX_HTML
     assert 'form.append("template_type", draft.template_type)' in INDEX_HTML
-    assert 'form.append("status", "active")' in INDEX_HTML
+    assert 'form.append("status", "draft")' in INDEX_HTML
     assert "function inferTemplateTypeFromForm" in INDEX_HTML
     assert "内部模板类型" not in INDEX_HTML
 
@@ -100,7 +100,39 @@ def test_template_rule_editor_is_business_readable():
     assert "默认色彩模式" in INDEX_HTML
     assert "输出色彩" in INDEX_HTML
     assert "rule_source: \"structured_form\"" in INDEX_HTML
-    assert "template_rules_text\", \"\"" in INDEX_HTML
+    assert "buildCanonicalRulePack" in INDEX_HTML
+
+
+def test_template_onboarding_requires_scan_check_and_confirmation():
+    assert 'id="templateProfile"' in INDEX_HTML
+    assert 'id="scanEvidence" readonly' in INDEX_HTML
+    assert 'id="fieldSources" readonly' in INDEX_HTML
+    assert 'id="restoreSuggestionsBtn"' in INDEX_HTML
+    assert 'id="addOptionGroupBtn"' in INDEX_HTML
+    assert 'id="orderBindingsJson"' in INDEX_HTML
+    assert 'id="assetMappingsJson"' in INDEX_HTML
+    assert 'id="textPoliciesJson"' in INDEX_HTML
+    assert 'id="outputTransformsJson"' in INDEX_HTML
+    assert 'id="validationSampleJson"' in INDEX_HTML
+    assert "确认并保存" in INDEX_HTML
+    assert "/rules/check" in INDEX_HTML
+    assert "/rules/confirm" in INDEX_HTML
+    assert "/rules/rollback" in INDEX_HTML
+    assert "data-rule-rollback" in INDEX_HTML
+    assert "/scan" in INDEX_HTML
+    assert "扫描草稿已生成" in INDEX_HTML
+    assert "data-template-disable" in INDEX_HTML
+    assert "data-template-remove" in INDEX_HTML
+    assert 'state.templates.filter(template => template.status === "active")' in INDEX_HTML
+    assert 'existingTemplate.status === "active"' in INDEX_HTML
+    assert "请先停用模板，再修改文件或基础信息" in INDEX_HTML
+
+    fill_body = INDEX_HTML[
+        INDEX_HTML.index("function fillTemplateRuleFields"):
+        INDEX_HTML.index("function legacyOptionGroups")
+    ]
+    assert "resetTemplateRuleFields()" not in fill_body
+    assert 'document.getElementById("fieldSources").value = prettyJson' in INDEX_HTML
 
 
 def test_template_rule_payload_preserves_legacy_config():

@@ -94,6 +94,7 @@ def migrate_legacy_template_rule(payload: Mapping[str, Any], *, template_id: str
         "dimensions": _dict(source.get("dimensions")),
         "text_targets": text_targets,
         "text_sequences": _dict_list(source.get("text_sequences")),
+        "text_policies": _dict(source.get("text_policies")),
         "slot_mappings": _dict_list(source.get("slot_mappings")),
         "order_bindings": _dict(source.get("order_bindings")),
         "asset_mappings": _dict_list(source.get("asset_mappings")),
@@ -192,6 +193,11 @@ def _normalize_canonical_pack(source: Dict[str, Any], *, template_id: str) -> Di
     }
     normalized["audit"] = deepcopy(_dict(source.get("audit")))
     normalized["audit"].setdefault("source_format", "template_rule_pack")
+    extra_validation = deepcopy(_dict(source.get("validation")))
+    extra_validation.pop("unresolved_items", None)
+    normalized["validation"].update(extra_validation)
+    normalized["validation"].setdefault("status", "draft")
+    normalized["validation"].setdefault("unresolved_items", [])
     return normalized
 
 

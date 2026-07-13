@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 from copy import deepcopy
 from pathlib import Path
@@ -89,15 +90,9 @@ def build_scan_summary(scan: Mapping[str, Any]) -> Dict[str, Any]:
 
 
 def scan_fingerprint(scan: Mapping[str, Any]) -> str:
-    document = _dict(scan.get("document"))
-    stable = "|".join(
-        [
-            str(document.get("source_ai") or ""),
-            str(document.get("size_bytes") or ""),
-            str(document.get("modified_ns") or ""),
-            str(len(_dict_list(scan.get("items")))),
-        ]
-    )
+    stable_scan = deepcopy(dict(scan))
+    stable_scan.pop("scan_version", None)
+    stable = json.dumps(stable_scan, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
     return hashlib.sha256(stable.encode("utf-8")).hexdigest()[:16]
 
 

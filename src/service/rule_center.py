@@ -180,7 +180,16 @@ def read_template_rule_config(path_value: object) -> Dict[str, Any]:
         payload = json.loads(path.read_text(encoding="utf-8-sig"))
     except (OSError, json.JSONDecodeError):
         return {}
-    return payload if isinstance(payload, dict) else {}
+    if not isinstance(payload, dict):
+        return {}
+    if payload.get("$schema") == "custom-renderer/template-rule-pack" and isinstance(payload.get("rules"), dict):
+        rules = dict(payload["rules"])
+        validation = payload.get("validation") if isinstance(payload.get("validation"), dict) else {}
+        rules["status"] = validation.get("status", "draft")
+        rules["capabilities"] = payload.get("capabilities", [])
+        rules["assets"] = payload.get("assets", {})
+        return rules
+    return payload
 
 
 def parse_dimensions(text: str) -> Dict[str, Dict[str, object]]:

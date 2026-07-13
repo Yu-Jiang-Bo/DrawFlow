@@ -7,6 +7,7 @@ from src.service.rule_center import (
     curved_layout_overrides,
     output_color_mode,
     parse_dimensions,
+    read_template_rule_config,
 )
 from src.service.template_registry import TemplateRegistry
 
@@ -180,6 +181,29 @@ def test_template_rule_check_accepts_design_font_options(tmp_path):
 
     assert check["complete"] is True
     assert check["renderable"] is True
+
+
+def test_runtime_reader_adapts_confirmed_canonical_rule_pack(tmp_path):
+    path = tmp_path / "template.rules.json"
+    path.write_text(
+        json.dumps(
+            {
+                "$schema": "custom-renderer/template-rule-pack",
+                "rules": {"font_options": ["F1"], "output": {"color_mode": "RGB"}},
+                "capabilities": ["replace_text"],
+                "assets": {"items": []},
+                "validation": {"status": "confirmed"},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    config = read_template_rule_config(path)
+
+    assert config["font_options"] == ["F1"]
+    assert config["status"] == "confirmed"
+    assert config["capabilities"] == ["replace_text"]
+    assert output_color_mode(config) == "RGB"
 
 
 def test_legacy_pipeline_is_renderable_but_not_rule_complete(tmp_path):

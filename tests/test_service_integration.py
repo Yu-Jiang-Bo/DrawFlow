@@ -1,7 +1,9 @@
 import json
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from openpyxl import Workbook
+import pytest
 
 from src.jjmb_config_grouped_main import build_grouped_task
 from src.render_task import RenderTaskError
@@ -9,12 +11,16 @@ from src.service.job_store import JobStore
 from src.service.http_server import RenderRequestHandler
 from src.service.render_service import (
     RenderService,
+    RenderServiceError,
     _configured_font_options,
     _design_font_options,
     _merge_202508_template_config,
     _missing_202508_font_configs,
 )
 from src.service.template_registry import TemplateRegistry
+from src.service.template_inspector import TemplateInspector
+from src.service.template_onboarding import TemplateOnboardingStore
+from src.service.template_publication import TemplatePublicationService
 
 
 def write_order_xlsx(path: Path) -> None:
@@ -118,6 +124,83 @@ def test_service_dry_run_creates_job_and_render_task(tmp_path):
     assert task["output"]["pathfinder_merge"] is True
 
 
+def test_service_rejects_draft_template_before_creating_job(tmp_path):
+    config_path = tmp_path / "templates.json"
+    order_path = tmp_path / "orders.xlsx"
+    write_templates_config(config_path)
+    write_order_xlsx(order_path)
+    payload = json.loads(config_path.read_text(encoding="utf-8"))
+    payload["templates"][0]["status"] = "draft"
+    config_path.write_text(json.dumps(payload), encoding="utf-8")
+    service = RenderService(
+        registry=TemplateRegistry(config_path),
+        jobs=JobStore(tmp_path / "jobs"),
+    )
+
+    with pytest.raises(RenderServiceError, match="not active"):
+        service.submit({"template_id": "JJMB202508261001394920", "order_file": str(order_path)})
+
+    assert service.jobs.list_recent() == []
+
+
+def test_scan_confirm_publish_then_render_dry_run(tmp_path):
+    registry = TemplateRegistry(tmp_path / "templates.json", tmp_path / "templates")
+    ai_path = registry.save_uploaded_ai("DEMO001", "template.ai", b"fake ai")
+    template = registry.upsert_template(
+        {
+            "template_id": "DEMO001",
+            "name": "Demo",
+            "template_type": "pure_text_color_design",
+            "status": "draft",
+            "template_ai": registry.to_config_path(ai_path),
+        }
+    )
+
+    class Bridge:
+        def __init__(self, **kwargs):
+            pass
+
+        def render(self, script, task_path):
+            task = json.loads(task_path.read_text(encoding="utf-8"))
+            Path(task["output_json"]).write_text(
+                json.dumps(
+                    {
+                        "layers": [{"name": "Template"}],
+                        "items": [
+                            {"type": "GroupItem", "name": "F1", "path": "Template/F1"},
+                            {"type": "GroupItem", "name": "Design1", "path": "Template/Design1"},
+                            {"type": "TextFrame", "name": "Name1", "path": "Template/Name1"},
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+    store = TemplateOnboardingStore(registry.storage_dir)
+    state = TemplateInspector(Bridge).scan(template, store)
+    pack = state["draft"]
+    pack["validation"]["unresolved_items"] = []
+    pack["validation"]["sample"] = {
+        "input": {"定制信息": "Meg"},
+        "expected": {"Name1": "Meg"},
+    }
+    pack["rules"]["order_bindings"] = {"text": "定制信息"}
+    pack["rules"]["text_policies"] = {"fit": "scale_to_box"}
+    record = TemplatePublicationService(registry, store).confirm(
+        "DEMO001", pack, change_summary="E2E"
+    )
+    active = record["template"]
+    order_path = tmp_path / "orders.xlsx"
+    write_order_xlsx(order_path)
+
+    result = RenderService(registry=registry, jobs=JobStore(tmp_path / "jobs")).submit(
+        {"template_id": active.template_id, "order_file": str(order_path), "dry_run": True}
+    )
+
+    assert result["status"] == "completed"
+    assert active.template_rules_config and active.template_rules_config.exists()
+
+
 def test_template_registry_resolves_defaults(tmp_path):
     config_path = tmp_path / "templates.json"
     write_templates_config(config_path)
@@ -177,6 +260,7 @@ def test_register_template_uses_reference_ai_when_size_template_is_empty(tmp_pat
     assert template.template_ai and template.template_ai.exists()
     assert template.template_ai_role == "原始参考模板"
     assert template.assets == []
+    assert template.status == "draft"
 
 
 def test_register_template_keeps_existing_reference_when_size_template_is_added(tmp_path):
@@ -234,7 +318,7 @@ def test_register_template_keeps_reference_ai_as_asset_when_size_template_exists
     assert template.assets[0]["role"] == "原始参考模板"
 
 
-def test_register_template_saves_rules_without_overwriting_structure_config(tmp_path):
+def test_register_template_ignores_direct_rules_and_preserves_structure_config(tmp_path):
     handler = object.__new__(RenderRequestHandler)
     handler.registry = TemplateRegistry(tmp_path / "templates.json", tmp_path / "templates")
     structure_config = tmp_path / "curved-title-mark-report.json"
@@ -246,7 +330,7 @@ def test_register_template_saves_rules_without_overwriting_structure_config(tmp_
             "name": "曲线标题模板",
             "template_type": "curved_title_text",
             "pipeline": "jjmb_202509_curved",
-            "status": "active",
+            "status": "draft",
             "template_ai": handler.registry.to_config_path(ai_path),
             "template_config": str(structure_config),
         }
@@ -265,8 +349,8 @@ def test_register_template_saves_rules_without_overwriting_structure_config(tmp_
     )
 
     assert template.template_config == structure_config
-    assert template.template_rules_config and template.template_rules_config.name == "template.rules.json"
-    assert "font_options" in template.template_rules_config.read_text(encoding="utf-8")
+    assert template.template_rules_config is None
+    assert not (handler.registry.storage_dir / template.template_id / "template.rules.json").exists()
 
 
 def test_template_registry_saves_multiple_ai_assets(tmp_path):
@@ -380,6 +464,7 @@ def test_template_registry_deletes_asset_registration_without_removing_files(tmp
     assert ai_path.exists()
     assert asset_path.exists()
     assert registry.get_template("JJMB202607030003").assets == []
+    assert registry.get_template("JJMB202607030003").status == "draft"
 
 
 def test_template_registry_deletes_primary_ai_registration_without_removing_file(tmp_path):
@@ -404,6 +489,110 @@ def test_template_registry_deletes_primary_ai_registration_without_removing_file
     assert removed["role"] == "尺寸/作图区模板"
     assert ai_path.exists()
     assert template.template_ai is None
+    assert template.status == "draft"
+
+
+def test_template_registry_disables_and_removes_record_without_removing_files(tmp_path):
+    registry = TemplateRegistry(tmp_path / "templates.json", tmp_path / "templates")
+    ai_path = registry.save_uploaded_ai("DEMO001", "main.ai", b"main ai")
+    registry.upsert_template(
+        {
+            "template_id": "DEMO001",
+            "name": "Demo",
+            "template_type": "pure_text",
+            "status": "draft",
+            "template_ai": registry.to_config_path(ai_path),
+        }
+    )
+
+    assert registry.set_template_status("DEMO001", "disabled").status == "disabled"
+    removed = registry.remove_template_record("DEMO001")
+
+    assert removed["template_id"] == "DEMO001"
+    assert ai_path.exists()
+    with pytest.raises(KeyError):
+        registry.get_template("DEMO001")
+
+
+def test_confirmed_pack_is_published_to_runtime_config_and_activates(tmp_path):
+    registry = TemplateRegistry(tmp_path / "templates.json", tmp_path / "templates")
+    registry.upsert_template(
+        {"template_id": "DEMO001", "name": "Demo", "template_type": "pure_text", "status": "draft"}
+    )
+    pack = {"template": {"template_id": "DEMO001"}, "rules": {"font_options": ["F1"]}}
+
+    template = registry.apply_confirmed_rule_pack("DEMO001", pack, activate=True)
+
+    assert template.status == "active"
+    assert template.template_rules_config
+    assert json.loads(template.template_rules_config.read_text(encoding="utf-8")) == pack
+
+
+def test_destructive_template_action_requires_exact_id_confirmation():
+    with pytest.raises(ValueError, match="template ID"):
+        RenderRequestHandler._require_template_confirmation("DEMO001", {"confirmation": "wrong"})
+
+    RenderRequestHandler._require_template_confirmation("DEMO001", {"confirmation": "DEMO001"})
+
+
+def test_template_registry_rejects_directory_colliding_ids(tmp_path):
+    registry = TemplateRegistry(tmp_path / "templates.json", tmp_path / "templates")
+    with pytest.raises(ValueError, match="template_id may only contain"):
+        registry.upsert_template(
+            {"template_id": "DEMO/001", "name": "Bad", "template_type": "pure_text"}
+        )
+
+
+def test_template_registry_rejects_case_only_collision_before_upload(tmp_path):
+    registry = TemplateRegistry(tmp_path / "templates.json", tmp_path / "templates")
+    registry.upsert_template({"template_id": "Demo", "name": "One", "template_type": "pure_text"})
+
+    with pytest.raises(ValueError, match="differs only by case"):
+        registry.validate_template_id("demo")
+
+
+def test_template_registry_serializes_concurrent_updates(tmp_path):
+    registry = TemplateRegistry(tmp_path / "templates.json", tmp_path / "templates")
+
+    def add(template_id):
+        return registry.upsert_template(
+            {"template_id": template_id, "name": template_id, "template_type": "pure_text"}
+        ).template_id
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        assert set(executor.map(add, ["DEMO001", "DEMO002"])) == {"DEMO001", "DEMO002"}
+
+    assert {item.template_id for item in registry.list_templates()} == {"DEMO001", "DEMO002"}
+
+
+def test_activation_rejects_non_executable_pipeline_and_missing_ai(tmp_path):
+    registry = TemplateRegistry(tmp_path / "templates.json", tmp_path / "templates")
+    template = registry.upsert_template(
+        {"template_id": "DEMO001", "name": "Demo", "template_type": "pure_text", "status": "draft"}
+    )
+    with pytest.raises(ValueError, match="not executable"):
+        TemplatePublicationService._validate_activation(template, {"rules": {}})
+
+
+def test_activation_rejects_registered_asset_when_file_is_missing(tmp_path):
+    registry = TemplateRegistry(tmp_path / "templates.json", tmp_path / "templates")
+    ai_path = registry.save_uploaded_ai("DEMO001", "template.ai", b"ai")
+    template = registry.upsert_template(
+        {
+            "template_id": "DEMO001",
+            "name": "Demo",
+            "template_type": "pure_text_color_design",
+            "status": "draft",
+            "template_ai": registry.to_config_path(ai_path),
+            "assets": [{"file_name": "missing.ai", "stored_path": str(tmp_path / "missing.ai")}],
+        }
+    )
+
+    with pytest.raises(ValueError, match="file is missing"):
+        TemplatePublicationService._validate_activation(
+            template,
+            {"rules": {"asset_mappings": [{"option": "Design1", "asset": "missing.ai"}]}},
+        )
 
 
 def test_service_accepts_string_boolean_flags(tmp_path):

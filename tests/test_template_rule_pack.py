@@ -142,6 +142,21 @@ def test_profiles_define_type_specific_requirements():
     assert profile_definition(PROFILE_UNCLASSIFIED) is None
 
 
+def test_canonical_normalization_keeps_onboarding_policy_and_sample():
+    pack = normalize_template_rule_pack(
+        {
+            "$schema": RULE_PACK_SCHEMA,
+            "template": {"template_id": "DEMO", "profile": PROFILE_COMPOSITE},
+            "structure": {"scan_version": "scan-1", "evidence": {}},
+            "rules": {"text_policies": {"fit": "scale_to_box"}},
+            "validation": {"status": "draft", "unresolved_items": [], "sample": {"text": "Alice"}},
+        }
+    )
+
+    assert pack["rules"]["text_policies"] == {"fit": "scale_to_box"}
+    assert pack["validation"]["sample"] == {"text": "Alice"}
+
+
 def test_infers_bundle_from_child_templates():
     assert infer_profile({"children": [{"template_id": "A"}, {"template_id": "B"}]}) == PROFILE_BUNDLE
 
