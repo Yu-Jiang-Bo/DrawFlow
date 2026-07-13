@@ -81,6 +81,11 @@ def build_template_rule_draft(
     dimensions = parse_dimensions(raw)
     output = infer_output_settings(raw)
     transforms = infer_transforms(raw)
+    order_bindings = parse_order_bindings(raw)
+    asset_mappings = parse_asset_mappings(raw)
+    text_policies = parse_text_policies(raw)
+    text_sequences = parse_text_sequences(raw, text_policies)
+    validation_sample = parse_validation_sample(raw)
 
     return {
         "version": 1,
@@ -97,13 +102,211 @@ def build_template_rule_draft(
         "defaults": defaults,
         "transforms": transforms,
         "dimensions": dimensions,
+        "order_bindings": order_bindings,
+        "asset_mappings": asset_mappings,
+        "text_policies": text_policies,
+        "text_sequences": text_sequences,
+        "slot_mappings": slot_mappings_from_sequences(text_sequences),
+        "validation_sample": validation_sample,
         "output": output,
         "slots": slots,
         "assets": {
             "mode": "split_ai" if mode == "asset_split" else "inline",
             "count": asset_count,
         },
+        "natural_text": raw,
     }
+
+
+ORDER_FIELD_ALIASES = {
+    "font": ("font", "字体", "字型"),
+    "design": ("design", "设计", "款式"),
+    "style": ("style", "尺寸", "版式"),
+    "color": ("color", "颜色", "色彩"),
+    "title": ("title", "标题"),
+    "text": ("text", "文字", "定制内容", "定制信息"),
+    "product_name": ("product_name", "产品", "品名"),
+    "order_no": ("order_no", "订单号"),
+}
+
+_COLUMN_TOKEN = r"[A-Za-z_][\w-]*|[\u4e00-\u9fff][\w\u4e00-\u9fff-]*"
+
+
+def parse_order_bindings(text: str) -> Dict[str, str]:
+    """Parse simple business descriptions such as '字体来自 font 列'."""
+
+    result: Dict[str, str] = {}
+    segments = re.split(r"[\r\n,，;；。]+", text or "")
+    for field, aliases in ORDER_FIELD_ALIASES.items():
+        alias = "|".join(re.escape(value) for value in aliases)
+        pattern = re.compile(
+            rf"(?:{alias})\s*(?:字段)?\s*(?:来自|取自|对应|映射到|使用|=|为)\s*"
+            rf"(?:订单(?:表格)?(?:中的)?(?:字段|列)?\s*)?(?P<column>{_COLUMN_TOKEN})",
+            re.I,
+        )
+        for segment in segments:
+            match = pattern.search(segment)
+            if match:
+                column = str(match.group("column") or "").strip()
+                if column and column.lower() not in {"列", "字段", "订单"}:
+                    result[field] = column
+                    break
+    return result
+
+
+def parse_asset_mappings(text: str) -> List[Dict[str, str]]:
+    """Parse option-to-AI-asset descriptions without requiring JSON."""
+
+    result: List[Dict[str, str]] = []
+    pattern = re.compile(
+        r"(?P<option>(?:Design|D|F|Style)\s*\d+)\s*(?:使用|对应|映射到|->|→)\s*"
+        r"(?P<asset>[A-Za-z0-9_ .()\-]+\.ai)",
+        re.I,
+    )
+    for match in pattern.finditer(text or ""):
+        item = {"option": re.sub(r"\s+", "", match.group("option")), "asset": match.group("asset").strip()}
+        if item not in result:
+            result.append(item)
+    return result
+
+
+def parse_text_policies(text: str) -> Dict[str, Any]:
+    """Parse readable fit and split policies from business language."""
+
+    raw = text or ""
+    policies: Dict[str, Any] = {}
+    lower = raw.lower()
+    if any(token in raw for token in ("禁止压缩", "不压缩", "保持字宽")):
+        policies["fit"] = "none"
+    elif any(token in lower for token in ("scale_to_box", "fit", "text_box")) or any(
+        token in raw for token in ("适配文字框", "缩放到文字框", "填入文字框")
+    ):
+        policies["fit"] = "scale_to_box"
+    elif any(token in raw for token in ("截断", "超出截断")):
+        policies["fit"] = "truncate"
+    sequences = parse_text_sequences(raw, policies)
+    if sequences:
+        sequence = sequences[0]
+        policies["split"] = {
+            "delimiter": sequence["delimiter"],
+            "max_parts": sequence["count"],
+            "overflow": "reject",
+            "trim": True,
+        }
+    return policies
+
+
+def parse_text_sequences(text: str, policies: Dict[str, Any] | None = None) -> List[Dict[str, Any]]:
+    """Parse 'Name 按 | 拆分为 Name1-Name3' and equivalent sample text."""
+
+    raw = text or ""
+    result: List[Dict[str, Any]] = []
+    pattern = re.compile(
+        rf"(?P<field>{_COLUMN_TOKEN})\s*(?:字段|内容)?\s*(?:按|使用)\s*"
+        r"[\"“']?(?P<delimiter>[^\"”'\s])\s*[\"”']?\s*(?:拆分|分割)"
+        rf"[^\r\n,，;；。]*?(?P<prefix>[A-Za-z_][\w-]*)(?P<start>\d+)\s*(?:-|至|到)\s*"
+        rf"(?P<end_prefix>[A-Za-z_][\w-]*)?(?P<end>\d+)",
+        re.I,
+    )
+    for match in pattern.finditer(raw):
+        start = int(match.group("start"))
+        end = int(match.group("end"))
+        if end < start or end - start > 50:
+            continue
+        result.append(
+            {
+                "field": match.group("field").strip(),
+                "delimiter": match.group("delimiter"),
+                "variable_prefix": match.group("prefix"),
+                "start_index": start,
+                "count": end - start + 1,
+                "variables": [f"{match.group('prefix')}{index}" for index in range(start, end + 1)],
+            }
+        )
+    sample_pattern = re.compile(rf"(?P<field>{_COLUMN_TOKEN})\s*=\s*(?P<value>[^\r\n;；。]+)")
+    for match in sample_pattern.finditer(raw):
+        value = match.group("value").strip()
+        if "|" not in value:
+            continue
+        parts = [part.strip() for part in value.split("|")]
+        field = match.group("field").strip()
+        if any(item.get("field") == field for item in result):
+            continue
+        result.append(
+            {
+                "field": field,
+                "delimiter": "|",
+                "variable_prefix": field,
+                "start_index": 1,
+                "count": len(parts),
+                "variables": [f"{field}{index}" for index in range(1, len(parts) + 1)],
+            }
+        )
+    return result
+
+
+def slot_mappings_from_sequences(sequences: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    result: List[Dict[str, Any]] = []
+    for sequence in sequences:
+        for index, variable in enumerate(sequence.get("variables", []), start=1):
+            result.append(
+                {
+                    "field": sequence.get("field", ""),
+                    "slot": variable,
+                    "delimiter": sequence.get("delimiter", ""),
+                    "sequence_index": index,
+                }
+            )
+    return result
+
+
+def parse_validation_sample(text: str) -> Dict[str, Any]:
+    """Parse an optional '验证订单 ... 预期 ...' example."""
+
+    raw = text or ""
+    sample_match = re.search(r"(?:验证订单|验证样例|测试订单|样例)\s*[:：]?\s*(.*)", raw, re.I)
+    if not sample_match:
+        return {}
+    body = sample_match.group(1)
+    parts = re.split(r"(?:预期|期望|输出|结果)\s*[:：]", body, maxsplit=1)
+    input_text = parts[0]
+    expected_text = parts[1] if len(parts) > 1 else ""
+    sample = {"input": parse_key_values(input_text), "expected": parse_key_values(expected_text)}
+    return sample if sample["input"] and sample["expected"] else {}
+
+
+def parse_key_values(text: str) -> Dict[str, str]:
+    result: Dict[str, str] = {}
+    for item in re.split(r"[,，;；\n]+", text or ""):
+        if "=" not in item and ":" not in item and "：" not in item:
+            continue
+        key, value = re.split(r"[=:：]", item, maxsplit=1)
+        key = key.strip().strip("\"'“”")
+        value = value.strip().strip("\"'“”")
+        if key and value:
+            result[key] = value
+    return result
+
+
+def summarize_template_rule_draft(draft: Dict[str, Any]) -> Dict[str, Any]:
+    """Return business-readable extraction feedback for the Web form."""
+
+    summary: List[str] = []
+    if draft.get("order_bindings"):
+        summary.append(f"识别到 {len(draft['order_bindings'])} 个订单字段对应关系")
+    if draft.get("asset_mappings"):
+        summary.append(f"识别到 {len(draft['asset_mappings'])} 个设计/资产对应关系")
+    policies = draft.get("text_policies") or {}
+    if policies:
+        summary.append("识别到文字适配或拆分策略")
+    if draft.get("validation_sample"):
+        summary.append("识别到验证订单和预期结果")
+    unresolved = []
+    if not draft.get("order_bindings"):
+        unresolved.append("没有识别到订单字段对应关系")
+    if not draft.get("validation_sample"):
+        unresolved.append("没有识别到验证样例")
+    return {"summary": summary, "unresolved": unresolved}
 
 
 def check_template_definition(template: Any) -> Dict[str, Any]:

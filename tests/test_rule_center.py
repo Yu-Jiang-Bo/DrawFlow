@@ -7,6 +7,10 @@ from src.service.rule_center import (
     curved_layout_overrides,
     output_color_mode,
     parse_dimensions,
+    parse_asset_mappings,
+    parse_order_bindings,
+    parse_text_policies,
+    parse_validation_sample,
     read_template_rule_config,
 )
 from src.service.template_registry import TemplateRegistry
@@ -91,6 +95,28 @@ def test_template_rule_draft_extracts_design_font_options():
     assert draft["mode"] == "asset_split"
     assert draft["font_options"] == [f"F{i}" for i in range(1, 13)]
     assert draft["design_font_options"] == ["F10", "F11", "F12"]
+
+
+def test_natural_language_extracts_business_rule_sections():
+    text = (
+        "\u5b57\u4f53\u6765\u81ea font_column\uff0c\u8bbe\u8ba1\u6765\u81ea design_column\uff1b"
+        "Design1 \u5bf9\u5e94 Design1.ai\uff1b"
+        "Name \u6309 | \u62c6\u5206\u4e3a Name1-Name3\uff0c\u6587\u5b57\u9002\u914d\u6587\u5b57\u6846\uff1b"
+        "\u9a8c\u8bc1\u6837\u4f8b\uff1aName=Tom|Jerry\uff1b\u9884\u671f\uff1aName1=Tom,Name2=Jerry"
+    )
+
+    assert parse_order_bindings(text) == {"font": "font_column", "design": "design_column"}
+    assert parse_asset_mappings(text) == [{"option": "Design1", "asset": "Design1.ai"}]
+    assert parse_text_policies(text)["split"]["max_parts"] == 3
+    assert parse_text_policies(text)["fit"] == "scale_to_box"
+    assert parse_validation_sample(text) == {
+        "input": {"Name": "Tom|Jerry"},
+        "expected": {"Name1": "Tom", "Name2": "Jerry"},
+    }
+
+    draft = build_template_rule_draft("NATURAL001", "pure_text_style", text)
+    assert draft["text_sequences"][0]["variables"] == ["Name1", "Name2", "Name3"]
+    assert draft["validation_sample"]["expected"]["Name2"] == "Jerry"
 
 
 def test_curved_layout_overrides_reads_structured_or_raw_dimensions():

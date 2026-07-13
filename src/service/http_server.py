@@ -16,7 +16,7 @@ from .job_store import JobStore
 from .llm_rule_parser import LlmRuleParser
 from .paths import PROJECT_ROOT, SERVICE_UPLOADS_DIR
 from .render_service import RenderService
-from .rule_center import build_template_rule_draft, check_template_definition
+from .rule_center import build_template_rule_draft, check_template_definition, summarize_template_rule_draft
 from .rule_store import DepartmentRuleStore
 from .template_registry import TemplateRegistry
 from .template_onboarding import TemplateOnboardingStore
@@ -1058,9 +1058,10 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
                 "template": context,
             },
             fallback=fallback,
-            require_llm=True,
+            require_llm=False,
         )
-        return {"draft": draft}
+        feedback = summarize_template_rule_draft(draft)
+        return {"draft": draft, **feedback}
 
     def _register_template(self, fields: dict[str, str], files: dict[str, list[dict[str, object]]]) -> object:
         template_id = fields.get("template_id", "").strip()

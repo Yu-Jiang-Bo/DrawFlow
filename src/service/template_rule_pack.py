@@ -104,6 +104,7 @@ def migrate_legacy_template_rule(payload: Mapping[str, Any], *, template_id: str
         "output": _dict(source.get("output")),
         "exceptions": _dict(source.get("exceptions")),
         "children": _dict_list(source.get("children")),
+        "natural_text": str(source.get("natural_text") or source.get("raw_text") or ""),
     }
     return {
         "$schema": RULE_PACK_SCHEMA,
