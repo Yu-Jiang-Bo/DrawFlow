@@ -96,8 +96,10 @@ def test_template_rule_editor_is_business_readable():
     assert "尺寸模式" in INDEX_HTML
     assert "固定制图尺寸" in INDEX_HTML
     assert 'id="dimensionMode"' in INDEX_HTML
+    assert 'id="fixedDimensionFields"' in INDEX_HTML
     assert 'id="fixedWidth"' in INDEX_HTML
     assert 'id="fixedHeight"' in INDEX_HTML
+    assert "dimension-mode-card" in INDEX_HTML
     assert "data-override-target" in INDEX_HTML
     assert "结构化规则 JSON" not in INDEX_HTML
     assert "新建空白" not in INDEX_HTML
@@ -116,6 +118,9 @@ def test_template_rule_supports_fixed_dimensions():
     assert "syncDimensionMode" in INDEX_HTML
     assert 'document.getElementById("dimensionRows").hidden = fixed' in INDEX_HTML
     assert 'document.getElementById("addDimensionRowBtn").hidden = fixed' in INDEX_HTML
+    assert 'document.getElementById("fixedDimensionFields").hidden = !fixed' in INDEX_HTML
+    assert 'document.getElementById("fixedWidth").disabled = !fixed' in INDEX_HTML
+    assert 'document.getElementById("fixedHeight").disabled = !fixed' in INDEX_HTML
     assert '!(fixed && key === "Fixed")' in INDEX_HTML
     assert "displayDimensionTargets(draft.dimensions || {}, draft.dimension_mode)" in INDEX_HTML
     assert 'document.getElementById("fixedWidth").value = fixed' in INDEX_HTML

@@ -435,6 +435,33 @@ INDEX_HTML = """<!doctype html>
       font-size: 12px;
       line-height: 1.5;
     }
+    .dimension-mode-card {
+      display: grid;
+      grid-template-columns: minmax(220px, 0.8fr) minmax(260px, 1.2fr);
+      gap: 12px;
+      align-items: end;
+      margin-bottom: 12px;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #fbfcfe;
+    }
+    .dimension-mode-control,
+    .fixed-dimension-fields {
+      min-width: 0;
+    }
+    .fixed-dimension-fields {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(120px, 1fr));
+      gap: 10px;
+    }
+    .fixed-dimension-fields[hidden] {
+      display: none;
+    }
+    .dimension-mode-note {
+      grid-column: 1 / -1;
+      margin: 0;
+    }
     .structured-table {
       display: grid;
       gap: 8px;
@@ -766,6 +793,8 @@ INDEX_HTML = """<!doctype html>
       .form-grid,
       .asset-panel-grid,
       .preview-grid,
+      .dimension-mode-card,
+      .fixed-dimension-fields,
       .structured-row,
       .structured-row.two,
       .structured-row.three,
@@ -1021,8 +1050,14 @@ INDEX_HTML = """<!doctype html>
                     <h3 class="rule-section-title">尺寸规则</h3>
                     <button class="btn-subtle rule-add-btn" id="addDimensionRowBtn" type="button">+ 添加尺寸</button>
                   </div>
-                  <div class="structured-row three"><div><label for="dimensionMode">尺寸模式</label><select id="dimensionMode"><option value="object">按尺寸/版式选项</option><option value="fixed">固定制图尺寸</option></select></div><div><label for="fixedWidth">固定宽度</label><input id="fixedWidth" type="number" min="0" step="0.1" placeholder="mm" /></div><div><label for="fixedHeight">固定高度</label><input id="fixedHeight" type="number" min="0" step="0.1" placeholder="mm" /></div></div>
-                  <p class="rule-section-note">固定尺寸模板选择“固定制图尺寸”，只填写一次宽高；不需要填写尺寸对象或订单 Style Option。</p>
+                  <div class="dimension-mode-card">
+                    <div class="dimension-mode-control"><label for="dimensionMode">尺寸模式</label><select id="dimensionMode"><option value="object">按尺寸/版式选项</option><option value="fixed">固定制图尺寸</option></select></div>
+                    <div class="fixed-dimension-fields" id="fixedDimensionFields">
+                      <div><label for="fixedWidth">固定宽度</label><input id="fixedWidth" type="number" min="0" step="0.1" placeholder="mm" /></div>
+                      <div><label for="fixedHeight">固定高度</label><input id="fixedHeight" type="number" min="0" step="0.1" placeholder="mm" /></div>
+                    </div>
+                    <p class="rule-section-note dimension-mode-note" id="dimensionModeHint">按尺寸/版式选项时，请在下方填写尺寸对象；固定尺寸模板切换为“固定制图尺寸”。</p>
+                  </div>
                   <div class="structured-table" id="dimensionRows"></div>
                 </div>
 
@@ -1544,6 +1579,12 @@ INDEX_HTML = """<!doctype html>
       const fixed = document.getElementById("dimensionMode").value === "fixed";
       document.getElementById("dimensionRows").hidden = fixed;
       document.getElementById("addDimensionRowBtn").hidden = fixed;
+      document.getElementById("fixedDimensionFields").hidden = !fixed;
+      document.getElementById("fixedWidth").disabled = !fixed;
+      document.getElementById("fixedHeight").disabled = !fixed;
+      document.getElementById("dimensionModeHint").textContent = fixed
+        ? "固定尺寸模板只填写一次宽高；不需要填写尺寸对象或订单 Style Option。"
+        : "按尺寸/版式选项时，请在下方填写尺寸对象；固定尺寸模板切换为“固定制图尺寸”。";
     }
 
     function setTextSequenceRows(rows) {
