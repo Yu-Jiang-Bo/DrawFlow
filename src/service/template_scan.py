@@ -29,7 +29,9 @@ def build_rule_draft_from_scan(scan: Mapping[str, Any], *, template_id: str = ""
     items = _dict_list(scan.get("items"))
     options, option_sources, untrusted_suggestions = _collect_options(items)
     asset_mappings, asset_mapping_issues = _collect_design_asset_mappings(
-        items, options["design_font_options"]
+        items,
+        options["design_font_options"],
+        options["design_options"],
     )
     targets = _collect_text_targets(items)
     dimensions = _collect_dimensions(items, options["style_options"])
@@ -158,25 +160,36 @@ def _collect_options(
 def _collect_design_asset_mappings(
     items: Iterable[Mapping[str, Any]],
     design_font_options: Iterable[str],
+    design_options: Iterable[str],
 ) -> tuple[list[Dict[str, str]], list[Dict[str, str]]]:
-    """Map named F groups in independent design files to their owning asset."""
+    """Map named option groups in independent resource files to their owning asset."""
 
-    allowed_options = {str(value).strip() for value in design_font_options if str(value).strip()}
+    allowed_font_options = {str(value).strip() for value in design_font_options if str(value).strip()}
+    allowed_design_options = {str(value).strip() for value in design_options if str(value).strip()}
     candidates: Dict[str, set[tuple[str, str]]] = {}
     for item in items:
-        if not _is_trusted_item(item) or not (
-            _is_design_font_asset_group(item) or _is_legacy_design_asset_group(item)
-        ):
+        if not _is_trusted_item(item):
             continue
         name = str(item.get("name") or "").strip()
         match = OPTION_RE.fullmatch(name)
-        if not match or _option_prefix(match.group(1)) != "F":
+        if not match:
             continue
         source_ai = str(item.get("source_ai") or "").strip()
         if not source_ai:
             continue
-        option = f"F{int(match.group(2))}"
-        if option not in allowed_options:
+        prefix = _option_prefix(match.group(1))
+        option = f"{prefix}{int(match.group(2))}"
+        is_font_candidate = (
+            prefix == "F"
+            and (_is_design_font_asset_group(item) or _is_legacy_design_asset_group(item))
+            and option in allowed_font_options
+        )
+        is_design_candidate = (
+            prefix in {"D", "Design"}
+            and _is_independent_design_resource_group(item)
+            and option in allowed_design_options
+        )
+        if not (is_font_candidate or is_design_candidate):
             continue
         candidates.setdefault(option, set()).add((Path(source_ai).name, name))
 
@@ -188,7 +201,7 @@ def _collect_design_asset_mappings(
             issues.append(
                 {
                     "code": "design_asset_mapping",
-                    "message": f"Independent design font {option} needs an asset mapping confirmation.",
+                    "message": f"Independent resource {option} needs an asset mapping confirmation.",
                 }
             )
             continue
@@ -355,6 +368,11 @@ def _is_design_font_asset_group(item: Mapping[str, Any]) -> bool:
 def _is_legacy_design_asset_group(item: Mapping[str, Any]) -> bool:
     role = str(item.get("source_role") or "")
     return role == "独立设计模板" and str(item.get("type") or "") == "GroupItem"
+
+
+def _is_independent_design_resource_group(item: Mapping[str, Any]) -> bool:
+    role = str(item.get("source_role") or "")
+    return role == "独立设计资源" and str(item.get("type") or "") == "GroupItem"
 
 def _option_prefix(value: str) -> str:
     lower = value.lower()

@@ -2266,8 +2266,8 @@ INDEX_HTML = """<!doctype html>
       const row = document.createElement("div");
       row.className = "structured-row";
       row.innerHTML = `
-        <div><label>独立设计字体</label><input data-design-asset-option placeholder="例如 F10" value="${escapeHtml(mapping.option || "")}" /></div>
-        <div><label>独立设计文件</label><input data-design-asset-file placeholder="例如 design-f10.ai" value="${escapeHtml(mapping.asset || "")}" /></div>
+        <div><label>订单选项</label><input data-design-asset-option placeholder="例如 F10 或 D1" value="${escapeHtml(mapping.option || "")}" /></div>
+        <div><label>独立资源文件</label><input data-design-asset-file placeholder="例如 font-f10.ai 或 design-d1.ai" value="${escapeHtml(mapping.asset || "")}" /></div>
         <div><label>AI 编组</label><input data-design-asset-group placeholder="例如 F10" value="${escapeHtml(mapping.group || mapping.ai_group || "")}" /></div>
         <div><label>操作</label><button class="btn-subtle" type="button" data-remove-design-asset-mapping>移除</button></div>`;
       document.getElementById("designAssetMappingRows").appendChild(row);

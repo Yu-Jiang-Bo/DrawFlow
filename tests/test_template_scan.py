@@ -127,6 +127,27 @@ def test_design_font_resource_creates_candidate_without_primary_name_match():
     ]
 
 
+def test_design_resource_creates_design_mapping_suggestion():
+    pack = build_rule_draft_from_scan(
+        {
+            "document": {"source_ai": "C:/templates/main.ai"},
+            "items": [
+                {
+                    "type": "GroupItem",
+                    "name": "D3",
+                    "source_role": "独立设计资源",
+                    "source_ai": "C:/templates/assets/design-d3.ai",
+                },
+            ],
+        }
+    )
+
+    assert pack["rules"]["design_options"] == ["D3"]
+    assert pack["rules"]["asset_mappings"] == [
+        {"option": "D3", "asset": "design-d3.ai", "group": "D3"},
+    ]
+
+
 def test_path_text_adds_curve_capability():
     scan = sample_scan()
     scan["items"].append(

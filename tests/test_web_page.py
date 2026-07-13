@@ -232,6 +232,8 @@ def test_template_rules_prefill_fixed_options_before_optional_supplement():
     assert "独立设计字体资源" in INDEX_HTML
     assert "独立设计资源（可选，可多选）" in INDEX_HTML
     assert 'form.append("design_font_assets", file)' in INDEX_HTML
+    assert "订单选项" in INDEX_HTML
+    assert "例如 F10 或 D1" in INDEX_HTML
     assert "function compactOptionRange" in INDEX_HTML
     assert "return numbers.length === 1" in INDEX_HTML
     assert "optionGroupsTouched: false" in INDEX_HTML
