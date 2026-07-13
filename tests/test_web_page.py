@@ -105,7 +105,9 @@ def test_template_rule_editor_is_business_readable():
 
 def test_template_onboarding_requires_scan_check_and_confirmation():
     assert 'id="templateProfile"' in INDEX_HTML
-    assert 'id="scanEvidence" readonly' in INDEX_HTML
+    assert 'id="scanEvidence"' in INDEX_HTML
+    assert 'id="scanEvidenceRaw" readonly' in INDEX_HTML
+    assert "查看原始扫描明细" in INDEX_HTML
     assert 'id="fieldSources" readonly' in INDEX_HTML
     assert 'id="restoreSuggestionsBtn"' in INDEX_HTML
     assert 'id="addOptionGroupBtn"' in INDEX_HTML
@@ -128,6 +130,7 @@ def test_template_onboarding_requires_scan_check_and_confirmation():
     assert "文件已保存为草稿，但扫描未完成" in INDEX_HTML
     assert "templateRulesDescriptionDirty" in INDEX_HTML
     assert "formatScanEvidence" in INDEX_HTML
+    assert "formatRawScanEvidence" in INDEX_HTML
     assert "formatFieldSources" in INDEX_HTML
     assert "请先点击“上传并扫描 .ai 模板”，扫描完成后再保存规则" in INDEX_HTML
     assert "/rules/check" in INDEX_HTML
@@ -195,6 +198,19 @@ def test_template_type_preserves_existing_before_inference():
     ]
     assert body.index("existingTemplate.template_type") < body.index("if (hasDesignAssets)")
     assert body.index("state.templateRuleBaseConfig.template_type") < body.index("if (hasDesignGroup)")
+
+
+def test_scan_evidence_defaults_to_summary_and_keeps_raw_details_collapsed():
+    assert 'id="scanEvidenceLabel">扫描结果摘要（只读）' in INDEX_HTML
+    assert 'class="preview-box readonly-summary" id="scanEvidence"' in INDEX_HTML
+    assert 'class="advanced-rule-box scan-evidence-details"' in INDEX_HTML
+    assert "完整对象路径、坐标和颜色信息已收起" in INDEX_HTML
+    assert "fontMappings" in INDEX_HTML
+    assert "compareTemplateOptionNames" in INDEX_HTML
+    assert "items.reduce" in INDEX_HTML
+    assert "items.filter(item => item && item.name)" in INDEX_HTML
+    assert 'document.getElementById("scanEvidence").textContent = formatScanEvidence(evidence)' in INDEX_HTML
+    assert 'document.getElementById("scanEvidenceRaw").value = formatRawScanEvidence(evidence)' in INDEX_HTML
 
 
 def test_template_asset_list_has_download_and_delete_actions():

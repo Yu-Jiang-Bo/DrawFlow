@@ -521,6 +521,16 @@ INDEX_HTML = """<!doctype html>
       color: var(--ink);
       line-height: 1.65;
     }
+    .scan-evidence-details {
+      margin-top: 10px;
+    }
+    .scan-evidence-details textarea {
+      min-height: 280px;
+      color: #435366;
+      font-family: Consolas, "Microsoft YaHei", monospace;
+      font-size: 12px;
+      line-height: 1.55;
+    }
     .extract-panel {
       display: grid;
       gap: 10px;
@@ -855,7 +865,7 @@ INDEX_HTML = """<!doctype html>
               </div>
               <div class="field-full">
                 <label>上传并扫描 .ai 模板</label>
-                <p class="rule-section-note">先选择文件，再点击底部按钮。系统会先保存全部文件和角色，再自动扫描；扫描失败也会保留草稿和已保存文件。</p>
+                <p class="rule-section-note">选择文件后点击“上传并扫描 .ai 模板”。系统会先保存全部文件和角色，再自动扫描；扫描失败也会保留草稿和已保存文件。</p>
                 <div class="asset-panel-grid">
                   <div class="upload-box">
                     <div>
@@ -951,7 +961,14 @@ INDEX_HTML = """<!doctype html>
                       </select>
                     </div>
                     <div><label for="scanVersion">扫描版本</label><input id="scanVersion" readonly /></div>
-                    <div class="field-full"><label for="scanEvidence">原始扫描证据（只读）</label><textarea id="scanEvidence" readonly></textarea></div>
+                    <div class="field-full">
+                      <label id="scanEvidenceLabel">扫描结果摘要（只读）</label>
+                      <div class="preview-box readonly-summary" id="scanEvidence">暂无扫描事实</div>
+                      <details class="advanced-rule-box scan-evidence-details">
+                        <summary>查看原始扫描明细</summary>
+                        <div class="advanced-rule-body"><textarea id="scanEvidenceRaw" readonly></textarea></div>
+                      </details>
+                    </div>
                     <div class="field-full"><label for="fieldSources">字段来源与人工修改状态（只读）</label><textarea id="fieldSources" readonly></textarea></div>
                     <div class="field-full">
                       <button class="btn-subtle" id="restoreSuggestionsBtn" type="button">恢复系统建议</button>
@@ -1313,8 +1330,8 @@ INDEX_HTML = """<!doctype html>
         scanNote.textContent = "以下内容由系统从 AI 模板中读取，只用于核对，不需要用户分类或填写。";
         const scanGrid = scanSection.querySelector(".form-grid");
         if (scanGrid) scanSection.insertBefore(scanNote, scanGrid);
-        const evidenceLabel = scanSection.querySelector('label[for="scanEvidence"]');
-        if (evidenceLabel) evidenceLabel.textContent = "扫描到的模板事实（只读）";
+        const evidenceLabel = document.getElementById("scanEvidenceLabel");
+        if (evidenceLabel) evidenceLabel.textContent = "扫描结果摘要（只读）";
         const sourceLabel = scanSection.querySelector('label[for="fieldSources"]');
         if (sourceLabel) sourceLabel.textContent = "规则来源与修改状态（只读）";
       }
@@ -2434,7 +2451,8 @@ INDEX_HTML = """<!doctype html>
       document.getElementById("templateExceptionStatus").value = "none";
       document.getElementById("templateProfile").value = "unclassified";
       document.getElementById("scanVersion").value = "";
-      document.getElementById("scanEvidence").value = "";
+      document.getElementById("scanEvidence").textContent = "暂无扫描事实";
+      document.getElementById("scanEvidenceRaw").value = "";
       document.getElementById("fieldSources").value = "";
       document.getElementById("templateRuleDescription").value = "";
       document.getElementById("templateExtractionStatus").textContent = "尚未提取";
@@ -2475,7 +2493,9 @@ INDEX_HTML = """<!doctype html>
       const rules = pack && pack.rules ? pack.rules : {};
       document.getElementById("templateProfile").value = (pack && pack.template && pack.template.profile) || "unclassified";
       document.getElementById("scanVersion").value = structure.scan_version || "";
-      document.getElementById("scanEvidence").value = formatScanEvidence(Object.keys(rawScan).length ? rawScan : (structure.evidence || {}));
+      const evidence = Object.keys(rawScan).length ? rawScan : (structure.evidence || {});
+      document.getElementById("scanEvidence").textContent = formatScanEvidence(evidence);
+      document.getElementById("scanEvidenceRaw").value = formatRawScanEvidence(evidence);
       document.getElementById("fieldSources").value = formatFieldSources(audit.field_sources || {});
       document.getElementById("templateRuleDescription").value = rules.natural_text || rules.raw_text || "";
       document.getElementById("templateExtractionStatus").textContent = rules.natural_text ? "已保存自然语言描述" : "尚未提取";
@@ -2500,6 +2520,101 @@ INDEX_HTML = """<!doctype html>
 
     function formatScanEvidence(value) {
       if (!value || typeof value !== "object") return "暂无扫描事实";
+      const documentInfo = value.document && typeof value.document === "object" ? value.document : {};
+      const sourceFiles = Array.isArray(value.source_files) ? value.source_files : [];
+      const items = Array.isArray(value.items) ? value.items : [];
+      const typeCounts = value.type_counts && typeof value.type_counts === "object"
+        ? value.type_counts
+        : items.reduce((counts, item) => {
+          const type = item && item.type ? String(item.type) : "Unknown";
+          counts[type] = (counts[type] || 0) + 1;
+          return counts;
+        }, {});
+      const namedItems = Array.isArray(value.named_items)
+        ? value.named_items
+        : items.filter(item => item && item.name).map(item => ({
+          path: item.path,
+          type: item.type,
+          name: item.name
+        }));
+      const groupNames = Array.from(new Set(namedItems
+        .filter(item => item && item.type === "GroupItem" && item.name)
+        .map(item => String(item.name))));
+      const fontMappings = items
+        .filter(item => item && /^F\\d+$/i.test(String(item.name || "")) && (item.font_family || item.font_name))
+        .map(item => ({
+          option: String(item.name),
+          font: String(item.font_family || item.font_name)
+        }))
+        .sort((left, right) => compareTemplateOptionNames(left.option, right.option));
+      const namedOptions = namedItems
+        .filter(item => item && /^F\\d+$/i.test(String(item.name || "")))
+        .map(item => String(item.name))
+        .sort(compareTemplateOptionNames);
+      const typeLabels = {
+        TextFrame: "文字对象",
+        GroupItem: "编组",
+        PathItem: "路径",
+        RasterItem: "图片"
+      };
+      const lines = [];
+      const primaryFile = documentInfo.name || (sourceFiles[0] && sourceFiles[0].file_name) || "未命名模板";
+      const colorSpace = String(documentInfo.color_space || "").replace("DocumentColorSpace.", "");
+      const fileCount = sourceFiles.length || (documentInfo.name ? 1 : 0);
+      lines.push(fileCount ? `已扫描 ${fileCount} 个模板文件` : "已生成扫描摘要");
+      lines.push(`- 主模板：${primaryFile}${documentInfo.source_role ? `（${documentInfo.source_role}）` : ""}`);
+      const layerCount = value.layer_count || (Array.isArray(value.layers) ? value.layers.length : 0);
+      const itemCount = value.item_count || items.length;
+      if (colorSpace || layerCount || itemCount) {
+        lines.push(`- ${colorSpace ? `色彩模式：${colorSpace}` : "色彩模式：未识别"}；图层：${layerCount}；对象：${itemCount}`);
+      }
+
+      const typeSummary = Object.entries(typeCounts)
+        .filter(([, count]) => Number(count) > 0)
+        .map(([type, count]) => `${typeLabels[type] || type} ${count}`)
+        .join("、");
+      if (typeSummary || groupNames.length) {
+        lines.push("\\n识别到的结构");
+        if (typeSummary) lines.push(`- 对象组成：${typeSummary}`);
+        if (groupNames.length) lines.push(`- 命名编组：${groupNames.join("、")}`);
+      }
+
+      if (fontMappings.length) {
+        lines.push(`\\n可选字体（${fontMappings.length}）`);
+        fontMappings.forEach(item => lines.push(`- ${item.option}：${item.font}`));
+      } else if (namedOptions.length) {
+        lines.push(`\\n识别到的字体编号：${namedOptions.join("、")}`);
+      }
+
+      const scanErrors = [
+        ...(Array.isArray(value.scan_errors) ? value.scan_errors : []),
+        ...sourceFiles.filter(item => item && (!item.scan_ok || item.error)).map(item => item.error || `${item.file_name || "模板文件"} 扫描失败`),
+        ...(value.fatal_error ? [value.fatal_error] : [])
+      ].filter(Boolean);
+      if (scanErrors.length) {
+        lines.push("\\n扫描提醒");
+        scanErrors.forEach(item => lines.push(`- ${formatReadableValue(item)}`));
+      }
+      const unresolved = Array.isArray(value.unresolved_items) ? value.unresolved_items : [];
+      if (unresolved.length) {
+        lines.push("\\n待确认事项");
+        unresolved.forEach(item => lines.push(`- ${formatReadableValue(item)}`));
+      }
+      lines.push("\\n完整对象路径、坐标和颜色信息已收起，可在下方原始明细中查看。");
+      return lines.join("\\n");
+    }
+
+    function compareTemplateOptionNames(left, right) {
+      const leftMatch = String(left).match(/^(.*?)(\\d+)$/i);
+      const rightMatch = String(right).match(/^(.*?)(\\d+)$/i);
+      if (leftMatch && rightMatch && leftMatch[1].toLowerCase() === rightMatch[1].toLowerCase()) {
+        return Number(leftMatch[2]) - Number(rightMatch[2]);
+      }
+      return String(left).localeCompare(String(right));
+    }
+
+    function formatRawScanEvidence(value) {
+      if (!value || typeof value !== "object") return "暂无原始扫描明细";
       const labels = {
         profile: "系统推断类型",
         capabilities: "支持能力",
