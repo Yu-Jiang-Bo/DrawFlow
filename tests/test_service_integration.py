@@ -565,12 +565,12 @@ def test_template_registry_serializes_concurrent_updates(tmp_path):
     assert {item.template_id for item in registry.list_templates()} == {"DEMO001", "DEMO002"}
 
 
-def test_activation_rejects_non_executable_pipeline_and_missing_ai(tmp_path):
+def test_activation_rejects_missing_ai_for_generic_pipeline(tmp_path):
     registry = TemplateRegistry(tmp_path / "templates.json", tmp_path / "templates")
     template = registry.upsert_template(
         {"template_id": "DEMO001", "name": "Demo", "template_type": "pure_text", "status": "draft"}
     )
-    with pytest.raises(ValueError, match="not executable"):
+    with pytest.raises(ValueError, match="AI file does not exist"):
         TemplatePublicationService._validate_activation(template, {"rules": {}})
 
 

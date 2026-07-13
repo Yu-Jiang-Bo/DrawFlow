@@ -128,6 +128,26 @@ def check_template_definition(template: Any) -> Dict[str, Any]:
     if not has_template_ai:
         missing.append({"code": "template_ai", "message": "缺少可用的 .ai 模板文件"})
 
+    if pipeline == "generic_rules_only":
+        if config.get("status") != "confirmed":
+            missing.append({"code": "rule_status", "message": "Template rules are not confirmed."})
+        if not isinstance(config.get("order_bindings"), dict) or not config.get("order_bindings"):
+            missing.append({"code": "order_bindings", "message": "Missing order field bindings."})
+        if not config.get("slot_mappings") and not config.get("text_targets"):
+            missing.append({"code": "text_targets", "message": "Missing executable text target mappings."})
+        missing.extend(_generic_asset_issues(config, assets))
+        complete = not missing
+        return {
+            "template_id": str(getattr(template, "template_id", "")),
+            "mode": mode,
+            "status": str(config.get("status") or getattr(template, "status", "draft")),
+            "complete": complete,
+            "renderable": complete and getattr(template, "status", "draft") == "active",
+            "missing": missing,
+            "warnings": warnings,
+            "capabilities": capabilities,
+        }
+
     if mode in {"pure_text", "annotated_ai"} and not config.get("font_options"):
         missing.append({"code": "font_options", "message": "缺少字体选项规则，例如 F1-F9 或 F1-F14"})
 
@@ -190,6 +210,33 @@ def read_template_rule_config(path_value: object) -> Dict[str, Any]:
         rules["assets"] = payload.get("assets", {})
         return rules
     return payload
+
+
+def _generic_asset_issues(config: Dict[str, Any], assets: Any) -> List[Dict[str, str]]:
+    mappings = config.get("asset_mappings", [])
+    if not isinstance(mappings, list) or not mappings:
+        return []
+    catalog: Dict[str, Path] = {}
+    for asset in assets if isinstance(assets, list) else []:
+        if not isinstance(asset, dict):
+            continue
+        path = Path(str(asset.get("stored_path") or ""))
+        if not path.is_absolute():
+            path = (Path(__file__).resolve().parents[2] / path).resolve()
+        for key in ("file_name", "stored_path"):
+            value = str(asset.get(key) or "")
+            if value:
+                catalog[value] = path
+    issues = []
+    for mapping in mappings:
+        name = str(mapping.get("asset") or "") if isinstance(mapping, dict) else ""
+        path = catalog.get(name) or next(
+            (item for value, item in catalog.items() if value.endswith("/" + name)),
+            None,
+        )
+        if path is None or not path.exists():
+            issues.append({"code": "asset_file", "message": f"Mapped asset is unavailable: {name}"})
+    return issues
 
 
 def parse_dimensions(text: str) -> Dict[str, Dict[str, object]]:

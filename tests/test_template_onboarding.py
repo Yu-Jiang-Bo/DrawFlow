@@ -186,6 +186,18 @@ def test_validation_sample_applies_delimiter_and_sequence_index():
     assert result["ok"] is True
 
 
+def test_validation_sample_preserves_numeric_zero():
+    pack = ready_pack()
+    pack["validation"]["sample"] = {
+        "input": {"custom_text": 0},
+        "expected": {"Name1": "0"},
+    }
+
+    result = check_rule_pack(pack, template_id="DEMO001")
+
+    assert result["ok"] is True
+
+
 def test_check_rejects_invalid_split_policy():
     pack = ready_pack()
     pack["rules"]["text_policies"] = {

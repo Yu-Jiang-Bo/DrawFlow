@@ -14,6 +14,7 @@ from .template_rule_pack import (
     profile_definition,
 )
 from .template_locks import TEMPLATE_STATE_LOCK
+from .template_rule_execution import resolve_mapped_text
 
 
 ADVISORY_CODES = {"confirmation_required"}
@@ -413,12 +414,12 @@ def _validate_editable_sections(
             continue
         delimiter = str(mapping.get("delimiter") or "")
         sequence_index = mapping.get("sequence_index")
-        if not isinstance(sequence_index, int) or isinstance(sequence_index, bool) or sequence_index < 1:
-            errors.append(_issue("slot_mappings", "Split slot mapping requires a positive sequence_index."))
         if not delimiter:
-            if sequence_index:
+            if sequence_index is not None:
                 errors.append(_issue("slot_mappings", "Split slot mapping requires a delimiter."))
             continue
+        if not isinstance(sequence_index, int) or isinstance(sequence_index, bool) or sequence_index < 1:
+            errors.append(_issue("slot_mappings", "Split slot mapping requires a positive sequence_index."))
         if not isinstance(split_policy, Mapping):
             errors.append(_issue("slot_mappings", "Split slot mapping requires a split policy object."))
             continue
@@ -440,34 +441,11 @@ def _predict_sample_output(rules: Mapping[str, Any], sample_input: Mapping[str, 
         target = str(mapping.get("slot") or mapping.get("name") or "")
         column = str(bindings.get(field) or field) if isinstance(bindings, Mapping) else field
         if column in sample_input and target:
-            value = sample_input[column]
-            delimiter = str(mapping.get("delimiter") or "")
-            raw_index = mapping.get("sequence_index")
-            sequence_index = raw_index if isinstance(raw_index, int) and not isinstance(raw_index, bool) else 0
-            if delimiter and sequence_index > 0:
-                text_policies = rules.get("text_policies", {})
-                split_policy = text_policies.get("split", {}) if isinstance(text_policies, Mapping) else {}
-                raw_max_parts = split_policy.get("max_parts") if isinstance(split_policy, Mapping) else None
-                max_parts = (
-                    raw_max_parts
-                    if isinstance(raw_max_parts, int) and not isinstance(raw_max_parts, bool) and raw_max_parts > 0
-                    else 0
-                )
-                parts = str(value).split(delimiter)
-                if isinstance(split_policy, Mapping) and split_policy.get("trim", True):
-                    parts = [part.strip() for part in parts]
-                overflow = str(split_policy.get("overflow") or "reject") if isinstance(split_policy, Mapping) else "reject"
-                if max_parts > 0 and len(parts) > max_parts:
-                    if overflow == "reject":
-                        continue
-                    parts = parts[:max_parts]
-                if sequence_index <= len(parts):
-                    value = parts[sequence_index - 1]
-                elif isinstance(split_policy, Mapping) and split_policy.get("overflow") == "empty":
-                    value = ""
-                else:
-                    continue
-            predicted[target] = value
+            text_policies = rules.get("text_policies", {})
+            text_policies = text_policies if isinstance(text_policies, Mapping) else {}
+            resolved, value = resolve_mapped_text(sample_input[column], mapping, text_policies)
+            if resolved:
+                predicted[target] = value
     if predicted:
         return predicted
     targets = rules.get("text_targets", [])
@@ -476,7 +454,15 @@ def _predict_sample_output(rules: Mapping[str, Any], sample_input: Mapping[str, 
         target = targets[0]
         column = str(bindings.get(field) or field)
         if isinstance(target, Mapping) and column in sample_input:
-            predicted[str(target.get("name") or "")] = sample_input[column]
+            text_policies = rules.get("text_policies", {})
+            text_policies = text_policies if isinstance(text_policies, Mapping) else {}
+            resolved, value = resolve_mapped_text(
+                sample_input[column],
+                {"field": field, "slot": str(target.get("name") or "")},
+                text_policies,
+            )
+            if resolved:
+                predicted[str(target.get("name") or "")] = value
     return {key: value for key, value in predicted.items() if key}
 
 

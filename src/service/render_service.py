@@ -23,12 +23,15 @@ from ..jjmb_202509_curved_main import (
 from ..jjmb_config_grouped_main import build_grouped_task
 from ..renderer.illustrator_bridge import IllustratorBridge
 from .job_store import JobStore
+from .generic_rule_renderer import build_generic_render_task
 from .llm_rule_parser import normalize_option_list
 from .rule_center import check_template_definition, curved_layout_overrides, output_color_mode, read_template_rule_config
 from .template_registry import TemplateDefinition, TemplateRegistry
 
 
-SUPPORTED_RENDER_PIPELINES = frozenset({"jjmb_202508", "jjmb_202603_grouped", "jjmb_202509_curved"})
+SUPPORTED_RENDER_PIPELINES = frozenset(
+    {"generic_rules_only", "jjmb_202508", "jjmb_202603_grouped", "jjmb_202509_curved"}
+)
 
 
 class RenderServiceError(RuntimeError):
@@ -60,6 +63,8 @@ class RenderService:
                 result = self._run_202603_grouped(record, template)
             elif template.pipeline == "jjmb_202509_curved":
                 result = self._run_202509_curved(record, template)
+            elif template.pipeline == "generic_rules_only":
+                result = self._run_generic_rules(record, template)
             else:
                 raise RenderServiceError(f"不支持的渲染 pipeline: {template.pipeline}")
             record["outputs"] = result["outputs"]
@@ -93,6 +98,38 @@ class RenderService:
             "dry_run": _to_bool(payload.get("dry_run", False)),
             "visible": _to_bool(payload.get("visible", False)),
             "output_name": str(payload.get("output_name", "")).strip(),
+        }
+
+    def _run_generic_rules(self, record: Dict[str, Any], template: TemplateDefinition) -> Dict[str, Any]:
+        request = record["request"]
+        job_dir = Path(record["job_dir"])
+        output_ai = self._output_ai_path(job_dir, request, template)
+        rules = read_template_rule_config(template.template_rules_config)
+        task = build_generic_render_task(
+            template,
+            rules,
+            Path(request["order_file"]),
+            output_ai,
+            sheet_name=request["sheet_name"],
+            columns=request["columns"],
+        )
+        task_file = job_dir / "render-task.json"
+        self._write_json(task_file, task)
+        if not request["dry_run"]:
+            script = Path(__file__).resolve().parents[2] / "scripts" / "illustrator" / "render_generic_rule_pack.jsx"
+            IllustratorBridge(visible=request["visible"]).render(script, task_file)
+        return {
+            "outputs": {
+                "output_ai": task["output_ai_files"][0],
+                "output_ai_files": task["output_ai_files"],
+                "render_task": str(task_file),
+            },
+            "stats": {
+                "orders": len(task["orders"]),
+                "variables": sum(len(order["variables"]) for order in task["orders"]),
+                "assets": sum(len(order["assets"]) for order in task["orders"]),
+                "dry_run": request["dry_run"],
+            },
         }
 
     def _run_202508(self, record: Dict[str, Any], template: TemplateDefinition) -> Dict[str, Any]:

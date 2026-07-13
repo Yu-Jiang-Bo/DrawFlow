@@ -142,7 +142,11 @@ def test_template_rule_check_reports_missing_asset_split_rules(tmp_path):
     assert check["mode"] == "asset_split"
     assert check["complete"] is False
     assert check["renderable"] is False
-    assert {item["code"] for item in check["missing"]} >= {"design_assets", "design_options", "place_ai_asset"}
+    assert {item["code"] for item in check["missing"]} >= {
+        "rule_status",
+        "order_bindings",
+        "text_targets",
+    }
 
 
 def test_template_rule_check_accepts_design_font_options(tmp_path):
@@ -155,10 +159,12 @@ def test_template_rule_check_accepts_design_font_options(tmp_path):
         json.dumps(
             {
                 "mode": "asset_split",
-                "status": "draft",
+                "status": "confirmed",
                 "capabilities": ["place_ai_asset", "replace_text", "scale_to_box"],
                 "font_options": ["F1", "F10"],
                 "design_font_options": ["F10"],
+                "order_bindings": {"text": "Custom"},
+                "text_targets": [{"name": "Name1", "type": "replace_text"}],
             },
             ensure_ascii=False,
         ),
@@ -170,7 +176,7 @@ def test_template_rule_check_accepts_design_font_options(tmp_path):
             "template_id": "ASSET002",
             "name": "asset split",
             "template_type": "asset_split",
-            "status": "draft",
+            "status": "active",
             "template_ai": str(ai_path),
             "template_rules_config": str(config_path),
             "assets": [{"file_name": "design.ai", "stored_path": str(asset_path), "role": "独立设计模板"}],
@@ -204,6 +210,41 @@ def test_runtime_reader_adapts_confirmed_canonical_rule_pack(tmp_path):
     assert config["status"] == "confirmed"
     assert config["capabilities"] == ["replace_text"]
     assert output_color_mode(config) == "RGB"
+
+
+def test_generic_readiness_rejects_missing_mapped_asset_file(tmp_path):
+    ai_path = tmp_path / "template.ai"
+    config_path = tmp_path / "template.rules.json"
+    ai_path.write_text("ai", encoding="utf-8")
+    config_path.write_text(
+        json.dumps(
+            {
+                "status": "confirmed",
+                "order_bindings": {"text": "Custom"},
+                "text_targets": [{"name": "Name1"}],
+                "asset_mappings": [{"option": "Design1", "asset": "missing.ai"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    registry = TemplateRegistry(tmp_path / "templates.json", tmp_path / "templates")
+    template = registry.upsert_template(
+        {
+            "template_id": "GENERIC-MISSING",
+            "name": "Missing asset",
+            "template_type": "asset_split",
+            "pipeline": "generic_rules_only",
+            "status": "active",
+            "template_ai": str(ai_path),
+            "template_rules_config": str(config_path),
+            "assets": [{"file_name": "missing.ai", "stored_path": str(tmp_path / "missing.ai")}],
+        }
+    )
+
+    check = check_template_definition(template)
+
+    assert check["renderable"] is False
+    assert {item["code"] for item in check["missing"]} == {"asset_file"}
 
 
 def test_legacy_pipeline_is_renderable_but_not_rule_complete(tmp_path):
