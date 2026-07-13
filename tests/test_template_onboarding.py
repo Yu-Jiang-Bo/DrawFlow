@@ -277,20 +277,20 @@ def test_invalid_max_parts_and_missing_mapping_delimiter_return_errors_not_excep
     assert "requires a delimiter" in messages
 
 
-def test_store_rejects_evidence_edits_and_versions_confirmations(tmp_path):
+def test_store_rebuilds_evidence_edits_and_versions_confirmations(tmp_path):
     store = TemplateOnboardingStore(tmp_path)
     pack = ready_pack()
     store.save_scan_draft("DEMO001", pack)
     changed = deepcopy(pack)
     changed["structure"]["evidence"]["item_count"] = 999
 
-    with pytest.raises(ValueError, match="read-only"):
-        store.check("DEMO001", changed)
+    rebuilt = store.check("DEMO001", changed)
+    assert rebuilt["pack"]["structure"]["evidence"]["item_count"] != 999
 
     changed_audit = deepcopy(pack)
     changed_audit["audit"]["field_sources"]["rules.design_options"]["suggestion"] = ["Forged"]
-    with pytest.raises(ValueError, match="source audit"):
-        store.check("DEMO001", changed_audit)
+    rebuilt_audit = store.check("DEMO001", changed_audit)
+    assert rebuilt_audit["pack"]["audit"]["field_sources"]["rules.design_options"]["suggestion"] != ["Forged"]
 
     first = store.confirm("DEMO001", pack, change_summary="Initial confirmation")
     second = store.rollback("DEMO001", 1)

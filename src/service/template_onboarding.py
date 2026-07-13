@@ -232,16 +232,14 @@ class TemplateOnboardingStore:
         if not scan_version or not scan_path.exists():
             raise ValueError("Draft is not bound to a registered scan version.")
         expected_record = self._read(scan_path)
-        expected = {
-            "structure": expected_record.get("structure", {}),
-            "audit": expected_record.get("audit", {}),
-        }
-        actual = {
-            "structure": deepcopy(pack["structure"]),
-            "audit": _immutable_scan_audit(pack.get("audit", {})),
-        }
-        if expected != actual:
-            raise ValueError("Scan evidence and source audit are read-only; re-scan instead of editing them.")
+        # The browser receives an audit display copy that can gain derived state
+        # such as `modified`. Rebuild immutable scan fields from the registered
+        # record so harmless client-side drift never blocks rule editing.
+        pack["structure"] = deepcopy(expected_record.get("structure", {}))
+        registered_audit = _immutable_scan_audit(expected_record.get("audit", {}))
+        audit = deepcopy(dict(pack.get("audit", {}))) if isinstance(pack.get("audit"), Mapping) else {}
+        audit.update(registered_audit)
+        pack["audit"] = audit
         return pack
 
     def _save_version(
