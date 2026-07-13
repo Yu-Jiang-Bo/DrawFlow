@@ -231,6 +231,20 @@ def test_template_rules_prefill_fixed_options_before_optional_supplement():
     assert "!hasConfiguredRuleValue(merged[key])" in INDEX_HTML
 
 
+def test_scanned_option_suggestions_render_as_editable_option_groups():
+    load_body = INDEX_HTML[
+        INDEX_HTML.index("async function loadTemplateRuleText"):
+        INDEX_HTML.index("function renderAssetRows")
+    ]
+    onboarding_body = INDEX_HTML[
+        INDEX_HTML.index("function fillOnboardingFields"):
+        INDEX_HTML.index("function prefillScannedOptionSuggestions")
+    ]
+    assert "fillOnboardingFields(pack, onboarding.versions || [], onboarding.scan_evidence || {})" in load_body
+    assert "fillTemplateRuleFields(pack.rules || {})" not in load_body
+    assert "fillTemplateRuleFields(editableRules)" in onboarding_body
+
+
 def test_template_asset_list_has_download_and_delete_actions():
     assert "data-template-download" not in INDEX_HTML
     assert "data-template-delete" not in INDEX_HTML

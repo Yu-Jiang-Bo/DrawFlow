@@ -1761,7 +1761,6 @@ INDEX_HTML = """<!doctype html>
             const pack = onboarding.draft;
             state.templateRuleDraft = pack;
             state.templateRuleBaseConfig = pack.rules || {};
-            fillTemplateRuleFields(pack.rules || {});
             fillOnboardingFields(pack, onboarding.versions || [], onboarding.scan_evidence || {});
             renderTemplateRulePreview();
             updateTemplateWorkflowState(true);
@@ -2525,6 +2524,7 @@ INDEX_HTML = """<!doctype html>
       const rules = pack && pack.rules ? pack.rules : {};
       const editableRules = prefillScannedOptionSuggestions(rules, audit.field_sources || {});
       state.templateRuleBaseConfig = editableRules;
+      fillTemplateRuleFields(editableRules);
       document.getElementById("templateProfile").value = (pack && pack.template && pack.template.profile) || "unclassified";
       document.getElementById("scanVersion").value = structure.scan_version || "";
       const evidence = Object.keys(rawScan).length ? rawScan : (structure.evidence || {});
