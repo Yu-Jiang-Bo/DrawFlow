@@ -969,7 +969,16 @@ INDEX_HTML = """<!doctype html>
                         <div class="advanced-rule-body"><textarea id="scanEvidenceRaw" readonly></textarea></div>
                       </details>
                     </div>
-                    <div class="field-full"><label for="fieldSources">字段来源与人工修改状态（只读）</label><textarea id="fieldSources" readonly></textarea></div>
+                    <div class="field-full">
+                      <details class="advanced-rule-box">
+                        <summary>查看系统审计明细（可选）</summary>
+                        <div class="advanced-rule-body">
+                          <p class="rule-section-note">仅用于核对扫描建议与当前配置是否一致，不需要填写。</p>
+                          <label for="fieldSources">系统建议与当前配置差异（只读）</label>
+                          <textarea id="fieldSources" readonly></textarea>
+                        </div>
+                      </details>
+                    </div>
                     <div class="field-full">
                       <button class="btn-subtle" id="restoreSuggestionsBtn" type="button">恢复系统建议</button>
                       <button class="btn-subtle" id="rescanTemplateBtn" type="button" hidden>重新扫描已保存文件</button>
@@ -1249,6 +1258,7 @@ INDEX_HTML = """<!doctype html>
       templateRuleDraft: null,
       templateRuleBaseConfig: null,
       templateOnboarding: null,
+      optionGroupsTouched: false,
       dimensionRowsTouched: false,
       textSequenceRowsTouched: false,
       templateRulesDescriptionDirty: false
@@ -1303,21 +1313,24 @@ INDEX_HTML = """<!doctype html>
       const orderInput = document.getElementById("orderBindingsJson");
       const ruleSection = orderInput && orderInput.closest(".rule-section");
       if (!ruleSection || document.getElementById("templateRuleDescription")) return;
+      const specialRules = document.getElementById("templateAdvancedRules");
+      const specialSection = specialRules && specialRules.closest(".rule-section");
+      if (specialSection) specialSection.insertAdjacentElement("afterend", ruleSection);
       const title = ruleSection.querySelector(".rule-section-title");
-      if (title) title.textContent = "用自然语言描述规则";
+      if (title) title.textContent = "补充说明（可选）";
       const note = ruleSection.querySelector(".rule-section-note");
-      if (note) note.textContent = "直接描述订单字段、设计资产、文字适配、拆分方式和验证样例。系统只生成草稿，提取后仍可修改，最后必须确认保存。";
+      if (note) note.textContent = "先完成上方固定项。这里只补充固定项无法表达的特殊业务条件；生成草稿不会覆盖已填写内容，仍需检查并确认保存。";
       const formGrid = ruleSection.querySelector(".form-grid");
       const panel = document.createElement("div");
       panel.className = "extract-panel";
       panel.innerHTML = `
-        <label for="templateRuleDescription">规则描述</label>
-        <textarea id="templateRuleDescription" placeholder="例如：字体来自订单 font 列，设计来自 design 列；Design1 对应 Design1.ai；Name 按 | 拆分为 Name1-Name3，文字适配文字框；验证样例：Name=Tom|Jerry；预期：Name1=Tom,Name2=Jerry"></textarea>
+        <label for="templateRuleDescription">补充规则说明</label>
+        <textarea id="templateRuleDescription" placeholder="例如：名字位置 1、3、5、7 使用红色，2、4、6 使用白色；或某个固定项无法表达的特殊处理。"></textarea>
         <div class="extract-actions">
-          <button class="btn-subtle" id="extractTemplateRulesBtn" type="button">根据描述提取规则</button>
-          <span class="extract-status" id="templateExtractionStatus">尚未提取</span>
+          <button class="btn-subtle" id="extractTemplateRulesBtn" type="button">将补充说明生成草稿</button>
+          <span class="extract-status" id="templateExtractionStatus">未填写补充说明</span>
         </div>
-        <div class="preview-box readonly-summary" id="templateExtractionSummary">系统会在这里显示已识别内容和需要你补充的内容。</div>`;
+        <div class="preview-box readonly-summary" id="templateExtractionSummary">填写补充说明后，系统会在这里显示可补充的规则和仍需确认的内容。</div>`;
       if (formGrid) ruleSection.insertBefore(panel, formGrid);
       const scanSection = profile && profile.closest(".rule-section");
       if (scanSection) {
@@ -1333,7 +1346,7 @@ INDEX_HTML = """<!doctype html>
         const evidenceLabel = document.getElementById("scanEvidenceLabel");
         if (evidenceLabel) evidenceLabel.textContent = "扫描结果摘要（只读）";
         const sourceLabel = scanSection.querySelector('label[for="fieldSources"]');
-        if (sourceLabel) sourceLabel.textContent = "规则来源与修改状态（只读）";
+        if (sourceLabel) sourceLabel.textContent = "系统建议与当前配置差异（只读）";
       }
     }
 
@@ -1352,12 +1365,15 @@ INDEX_HTML = """<!doctype html>
       document.getElementById("extractTemplateRulesBtn").addEventListener("click", extractTemplateRules);
       document.getElementById("templateRuleDescription").addEventListener("input", () => {
         state.templateRulesDescriptionDirty = true;
-        document.getElementById("templateExtractionStatus").textContent = "描述已修改，请重新提取";
+        document.getElementById("templateExtractionStatus").textContent = "补充说明已修改，如需采用建议请重新生成草稿";
       });
       document.getElementById("checkTemplateRuleBtn").addEventListener("click", checkTemplateRule);
       document.getElementById("saveTemplateBtn").addEventListener("click", saveTemplate);
       document.getElementById("uploadScanTemplateBtn").addEventListener("click", uploadAndScanTemplate);
-      document.getElementById("addOptionGroupBtn").addEventListener("click", () => addOptionGroupRow());
+      document.getElementById("addOptionGroupBtn").addEventListener("click", () => {
+        state.optionGroupsTouched = true;
+        addOptionGroupRow();
+      });
       document.getElementById("restoreSuggestionsBtn").addEventListener("click", restoreRuleSuggestions);
       document.getElementById("rescanTemplateBtn").addEventListener("click", rescanTemplate);
       document.getElementById("addDimensionRowBtn").addEventListener("click", addDimensionRow);
@@ -1405,10 +1421,14 @@ INDEX_HTML = """<!doctype html>
         const button = event.target.closest("[data-remove-option-group]");
         if (!button) return;
         button.closest(".structured-row").remove();
+        state.optionGroupsTouched = true;
         renderTemplateRulePreview();
       });
       ["input", "change"].forEach(eventName => {
-        document.getElementById("optionGroupRows").addEventListener(eventName, renderTemplateRulePreview);
+        document.getElementById("optionGroupRows").addEventListener(eventName, () => {
+          state.optionGroupsTouched = true;
+          renderTemplateRulePreview();
+        });
       });
       ["dimensionRows", "textSequenceRows"].forEach(id => {
         const container = document.getElementById(id);
@@ -1557,6 +1577,7 @@ INDEX_HTML = """<!doctype html>
       state.selectedTemplateId = "";
       state.templateRuleDraft = null;
       state.templateRuleBaseConfig = null;
+      state.optionGroupsTouched = false;
       state.dimensionRowsTouched = false;
       state.textSequenceRowsTouched = false;
       clearTemplateForm();
@@ -1727,6 +1748,7 @@ INDEX_HTML = """<!doctype html>
       state.templateRuleDraft = null;
       state.templateRuleBaseConfig = null;
       state.templateOnboarding = null;
+      state.optionGroupsTouched = false;
       state.dimensionRowsTouched = false;
       state.textSequenceRowsTouched = false;
       resetTemplateRuleFields();
@@ -1900,11 +1922,11 @@ INDEX_HTML = """<!doctype html>
       const templateId = document.getElementById("templateId").value.trim();
       const description = document.getElementById("templateRuleDescription").value.trim();
       if (!templateId || !description) {
-        setMessage("templateSaveMessage", "请先填写模板 ID 和规则描述", "error");
+        setMessage("templateSaveMessage", "请先填写模板 ID 和补充说明", "error");
         return;
       }
       const status = document.getElementById("templateExtractionStatus");
-      status.textContent = "正在提取规则";
+      status.textContent = "正在生成补充草稿";
       try {
         const result = await postJson("/api/templates/rules/draft", {
           template_id: templateId,
@@ -1912,16 +1934,17 @@ INDEX_HTML = """<!doctype html>
           natural_text: description,
           asset_count: uploadedAssetCount()
         });
-        const current = isPlainObject(state.templateRuleBaseConfig) ? state.templateRuleBaseConfig : {};
+        const current = buildTemplateRulePayload();
         const draft = result.draft || {};
         const merged = { ...current };
         Object.entries(draft).forEach(([key, value]) => {
-          if (key === "natural_text" || (value !== "" && value !== null && (!Array.isArray(value) || value.length))) {
+          if (key !== "natural_text" && key !== "raw_text" && !hasConfiguredRuleValue(merged[key]) && hasConfiguredRuleValue(value)) {
             merged[key] = value;
           }
         });
         merged.natural_text = description;
         state.templateRuleBaseConfig = merged;
+        state.optionGroupsTouched = false;
         state.dimensionRowsTouched = false;
         state.textSequenceRowsTouched = false;
         fillTemplateRuleFields(merged);
@@ -1933,12 +1956,18 @@ INDEX_HTML = """<!doctype html>
         state.templateRulesDescriptionDirty = false;
         renderTemplateExtractionFeedback(result);
         renderTemplateRulePreview();
-        status.textContent = "已提取为草稿，等待人工确认";
-        setMessage("templateSaveMessage", "规则草稿已生成，请核对并修改后再检查", "ok");
+        status.textContent = "已生成补充草稿，未覆盖固定项";
+        setMessage("templateSaveMessage", "补充规则草稿已生成，请核对后再检查", "ok");
       } catch (error) {
-        status.textContent = "提取失败";
+        status.textContent = "补充草稿生成失败";
         setMessage("templateSaveMessage", String(error.message || error), "error");
       }
+    }
+
+    function hasConfiguredRuleValue(value) {
+      if (Array.isArray(value)) return value.length > 0;
+      if (value && typeof value === "object") return Object.keys(value).length > 0;
+      return String(value == null ? "" : value).trim().length > 0;
     }
 
     function setHiddenRuleJson(id, value) {
@@ -1971,7 +2000,10 @@ INDEX_HTML = """<!doctype html>
           pack: buildCanonicalRulePack()
         });
         state.templateRuleDraft = result.pack;
-        document.getElementById("fieldSources").value = formatFieldSources((result.pack.audit && result.pack.audit.field_sources) || {});
+        document.getElementById("fieldSources").value = formatFieldSources(
+          (result.pack.audit && result.pack.audit.field_sources) || {},
+          result.pack.rules || {}
+        );
         const issues = [...(result.errors || []), ...(result.warnings || [])];
         document.getElementById("templateRulePreview").innerHTML = renderOnboardingIssues(result, issues);
         setMessage("templateSaveMessage", result.ok ? "后端检查通过，等待你最终确认" : "仍有阻断项，不能启用模板", result.ok ? "ok" : "error");
@@ -2065,9 +2097,9 @@ INDEX_HTML = """<!doctype html>
         natural_text: document.getElementById("templateRuleDescription").value.trim(),
         raw_text: state.dimensionRowsTouched ? "" : (baseConfig.raw_text || ""),
         option_groups: optionGroups,
-        font_options: fontOptions.length ? fontOptions : normalizeOptions(baseConfig.font_options),
-        design_options: mergeDesignOptions(baseConfig.design_options, designOptions),
-        style_options: styleOptions.length ? styleOptions : normalizeOptions(baseConfig.style_options),
+        font_options: state.optionGroupsTouched ? fontOptions : (fontOptions.length ? fontOptions : normalizeOptions(baseConfig.font_options)),
+        design_options: state.optionGroupsTouched ? designOptions : mergeDesignOptions(baseConfig.design_options, designOptions),
+        style_options: state.optionGroupsTouched ? styleOptions : (styleOptions.length ? styleOptions : normalizeOptions(baseConfig.style_options)),
         dimension_mode: baseConfig.dimension_mode || "object",
         dimensions,
         slots,
@@ -2455,8 +2487,8 @@ INDEX_HTML = """<!doctype html>
       document.getElementById("scanEvidenceRaw").value = "";
       document.getElementById("fieldSources").value = "";
       document.getElementById("templateRuleDescription").value = "";
-      document.getElementById("templateExtractionStatus").textContent = "尚未提取";
-      document.getElementById("templateExtractionSummary").textContent = "系统会在这里显示已识别内容和需要你补充的内容。";
+      document.getElementById("templateExtractionStatus").textContent = "未填写补充说明";
+      document.getElementById("templateExtractionSummary").textContent = "填写补充说明后，系统会在这里显示可补充的规则和仍需确认的内容。";
       state.templateRulesDescriptionDirty = false;
       document.getElementById("orderBindingsJson").value = "{}";
       document.getElementById("assetMappingsJson").value = "[]";
@@ -2491,19 +2523,21 @@ INDEX_HTML = """<!doctype html>
       const structure = pack && pack.structure ? pack.structure : {};
       const audit = pack && pack.audit ? pack.audit : {};
       const rules = pack && pack.rules ? pack.rules : {};
+      const editableRules = prefillScannedOptionSuggestions(rules, audit.field_sources || {});
+      state.templateRuleBaseConfig = editableRules;
       document.getElementById("templateProfile").value = (pack && pack.template && pack.template.profile) || "unclassified";
       document.getElementById("scanVersion").value = structure.scan_version || "";
       const evidence = Object.keys(rawScan).length ? rawScan : (structure.evidence || {});
       document.getElementById("scanEvidence").textContent = formatScanEvidence(evidence);
       document.getElementById("scanEvidenceRaw").value = formatRawScanEvidence(evidence);
-      document.getElementById("fieldSources").value = formatFieldSources(audit.field_sources || {});
-      document.getElementById("templateRuleDescription").value = rules.natural_text || rules.raw_text || "";
-      document.getElementById("templateExtractionStatus").textContent = rules.natural_text ? "已保存自然语言描述" : "尚未提取";
+      document.getElementById("fieldSources").value = formatFieldSources(audit.field_sources || {}, editableRules);
+      document.getElementById("templateRuleDescription").value = editableRules.natural_text || editableRules.raw_text || "";
+      document.getElementById("templateExtractionStatus").textContent = editableRules.natural_text ? "已保存补充说明" : "未填写补充说明";
       state.templateRulesDescriptionDirty = false;
-      setHiddenRuleJson("orderBindingsJson", rules.order_bindings || {});
-      setHiddenRuleJson("assetMappingsJson", rules.asset_mappings || []);
-      setHiddenRuleJson("textPoliciesJson", rules.text_policies || {});
-      setHiddenRuleJson("outputTransformsJson", rules.transforms || {});
+      setHiddenRuleJson("orderBindingsJson", editableRules.order_bindings || {});
+      setHiddenRuleJson("assetMappingsJson", editableRules.asset_mappings || []);
+      setHiddenRuleJson("textPoliciesJson", editableRules.text_policies || {});
+      setHiddenRuleJson("outputTransformsJson", editableRules.transforms || {});
       setHiddenRuleJson("validationSampleJson", (pack && pack.validation && pack.validation.sample) || {});
       const history = document.getElementById("templateVersionHistory");
       history.innerHTML = versions.length
@@ -2512,6 +2546,17 @@ INDEX_HTML = """<!doctype html>
       history.querySelectorAll("[data-rule-rollback]").forEach(button => {
         button.addEventListener("click", () => rollbackRuleVersion(Number(button.dataset.ruleRollback)));
       });
+    }
+
+    function prefillScannedOptionSuggestions(rules, fieldSources) {
+      const next = { ...(rules || {}) };
+      ["font_options", "design_options", "style_options"].forEach(key => {
+        if (normalizeOptions(next[key]).length) return;
+        const source = fieldSources && fieldSources[`rules.${key}`];
+        const suggestion = source && typeof source === "object" ? normalizeOptions(source.suggestion) : [];
+        if (suggestion.length) next[key] = suggestion;
+      });
+      return next;
     }
 
     function prettyJson(value) {
@@ -2634,14 +2679,27 @@ INDEX_HTML = """<!doctype html>
       }).join("\\n");
     }
 
-    function formatFieldSources(value) {
+    function formatFieldSources(value, rules = null) {
       if (!value || typeof value !== "object") return "暂无规则来源记录";
+      const labels = {
+        "rules.font_options": "字体选项",
+        "rules.design_options": "设计选项",
+        "rules.style_options": "尺寸/版式选项",
+        "rules.dimensions": "尺寸规则",
+        "rules.text_targets": "文字目标"
+      };
       return Object.entries(value).map(([field, details]) => {
         const source = details && typeof details === "object" ? details : {};
-        const status = source.modified ? "人工已修改" : "沿用系统建议";
+        const configured = rules && field.startsWith("rules.") ? rules[field.slice("rules.".length)] : undefined;
+        const differs = configured === undefined ? Boolean(source.modified) : !ruleValuesMatch(configured, source.suggestion);
+        const status = differs ? "当前配置与系统建议不同" : "当前配置与系统建议一致";
         const suggestion = source.suggestion == null ? "" : `；系统建议：${formatReadableValue(source.suggestion)}`;
-        return `${field}：${status}${suggestion}`;
+        return `${labels[field] || field}：${status}${suggestion}`;
       }).join("\\n");
+    }
+
+    function ruleValuesMatch(left, right) {
+      return JSON.stringify(left == null ? null : left) === JSON.stringify(right == null ? null : right);
     }
 
     function formatReadableValue(value) {
@@ -2683,6 +2741,7 @@ INDEX_HTML = """<!doctype html>
     }
 
     function fillTemplateRuleFields(config) {
+      state.optionGroupsTouched = false;
       const groups = Array.isArray(config.option_groups) && config.option_groups.length
         ? config.option_groups
         : legacyOptionGroups(config);
@@ -2797,6 +2856,15 @@ INDEX_HTML = """<!doctype html>
     function compactOptionRange(options) {
       const optionValues = normalizeOptions(options);
       if (!optionValues.length) return "";
+      const matches = optionValues.map(value => String(value).match(/^([A-Za-z]+)(\\d+)$/));
+      if (matches.every(Boolean)) {
+        const prefix = matches[0][1];
+        const numbers = matches.map(match => Number(match[2])).sort((left, right) => left - right);
+        const contiguous = numbers.every((value, index) => index === 0 || value === numbers[index - 1] + 1);
+        if (contiguous && matches.every(match => match[1] === prefix)) {
+          return numbers.length === 1 ? `${prefix}${numbers[0]}` : `${prefix}${numbers[0]}-${prefix}${numbers[numbers.length - 1]}`;
+        }
+      }
       return optionValues.join(" / ");
     }
 
@@ -2897,7 +2965,7 @@ INDEX_HTML = """<!doctype html>
         return;
       }
       if (state.templateRulesDescriptionDirty) {
-        setMessage("templateSaveMessage", "规则描述已修改，请先点击“根据描述提取规则”", "error");
+        setMessage("templateSaveMessage", "补充说明已修改，请先点击“将补充说明生成草稿”", "error");
         return;
       }
       if (!state.templateOnboarding || !state.templateOnboarding.draft) {
@@ -2970,6 +3038,7 @@ INDEX_HTML = """<!doctype html>
       document.getElementById("assetAiFiles").value = "";
       state.templateRuleDraft = null;
       state.templateRuleBaseConfig = null;
+      state.optionGroupsTouched = false;
       state.dimensionRowsTouched = false;
       state.textSequenceRowsTouched = false;
       document.getElementById("assetRows").innerHTML = '<div class="empty">暂无 .ai 模板资产</div>';

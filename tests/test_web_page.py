@@ -213,6 +213,24 @@ def test_scan_evidence_defaults_to_summary_and_keeps_raw_details_collapsed():
     assert 'document.getElementById("scanEvidenceRaw").value = formatRawScanEvidence(evidence)' in INDEX_HTML
 
 
+def test_template_rules_prefill_fixed_options_before_optional_supplement():
+    assert "查看系统审计明细（可选）" in INDEX_HTML
+    assert "当前配置与系统建议不同" in INDEX_HTML
+    assert 'specialSection.insertAdjacentElement("afterend", ruleSection)' in INDEX_HTML
+    assert "补充说明（可选）" in INDEX_HTML
+    assert "将补充说明生成草稿" in INDEX_HTML
+    assert "生成草稿不会覆盖已填写内容" in INDEX_HTML
+    assert "function prefillScannedOptionSuggestions" in INDEX_HTML
+    assert '["font_options", "design_options", "style_options"]' in INDEX_HTML
+    assert "function compactOptionRange" in INDEX_HTML
+    assert "return numbers.length === 1" in INDEX_HTML
+    assert "optionGroupsTouched: false" in INDEX_HTML
+    assert "state.optionGroupsTouched = true" in INDEX_HTML
+    assert "font_options: state.optionGroupsTouched ? fontOptions" in INDEX_HTML
+    assert "const current = buildTemplateRulePayload();" in INDEX_HTML
+    assert "!hasConfiguredRuleValue(merged[key])" in INDEX_HTML
+
+
 def test_template_asset_list_has_download_and_delete_actions():
     assert "data-template-download" not in INDEX_HTML
     assert "data-template-delete" not in INDEX_HTML
