@@ -42,11 +42,16 @@ class LlmRuleParser:
         context: Dict[str, Any],
         fallback: Dict[str, Any],
         require_llm: bool = False,
+        allow_llm: bool = True,
     ) -> Dict[str, Any]:
         if not self.configured:
             if require_llm:
                 raise RuntimeError("LLM 规则编译未配置，请设置 CUSTOM_RENDERER_LLM_API_KEY 和 CUSTOM_RENDERER_LLM_BASE_URL")
             return with_parser_meta(normalize_rule_draft(fallback), source="local", configured=False)
+        if not allow_llm:
+            if require_llm:
+                raise RuntimeError("当前规则提取流程未启用 LLM")
+            return with_parser_meta(normalize_rule_draft(fallback), source="local", configured=True)
         try:
             parsed = self._call_llm(kind=kind, natural_text=natural_text, context=context)
         except Exception as exc:

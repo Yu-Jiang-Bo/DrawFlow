@@ -1059,6 +1059,7 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
             },
             fallback=fallback,
             require_llm=False,
+            allow_llm=False,
         )
         feedback = summarize_template_rule_draft(draft)
         return {"draft": draft, **feedback}

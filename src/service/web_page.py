@@ -515,6 +515,29 @@ INDEX_HTML = """<!doctype html>
       border-radius: 7px;
       background: #fbfcfe;
     }
+    .readonly-summary {
+      min-height: 100px;
+      white-space: pre-wrap;
+      color: var(--ink);
+      line-height: 1.65;
+    }
+    .extract-panel {
+      display: grid;
+      gap: 10px;
+    }
+    .extract-panel textarea {
+      min-height: 132px;
+    }
+    .extract-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .extract-status {
+      color: var(--muted);
+      font-size: 12px;
+    }
     .preview-grid {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1202,7 +1225,8 @@ INDEX_HTML = """<!doctype html>
       templateRuleBaseConfig: null,
       templateOnboarding: null,
       dimensionRowsTouched: false,
-      textSequenceRowsTouched: false
+      textSequenceRowsTouched: false,
+      templateRulesDescriptionDirty: false
     };
     let progressTimer = null;
     let progressValue = 0;
@@ -1233,10 +1257,59 @@ INDEX_HTML = """<!doctype html>
     };
 
     async function init() {
+      prepareBusinessRuleEditor();
       bindEvents();
       await checkHealth();
       await Promise.all([loadTemplates(), loadRules(), loadJobs()]);
       resetTaskResult();
+    }
+
+    function prepareBusinessRuleEditor() {
+      const profile = document.getElementById("templateProfile");
+      if (profile) profile.disabled = true;
+      const profileWrapper = profile && profile.closest(".form-grid > div");
+      if (profileWrapper) profileWrapper.hidden = true;
+      const jsonIds = ["orderBindingsJson", "assetMappingsJson", "textPoliciesJson", "outputTransformsJson", "validationSampleJson"];
+      jsonIds.forEach(id => {
+        const input = document.getElementById(id);
+        const wrapper = input && input.closest(".form-grid > div");
+        if (wrapper) wrapper.hidden = true;
+      });
+      const orderInput = document.getElementById("orderBindingsJson");
+      const ruleSection = orderInput && orderInput.closest(".rule-section");
+      if (!ruleSection || document.getElementById("templateRuleDescription")) return;
+      const title = ruleSection.querySelector(".rule-section-title");
+      if (title) title.textContent = "用自然语言描述规则";
+      const note = ruleSection.querySelector(".rule-section-note");
+      if (note) note.textContent = "直接描述订单字段、设计资产、文字适配、拆分方式和验证样例。系统只生成草稿，提取后仍可修改，最后必须确认保存。";
+      const formGrid = ruleSection.querySelector(".form-grid");
+      const panel = document.createElement("div");
+      panel.className = "extract-panel";
+      panel.innerHTML = `
+        <label for="templateRuleDescription">规则描述</label>
+        <textarea id="templateRuleDescription" placeholder="例如：字体来自订单 font 列，设计来自 design 列；Design1 对应 Design1.ai；Name 按 | 拆分为 Name1-Name3，文字适配文字框；验证样例：Name=Tom|Jerry；预期：Name1=Tom,Name2=Jerry"></textarea>
+        <div class="extract-actions">
+          <button class="btn-subtle" id="extractTemplateRulesBtn" type="button">根据描述提取规则</button>
+          <span class="extract-status" id="templateExtractionStatus">尚未提取</span>
+        </div>
+        <div class="preview-box readonly-summary" id="templateExtractionSummary">系统会在这里显示已识别内容和需要你补充的内容。</div>`;
+      if (formGrid) ruleSection.insertBefore(panel, formGrid);
+      const scanSection = profile && profile.closest(".rule-section");
+      if (scanSection) {
+        const scanTitle = scanSection.querySelector(".rule-section-title");
+        if (scanTitle) scanTitle.textContent = "系统扫描结果";
+        const profileLabel = scanSection.querySelector('label[for="templateProfile"]');
+        if (profileLabel) profileLabel.textContent = "系统推断类型";
+        const scanNote = document.createElement("p");
+        scanNote.className = "rule-section-note";
+        scanNote.textContent = "以下内容由系统从 AI 模板中读取，只用于核对，不需要用户分类或填写。";
+        const scanGrid = scanSection.querySelector(".form-grid");
+        if (scanGrid) scanSection.insertBefore(scanNote, scanGrid);
+        const evidenceLabel = scanSection.querySelector('label[for="scanEvidence"]');
+        if (evidenceLabel) evidenceLabel.textContent = "扫描到的模板事实（只读）";
+        const sourceLabel = scanSection.querySelector('label[for="fieldSources"]');
+        if (sourceLabel) sourceLabel.textContent = "规则来源与修改状态（只读）";
+      }
     }
 
     function bindEvents() {
@@ -1251,6 +1324,11 @@ INDEX_HTML = """<!doctype html>
       document.getElementById("refreshJobsPageBtn").addEventListener("click", loadJobs);
       document.getElementById("closeRenderErrorBtn").addEventListener("click", hideRenderError);
       document.getElementById("newTemplateBtn").addEventListener("click", newTemplate);
+      document.getElementById("extractTemplateRulesBtn").addEventListener("click", extractTemplateRules);
+      document.getElementById("templateRuleDescription").addEventListener("input", () => {
+        state.templateRulesDescriptionDirty = true;
+        document.getElementById("templateExtractionStatus").textContent = "描述已修改，请重新提取";
+      });
       document.getElementById("checkTemplateRuleBtn").addEventListener("click", checkTemplateRule);
       document.getElementById("saveTemplateBtn").addEventListener("click", saveTemplate);
       document.getElementById("addOptionGroupBtn").addEventListener("click", () => addOptionGroupRow());
@@ -1286,6 +1364,7 @@ INDEX_HTML = """<!doctype html>
         "#textPoliciesJson",
         "#outputTransformsJson",
         "#validationSampleJson",
+        "#templateRuleDescription",
         "#overrideRows input",
         "#overrideRows select",
         "#templateAdvancedRules",
@@ -1741,6 +1820,69 @@ INDEX_HTML = """<!doctype html>
       target.innerHTML = renderTemplateRuleCheck(draft);
     }
 
+    async function extractTemplateRules() {
+      const templateId = document.getElementById("templateId").value.trim();
+      const description = document.getElementById("templateRuleDescription").value.trim();
+      if (!templateId || !description) {
+        setMessage("templateSaveMessage", "请先填写模板 ID 和规则描述", "error");
+        return;
+      }
+      const status = document.getElementById("templateExtractionStatus");
+      status.textContent = "正在提取规则";
+      try {
+        const result = await postJson("/api/templates/rules/draft", {
+          template_id: templateId,
+          template_type: inferTemplateTypeFromForm(),
+          natural_text: description,
+          asset_count: uploadedAssetCount()
+        });
+        const current = isPlainObject(state.templateRuleBaseConfig) ? state.templateRuleBaseConfig : {};
+        const draft = result.draft || {};
+        const merged = { ...current };
+        Object.entries(draft).forEach(([key, value]) => {
+          if (key === "natural_text" || (value !== "" && value !== null && (!Array.isArray(value) || value.length))) {
+            merged[key] = value;
+          }
+        });
+        merged.natural_text = description;
+        state.templateRuleBaseConfig = merged;
+        state.dimensionRowsTouched = false;
+        state.textSequenceRowsTouched = false;
+        fillTemplateRuleFields(merged);
+        setHiddenRuleJson("orderBindingsJson", merged.order_bindings || {});
+        setHiddenRuleJson("assetMappingsJson", merged.asset_mappings || []);
+        setHiddenRuleJson("textPoliciesJson", merged.text_policies || {});
+        setHiddenRuleJson("outputTransformsJson", merged.transforms || {});
+        setHiddenRuleJson("validationSampleJson", draft.validation_sample || parseJsonField("validationSampleJson", {}));
+        state.templateRulesDescriptionDirty = false;
+        renderTemplateExtractionFeedback(result);
+        renderTemplateRulePreview();
+        status.textContent = "已提取为草稿，等待人工确认";
+        setMessage("templateSaveMessage", "规则草稿已生成，请核对并修改后再检查", "ok");
+      } catch (error) {
+        status.textContent = "提取失败";
+        setMessage("templateSaveMessage", String(error.message || error), "error");
+      }
+    }
+
+    function setHiddenRuleJson(id, value) {
+      const input = document.getElementById(id);
+      if (input) input.value = JSON.stringify(value == null ? {} : value);
+    }
+
+    function renderTemplateExtractionFeedback(result) {
+      const summary = Array.isArray(result.summary) ? result.summary : [];
+      const unresolved = Array.isArray(result.unresolved) ? result.unresolved : [];
+      const lines = [];
+      lines.push(summary.length ? "已识别：" : "暂未识别到可直接使用的规则：");
+      summary.forEach(item => lines.push(`- ${item}`));
+      if (unresolved.length) {
+        lines.push("待补充：");
+        unresolved.forEach(item => lines.push(`- ${item}`));
+      }
+      document.getElementById("templateExtractionSummary").textContent = lines.join("\n");
+    }
+
     async function checkTemplateRule() {
       renderTemplateRulePreview();
       const templateId = document.getElementById("templateId").value.trim();
@@ -1753,7 +1895,7 @@ INDEX_HTML = """<!doctype html>
           pack: buildCanonicalRulePack()
         });
         state.templateRuleDraft = result.pack;
-        document.getElementById("fieldSources").value = prettyJson((result.pack.audit && result.pack.audit.field_sources) || {});
+        document.getElementById("fieldSources").value = formatFieldSources((result.pack.audit && result.pack.audit.field_sources) || {});
         const issues = [...(result.errors || []), ...(result.warnings || [])];
         document.getElementById("templateRulePreview").innerHTML = renderOnboardingIssues(result, issues);
         setMessage("templateSaveMessage", result.ok ? "后端检查通过，等待你最终确认" : "仍有阻断项，不能启用模板", result.ok ? "ok" : "error");
@@ -1844,6 +1986,7 @@ INDEX_HTML = """<!doctype html>
         template_type: inferTemplateTypeFromForm(),
         status: "draft",
         rule_source: "structured_form",
+        natural_text: document.getElementById("templateRuleDescription").value.trim(),
         raw_text: state.dimensionRowsTouched ? "" : (baseConfig.raw_text || ""),
         option_groups: optionGroups,
         font_options: fontOptions.length ? fontOptions : normalizeOptions(baseConfig.font_options),
@@ -2234,6 +2377,10 @@ INDEX_HTML = """<!doctype html>
       document.getElementById("scanVersion").value = "";
       document.getElementById("scanEvidence").value = "";
       document.getElementById("fieldSources").value = "";
+      document.getElementById("templateRuleDescription").value = "";
+      document.getElementById("templateExtractionStatus").textContent = "尚未提取";
+      document.getElementById("templateExtractionSummary").textContent = "系统会在这里显示已识别内容和需要你补充的内容。";
+      state.templateRulesDescriptionDirty = false;
       document.getElementById("orderBindingsJson").value = "{}";
       document.getElementById("assetMappingsJson").value = "[]";
       document.getElementById("textPoliciesJson").value = "{}";
@@ -2269,13 +2416,16 @@ INDEX_HTML = """<!doctype html>
       const rules = pack && pack.rules ? pack.rules : {};
       document.getElementById("templateProfile").value = (pack && pack.template && pack.template.profile) || "unclassified";
       document.getElementById("scanVersion").value = structure.scan_version || "";
-      document.getElementById("scanEvidence").value = prettyJson(Object.keys(rawScan).length ? rawScan : (structure.evidence || {}));
-      document.getElementById("fieldSources").value = prettyJson(audit.field_sources || {});
-      document.getElementById("orderBindingsJson").value = prettyJson(rules.order_bindings || {});
-      document.getElementById("assetMappingsJson").value = prettyJson(rules.asset_mappings || []);
-      document.getElementById("textPoliciesJson").value = prettyJson(rules.text_policies || {});
-      document.getElementById("outputTransformsJson").value = prettyJson(rules.transforms || {});
-      document.getElementById("validationSampleJson").value = prettyJson((pack && pack.validation && pack.validation.sample) || {});
+      document.getElementById("scanEvidence").value = formatScanEvidence(Object.keys(rawScan).length ? rawScan : (structure.evidence || {}));
+      document.getElementById("fieldSources").value = formatFieldSources(audit.field_sources || {});
+      document.getElementById("templateRuleDescription").value = rules.natural_text || rules.raw_text || "";
+      document.getElementById("templateExtractionStatus").textContent = rules.natural_text ? "已保存自然语言描述" : "尚未提取";
+      state.templateRulesDescriptionDirty = false;
+      setHiddenRuleJson("orderBindingsJson", rules.order_bindings || {});
+      setHiddenRuleJson("assetMappingsJson", rules.asset_mappings || []);
+      setHiddenRuleJson("textPoliciesJson", rules.text_policies || {});
+      setHiddenRuleJson("outputTransformsJson", rules.transforms || {});
+      setHiddenRuleJson("validationSampleJson", (pack && pack.validation && pack.validation.sample) || {});
       const history = document.getElementById("templateVersionHistory");
       history.innerHTML = versions.length
         ? versions.map(item => `<div>v${item.version} ${escapeHtml(item.event)} ${escapeHtml(item.created_at || "")} <button class="btn-subtle" type="button" data-rule-rollback="${item.version}">回滚到此版本</button></div>`).join("")
@@ -2287,6 +2437,45 @@ INDEX_HTML = """<!doctype html>
 
     function prettyJson(value) {
       return JSON.stringify(value == null ? {} : value, null, 2);
+    }
+
+    function formatScanEvidence(value) {
+      if (!value || typeof value !== "object") return "暂无扫描事实";
+      const labels = {
+        profile: "系统推断类型",
+        capabilities: "支持能力",
+        groups: "识别到的编组",
+        layers: "识别到的图层",
+        text_frames: "识别到的文字对象",
+        text_objects: "识别到的文字对象",
+        fonts: "识别到的字体",
+        dimensions: "识别到的尺寸对象",
+        assets: "识别到的资产",
+        warnings: "扫描提醒",
+        unresolved_items: "待确认事项"
+      };
+      return Object.entries(value).map(([key, item]) => {
+        const label = labels[key] || key.replace(/_/g, " ");
+        return `${label}：${formatReadableValue(item)}`;
+      }).join("\n");
+    }
+
+    function formatFieldSources(value) {
+      if (!value || typeof value !== "object") return "暂无规则来源记录";
+      return Object.entries(value).map(([field, details]) => {
+        const source = details && typeof details === "object" ? details : {};
+        const status = source.modified ? "人工已修改" : "沿用系统建议";
+        const suggestion = source.suggestion == null ? "" : `；系统建议：${formatReadableValue(source.suggestion)}`;
+        return `${field}：${status}${suggestion}`;
+      }).join("\n");
+    }
+
+    function formatReadableValue(value) {
+      if (Array.isArray(value)) return value.map(item => formatReadableValue(item)).join("、");
+      if (value && typeof value === "object") {
+        return Object.entries(value).map(([key, item]) => `${key}=${formatReadableValue(item)}`).join("；");
+      }
+      return String(value == null ? "暂无" : value);
     }
 
     async function rollbackRuleVersion(version) {
@@ -2452,6 +2641,10 @@ INDEX_HTML = """<!doctype html>
       const name = document.getElementById("templateName").value.trim();
       if (!templateId || !name) {
         setMessage("templateSaveMessage", "请填写模板 ID 和模板名称", "error");
+        return;
+      }
+      if (state.templateRulesDescriptionDirty) {
+        setMessage("templateSaveMessage", "规则描述已修改，请先点击“根据描述提取规则”", "error");
         return;
       }
       const draft = buildTemplateRulePayload();

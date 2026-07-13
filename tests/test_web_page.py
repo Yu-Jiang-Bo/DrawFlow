@@ -114,6 +114,13 @@ def test_template_onboarding_requires_scan_check_and_confirmation():
     assert 'id="textPoliciesJson"' in INDEX_HTML
     assert 'id="outputTransformsJson"' in INDEX_HTML
     assert 'id="validationSampleJson"' in INDEX_HTML
+    assert "prepareBusinessRuleEditor" in INDEX_HTML
+    assert "profileWrapper.hidden = true" in INDEX_HTML
+    assert 'id="templateRuleDescription"' in INDEX_HTML
+    assert "extractTemplateRules" in INDEX_HTML
+    assert "templateRulesDescriptionDirty" in INDEX_HTML
+    assert "formatScanEvidence" in INDEX_HTML
+    assert "formatFieldSources" in INDEX_HTML
     assert "确认并保存" in INDEX_HTML
     assert "/rules/check" in INDEX_HTML
     assert "/rules/confirm" in INDEX_HTML
@@ -132,7 +139,7 @@ def test_template_onboarding_requires_scan_check_and_confirmation():
         INDEX_HTML.index("function legacyOptionGroups")
     ]
     assert "resetTemplateRuleFields()" not in fill_body
-    assert 'document.getElementById("fieldSources").value = prettyJson' in INDEX_HTML
+    assert 'document.getElementById("fieldSources").value = formatFieldSources' in INDEX_HTML
 
 
 def test_template_rule_payload_preserves_legacy_config():

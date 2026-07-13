@@ -48,6 +48,22 @@ def test_llm_parser_required_mode_returns_llm_source(monkeypatch):
     assert draft["parser"] == {"source": "llm", "llm_configured": True}
 
 
+def test_llm_parser_can_force_local_fallback_when_configured(monkeypatch):
+    parser = LlmRuleParser(api_key="key", base_url="https://example.test/v1")
+    monkeypatch.setattr(parser, "_call_llm", lambda **kwargs: pytest.fail("LLM should not be called"))
+
+    draft = parser.parse(
+        kind="template_rule",
+        natural_text="Font Options 为 F1",
+        context={},
+        fallback={"template_id": "JJMB1", "font_options": ["F1"]},
+        allow_llm=False,
+    )
+
+    assert draft["font_options"] == ["F1"]
+    assert draft["parser"] == {"source": "local", "llm_configured": True}
+
+
 def test_llm_parser_normalizes_object_option_arrays(monkeypatch):
     parser = LlmRuleParser(api_key="key", base_url="https://example.test/v1")
     monkeypatch.setattr(
