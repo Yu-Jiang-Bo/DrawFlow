@@ -876,6 +876,10 @@ INDEX_HTML = """<!doctype html>
                     <div id="assetRows"></div>
                   </div>
                 </div>
+                <div class="actions">
+                  <button class="btn-primary" id="uploadScanTemplateBtn" type="button">上传并扫描 .ai 模板</button>
+                  <span class="extract-status" id="uploadScanStatus">选择文件后从这里开始</span>
+                </div>
               </div>
               <div class="field-full">
                 <div class="rule-section">
@@ -1066,7 +1070,7 @@ INDEX_HTML = """<!doctype html>
             </div>
             <div class="actions">
               <button class="btn-subtle" id="checkTemplateRuleBtn">检查规则</button>
-              <button class="btn-primary" id="saveTemplateBtn">确认并保存</button>
+              <button class="btn-primary" id="saveTemplateBtn">检查并保存规则</button>
             </div>
             <div class="message" id="templateSaveMessage">等待编辑</div>
           </div>
@@ -1335,6 +1339,7 @@ INDEX_HTML = """<!doctype html>
       });
       document.getElementById("checkTemplateRuleBtn").addEventListener("click", checkTemplateRule);
       document.getElementById("saveTemplateBtn").addEventListener("click", saveTemplate);
+      document.getElementById("uploadScanTemplateBtn").addEventListener("click", uploadAndScanTemplate);
       document.getElementById("addOptionGroupBtn").addEventListener("click", () => addOptionGroupRow());
       document.getElementById("restoreSuggestionsBtn").addEventListener("click", restoreRuleSuggestions);
       document.getElementById("rescanTemplateBtn").addEventListener("click", rescanTemplate);
@@ -1688,7 +1693,11 @@ INDEX_HTML = """<!doctype html>
 
     function updateTemplateWorkflowState(hasDraft) {
       const saveButton = document.getElementById("saveTemplateBtn");
-      if (saveButton) saveButton.textContent = hasDraft ? "确认并保存" : "上传文件并扫描";
+      if (saveButton) saveButton.textContent = "检查并保存规则";
+      const uploadButton = document.getElementById("uploadScanTemplateBtn");
+      if (uploadButton) uploadButton.disabled = Boolean(selectedTemplate() && selectedTemplate().status === "active");
+      const uploadStatus = document.getElementById("uploadScanStatus");
+      if (uploadStatus && !hasDraft) uploadStatus.textContent = "选择文件后从这里开始";
       const rescanButton = document.getElementById("rescanTemplateBtn");
       if (rescanButton) {
         const savedTemplate = Boolean(selectedTemplate());
@@ -1825,6 +1834,8 @@ INDEX_HTML = """<!doctype html>
         const result = await postJson("/api/templates/" + encodeURIComponent(templateId) + "/scan", {});
         await loadTemplates(templateId);
         if (result.scan_ok) {
+          const uploadStatus = document.getElementById("uploadScanStatus");
+          if (uploadStatus) uploadStatus.textContent = "扫描完成，请核对规则";
           setMessage("templateSaveMessage", "扫描完成，已生成规则草稿，请核对后确认保存", "ok");
         } else {
           setMessage(
@@ -1834,6 +1845,8 @@ INDEX_HTML = """<!doctype html>
               "。可点击“重新扫描已保存文件”继续",
             "error"
           );
+          const uploadStatus = document.getElementById("uploadScanStatus");
+          if (uploadStatus) uploadStatus.textContent = "文件已保存，扫描失败，可重新扫描";
         }
       } catch (error) {
         setMessage("templateSaveMessage", String(error.message || error), "error");
@@ -2681,6 +2694,85 @@ INDEX_HTML = """<!doctype html>
       return value.action || "";
     }
 
+    async function uploadAndScanTemplate() {
+      const templateId = document.getElementById("templateId").value.trim();
+      const name = document.getElementById("templateName").value.trim();
+      const existingTemplate = formTemplate();
+      const reference = document.getElementById("referenceAiFile").files[0];
+      const primary = document.getElementById("primaryAiFile").files[0];
+      const assetFiles = Array.from(document.getElementById("assetAiFiles").files || []);
+      const hasPendingFiles = Boolean(reference || primary || assetFiles.length);
+
+      if (!templateId || !name) {
+        setMessage("templateSaveMessage", "请填写模板 ID 和模板名称", "error");
+        return;
+      }
+      if (!hasPendingFiles) {
+        if (existingTemplate) {
+          await rescanTemplate();
+        } else {
+          setMessage("templateSaveMessage", "请至少选择一个 .ai 模板文件", "error");
+        }
+        return;
+      }
+      if (existingTemplate && existingTemplate.status === "active") {
+        setMessage("templateSaveMessage", "请先停用模板，再上传替换文件", "error");
+        return;
+      }
+
+      const form = new FormData();
+      form.append("template_id", templateId);
+      form.append("name", name);
+      form.append("template_type", buildTemplateRulePayload().template_type);
+      form.append("status", "draft");
+      if (reference) form.append("reference_ai", reference);
+      if (primary) form.append("template_ai", primary);
+      assetFiles.forEach(file => form.append("template_assets", file));
+
+      let registeredTemplateId = "";
+      const uploadStatus = document.getElementById("uploadScanStatus");
+      setMessage("templateSaveMessage", "正在保存文件并扫描，请稍候", "");
+      if (uploadStatus) uploadStatus.textContent = "正在上传并扫描";
+      try {
+        const result = await postForm("/api/templates", form);
+        registeredTemplateId = result.template.template_id;
+        state.selectedTemplateId = registeredTemplateId;
+        const scan = await postJson("/api/templates/" + encodeURIComponent(registeredTemplateId) + "/scan", {});
+        document.getElementById("referenceAiFile").value = "";
+        document.getElementById("primaryAiFile").value = "";
+        document.getElementById("assetAiFiles").value = "";
+        await loadTemplates(registeredTemplateId);
+        if (!scan.scan_ok) {
+          throw new Error("AI 扫描失败，模板保持草稿：" + (scan.scan_error || "未知错误"));
+        }
+        if (uploadStatus) uploadStatus.textContent = "扫描完成，请核对规则";
+        setMessage("templateSaveMessage", "扫描草稿已生成，请核对并修改规则后点击“检查并保存规则”", "ok");
+      } catch (error) {
+        if (registeredTemplateId) {
+          document.getElementById("referenceAiFile").value = "";
+          document.getElementById("primaryAiFile").value = "";
+          document.getElementById("assetAiFiles").value = "";
+          try {
+            await loadTemplates(registeredTemplateId);
+          } catch (refreshError) {
+            setMessage("templateSaveMessage", String(refreshError.message || refreshError), "error");
+            return;
+          }
+          if (uploadStatus) uploadStatus.textContent = "文件已保存，扫描失败，可重新扫描";
+          setMessage(
+            "templateSaveMessage",
+            "文件已保存为草稿，但扫描未完成：" +
+              String(error.message || error) +
+              "。可点击“重新扫描已保存文件”继续",
+            "error"
+          );
+        } else {
+          if (uploadStatus) uploadStatus.textContent = "上传失败，请检查文件后重试";
+          setMessage("templateSaveMessage", String(error.message || error), "error");
+        }
+      }
+    }
+
     async function saveTemplate() {
       setMessage("templateSaveMessage", "处理中", "");
       const templateId = document.getElementById("templateId").value.trim();
@@ -2691,6 +2783,19 @@ INDEX_HTML = """<!doctype html>
       }
       if (state.templateRulesDescriptionDirty) {
         setMessage("templateSaveMessage", "规则描述已修改，请先点击“根据描述提取规则”", "error");
+        return;
+      }
+      if (!state.templateOnboarding || !state.templateOnboarding.draft) {
+        setMessage("templateSaveMessage", "请先点击“上传并扫描 .ai 模板”，扫描完成后再保存规则", "error");
+        return;
+      }
+      const hasPendingFiles = Boolean(
+        document.getElementById("referenceAiFile").files[0] ||
+        document.getElementById("primaryAiFile").files[0] ||
+        document.getElementById("assetAiFiles").files.length
+      );
+      if (hasPendingFiles) {
+        setMessage("templateSaveMessage", "检测到尚未上传的 .ai 文件，请先点击“上传并扫描 .ai 模板”", "error");
         return;
       }
       const draft = buildTemplateRulePayload();
@@ -2713,13 +2818,8 @@ INDEX_HTML = """<!doctype html>
         if (!(await checkTemplateRule())) return;
       }
       const existingTemplate = formTemplate();
-      const hasPendingFiles = Boolean(
-        document.getElementById("referenceAiFile").files[0] ||
-        document.getElementById("primaryAiFile").files[0] ||
-        document.getElementById("assetAiFiles").files.length
-      );
       if (hasScanDraft && existingTemplate && existingTemplate.status === "active") {
-        if (hasPendingFiles || name !== existingTemplate.name) {
+        if (name !== existingTemplate.name) {
           setMessage("templateSaveMessage", "请先停用模板，再修改文件或基础信息；规则修改可直接确认", "error");
           return;
         }
@@ -2735,64 +2835,15 @@ INDEX_HTML = """<!doctype html>
         }
         return;
       }
-      const form = new FormData();
-      form.append("template_id", templateId);
-      form.append("name", name);
-      form.append("template_type", draft.template_type);
-      form.append("status", "draft");
-      const reference = document.getElementById("referenceAiFile").files[0];
-      if (reference) form.append("reference_ai", reference);
-      const primary = document.getElementById("primaryAiFile").files[0];
-      if (primary) form.append("template_ai", primary);
-      Array.from(document.getElementById("assetAiFiles").files || []).forEach(file => {
-        form.append("template_assets", file);
-      });
-      let registeredTemplateId = "";
       try {
-        const result = await postForm("/api/templates", form);
-        registeredTemplateId = result.template.template_id;
-        state.selectedTemplateId = result.template.template_id;
-        if (hasScanDraft && canonicalPack) {
-          await postJson(`/api/templates/${encodeURIComponent(templateId)}/rules/confirm`, {
-            pack: canonicalPack,
-            change_summary: document.getElementById("templateChangeSummary").value.trim()
-          });
-        } else {
-          const scan = await postJson(`/api/templates/${encodeURIComponent(templateId)}/scan`, {});
-          if (!scan.scan_ok) {
-            throw new Error(`AI 扫描失败，模板保持草稿：${scan.scan_error || "未知错误"}`);
-          }
-        }
-        document.getElementById("referenceAiFile").value = "";
-        document.getElementById("primaryAiFile").value = "";
-        document.getElementById("assetAiFiles").value = "";
-        await loadTemplates(result.template.template_id);
-        setMessage(
-          "templateSaveMessage",
-          hasScanDraft ? `已确认并启用模板：${result.template.template_id}` : `扫描草稿已生成：${result.template.template_id}，请核对并修改后再次点击确认`,
-          "ok"
-        );
+        await postJson(`/api/templates/${encodeURIComponent(templateId)}/rules/confirm`, {
+          pack: canonicalPack,
+          change_summary: document.getElementById("templateChangeSummary").value.trim()
+        });
+        await loadTemplates(templateId);
+        setMessage("templateSaveMessage", `已确认并启用模板：${templateId}`, "ok");
       } catch (error) {
-        if (registeredTemplateId) {
-          document.getElementById("referenceAiFile").value = "";
-          document.getElementById("primaryAiFile").value = "";
-          document.getElementById("assetAiFiles").value = "";
-          try {
-            await loadTemplates(registeredTemplateId);
-          } catch (refreshError) {
-            setMessage("templateSaveMessage", String(refreshError.message || refreshError), "error");
-            return;
-          }
-          setMessage(
-            "templateSaveMessage",
-            "文件已保存为草稿，但扫描未完成：" +
-              String(error.message || error) +
-              "。可点击“重新扫描已保存文件”继续",
-            "error"
-          );
-        } else {
-          setMessage("templateSaveMessage", String(error.message || error), "error");
-        }
+        setMessage("templateSaveMessage", String(error.message || error), "error");
       }
     }
 

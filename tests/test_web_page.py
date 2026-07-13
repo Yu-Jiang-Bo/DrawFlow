@@ -64,7 +64,7 @@ def test_template_rule_preview_normalizes_object_options():
 def test_template_form_hides_type_and_status_from_user():
     assert 'id="templateType"' not in INDEX_HTML
     assert 'id="templateStatus"' not in INDEX_HTML
-    assert 'form.append("template_type", draft.template_type)' in INDEX_HTML
+    assert 'form.append("template_type", buildTemplateRulePayload().template_type)' in INDEX_HTML
     assert 'form.append("status", "draft")' in INDEX_HTML
     assert "function inferTemplateTypeFromForm" in INDEX_HTML
     assert "内部模板类型" not in INDEX_HTML
@@ -120,11 +120,16 @@ def test_template_onboarding_requires_scan_check_and_confirmation():
     assert "extractTemplateRules" in INDEX_HTML
     assert 'id="rescanTemplateBtn"' in INDEX_HTML
     assert "rescanTemplate" in INDEX_HTML
+    assert 'id="uploadScanTemplateBtn"' in INDEX_HTML
+    assert "uploadAndScanTemplate" in INDEX_HTML
+    assert "检查并保存规则" in INDEX_HTML
+    assert INDEX_HTML.index('id="uploadScanTemplateBtn"') < INDEX_HTML.index("选项组角色")
+    assert INDEX_HTML.count('addEventListener("click", uploadAndScanTemplate)') == 1
     assert "文件已保存为草稿，但扫描未完成" in INDEX_HTML
     assert "templateRulesDescriptionDirty" in INDEX_HTML
     assert "formatScanEvidence" in INDEX_HTML
     assert "formatFieldSources" in INDEX_HTML
-    assert "确认并保存" in INDEX_HTML
+    assert "请先点击“上传并扫描 .ai 模板”，扫描完成后再保存规则" in INDEX_HTML
     assert "/rules/check" in INDEX_HTML
     assert "/rules/confirm" in INDEX_HTML
     assert "/rules/rollback" in INDEX_HTML
