@@ -33,6 +33,7 @@ def ready_pack(version="scan-1"):
     pack = build_rule_draft_from_scan(scan(version))
     pack["validation"]["unresolved_items"] = []
     pack["validation"]["sample"] = {"input": {"custom_text": "Alice"}, "expected": {"Name1": "Alice"}}
+    pack["validation"]["sample_source"] = "manual"
     pack["rules"]["order_bindings"] = {"text": "custom_text"}
     pack["rules"]["text_policies"] = {"fit": "scale_to_box"}
     return pack
@@ -72,6 +73,52 @@ def test_check_allows_missing_validation_sample_for_single_text_rendering():
 
     assert result["ok"] is True
     assert not any(item["code"] == "validation_sample" for item in result["errors"])
+
+
+def test_check_ignores_legacy_auto_validation_sample():
+    pack = ready_pack()
+    pack["validation"].pop("sample_source", None)
+    pack["validation"]["sample"] = {
+        "input": {"names": "Legacy"},
+        "expected": {"Name1": "Wrong"},
+    }
+
+    result = check_rule_pack(pack, template_id="DEMO001")
+
+    assert result["ok"] is True
+    assert "sample" not in result["pack"]["validation"]
+    assert not any(item["code"] == "validation_sample" for item in result["errors"])
+
+
+def test_check_does_not_treat_sample_source_required_as_manual():
+    pack = ready_pack()
+    pack["validation"]["sample_source"] = "required"
+    pack["validation"]["sample"] = {
+        "input": {"names": "Legacy"},
+        "expected": {"Name1": "Wrong"},
+    }
+
+    result = check_rule_pack(pack, template_id="DEMO001")
+
+    assert result["ok"] is True
+    assert "sample" not in result["pack"]["validation"]
+    assert not any(item["code"] == "validation_sample" for item in result["errors"])
+
+
+def test_check_validates_sample_when_required_flag_is_true():
+    pack = ready_pack()
+    pack["validation"].pop("sample_source", None)
+    pack["validation"]["sample_required"] = True
+    pack["validation"]["sample"] = {
+        "input": {"names": "Legacy"},
+        "expected": {"Name1": "Wrong"},
+    }
+
+    result = check_rule_pack(pack, template_id="DEMO001")
+
+    assert result["ok"] is False
+    assert any(item["code"] == "validation_sample" for item in result["errors"])
+    assert result["pack"]["validation"]["sample"] == pack["validation"]["sample"]
 
 
 def test_confirmation_required_is_advisory_until_explicit_confirm():

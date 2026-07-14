@@ -17,6 +17,7 @@ from .font_style_rules import validate_font_style_rules
 from .name_color_cycle import validate_name_color_cycle
 from .template_locks import TEMPLATE_STATE_LOCK
 from .template_rule_execution import resolve_mapped_text
+from .template_rule_ast import validate_rule_ast
 
 
 ADVISORY_CODES = {"confirmation_required", "profile"}
@@ -92,9 +93,12 @@ def check_rule_pack(
         if str(capability) not in supported:
             errors.append(_issue("capability", f"Unsupported capability: {capability}"))
 
-    _validate_editable_sections(raw_rules, raw_validation, pack, errors)
+    validate_sample = _should_validate_sample(raw_validation)
+    _validate_editable_sections(raw_rules, raw_validation, pack, errors, validate_sample=validate_sample)
 
     checked = deepcopy(pack)
+    if not validate_sample:
+        checked["validation"].pop("sample", None)
     _mark_field_sources(checked)
     checked["validation"]["status"] = "checked" if not errors else "invalid"
     checked["validation"]["issues"] = deepcopy(errors + warnings)
@@ -333,6 +337,8 @@ def _validate_editable_sections(
     raw_validation: Any,
     pack: Mapping[str, Any],
     errors: list[Dict[str, str]],
+    *,
+    validate_sample: bool = False,
 ) -> None:
     if not isinstance(raw_rules, Mapping):
         errors.append(_issue("rules", "Rules must be a JSON object."))
@@ -342,6 +348,8 @@ def _validate_editable_sections(
         "asset_mappings": list,
         "text_policies": Mapping,
         "transforms": Mapping,
+        "rule_ast": Mapping,
+        "special_rules_text": str,
     }
     for field, expected in expected_types.items():
         if field in raw_rules and not isinstance(raw_rules.get(field), expected):
@@ -354,6 +362,13 @@ def _validate_editable_sections(
     font_style_rules = raw_rules.get("font_style_rules") if "font_style_rules" in raw_rules else rules.get("font_style_rules")
     for message in validate_font_style_rules(font_style_rules):
         errors.append(_issue("font_style_rules", message))
+    special_rules_text = str(raw_rules.get("special_rules_text") or "").strip()
+    raw_rule_ast = raw_rules.get("rule_ast")
+    if special_rules_text and not isinstance(raw_rule_ast, Mapping):
+        errors.append(_issue("rule_ast", "模板特殊规则需要先编译并确认。"))
+    elif isinstance(raw_rule_ast, Mapping):
+        for message in validate_rule_ast(raw_rule_ast, natural_text=special_rules_text):
+            errors.append(_issue("rule_ast", message))
 
     profile = str(pack.get("template", {}).get("profile") or "")
     if profile != "bundle" and not rules.get("order_bindings"):
@@ -408,6 +423,8 @@ def _validate_editable_sections(
 
     sample = raw_validation.get("sample") if isinstance(raw_validation, Mapping) else None
     if sample in (None, {}, ""):
+        pass
+    elif not validate_sample:
         pass
     elif not isinstance(sample, Mapping) or not isinstance(sample.get("input"), Mapping) or not isinstance(
         sample.get("expected"), Mapping
@@ -510,6 +527,15 @@ def _validate_editable_sections(
         max_parts = split_policy.get("max_parts")
         if isinstance(sequence_index, int) and isinstance(max_parts, int) and sequence_index > max_parts:
             errors.append(_issue("slot_mappings", "sequence_index cannot exceed split max_parts."))
+
+
+def _should_validate_sample(raw_validation: Any) -> bool:
+    if not isinstance(raw_validation, Mapping):
+        return False
+    if raw_validation.get("sample_required") is True:
+        return True
+    source = str(raw_validation.get("sample_source") or "").strip().lower()
+    return source == "manual"
 
 
 def _has_complete_design_asset_mappings(rules: Mapping[str, Any]) -> bool:
