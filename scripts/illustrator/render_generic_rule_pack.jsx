@@ -68,7 +68,7 @@
                 frame.contents = String(variable.value || "");
                 if (fontSource) copyTextStyle(fontSource, frame);
                 applyTextColor(frame, String(selections.color || ""));
-                applyNameAlternatingColors(frame, String(variable.target || ""), String(variable.name_delimiter || "|"));
+                applyNameColorCycle(frame, variable);
                 if (dimension && String(policies.fit || "") !== "none") {
                     fitText(frame, Number(dimension.width_mm || 0), Number(dimension.height_mm || 0));
                 }
@@ -161,23 +161,40 @@
         try { frame.textRange.characterAttributes.fillColor = color; } catch (e1) {}
     }
 
-    function applyNameAlternatingColors(frame, target, delimiter) {
-        if (target !== "Name" || !delimiter) return;
+    function applyNameColorCycle(frame, variable) {
+        if (String(variable.target || "") !== "Name") return;
+        var cycle = variable.name_color_cycle || {};
+        var delimiter = String(cycle.delimiter || "");
+        var colors = cycle.colors || [];
+        if (!delimiter || typeof colors.length !== "number" || colors.length < 2) return;
         var text = String(frame.contents || "");
         if (text.indexOf(delimiter) < 0) return;
         var parts = text.split(delimiter);
         if (parts.length < 2) return;
         var cursor = 0;
         for (var partIndex = 0; partIndex < parts.length; partIndex++) {
-            var rgb = partIndex % 2 === 0 ? [215, 25, 32] : [0, 0, 0];
-            var color = new RGBColor();
-            color.red = rgb[0]; color.green = rgb[1]; color.blue = rgb[2];
+            var rgb = hexColor(colors[partIndex % colors.length]);
             var part = parts[partIndex];
-            for (var charIndex = 0; charIndex < part.length; charIndex++) {
-                frame.characters[cursor + charIndex].characterAttributes.fillColor = color;
+            if (rgb) {
+                var color = new RGBColor();
+                color.red = rgb[0]; color.green = rgb[1]; color.blue = rgb[2];
+                for (var charIndex = 0; charIndex < part.length; charIndex++) {
+                    frame.characters[cursor + charIndex].characterAttributes.fillColor = color;
+                }
             }
-            cursor += part.length + delimiter.length;
+            cursor += part.length + (partIndex < parts.length - 1 ? delimiter.length : 0);
         }
+    }
+
+    function hexColor(value) {
+        var match = String(value || "").match(/^#([0-9a-f]{6})$/i);
+        if (!match) return null;
+        var hex = match[1];
+        return [
+            parseInt(hex.substring(0, 2), 16),
+            parseInt(hex.substring(2, 4), 16),
+            parseInt(hex.substring(4, 6), 16)
+        ];
     }
 
     function colorValue(name) {

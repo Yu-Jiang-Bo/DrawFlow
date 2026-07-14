@@ -7,6 +7,7 @@ from typing import Any, Dict, Iterable, Mapping
 
 from openpyxl import load_workbook
 
+from .name_color_cycle import normalize_name_color_cycle
 from .template_registry import TemplateDefinition
 from .template_rule_execution import resolve_mapped_text
 
@@ -79,7 +80,7 @@ def _build_order(
         for key in ("font", "design", "style", "color")
         if ("" if values.get(key) is None else str(values.get(key))).strip()
     }
-    variables = _build_variables(values, rules, selections)
+    variables = _build_variables(values, rules)
     asset_tasks = []
     selected_options = set(selections.values())
     for mapping in _list_of_mappings(rules.get("asset_mappings")):
@@ -110,13 +111,13 @@ def _build_order(
 def _build_variables(
     values: Mapping[str, Any],
     rules: Mapping[str, Any],
-    selections: Mapping[str, str],
 ) -> list[Dict[str, Any]]:
     mappings = _list_of_mappings(rules.get("slot_mappings"))
     if not mappings:
         targets = _list_of_mappings(rules.get("text_targets"))
         if len(targets) == 1 and "text" in values:
             mappings = [{"field": "text", "slot": targets[0].get("name", "")}]
+    name_color_cycle = normalize_name_color_cycle(rules.get("name_color_cycle"))
     variables = []
     for mapping in mappings:
         field = str(mapping.get("field") or mapping.get("source") or "")
@@ -131,22 +132,12 @@ def _build_variables(
                 f"Order value cannot satisfy split policy for target: {target}"
             )
         variable = {"target": target, "field": field, "value": value}
-        if field == "text" and target == "Name":
-            variable["name_delimiter"] = _name_delimiter(mapping, rules)
+        if target == "Name" and name_color_cycle:
+            variable["name_color_cycle"] = name_color_cycle
         variables.append(variable)
     if not variables:
         raise GenericRuleRenderError("Order row does not produce any template variables.")
     return variables
-
-
-def _name_delimiter(mapping: Mapping[str, Any], rules: Mapping[str, Any]) -> str:
-    delimiter = str(mapping.get("delimiter") or "").strip()
-    if delimiter:
-        return delimiter
-    policies = rules.get("text_policies")
-    split_policy = policies.get("split") if isinstance(policies, Mapping) else None
-    delimiter = str(split_policy.get("delimiter") or "").strip() if isinstance(split_policy, Mapping) else ""
-    return delimiter or "|"
 
 
 def _read_rows(path: Path, *, sheet_name: str) -> list[Dict[str, Any]]:

@@ -13,6 +13,7 @@ from .template_rule_pack import (
     normalize_template_rule_pack,
     profile_definition,
 )
+from .name_color_cycle import validate_name_color_cycle
 from .template_locks import TEMPLATE_STATE_LOCK
 from .template_rule_execution import resolve_mapped_text
 
@@ -324,8 +325,12 @@ def _validate_editable_sections(
         if field in raw_rules and not isinstance(raw_rules.get(field), expected):
             errors.append(_issue(field, f"rules.{field} has an invalid JSON type."))
 
-    profile = str(pack.get("template", {}).get("profile") or "")
     rules = pack.get("rules", {})
+    color_cycle = raw_rules.get("name_color_cycle") if "name_color_cycle" in raw_rules else rules.get("name_color_cycle")
+    for message in validate_name_color_cycle(color_cycle):
+        errors.append(_issue("name_color_cycle", message))
+
+    profile = str(pack.get("template", {}).get("profile") or "")
     if profile != "bundle" and not rules.get("order_bindings"):
         errors.append(_issue("order_bindings", "Add at least one order field binding."))
     if profile != "bundle" and not rules.get("text_policies"):

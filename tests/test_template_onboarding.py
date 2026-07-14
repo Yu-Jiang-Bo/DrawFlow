@@ -265,6 +265,29 @@ def test_check_discards_retired_text_effect_payload():
     assert "effects" not in result["pack"]["rules"]
 
 
+def test_check_validates_name_color_cycle_without_a_color_count_limit():
+    pack = ready_pack()
+    pack["rules"]["name_color_cycle"] = {
+        "delimiter": "|",
+        "colors": ["#d71920", "#000000", "#0000ff", "#00aa00", "#ffaa00", "#663399"],
+    }
+
+    result = check_rule_pack(pack, template_id="DEMO001")
+
+    assert result["ok"] is True
+    assert result["pack"]["rules"]["name_color_cycle"]["colors"][-1] == "#663399".upper()
+
+
+def test_check_rejects_incomplete_name_color_cycle():
+    pack = ready_pack()
+    pack["rules"]["name_color_cycle"] = {"delimiter": "", "colors": ["#D71920"]}
+
+    result = check_rule_pack(pack, template_id="DEMO001")
+
+    assert {item["code"] for item in result["errors"]} >= {"name_color_cycle"}
+    assert "至少需要两个颜色" in " ".join(item["message"] for item in result["errors"])
+
+
 def test_validation_sample_preserves_numeric_zero():
     pack = ready_pack()
     pack["validation"]["sample"] = {

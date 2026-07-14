@@ -316,6 +316,19 @@ def test_template_rules_prefill_fixed_options_before_optional_supplement():
     assert "!hasConfiguredRuleValue(merged[key])" in INDEX_HTML
 
 
+def test_template_rule_supports_an_expandable_name_color_cycle():
+    assert "Name 多色循环（可选）" in INDEX_HTML
+    assert 'id="nameColorDelimiter"' in INDEX_HTML
+    assert 'id="nameColorRows"' in INDEX_HTML
+    assert 'id="addNameColorBtn"' in INDEX_HTML
+    assert "function addNameColor" in INDEX_HTML
+    assert "function collectNameColorCycle" in INDEX_HTML
+    assert "function displayNameColorCycle" in INDEX_HTML
+    assert "name_color_cycle: nameColorCycle" in INDEX_HTML
+    assert "name_color_cycle: \"请在“Name 多色循环”中至少保留两个 #RRGGBB 颜色，并填写分隔符\"" in INDEX_HTML
+    assert "colors.length >= 5" not in INDEX_HTML
+
+
 def test_scanned_option_suggestions_render_as_editable_option_groups():
     load_body = INDEX_HTML[
         INDEX_HTML.index("async function loadTemplateRuleText"):

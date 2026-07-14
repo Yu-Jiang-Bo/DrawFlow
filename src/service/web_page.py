@@ -435,6 +435,39 @@ INDEX_HTML = """<!doctype html>
       font-size: 12px;
       line-height: 1.5;
     }
+    .name-color-cycle-grid {
+      display: grid;
+      grid-template-columns: minmax(150px, 0.42fr) minmax(0, 1fr);
+      gap: 12px 16px;
+      align-items: start;
+    }
+    .name-color-list {
+      display: grid;
+      gap: 8px;
+    }
+    .name-color-row {
+      display: grid;
+      grid-template-columns: 42px minmax(0, 1fr) 36px;
+      gap: 8px;
+      align-items: center;
+    }
+    .name-color-row input[type="color"] {
+      width: 42px;
+      min-width: 42px;
+      min-height: 38px;
+      padding: 3px;
+      cursor: pointer;
+    }
+    .name-color-row input[data-name-color-value] {
+      min-width: 0;
+      text-transform: uppercase;
+    }
+    .name-color-empty {
+      margin: 0;
+      padding: 7px 0;
+      color: var(--muted);
+      font-size: 12px;
+    }
     .dimension-mode-card {
       display: grid;
       grid-template-columns: minmax(220px, 0.8fr) minmax(260px, 1.2fr);
@@ -795,6 +828,7 @@ INDEX_HTML = """<!doctype html>
       .preview-grid,
       .dimension-mode-card,
       .fixed-dimension-fields,
+      .name-color-cycle-grid,
       .structured-row,
       .structured-row.two,
       .structured-row.three,
@@ -1068,6 +1102,18 @@ INDEX_HTML = """<!doctype html>
                     <div><label for="textSourceColumn">订单内容列名</label><input id="textSourceColumn" placeholder="例如：定制信息 或 names" /></div>
                     <div><label for="textTargetName">模板文字对象</label><input id="textTargetName" placeholder="例如：Name" /></div>
                     <div><label for="textFitPolicy">文字适配方式</label><select id="textFitPolicy"><option value="scale_to_box">自动缩放适配</option><option value="text_fit_box">适配文字框</option><option value="none">不自动缩放</option></select></div>
+                  </div>
+                </div>
+
+                <div class="rule-section">
+                  <div class="rule-section-head">
+                    <h3 class="rule-section-title">Name 多色循环（可选）</h3>
+                    <button class="btn-subtle rule-add-btn" id="addNameColorBtn" type="button">+ 添加颜色</button>
+                  </div>
+                  <p class="rule-section-note">仅作用于名称恰好为 Name 的文字对象。系统按分隔符拆分内容，再按颜色顺序循环；不配置时保留模板原有颜色。</p>
+                  <div class="name-color-cycle-grid">
+                    <div><label for="nameColorDelimiter">分隔符</label><input id="nameColorDelimiter" value="|" placeholder="例如 |" /></div>
+                    <div><label>循环颜色</label><div class="name-color-list" id="nameColorRows"></div></div>
                   </div>
                 </div>
 
@@ -1419,6 +1465,7 @@ INDEX_HTML = """<!doctype html>
       document.getElementById("restoreSuggestionsBtn").addEventListener("click", restoreRuleSuggestions);
       document.getElementById("rescanTemplateBtn").addEventListener("click", rescanTemplate);
       document.getElementById("addDimensionRowBtn").addEventListener("click", addDimensionRow);
+      document.getElementById("addNameColorBtn").addEventListener("click", addNameColor);
       document.getElementById("dimensionMode").addEventListener("change", () => {
         state.dimensionRowsTouched = true;
         syncDimensionMode();
@@ -1458,6 +1505,7 @@ INDEX_HTML = """<!doctype html>
         "#textSourceColumn",
         "#textTargetName",
         "#textFitPolicy",
+        "#nameColorDelimiter",
         "#templateRuleNote",
         "#templateProfile",
         "#orderBindingsJson",
@@ -1499,6 +1547,28 @@ INDEX_HTML = """<!doctype html>
         state.assetMappingsTouched = true;
         renderTemplateRulePreview();
       });
+      const nameColorRows = document.getElementById("nameColorRows");
+      nameColorRows.addEventListener("input", event => {
+        const row = event.target.closest(".name-color-row");
+        if (!row) return;
+        const picker = row.querySelector("[data-name-color-picker]");
+        const value = row.querySelector("[data-name-color-value]");
+        if (event.target.matches("[data-name-color-picker]") && value) {
+          value.value = event.target.value.toUpperCase();
+        } else if (event.target.matches("[data-name-color-value]") && picker) {
+          const color = normalizeNameColorHex(event.target.value);
+          if (color) picker.value = color;
+        }
+        renderTemplateRulePreview();
+      });
+      nameColorRows.addEventListener("click", event => {
+        const button = event.target.closest("[data-remove-name-color]");
+        if (!button) return;
+        const row = button.closest(".name-color-row");
+        if (row) row.remove();
+        if (!nameColorRows.querySelector(".name-color-row")) setNameColorRows([]);
+        renderTemplateRulePreview();
+      });
       ["dimensionRows", "textSequenceRows"].forEach(id => {
         const container = document.getElementById(id);
         container.addEventListener("input", () => {
@@ -1537,6 +1607,56 @@ INDEX_HTML = """<!doctype html>
       rows.push(blankTextSequenceRow());
       setTextSequenceRows(rows);
       renderTemplateRulePreview();
+    }
+
+    function addNameColor() {
+      const colors = Array.from(document.querySelectorAll("[data-name-color-value]"))
+        .map(input => input.value.trim());
+      setNameColorRows(colors.length ? [...colors, ""] : ["", ""], { includeEmpty: true });
+      renderTemplateRulePreview();
+    }
+
+    function setNameColorRows(colors, options = {}) {
+      const includeEmpty = Boolean(options.includeEmpty);
+      const values = Array.isArray(colors)
+        ? colors.map(color => String(color || "").trim()).filter(color => includeEmpty || color)
+        : [];
+      const target = document.getElementById("nameColorRows");
+      target.innerHTML = values.length
+        ? values.map((color, index) => renderNameColorRow(color, index)).join("")
+        : '<p class="name-color-empty">未配置循环颜色，Name 会保留模板原有颜色。</p>';
+    }
+
+    function renderNameColorRow(color, index) {
+      const value = String(color || "").trim();
+      const pickerValue = normalizeNameColorHex(value) || "#000000";
+      return `
+        <div class="name-color-row">
+          <input type="color" data-name-color-picker value="${pickerValue}" aria-label="第 ${index + 1} 个循环颜色" />
+          <input data-name-color-value value="${escapeHtml(value)}" placeholder="#RRGGBB" aria-label="第 ${index + 1} 个循环颜色代码" />
+          <button class="row-remove-btn" type="button" data-remove-name-color aria-label="删除第 ${index + 1} 个循环颜色">×</button>
+        </div>
+      `;
+    }
+
+    function normalizeNameColorHex(value) {
+      const color = String(value || "").trim();
+      return /^#[0-9a-f]{6}$/i.test(color) ? color.toUpperCase() : "";
+    }
+
+    function collectNameColors() {
+      return Array.from(document.querySelectorAll("[data-name-color-value]"))
+        .map(input => input.value.trim())
+        .filter(Boolean);
+    }
+
+    function collectNameColorCycle() {
+      const colors = collectNameColors();
+      if (!colors.length) return {};
+      return {
+        delimiter: document.getElementById("nameColorDelimiter").value.trim(),
+        colors
+      };
     }
 
     function removeDynamicRuleRow(button, rowType) {
@@ -2273,6 +2393,7 @@ INDEX_HTML = """<!doctype html>
         order_bindings: "请在“文字内容设置”里填写订单内容列名",
         text_policies: "请填写文字变量规则，系统会自动生成基础文字适配策略",
         validation_sample: "请检查字段拆分规则，系统需要能生成一条可验证样例",
+        name_color_cycle: "请在“Name 多色循环”中至少保留两个 #RRGGBB 颜色，并填写分隔符",
         exceptions: "当前模板仍有无法执行的旧规则，请将其改为页面中的固定规则后再保存",
         scan_failed: "请重新上传并扫描模板文件"
       };
@@ -2289,6 +2410,7 @@ INDEX_HTML = """<!doctype html>
       delete savedBaseConfig.effects;
       delete savedBaseConfig.text_sequence_styles;
       const textRule = collectTextContentRule(baseConfig);
+      const nameColorCycle = collectNameColorCycle();
       const optionGroups = collectOptionGroups();
       const dimensionMode = document.getElementById("dimensionMode").value;
       const collectedDimensions = dimensionMode === "fixed" ? collectFixedDimensions() : collectDimensions();
@@ -2362,6 +2484,7 @@ INDEX_HTML = """<!doctype html>
         slot_mappings: slotMappings,
         order_bindings: textRule.source_column ? { text: textRule.source_column } : {},
         text_policies: { fit: textRule.fit },
+        name_color_cycle: nameColorCycle,
         defaults,
         option_overrides: {
           ...(isPlainObject(baseConfig.option_overrides) ? baseConfig.option_overrides : {}),
@@ -2736,6 +2859,7 @@ INDEX_HTML = """<!doctype html>
           <div class="preview-chip"><span>尺寸/版式组</span><strong>${escapeHtml(displayOptions(draft.style_options))}</strong></div>
           <div class="preview-chip"><span>尺寸对象</span><strong>${escapeHtml(displayDimensionTargets(draft.dimensions || {}, draft.dimension_mode))}</strong></div>
           <div class="preview-chip"><span>文字内容</span><strong>${escapeHtml(displayTextContent(draft))}</strong></div>
+          <div class="preview-chip"><span>Name 颜色循环</span><strong>${escapeHtml(displayNameColorCycle(draft.name_color_cycle))}</strong></div>
           <div class="preview-chip"><span>多个文字位置</span><strong>${escapeHtml(displayTextSequences(draft.text_sequences || []))}</strong></div>
           <div class="preview-chip"><span>默认值</span><strong>${escapeHtml(describeDefaults(draft.defaults || {}))}</strong></div>
           <div class="preview-chip"><span>特殊处理</span><strong>${escapeHtml(displayOverrides(draft.option_overrides || {}))}</strong></div>
@@ -2772,6 +2896,12 @@ INDEX_HTML = """<!doctype html>
       const source = String(bindings.text || "").trim();
       const target = String(mapping.slot || mapping.name || "").trim();
       return source && target ? `${source} -> ${target}` : "未填写";
+    }
+
+    function displayNameColorCycle(value) {
+      if (!isPlainObject(value) || !Array.isArray(value.colors) || !value.colors.length) return "未配置";
+      const delimiter = String(value.delimiter || "").trim() || "未填写分隔符";
+      return `按 ${delimiter} 循环：${value.colors.join(" / ")}`;
     }
 
     function displayOptionGroupRole(value) {
@@ -2819,6 +2949,8 @@ INDEX_HTML = """<!doctype html>
       document.getElementById("textSourceColumn").value = "";
       document.getElementById("textTargetName").value = "";
       document.getElementById("textFitPolicy").value = "scale_to_box";
+      document.getElementById("nameColorDelimiter").value = "|";
+      setNameColorRows([]);
       document.getElementById("templateRuleNote").value = "";
       document.getElementById("templateProfile").value = "unclassified";
       document.getElementById("scanVersion").value = "";
@@ -3121,6 +3253,9 @@ INDEX_HTML = """<!doctype html>
       document.getElementById("textSourceColumn").value = bindings.text || (legacyField && bindings[legacyField]) || "";
       document.getElementById("textTargetName").value = firstMapping.slot || firstMapping.name || "";
       document.getElementById("textFitPolicy").value = (config.text_policies && config.text_policies.fit) || "scale_to_box";
+      const nameColorCycle = isPlainObject(config.name_color_cycle) ? config.name_color_cycle : {};
+      document.getElementById("nameColorDelimiter").value = nameColorCycle.delimiter || "|";
+      setNameColorRows(nameColorCycle.colors || []);
 
       const defaults = config.defaults || {};
       document.getElementById("defaultFont").value = defaults.font || "";

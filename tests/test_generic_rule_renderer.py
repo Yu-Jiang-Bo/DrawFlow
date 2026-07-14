@@ -173,12 +173,16 @@ def test_numeric_zero_is_preserved_as_template_text(tmp_path):
     assert task["orders"][0]["variables"][0]["value"] == "0"
 
 
-def test_marks_name_target_for_hardcoded_alternating_colors(tmp_path):
+def test_passes_configured_name_color_cycle_to_exact_name_target(tmp_path):
     _, template = make_template(tmp_path)
     order_path = tmp_path / "orders.xlsx"
     make_orders(order_path, custom="Alice|Bob|Carol")
     rules = base_rules()
     rules["slot_mappings"] = [{"field": "text", "slot": "Name"}]
+    rules["name_color_cycle"] = {
+        "delimiter": "|",
+        "colors": ["#D71920", "#000000", "#0000FF"],
+    }
 
     task = build_generic_render_task(template, rules, order_path, tmp_path / "output.ai")
 
@@ -187,9 +191,25 @@ def test_marks_name_target_for_hardcoded_alternating_colors(tmp_path):
             "target": "Name",
             "field": "text",
             "value": "Alice|Bob|Carol",
-            "name_delimiter": "|",
+            "name_color_cycle": {
+                "delimiter": "|",
+                "colors": ["#D71920", "#000000", "#0000FF"],
+            },
         }
     ]
+
+
+def test_does_not_pass_name_color_cycle_to_numbered_name_targets(tmp_path):
+    _, template = make_template(tmp_path)
+    order_path = tmp_path / "orders.xlsx"
+    make_orders(order_path, custom="Alice|Bob")
+    rules = base_rules()
+    rules["slot_mappings"] = [{"field": "text", "slot": "Name1"}]
+    rules["name_color_cycle"] = {"delimiter": "|", "colors": ["#D71920", "#000000"]}
+
+    task = build_generic_render_task(template, rules, order_path, tmp_path / "output.ai")
+
+    assert "name_color_cycle" not in task["orders"][0]["variables"][0]
 
 
 def test_builds_effective_transform_for_each_selected_option(tmp_path):

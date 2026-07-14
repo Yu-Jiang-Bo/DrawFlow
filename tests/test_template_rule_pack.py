@@ -172,6 +172,27 @@ def test_discards_legacy_alternating_color_configuration():
     assert "effects" not in pack["rules"]
 
 
+def test_normalizes_name_color_cycle_without_a_color_count_limit():
+    pack = normalize_template_rule_pack(
+        {
+            "$schema": RULE_PACK_SCHEMA,
+            "template": {"template_id": "TEXT004", "profile": PROFILE_PURE_TEXT},
+            "rules": {
+                "name_color_cycle": {
+                    "delimiter": "|",
+                    "colors": ["#d71920", "#000000", "#0000ff", "#00aa00", "#ffaa00", "#663399"],
+                }
+            },
+            "validation": {"status": "draft", "unresolved_items": []},
+        }
+    )
+
+    assert pack["rules"]["name_color_cycle"] == {
+        "delimiter": "|",
+        "colors": ["#D71920", "#000000", "#0000FF", "#00AA00", "#FFAA00", "#663399".upper()],
+    }
+
+
 def test_profiles_define_type_specific_requirements():
     assert profile_definition(PROFILE_PURE_TEXT).required_rule_sections == ("font_options", "text_targets")
     assert profile_definition(PROFILE_FIXED_FONT_DESIGN).required_rule_sections == (

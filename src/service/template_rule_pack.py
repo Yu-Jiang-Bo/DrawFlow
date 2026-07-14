@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, Iterable, Mapping
 
 from .llm_rule_parser import normalize_option_list
+from .name_color_cycle import normalize_name_color_cycle
 
 
 RULE_PACK_SCHEMA = "custom-renderer/template-rule-pack"
@@ -95,6 +96,7 @@ def migrate_legacy_template_rule(payload: Mapping[str, Any], *, template_id: str
         "text_targets": text_targets,
         "text_sequences": _dict_list(source.get("text_sequences")),
         "text_policies": _dict(source.get("text_policies")),
+        "name_color_cycle": normalize_name_color_cycle(source.get("name_color_cycle")),
         "slot_mappings": _dict_list(source.get("slot_mappings")),
         "order_bindings": _dict(source.get("order_bindings")),
         "asset_mappings": _dict_list(source.get("asset_mappings")),
