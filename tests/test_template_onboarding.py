@@ -46,8 +46,22 @@ def test_check_requires_profile_sections_and_resolved_items():
     result = check_rule_pack(pack, template_id="DEMO001")
 
     assert result["ok"] is False
-    assert {item["code"] for item in result["errors"]} == {"design_options", "mapping"}
+    assert {item["code"] for item in result["errors"]} == {"mapping"}
     assert result["pack"]["validation"]["status"] == "invalid"
+
+
+def test_unclassified_profile_is_advisory_when_concrete_rules_are_complete():
+    pack = ready_pack()
+    pack["template"]["profile"] = "unclassified"
+    pack["validation"]["unresolved_items"] = [
+        {"code": "profile", "message": "无法从扫描确定模板 Profile"}
+    ]
+
+    result = check_rule_pack(pack, template_id="DEMO001")
+
+    assert result["ok"] is True
+    assert result["errors"] == []
+    assert [item["code"] for item in result["warnings"]] == ["profile"]
 
 
 def test_confirmation_required_is_advisory_until_explicit_confirm():
@@ -145,6 +159,27 @@ def test_check_validates_binding_sample_and_asset_references():
     assert "unknown targets: UnknownTarget" in messages
     assert "unknown option: UnknownDesign" in messages
     assert "unknown asset: missing.ai" in messages
+
+
+def test_check_rejects_unbound_and_unverified_slot_mappings():
+    pack = ready_pack()
+    pack["rules"]["text_targets"] = [{"name": "Name1"}, {"name": "Title1"}]
+    pack["rules"]["slot_mappings"] = [
+        {"field": "text", "slot": "Name1"},
+        {"field": "title", "slot": "Title1"},
+    ]
+    pack["rules"]["order_bindings"] = {"text": "custom_text"}
+    pack["validation"]["sample"] = {
+        "input": {"custom_text": "Alice"},
+        "expected": {"Name1": "Alice"},
+    }
+
+    result = check_rule_pack(pack, template_id="DEMO001")
+
+    assert result["ok"] is False
+    messages = " ".join(item["message"] for item in result["errors"])
+    assert "order bindings for fields: title" in messages
+    assert "missing targets: Title1" in messages
 
 
 def test_check_rejects_unsupported_policy_empty_asset_catalog_and_wrong_sample_result():

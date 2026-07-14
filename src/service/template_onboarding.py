@@ -17,7 +17,7 @@ from .template_locks import TEMPLATE_STATE_LOCK
 from .template_rule_execution import resolve_mapped_text
 
 
-ADVISORY_CODES = {"confirmation_required"}
+ADVISORY_CODES = {"confirmation_required", "profile"}
 DEFAULT_SUPPORTED_CAPABILITIES = {
     "compose_templates",
     "export_ai8",
@@ -56,11 +56,7 @@ def check_rule_pack(
     profile = str(pack["template"].get("profile") or "").strip()
     definition = profile_definition(profile)
     if profile == PROFILE_UNCLASSIFIED or definition is None:
-        errors.append(_issue("profile", "Select a supported template profile."))
-    else:
-        for section in definition.required_rule_sections:
-            if not rules.get(section):
-                errors.append(_issue(section, f"Profile requires rules.{section}."))
+        warnings.append(_issue("profile", "未识别出模板类型；本次只按已填写的具体规则检查。"))
 
     evidence = pack["structure"].get("evidence", {})
     if isinstance(evidence, Mapping) and str(evidence.get("fatal_error") or "").strip():
@@ -70,6 +66,8 @@ def check_rule_pack(
         if not isinstance(item, Mapping):
             continue
         code = str(item.get("code") or "unresolved").strip()
+        if code == "profile" and (profile == PROFILE_UNCLASSIFIED or definition is None):
+            continue
         if code == "design_asset_mapping" and _has_complete_design_asset_mappings(rules):
             continue
         issue = _issue(code, str(item.get("message") or "Unresolved onboarding item."))
@@ -332,6 +330,8 @@ def _validate_editable_sections(
         errors.append(_issue("order_bindings", "Add at least one order field binding."))
     if profile != "bundle" and not rules.get("text_policies"):
         errors.append(_issue("text_policies", "Define a text fit or split policy."))
+    if profile != "bundle" and not rules.get("slot_mappings") and not rules.get("text_targets"):
+        errors.append(_issue("text_targets", "Add at least one executable text target or variable mapping."))
 
     bindings = rules.get("order_bindings", {})
     if isinstance(bindings, Mapping):
@@ -340,6 +340,28 @@ def _validate_editable_sections(
                 errors.append(_issue("order_bindings", "Order binding keys and columns cannot be empty."))
             elif str(field) not in ORDER_FIELDS:
                 errors.append(_issue("order_bindings", f"Unsupported order field: {field}"))
+
+    slot_mappings = rules.get("slot_mappings", [])
+    slot_mapping_items = [item for item in slot_mappings if isinstance(item, Mapping)] if isinstance(slot_mappings, list) else []
+    mapping_fields = {
+        str(item.get("field") or item.get("source") or "").strip()
+        for item in slot_mapping_items
+        if str(item.get("field") or item.get("source") or "").strip()
+    }
+    mapping_targets = {
+        str(item.get("slot") or item.get("name") or "").strip()
+        for item in slot_mapping_items
+        if str(item.get("slot") or item.get("name") or "").strip()
+    }
+    if isinstance(bindings, Mapping):
+        missing_mapping_bindings = sorted(field for field in mapping_fields if field not in bindings)
+        if missing_mapping_bindings:
+            errors.append(
+                _issue(
+                    "slot_mappings",
+                    "Slot mappings require order bindings for fields: " + ", ".join(missing_mapping_bindings),
+                )
+            )
 
     policies = rules.get("text_policies", {})
     if isinstance(policies, Mapping):
@@ -368,11 +390,18 @@ def _validate_editable_sections(
             str(item.get("name") or item.get("slot") or "").strip()
             for item in [*rules.get("text_targets", []), *rules.get("slot_mappings", [])]
             if isinstance(item, Mapping)
+            and str(item.get("name") or item.get("slot") or "").strip()
         }
+        targets.update(mapping_targets)
         unknown_targets = sorted(set(sample["expected"]) - targets)
         if unknown_targets:
             errors.append(
                 _issue("validation_sample", f"Validation expected references unknown targets: {', '.join(unknown_targets)}")
+            )
+        missing_expected_targets = sorted(targets - set(sample["expected"]))
+        if missing_expected_targets:
+            errors.append(
+                _issue("validation_sample", f"Validation expected is missing targets: {', '.join(missing_expected_targets)}")
             )
         predicted = _predict_sample_output(rules, sample["input"])
         if predicted != dict(sample["expected"]):

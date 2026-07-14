@@ -144,6 +144,14 @@ def test_template_onboarding_requires_scan_check_and_confirmation():
     assert "profileWrapper.hidden = true" in INDEX_HTML
     assert 'id="templateRuleDescription"' in INDEX_HTML
     assert "extractTemplateRules" in INDEX_HTML
+    assert "分析补充说明" in INDEX_HTML
+    assert "将补充说明生成草稿" not in INDEX_HTML
+    assert "保存版本备注" in INDEX_HTML
+    assert "不参与渲染" in INDEX_HTML
+    assert "特殊规则说明" in INDEX_HTML
+    assert "mergeExceptionNote" in INDEX_HTML
+    assert "appendAdvancedExceptionNote" in INDEX_HTML
+    assert "已作为待处理特殊规则保留" in INDEX_HTML
     assert 'id="rescanTemplateBtn"' in INDEX_HTML
     assert "rescanTemplate" in INDEX_HTML
     assert 'id="uploadScanTemplateBtn"' in INDEX_HTML
@@ -175,6 +183,26 @@ def test_template_onboarding_requires_scan_check_and_confirmation():
     ]
     assert "resetTemplateRuleFields()" not in fill_body
     assert 'document.getElementById("fieldSources").value = formatFieldSources' in INDEX_HTML
+
+
+def test_template_rule_check_infers_hidden_business_fields():
+    assert "currentRulePackProfile" in INDEX_HTML
+    assert "inferOrderBindingsFromRules" in INDEX_HTML
+    assert "mergeOrderBindings" in INDEX_HTML
+    assert "mergeTextPolicies" in INDEX_HTML
+    assert "mergeValidationSample" in INDEX_HTML
+    assert "rules.order_bindings = mergeOrderBindings" in INDEX_HTML
+    assert "rules.text_policies = mergeTextPolicies" in INDEX_HTML
+    assert "const sample = mergeValidationSample" in INDEX_HTML
+    assert "sequences.forEach(item =>" in INDEX_HTML
+    assert "rules.slot_mappings.forEach(item =>" in INDEX_HTML
+    assert "result[field] = field" in INDEX_HTML
+    assert "if (sequences.length)" in INDEX_HTML
+    assert "Object.values(splitGroups).forEach" in INDEX_HTML
+    assert "请选择模板规则类型" not in INDEX_HTML
+    assert "模板类型仅供系统参考" in INDEX_HTML
+    assert "每个订单字段都要能生成对应模板变量" in INDEX_HTML
+    assert "字段拆分与变量序列" in INDEX_HTML
 
 
 def test_template_rule_payload_preserves_legacy_config():
@@ -242,7 +270,7 @@ def test_template_rules_prefill_fixed_options_before_optional_supplement():
     assert "当前配置与系统建议不同" in INDEX_HTML
     assert 'specialSection.insertAdjacentElement("afterend", ruleSection)' in INDEX_HTML
     assert "补充说明（可选）" in INDEX_HTML
-    assert "将补充说明生成草稿" in INDEX_HTML
+    assert "分析补充说明" in INDEX_HTML
     assert "生成草稿不会覆盖已填写内容" in INDEX_HTML
     assert "function prefillScannedOptionSuggestions" in INDEX_HTML
     assert "function mergeScannedOptionGroups" in INDEX_HTML

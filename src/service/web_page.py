@@ -1040,7 +1040,7 @@ INDEX_HTML = """<!doctype html>
                     <div><label for="textPoliciesJson">文字适配/拆分策略</label><textarea id="textPoliciesJson" placeholder='{"fit":"scale_to_box"}'></textarea></div>
                     <div><label for="outputTransformsJson">输出处理</label><textarea id="outputTransformsJson" placeholder='{"color_mode":"CMYK"}'></textarea></div>
                     <div class="field-full"><label for="validationSampleJson">验证样例</label><textarea id="validationSampleJson" placeholder='{"input":{},"expected":{}}'></textarea></div>
-                    <div class="field-full"><label for="templateChangeSummary">本次确认说明</label><input id="templateChangeSummary" placeholder="例如：核对对象命名并补齐 Design 映射" /></div>
+                    <div class="field-full"><label for="templateChangeSummary">保存版本备注</label><input id="templateChangeSummary" placeholder="仅用于版本历史和回滚说明，不参与渲染。例如：核对对象命名并补齐 Design 映射" /></div>
                   </div>
                   <div class="preview-box" id="templateVersionHistory">尚无已确认版本</div>
                 </div>
@@ -1133,8 +1133,8 @@ INDEX_HTML = """<!doctype html>
                   <details class="advanced-rule-box">
                     <summary>高级例外规则（可选）</summary>
                     <div class="advanced-rule-body">
-                      <label for="templateAdvancedRules">例外说明</label>
-                      <textarea id="templateAdvancedRules" placeholder="例如：Design5 的第二行文字需要向上偏移 2mm。这里仅作为待确认说明保存，不会直接自动参与出图。"></textarea>
+                      <label for="templateAdvancedRules">特殊规则说明</label>
+                      <textarea id="templateAdvancedRules" placeholder="例如：名字顺序 1、3、5、7 使用红色，2、4、6 使用白色。这里保存尚未结构化的特殊规则；标为待人工处理时会阻止启用，避免误以为已能自动出图。"></textarea>
                       <label for="templateExceptionStatus">例外状态</label>
                       <select id="templateExceptionStatus"><option value="none">无例外</option><option value="resolved">已解决</option><option value="manual_review">待人工处理（阻止启用）</option></select>
                     </div>
@@ -1378,13 +1378,13 @@ INDEX_HTML = """<!doctype html>
       const panel = document.createElement("div");
       panel.className = "extract-panel";
       panel.innerHTML = `
-        <label for="templateRuleDescription">补充规则说明</label>
-        <textarea id="templateRuleDescription" placeholder="例如：名字位置 1、3、5、7 使用红色，2、4、6 使用白色；或某个固定项无法表达的特殊处理。"></textarea>
+        <label for="templateRuleDescription">补充说明转草稿</label>
+        <textarea id="templateRuleDescription" placeholder="优先用于补充固定项写不下的说明。能识别的会生成草稿；暂不能识别成固定规则的内容会保留到“特殊规则说明”，等待人工处理或后续开发渲染支持。"></textarea>
         <div class="extract-actions">
-          <button class="btn-subtle" id="extractTemplateRulesBtn" type="button">将补充说明生成草稿</button>
+          <button class="btn-subtle" id="extractTemplateRulesBtn" type="button">分析补充说明</button>
           <span class="extract-status" id="templateExtractionStatus">未填写补充说明</span>
         </div>
-        <div class="preview-box readonly-summary" id="templateExtractionSummary">填写补充说明后，系统会在这里显示可补充的规则和仍需确认的内容。</div>`;
+        <div class="preview-box readonly-summary" id="templateExtractionSummary">填写补充说明后，系统会区分：已转成固定规则的内容，以及仅作为特殊规则说明保留的内容。</div>`;
       if (formGrid) ruleSection.insertBefore(panel, formGrid);
       const scanSection = profile && profile.closest(".rule-section");
       if (scanSection) {
@@ -1419,7 +1419,7 @@ INDEX_HTML = """<!doctype html>
       document.getElementById("extractTemplateRulesBtn").addEventListener("click", extractTemplateRules);
       document.getElementById("templateRuleDescription").addEventListener("input", () => {
         state.templateRulesDescriptionDirty = true;
-        document.getElementById("templateExtractionStatus").textContent = "补充说明已修改，如需采用建议请重新生成草稿";
+        document.getElementById("templateExtractionStatus").textContent = "补充说明已修改，如需采用请重新分析";
       });
       document.getElementById("checkTemplateRuleBtn").addEventListener("click", checkTemplateRule);
       document.getElementById("saveTemplateBtn").addEventListener("click", saveTemplate);
@@ -2041,21 +2041,30 @@ INDEX_HTML = """<!doctype html>
           }
         });
         merged.natural_text = description;
+        const recognizedItems = Array.isArray(result.summary) ? result.summary : [];
+        const storedAsException = recognizedItems.length === 0;
+        if (storedAsException) {
+          merged.exceptions = mergeExceptionNote(merged.exceptions, description, "manual_review");
+        }
         state.templateRuleBaseConfig = merged;
         state.optionGroupsTouched = false;
         state.dimensionRowsTouched = false;
         state.textSequenceRowsTouched = false;
         fillTemplateRuleFields(merged);
+        if (storedAsException) {
+          appendAdvancedExceptionNote(description);
+          document.getElementById("templateExceptionStatus").value = "manual_review";
+        }
         setHiddenRuleJson("orderBindingsJson", merged.order_bindings || {});
         setHiddenRuleJson("assetMappingsJson", merged.asset_mappings || []);
         setHiddenRuleJson("textPoliciesJson", merged.text_policies || {});
         setHiddenRuleJson("outputTransformsJson", merged.transforms || {});
         setHiddenRuleJson("validationSampleJson", draft.validation_sample || parseJsonField("validationSampleJson", {}));
         state.templateRulesDescriptionDirty = false;
-        renderTemplateExtractionFeedback(result);
+        renderTemplateExtractionFeedback(result, storedAsException);
         renderTemplateRulePreview();
-        status.textContent = "已生成补充草稿，未覆盖固定项";
-        setMessage("templateSaveMessage", "补充规则草稿已生成，请核对后再检查", "ok");
+        status.textContent = storedAsException ? "已作为待处理特殊规则保留" : "已生成补充草稿，未覆盖固定项";
+        setMessage("templateSaveMessage", storedAsException ? "补充说明已保留为特殊规则；当前尚未自动参与渲染，需处理后再启用" : "补充规则草稿已生成，请核对后再检查", storedAsException ? "warn" : "ok");
       } catch (error) {
         status.textContent = "补充草稿生成失败";
         setMessage("templateSaveMessage", String(error.message || error), "error");
@@ -2068,19 +2077,42 @@ INDEX_HTML = """<!doctype html>
       return String(value == null ? "" : value).trim().length > 0;
     }
 
+    function mergeExceptionNote(existing, note, status = "manual_review") {
+      const result = { ...(isPlainObject(existing) ? existing : {}) };
+      const text = String(note || "").trim();
+      if (!text) return result;
+      const current = String(result.note || "").trim();
+      result.note = current && !current.includes(text) ? `${current}\n${text}` : (current || text);
+      result.status = status;
+      return result;
+    }
+
+    function appendAdvancedExceptionNote(note) {
+      const input = document.getElementById("templateAdvancedRules");
+      if (!input) return;
+      const text = String(note || "").trim();
+      if (!text) return;
+      const current = input.value.trim();
+      input.value = current && !current.includes(text) ? `${current}\n${text}` : (current || text);
+    }
+
     function setHiddenRuleJson(id, value) {
       const input = document.getElementById(id);
       if (input) input.value = JSON.stringify(value == null ? {} : value);
     }
 
-    function renderTemplateExtractionFeedback(result) {
+    function renderTemplateExtractionFeedback(result, storedAsException = false) {
       const summary = Array.isArray(result.summary) ? result.summary : [];
       const unresolved = Array.isArray(result.unresolved) ? result.unresolved : [];
       const lines = [];
-      lines.push(summary.length ? "已识别：" : "暂未识别到可直接使用的规则：");
+      lines.push(summary.length ? "已转成固定规则草稿：" : "暂未识别到可直接转成固定项的规则。");
       summary.forEach(item => lines.push(`- ${item}`));
+      if (storedAsException) {
+        lines.push("已保留为特殊规则说明：");
+        lines.push("- 这类规则目前不会自动参与渲染，已放入“特殊规则说明”并标记为待人工处理。");
+      }
       if (unresolved.length) {
-        lines.push("待补充：");
+        lines.push("如果你希望系统自动生成固定规则，还需要补充：");
         unresolved.forEach(item => lines.push(`- ${item}`));
       }
       document.getElementById("templateExtractionSummary").textContent = lines.join("\\n");
@@ -2104,7 +2136,7 @@ INDEX_HTML = """<!doctype html>
         );
         const issues = [...(result.errors || []), ...(result.warnings || [])];
         document.getElementById("templateRulePreview").innerHTML = renderOnboardingIssues(result, issues);
-        const blockers = (result.errors || []).map(formatRuleBlocker).filter(Boolean);
+        const blockers = [...new Set((result.errors || []).map(formatRuleBlocker).filter(Boolean))];
         const blockerText = blockers.length ? blockers.slice(0, 3).join("；") : "请查看下方规则检查结果";
         setMessage("templateSaveMessage", result.ok ? "后端检查通过，等待你最终确认" : `不能启用：${blockerText}${blockers.length > 3 ? "；请查看下方规则检查结果" : ""}`, result.ok ? "ok" : "error");
         return Boolean(result.ok);
@@ -2118,24 +2150,118 @@ INDEX_HTML = """<!doctype html>
       const source = state.templateOnboarding && state.templateOnboarding.draft;
       if (!source) throw new Error("缺少扫描草稿，不能确认模板");
       const rules = buildTemplateRulePayload();
-      rules.order_bindings = parseJsonField("orderBindingsJson", {});
+      rules.order_bindings = mergeOrderBindings(
+        parseJsonField("orderBindingsJson", {}),
+        inferOrderBindingsFromRules(rules)
+      );
       rules.asset_mappings = collectDesignAssetMappings();
-      rules.text_policies = parseJsonField("textPoliciesJson", {});
+      rules.text_policies = mergeTextPolicies(parseJsonField("textPoliciesJson", {}), rules);
       rules.transforms = parseJsonField("outputTransformsJson", {});
+      const profile = currentRulePackProfile(source);
+      const sample = mergeValidationSample(parseJsonField("validationSampleJson", {}), rules);
       const unresolved = ((source.validation && source.validation.unresolved_items) || []).filter(item => {
-        if (item.code === "profile") return document.getElementById("templateProfile").value === "unclassified";
+        if (item.code === "profile") return profile === "unclassified";
         if (item.code === "text_targets") return !hasSlotsOrMappings(rules);
         if (item.code === "option_group_names") return !rules.option_groups.length;
         return item.code !== "confirmation_required";
       });
       return {
         ...source,
-        template: { ...source.template, template_id: document.getElementById("templateId").value.trim(), profile: document.getElementById("templateProfile").value },
+        template: { ...source.template, template_id: document.getElementById("templateId").value.trim(), profile },
         structure: source.structure,
         rules,
-        validation: { ...source.validation, status: "draft", unresolved_items: unresolved, sample: parseJsonField("validationSampleJson", {}) },
+        validation: { ...source.validation, status: "draft", unresolved_items: unresolved, sample },
         audit: source.audit
       };
+    }
+
+    function currentRulePackProfile(source) {
+      const visibleProfile = document.getElementById("templateProfile").value;
+      if (visibleProfile && visibleProfile !== "unclassified") return visibleProfile;
+      const sourceProfile = source && source.template ? String(source.template.profile || "") : "";
+      if (sourceProfile && sourceProfile !== "unclassified") return sourceProfile;
+      return "unclassified";
+    }
+
+    function inferOrderBindingsFromRules(rules) {
+      const result = {};
+      const sequences = Array.isArray(rules.text_sequences) ? rules.text_sequences : [];
+      sequences.forEach(item => {
+        const field = String((item && item.field) || "").trim();
+        if (field) result[field] = field;
+      });
+      if (Array.isArray(rules.slot_mappings)) {
+        rules.slot_mappings.forEach(item => {
+          const field = String((item && (item.field || item.source)) || "").trim();
+          if (field) result[field] = field;
+        });
+      }
+      if (!Object.keys(result).length && Array.isArray(rules.text_targets) && rules.text_targets.length) result.text = "text";
+      return result;
+    }
+
+    function mergeOrderBindings(existing, inferred) {
+      return {
+        ...(isPlainObject(inferred) ? inferred : {}),
+        ...(isPlainObject(existing) ? existing : {})
+      };
+    }
+
+    function mergeTextPolicies(existing, rules) {
+      const merged = { ...(isPlainObject(existing) ? existing : {}) };
+      if (!merged.fit && hasSlotsOrMappings(rules)) merged.fit = "scale_to_box";
+      const sequences = Array.isArray(rules.text_sequences) ? rules.text_sequences : [];
+      const splitSequence = sequences.find(item => item && item.delimiter);
+      if (splitSequence && !merged.split) {
+        merged.split = {
+          delimiter: splitSequence.delimiter,
+          max_parts: Number(splitSequence.count || 1),
+          overflow: "reject",
+          trim: true
+        };
+      }
+      return merged;
+    }
+
+    function mergeValidationSample(existing, rules) {
+      if (isPlainObject(existing) && isPlainObject(existing.input) && isPlainObject(existing.expected)) {
+        return existing;
+      }
+      const bindings = isPlainObject(rules.order_bindings) ? rules.order_bindings : {};
+      const input = {};
+      const expected = {};
+      const sequences = Array.isArray(rules.text_sequences) ? rules.text_sequences.filter(item => item && item.field) : [];
+      if (sequences.length) {
+        sequences.forEach((item, sequenceIndex) => {
+          const column = bindings[item.field] || item.field;
+          const values = item.variables.map((_, index) => `示例${sequenceIndex + 1}-${index + 1}`);
+          input[column] = item.delimiter ? values.join(item.delimiter) : values[0];
+          item.variables.forEach((variable, index) => {
+            expected[variable] = values[index] || "";
+          });
+        });
+      } else if (Array.isArray(rules.slot_mappings) && rules.slot_mappings.length) {
+        const splitGroups = {};
+        rules.slot_mappings.forEach((mapping, index) => {
+          const field = mapping.field || mapping.source || "text";
+          const target = mapping.slot || mapping.name || `Text${index + 1}`;
+          const column = bindings[field] || field;
+          const delimiter = mapping.delimiter || "";
+          if (delimiter && mapping.sequence_index) {
+            const key = `${field}::${delimiter}`;
+            if (!splitGroups[key]) splitGroups[key] = { column, delimiter, values: [] };
+            splitGroups[key].values[Number(mapping.sequence_index) - 1] = `示例${index + 1}`;
+            expected[target] = `示例${index + 1}`;
+          } else {
+            input[column] = `示例${index + 1}`;
+            expected[target] = `示例${index + 1}`;
+          }
+        });
+        Object.values(splitGroups).forEach(group => {
+          input[group.column] = group.values.map(value => value || "").join(group.delimiter);
+        });
+      }
+      return { input, expected };
     }
 
     function parseJsonField(id, fallback) {
@@ -2146,14 +2272,28 @@ INDEX_HTML = """<!doctype html>
     }
 
     function renderOnboardingIssues(result, issues) {
-      const rows = issues.length ? issues.map(item => `<li>${escapeHtml(item.code)}：${escapeHtml(item.message)}</li>`).join("") : "<li>无阻断项</li>";
+      const rows = issues.length ? issues.map(item => `<li>${escapeHtml(formatRuleIssue(item))}</li>`).join("") : "<li>无阻断项</li>";
       return `<div class="preview-chip"><span>后端检查</span><strong>${result.ok ? "通过" : "未通过"}</strong></div><ul>${rows}</ul>`;
     }
 
     function formatRuleBlocker(item) {
       const code = String((item && item.code) || "");
-      const names = { profile: "请选择模板规则类型", text_targets: "补充文字目标", option_group_names: "补充选项组角色", order_bindings: "补充订单字段绑定", text_policies: "补充文字适配/拆分规则", validation_sample: "补充验证样例", exceptions: "处理高级例外", scan_failed: "重新扫描模板" };
+      const names = {
+        profile: "模板类型仅供系统参考；启用与否只按已填写的具体规则检查",
+        text_targets: "请在“字段拆分与变量序列”里填写要替换的订单字段和模板变量",
+        slot_mappings: "请检查“字段拆分与变量序列”：每个订单字段都要能生成对应模板变量",
+        option_group_names: "请补充选项组角色，例如字体组、设计组或尺寸/版式组",
+        order_bindings: "请在“字段拆分与变量序列”里填写订单字段名，系统会自动生成字段对应关系",
+        text_policies: "请填写文字变量规则，系统会自动生成基础文字适配策略",
+        validation_sample: "请检查字段拆分规则，系统需要能生成一条可验证样例",
+        exceptions: "请处理高级例外，未解决的例外不能启用模板",
+        scan_failed: "请重新上传并扫描模板文件"
+      };
       return names[code] || String((item && item.message) || "规则配置不完整");
+    }
+
+    function formatRuleIssue(item) {
+      return formatRuleBlocker(item);
     }
 
     function buildTemplateRulePayload() {
@@ -2663,7 +2803,7 @@ INDEX_HTML = """<!doctype html>
       document.getElementById("fieldSources").value = "";
       document.getElementById("templateRuleDescription").value = "";
       document.getElementById("templateExtractionStatus").textContent = "未填写补充说明";
-      document.getElementById("templateExtractionSummary").textContent = "填写补充说明后，系统会在这里显示可补充的规则和仍需确认的内容。";
+      document.getElementById("templateExtractionSummary").textContent = "填写补充说明后，系统会区分：已转成固定规则的内容，以及仅作为特殊规则说明保留的内容。";
       state.templateRulesDescriptionDirty = false;
       document.getElementById("orderBindingsJson").value = "{}";
       document.getElementById("assetMappingsJson").value = "[]";
@@ -3181,7 +3321,7 @@ INDEX_HTML = """<!doctype html>
         return;
       }
       if (state.templateRulesDescriptionDirty) {
-        setMessage("templateSaveMessage", "补充说明已修改，请先点击“将补充说明生成草稿”", "error");
+        setMessage("templateSaveMessage", "补充说明已修改，请先点击“分析补充说明”", "error");
         return;
       }
       if (!state.templateOnboarding || !state.templateOnboarding.draft) {
