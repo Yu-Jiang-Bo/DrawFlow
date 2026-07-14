@@ -28,6 +28,7 @@ from .generic_rule_renderer import build_generic_render_task
 from .llm_rule_parser import normalize_option_list
 from .rule_center import check_template_definition, curved_layout_overrides, output_color_mode, read_template_rule_config
 from .template_registry import TemplateDefinition, TemplateRegistry
+from .template_rule_ast import RULE_AST_SCHEMA, font_styles_from_ast
 
 
 SUPPORTED_RENDER_PIPELINES = frozenset(
@@ -58,13 +59,14 @@ class RenderService:
             if not rule_check["renderable"]:
                 missing = "；".join(item["message"] for item in rule_check["missing"])
                 raise RenderServiceError(f"模板规则不完整，无法渲染：{missing}")
-            if template.pipeline == "jjmb_202508":
+            pipeline = _effective_pipeline(template)
+            if pipeline == "jjmb_202508":
                 result = self._run_202508(record, template)
-            elif template.pipeline == "jjmb_202603_grouped":
+            elif pipeline == "jjmb_202603_grouped":
                 result = self._run_202603_grouped(record, template)
-            elif template.pipeline == "jjmb_202509_curved":
+            elif pipeline == "jjmb_202509_curved":
                 result = self._run_202509_curved(record, template)
-            elif template.pipeline == "generic_rules_only":
+            elif pipeline == "generic_rules_only":
                 result = self._run_generic_rules(record, template)
             else:
                 raise RenderServiceError(f"不支持的渲染 pipeline: {template.pipeline}")
@@ -164,10 +166,7 @@ class RenderService:
             columns=request["columns"],
             show_style_boxes=not request["hide_boxes"],
             color_mode=output_color_mode(template_rules),
-            font_styles=font_style_by_option(
-                template_rules.get("font_style_rules"),
-                legacy_option_overrides=template_rules.get("option_overrides"),
-            ),
+            font_styles=_font_styles(template_rules),
         )
         task_file = job_dir / "render-task.json"
         self._write_json(task_file, task)
@@ -223,10 +222,7 @@ class RenderService:
                 _design_asset_mappings(template, template_rules, design_fonts)
                 if has_design_mapping_rules else None
             ),
-            font_styles=font_style_by_option(
-                template_rules.get("font_style_rules"),
-                legacy_option_overrides=template_rules.get("option_overrides"),
-            ),
+            font_styles=_font_styles(template_rules),
         )
         task_file = job_dir / "render-task.json"
         self._write_json(task_file, task.to_json_dict())
@@ -369,6 +365,17 @@ def _to_bool(value: object) -> bool:
     return bool(value)
 
 
+def _effective_pipeline(template: TemplateDefinition) -> str:
+    if template.pipeline == "generic_rules_only":
+        return template.pipeline
+    rules = read_template_rule_config(template.template_rules_config)
+    bindings = rules.get("order_bindings")
+    has_targets = bool(rules.get("slot_mappings") or rules.get("text_targets") or rules.get("asset_mappings"))
+    if isinstance(bindings, Mapping) and bindings and has_targets:
+        return "generic_rules_only"
+    return template.pipeline
+
+
 def _configured_font_options(*configs: Dict[str, Any]) -> List[str] | None:
     for config in configs:
         value = config.get("font_options") if isinstance(config, dict) else None
@@ -445,6 +452,16 @@ def _merge_202508_template_config(base: Dict[str, Any], reference: Dict[str, Any
 
     merged["font_options"] = base_fonts
     return merged
+
+
+def _font_styles(rules: Mapping[str, Any]) -> Dict[str, Dict[str, float]]:
+    ast = rules.get("rule_ast")
+    if isinstance(ast, Mapping) and ast.get("$schema") == RULE_AST_SCHEMA:
+        return font_styles_from_ast(ast)
+    return font_style_by_option(
+        rules.get("font_style_rules"),
+        legacy_option_overrides=rules.get("option_overrides"),
+    )
 
 
 def _design_asset_path(template: TemplateDefinition) -> Path | None:

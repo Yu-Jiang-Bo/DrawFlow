@@ -12,6 +12,7 @@ from src.service.template_inspector import TemplateInspector
 from src.service.template_onboarding import TemplateOnboardingStore
 from src.service.template_publication import TemplatePublicationService
 from src.service.template_registry import TemplateRegistry
+from src.service.template_rule_ast import migrate_legacy_rule_ast
 
 
 def make_template(tmp_path, assets=None):
@@ -88,6 +89,30 @@ def test_builds_generic_task_from_bindings_and_split_variables(tmp_path):
     ]
     assert task["dimensions"]["Name1"]["width_mm"] == 20
     assert task["output"]["color_mode"] == "CMYK"
+
+
+def test_generic_task_resolves_case_and_common_chinese_order_columns(tmp_path):
+    _, template = make_template(tmp_path)
+    order_path = tmp_path / "orders.xlsx"
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["\u5185\u90e8\u8ba2\u5355\u53f7", "\u6a21\u677f", "\u5b57\u4f53", "Name"])
+    sheet.append(["A-1", template.template_id, "F5", "Alice|Bob"])
+    sheet.append(["B-1", "OTHER_TEMPLATE", "F7", "Skip Me"])
+    workbook.save(order_path)
+    rules = base_rules()
+    rules["order_bindings"] = {"text": "name"}
+    rules["slot_mappings"] = [{"field": "text", "slot": "Name"}]
+    rules["font_style_rules"] = [{"font_options": ["F5"], "boldness": 0.5}]
+
+    task = build_generic_render_task(template, rules, order_path, tmp_path / "output.ai")
+
+    assert len(task["orders"]) == 1
+    assert task["orders"][0]["order_no"] == "A-1"
+    assert task["orders"][0]["selections"]["font"] == "F5"
+    assert task["orders"][0]["variables"] == [
+        {"target": "Name", "field": "text", "value": "Alice|Bob", "font_style": {"boldness": 0.5}}
+    ]
 
 
 def test_resolves_selected_design_asset(tmp_path):
@@ -217,6 +242,25 @@ def test_passes_selected_font_boldness_to_every_text_variable(tmp_path):
     ]
 
 
+def test_compiles_confirmed_rule_ast_into_generic_runtime_actions(tmp_path):
+    _, template = make_template(tmp_path)
+    order_path = tmp_path / "orders.xlsx"
+    make_orders(order_path, custom="Alice|Bob|Carol")
+    rules = base_rules()
+    rules["slot_mappings"] = [{"field": "text", "slot": "Name"}]
+    rules["rule_ast"] = migrate_legacy_rule_ast(
+        name_color_cycle={"delimiter": "|", "colors": ["Red", "Black", "Blue"]},
+        font_style_rules=[{"font_options": ["F2"], "boldness": 0.4}],
+    )
+
+    task = build_generic_render_task(template, rules, order_path, tmp_path / "output.ai")
+
+    variable = task["orders"][0]["variables"][0]
+    assert [action["type"] for action in variable["actions"]] == ["fill_color", "stroke_width"]
+    assert "name_color_cycle" not in variable
+    assert "font_style" not in variable
+
+
 def test_does_not_pass_name_color_cycle_to_numbered_name_targets(tmp_path):
     _, template = make_template(tmp_path)
     order_path = tmp_path / "orders.xlsx"
@@ -287,6 +331,41 @@ def test_generic_pipeline_dry_run_consumes_confirmed_rule_pack(tmp_path):
     task = Path(result["outputs"]["render_task"]).read_text(encoding="utf-8")
     assert '"target": "Name1"' in task
     assert '"value": "Alice"' in task
+
+
+def test_render_service_uses_generic_rules_when_legacy_pipeline_has_executable_pack(tmp_path):
+    registry = TemplateRegistry(tmp_path / "templates.json", tmp_path / "templates")
+    ai_path = registry.save_uploaded_ai("LEGACYGENERIC001", "template.ai", b"ai")
+    pack = {
+        "$schema": "custom-renderer/template-rule-pack",
+        "template": {"template_id": "LEGACYGENERIC001", "profile": "unclassified"},
+        "rules": base_rules(),
+        "assets": {"items": [], "policy": {"mode": "inline"}},
+        "capabilities": ["replace_text", "scale_to_box"],
+        "validation": {"status": "confirmed", "unresolved_items": []},
+    }
+    rules_path = registry.save_template_rules_config("LEGACYGENERIC001", json.dumps(pack))
+    template = registry.upsert_template(
+        {
+            "template_id": "LEGACYGENERIC001",
+            "name": "Legacy generic",
+            "template_type": "pure_text_color_design",
+            "pipeline": "jjmb_202508",
+            "status": "active",
+            "template_ai": registry.to_config_path(ai_path),
+            "template_rules_config": registry.to_config_path(rules_path),
+        }
+    )
+    order_path = tmp_path / "orders.xlsx"
+    make_orders(order_path)
+
+    result = RenderService(registry=registry, jobs=JobStore(tmp_path / "jobs-legacy")).submit(
+        {"template_id": template.template_id, "order_file": str(order_path), "dry_run": True}
+    )
+
+    assert result["status"] == "completed"
+    assert result["stats"]["orders"] == 1
+    assert result["stats"]["variables"] == 2
 
 
 def test_new_generic_template_scan_confirm_and_dry_run(tmp_path):

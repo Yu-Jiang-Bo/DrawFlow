@@ -78,6 +78,16 @@ def test_concurrent_publications_keep_runtime_and_confirmed_pack_consistent(tmp_
     assert runtime == state["confirmed"]["pack"]
 
 
+def test_executable_rule_pack_switches_legacy_template_to_generic_pipeline(tmp_path):
+    registry, store, pack = setup_publication(tmp_path)
+
+    published = TemplatePublicationService(registry, store).confirm(
+        "DEMO001", pack, change_summary="publish generic"
+    )
+
+    assert published["template"].pipeline == "generic_rules_only"
+
+
 def test_publication_rechecks_asset_file_inside_transaction(tmp_path):
     registry, store, pack = setup_publication(tmp_path)
     missing_path = tmp_path / "missing.ai"

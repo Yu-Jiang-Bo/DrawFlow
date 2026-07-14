@@ -25,6 +25,19 @@ _COLOR_NAME_ALIASES = {
     "orange": "#FFA500",
     "purple": "#800080",
     "brown": "#A52A2A",
+    "黑色": "#000000",
+    "白色": "#FFFFFF",
+    "红色": "#FF0000",
+    "蓝色": "#0000FF",
+    "绿色": "#008000",
+    "粉色": "#F4AAC8",
+    "金色": "#D4AF37",
+    "银色": "#C0C0C0",
+    "灰色": "#808080",
+    "黄色": "#FFFF00",
+    "橙色": "#FFA500",
+    "紫色": "#800080",
+    "棕色": "#A52A2A",
 }
 
 
@@ -37,7 +50,7 @@ def normalize_name_color_cycle(value: Any) -> Dict[str, Any]:
     raw_colors = value.get("colors")
     if not isinstance(raw_colors, list):
         return {}
-    colors = [_normalize_color(item) for item in raw_colors]
+    colors = [normalize_color(item) for item in raw_colors]
     colors = [color for color in colors if color]
     if not delimiter or len(colors) < 2:
         return {}
@@ -63,12 +76,12 @@ def validate_name_color_cycle(value: Any) -> List[str]:
     if len(colors) < 2:
         errors.append("Name 多色循环至少需要两个颜色。")
     for index, color in enumerate(colors, start=1):
-        if not _normalize_color(color):
+        if not normalize_color(color):
             errors.append(f"Name 多色循环第 {index} 个颜色必须为 #RRGGBB 或常见英文颜色名。")
     return errors
 
 
-def _normalize_color(value: Any) -> str:
+def normalize_color(value: Any) -> str:
     color = str(value or "").strip()
     if _HEX_COLOR.fullmatch(color):
         return color.upper()

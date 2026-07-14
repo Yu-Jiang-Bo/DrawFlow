@@ -11,10 +11,46 @@ from .font_style_rules import font_style_by_option
 from .name_color_cycle import normalize_name_color_cycle
 from .template_registry import TemplateDefinition
 from .template_rule_execution import resolve_mapped_text
+from .template_rule_ast import RULE_AST_SCHEMA, runtime_actions
 
 
 class GenericRuleRenderError(ValueError):
     pass
+
+
+_MISSING = object()
+
+IMPLICIT_ORDER_BINDINGS = {
+    "order_no": (
+        "order_no",
+        "order",
+        "order no",
+        "order number",
+        "\u8ba2\u5355\u53f7",
+        "\u5185\u90e8\u8ba2\u5355\u53f7",
+    ),
+    "font": (
+        "font",
+        "font option",
+        "font options",
+        "\u5b57\u4f53",
+        "\u5b57\u4f53\u9009\u9879",
+    ),
+    "design": ("design", "design option", "\u8bbe\u8ba1", "\u8bbe\u8ba1\u9009\u9879"),
+    "style": ("style", "style option", "\u5c3a\u5bf8", "\u6b3e\u5f0f"),
+    "color": ("color", "color option", "\u989c\u8272", "\u5b57\u4f53\u989c\u8272"),
+    "text": (
+        "text",
+        "name",
+        "names",
+        "personalization",
+        "\u540d\u5b57",
+        "\u5b9a\u5236\u4fe1\u606f",
+        "\u5b9a\u5236\u5185\u5bb9",
+    ),
+}
+
+TEMPLATE_COLUMN_ALIASES = ("template", "\u6a21\u677f")
 
 
 def build_generic_render_task(
@@ -33,6 +69,7 @@ def build_generic_render_task(
         raise GenericRuleRenderError("Confirmed rules do not define order_bindings.")
     rows = _read_rows(order_file, sheet_name=sheet_name)
     _require_columns(rows, bindings.values())
+    rows = _filter_rows_for_template(rows, template.template_id)
     assets = _asset_catalog(template.assets)
     orders = [
         _build_order(index, row, rules, bindings, assets)
@@ -72,23 +109,23 @@ def _build_order(
     bindings: Mapping[str, Any],
     assets: Mapping[str, str],
 ) -> Dict[str, Any]:
-    values = {
-        str(field): row.get(str(column))
-        for field, column in bindings.items()
-    }
+    values = _bound_values(row, bindings)
     selections = {
         key: ("" if values.get(key) is None else str(values.get(key))).strip()
         for key in ("font", "design", "style", "color")
         if ("" if values.get(key) is None else str(values.get(key))).strip()
     }
-    font_styles = font_style_by_option(
-        rules.get("font_style_rules"),
-        legacy_option_overrides=rules.get("option_overrides"),
+    rule_ast = rules.get("rule_ast")
+    use_rule_ast = isinstance(rule_ast, Mapping) and rule_ast.get("$schema") == RULE_AST_SCHEMA
+    font_styles = {} if use_rule_ast else font_style_by_option(
+        rules.get("font_style_rules"), legacy_option_overrides=rules.get("option_overrides")
     )
     variables = _build_variables(
         values,
         rules,
         font_style=font_styles.get(selections.get("font", "")),
+        rule_ast=rule_ast if use_rule_ast else None,
+        selections={**selections, "text": values.get("text")},
     )
     asset_tasks = []
     selected_options = set(selections.values())
@@ -122,13 +159,15 @@ def _build_variables(
     rules: Mapping[str, Any],
     *,
     font_style: Mapping[str, Any] | None = None,
+    rule_ast: Any = None,
+    selections: Mapping[str, Any] | None = None,
 ) -> list[Dict[str, Any]]:
     mappings = _list_of_mappings(rules.get("slot_mappings"))
     if not mappings:
         targets = _list_of_mappings(rules.get("text_targets"))
         if len(targets) == 1 and "text" in values:
             mappings = [{"field": "text", "slot": targets[0].get("name", "")}]
-    name_color_cycle = normalize_name_color_cycle(rules.get("name_color_cycle"))
+    name_color_cycle = normalize_name_color_cycle(rules.get("name_color_cycle")) if rule_ast is None else {}
     variables = []
     for mapping in mappings:
         field = str(mapping.get("field") or mapping.get("source") or "")
@@ -143,6 +182,9 @@ def _build_variables(
                 f"Order value cannot satisfy split policy for target: {target}"
             )
         variable = {"target": target, "field": field, "value": value}
+        actions = runtime_actions(rule_ast, target=target, selections=selections or {}) if rule_ast is not None else []
+        if actions:
+            variable["actions"] = actions
         if target == "Name" and name_color_cycle:
             variable["name_color_cycle"] = name_color_cycle
         if font_style:
@@ -176,10 +218,65 @@ def _read_rows(path: Path, *, sheet_name: str) -> list[Dict[str, Any]]:
 def _require_columns(rows: list[Mapping[str, Any]], columns: Iterable[Any]) -> None:
     if not rows:
         return
-    available = set(rows[0])
-    missing = [str(column) for column in columns if str(column) not in available]
+    available = _column_lookup(rows[0])
+    missing = [str(column) for column in columns if _normalize_column(column) not in available]
     if missing:
         raise GenericRuleRenderError(f"Order sheet is missing bound columns: {', '.join(missing)}")
+
+
+def _filter_rows_for_template(rows: list[Dict[str, Any]], template_id: str) -> list[Dict[str, Any]]:
+    if not rows:
+        return rows
+    lookup = _column_lookup(rows[0])
+    template_column = next(
+        (lookup[_normalize_column(alias)] for alias in TEMPLATE_COLUMN_ALIASES if _normalize_column(alias) in lookup),
+        "",
+    )
+    if not template_column:
+        return rows
+    target = str(template_id or "").strip().casefold()
+    return [
+        row
+        for row in rows
+        if not str(row.get(template_column) or "").strip()
+        or str(row.get(template_column) or "").strip().casefold() == target
+    ]
+
+
+def _bound_values(row: Mapping[str, Any], bindings: Mapping[str, Any]) -> Dict[str, Any]:
+    values: Dict[str, Any] = {}
+    for field, column in bindings.items():
+        values[str(field)] = _column_value(row, str(column))
+    for field, aliases in IMPLICIT_ORDER_BINDINGS.items():
+        if values.get(field) not in (None, ""):
+            continue
+        value = _first_column_value(row, aliases)
+        if value is not _MISSING:
+            values[field] = value
+    return values
+
+
+def _first_column_value(row: Mapping[str, Any], aliases: Iterable[Any]) -> Any:
+    for alias in aliases:
+        value = _column_value(row, str(alias), default=_MISSING)
+        if value is not _MISSING:
+            return value
+    return _MISSING
+
+
+def _column_value(row: Mapping[str, Any], column: str, *, default: Any = None) -> Any:
+    if column in row:
+        return row.get(column)
+    actual = _column_lookup(row).get(_normalize_column(column))
+    return row.get(actual) if actual is not None else default
+
+
+def _column_lookup(row: Mapping[str, Any]) -> Dict[str, str]:
+    return {_normalize_column(key): str(key) for key in row}
+
+
+def _normalize_column(value: Any) -> str:
+    return str(value or "").strip().casefold()
 
 
 def _asset_catalog(items: Any) -> Dict[str, str]:

@@ -23,6 +23,8 @@ class IllustratorBridge:
         if not task.exists():
             raise FileNotFoundError(f"Render task 不存在: {task}")
 
+        error_report = task.with_name(task.name + ".jsx-error.txt")
+        error_report.unlink(missing_ok=True)
         bootstrap = self._build_bootstrap(script, task)
         with ComApartment():
             try:
@@ -38,14 +40,30 @@ class IllustratorBridge:
             except ImportError as exc:
                 raise IllustratorBridgeError("缺少 pywin32，无法调用 Illustrator") from exc
             except Exception as exc:
+                detail = _read_text(error_report)
+                if detail:
+                    raise IllustratorBridgeError(f"Illustrator JSX failed: {exc}: {detail}") from exc
                 raise IllustratorBridgeError(f"执行 Illustrator JSX 失败: {exc}") from exc
 
     def _build_bootstrap(self, render_script: Path, task_file: Path) -> str:
         return "\n".join(
             [
                 "(function () {",
-                "  $.setenv('CUSTOM_RENDER_TASK', %s);" % jsx_string(str(task_file)),
-                "  return $.evalFile(File(%s));" % jsx_string(str(render_script)),
+                "  var taskPath = %s;" % jsx_string(str(task_file)),
+                "  $.setenv('CUSTOM_RENDER_TASK', taskPath);",
+                "  try {",
+                "    return $.evalFile(File(%s));" % jsx_string(str(render_script)),
+                "  } catch (e) {",
+                "    var report = File(taskPath + '.jsx-error.txt');",
+                "    try {",
+                "      report.encoding = 'UTF-8';",
+                "      report.open('w');",
+                "      report.write(String(e && e.message ? e.message : e));",
+                "      if (e && e.line) report.write('\\nLine: ' + e.line);",
+                "      report.close();",
+                "    } catch (ignored) {}",
+                "    throw e;",
+                "  }",
                 "}());",
             ]
         )
@@ -60,6 +78,13 @@ def jsx_string(value: str) -> str:
         .replace("'", "\\'")
     )
     return "'" + escaped + "'"
+
+
+def _read_text(path: Path) -> str:
+    try:
+        return path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
 
 
 class ComApartment:

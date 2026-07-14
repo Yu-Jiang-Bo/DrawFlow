@@ -3877,6 +3877,7 @@ INDEX_HTML = """<!doctype html>
     function explainRenderError(error) {
       const raw = String(error && error.message ? error.message : error || "").trim();
       const text = raw.toLowerCase();
+      if (raw) return cleanErrorText(raw);
       if (!raw) {
         return "生成效果图失败。请检查模板、订单表格和规则配置后再试一次。";
       }

@@ -245,6 +245,8 @@ class TemplateRegistry:
         temporary.write_text(json.dumps(pack, ensure_ascii=False, indent=2), encoding="utf-8")
         temporary.replace(output_path)
         target["template_rules_config"] = self.to_config_path(output_path)
+        if _pack_requests_generic_pipeline(pack):
+            target["pipeline"] = "generic_rules_only"
         if activate:
             target["status"] = "active"
         self._write_config(raw)
@@ -415,3 +417,13 @@ def _to_bool(value: object) -> bool:
     if text in {"1", "true", "yes", "on", "是"}:
         return True
     return bool(value)
+
+
+def _pack_requests_generic_pipeline(pack: Dict[str, Any]) -> bool:
+    rules = pack.get("rules") if isinstance(pack, dict) else None
+    if not isinstance(rules, dict):
+        return False
+    bindings = rules.get("order_bindings")
+    if not isinstance(bindings, dict) or not bindings:
+        return False
+    return bool(rules.get("slot_mappings") or rules.get("text_targets") or rules.get("asset_mappings"))
