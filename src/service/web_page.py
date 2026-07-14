@@ -1115,14 +1115,13 @@ INDEX_HTML = """<!doctype html>
                 </div>
 
                 <div class="rule-section">
-                  <h3 class="rule-section-title">映射、文字策略与验证样例</h3>
+                  <h3 class="rule-section-title">映射与文字策略</h3>
                   <p class="rule-section-note">以下规则均可编辑；JSON 格式错误会阻止检查与确认。</p>
                   <div class="form-grid">
                     <div><label for="orderBindingsJson">订单字段绑定</label><textarea id="orderBindingsJson" placeholder='{"text":"定制信息"}'></textarea></div>
                     <div><label for="assetMappingsJson">设计/资产映射</label><textarea id="assetMappingsJson" placeholder='[{"option":"Design1","asset":"design-1.ai"}]'></textarea></div>
                     <div><label for="textPoliciesJson">文字适配/拆分策略</label><textarea id="textPoliciesJson" placeholder='{"fit":"scale_to_box"}'></textarea></div>
                     <div><label for="outputTransformsJson">输出处理</label><textarea id="outputTransformsJson" placeholder='{"color_mode":"CMYK"}'></textarea></div>
-                    <div class="field-full"><label for="validationSampleJson">验证样例</label><textarea id="validationSampleJson" placeholder='{"input":{},"expected":{}}'></textarea></div>
                     <div class="field-full"><label for="templateChangeSummary">保存版本备注</label><input id="templateChangeSummary" placeholder="仅用于版本历史和回滚说明，不参与渲染。例如：核对对象命名并补齐 Design 映射" /></div>
                   </div>
                   <div class="preview-box" id="templateVersionHistory">尚无已确认版本</div>
@@ -1211,13 +1210,6 @@ INDEX_HTML = """<!doctype html>
                   </div>
                   <p class="rule-section-note">为一组字体应用相同的描边加粗值。多个字体用逗号分隔，例如 F2, F3, F10；可无限添加规则，数值单位为 pt。</p>
                   <div class="structured-table" id="fontStyleRuleRows"></div>
-                  <details class="advanced-rule-box">
-                    <summary>其他说明（可选，不参与渲染）</summary>
-                    <div class="advanced-rule-body">
-                      <label for="templateRuleNote">补充备注</label>
-                      <textarea id="templateRuleNote" placeholder="记录给后续维护者看的说明，例如模板制作注意事项。这里不会影响渲染，也不会阻止启用。"></textarea>
-                    </div>
-                  </details>
                 </div>
 
                 <div class="rule-section">
@@ -1458,7 +1450,7 @@ INDEX_HTML = """<!doctype html>
       if (profile) profile.disabled = true;
       const profileWrapper = profile && profile.closest(".form-grid > div");
       if (profileWrapper) profileWrapper.hidden = true;
-      const jsonIds = ["orderBindingsJson", "assetMappingsJson", "textPoliciesJson", "outputTransformsJson", "validationSampleJson"];
+      const jsonIds = ["orderBindingsJson", "assetMappingsJson", "textPoliciesJson", "outputTransformsJson"];
       jsonIds.forEach(id => {
         const input = document.getElementById(id);
         const wrapper = input && input.closest(".form-grid > div");
@@ -1559,13 +1551,11 @@ INDEX_HTML = """<!doctype html>
         "#textTargetName",
         "#textFitPolicy",
         "#nameColorDelimiter",
-        "#templateRuleNote",
         "#templateProfile",
         "#orderBindingsJson",
         "#assetMappingsJson",
         "#textPoliciesJson",
         "#outputTransformsJson",
-        "#validationSampleJson",
         "#templateAdvancedRules",
         "#templateExceptionStatus"
       ];
@@ -2287,7 +2277,6 @@ INDEX_HTML = """<!doctype html>
         setHiddenRuleJson("assetMappingsJson", merged.asset_mappings || []);
         setHiddenRuleJson("textPoliciesJson", merged.text_policies || {});
         setHiddenRuleJson("outputTransformsJson", merged.transforms || {});
-        setHiddenRuleJson("validationSampleJson", draft.validation_sample || parseJsonField("validationSampleJson", {}));
         state.templateRulesDescriptionDirty = false;
         renderTemplateExtractionFeedback(result, storedAsException);
         renderTemplateRulePreview();
@@ -2383,19 +2372,20 @@ INDEX_HTML = """<!doctype html>
       rules.text_policies = mergeTextPolicies(parseJsonField("textPoliciesJson", {}), rules);
       rules.transforms = parseJsonField("outputTransformsJson", {});
       const profile = currentRulePackProfile(source);
-      const sample = mergeValidationSample(parseJsonField("validationSampleJson", {}), rules);
       const unresolved = ((source.validation && source.validation.unresolved_items) || []).filter(item => {
         if (item.code === "profile") return profile === "unclassified";
         if (item.code === "text_targets") return !hasSlotsOrMappings(rules);
         if (item.code === "option_group_names") return !rules.option_groups.length;
         return item.code !== "confirmation_required";
       });
+      const validation = { ...source.validation, status: "draft", unresolved_items: unresolved };
+      delete validation.sample;
       return {
         ...source,
         template: { ...source.template, template_id: document.getElementById("templateId").value.trim(), profile },
         structure: source.structure,
         rules,
-        validation: { ...source.validation, status: "draft", unresolved_items: unresolved, sample },
+        validation,
         audit: source.audit
       };
     }
@@ -2451,47 +2441,6 @@ INDEX_HTML = """<!doctype html>
       return merged;
     }
 
-    function mergeValidationSample(existing, rules) {
-      if (isPlainObject(existing) && isPlainObject(existing.input) && isPlainObject(existing.expected)) {
-        return existing;
-      }
-      const bindings = isPlainObject(rules.order_bindings) ? rules.order_bindings : {};
-      const input = {};
-      const expected = {};
-      const sequences = Array.isArray(rules.text_sequences) ? rules.text_sequences.filter(item => item && item.field) : [];
-      if (sequences.length) {
-        sequences.forEach((item, sequenceIndex) => {
-          const column = bindings[item.field] || item.field;
-          const values = item.variables.map((_, index) => `示例${sequenceIndex + 1}-${index + 1}`);
-          input[column] = item.delimiter ? values.join(item.delimiter) : values[0];
-          item.variables.forEach((variable, index) => {
-            expected[variable] = values[index] || "";
-          });
-        });
-      } else if (Array.isArray(rules.slot_mappings) && rules.slot_mappings.length) {
-        const splitGroups = {};
-        rules.slot_mappings.forEach((mapping, index) => {
-          const field = mapping.field || mapping.source || "text";
-          const target = mapping.slot || mapping.name || `Text${index + 1}`;
-          const column = bindings[field] || field;
-          const delimiter = mapping.delimiter || "";
-          if (delimiter && mapping.sequence_index) {
-            const key = `${field}::${delimiter}`;
-            if (!splitGroups[key]) splitGroups[key] = { column, delimiter, values: [] };
-            splitGroups[key].values[Number(mapping.sequence_index) - 1] = `示例${index + 1}`;
-            expected[target] = `示例${index + 1}`;
-          } else {
-            input[column] = `示例${index + 1}`;
-            expected[target] = `示例${index + 1}`;
-          }
-        });
-        Object.values(splitGroups).forEach(group => {
-          input[group.column] = group.values.map(value => value || "").join(group.delimiter);
-        });
-      }
-      return { input, expected };
-    }
-
     function parseJsonField(id, fallback) {
       const text = document.getElementById(id).value.trim();
       if (!text) return fallback;
@@ -2513,7 +2462,7 @@ INDEX_HTML = """<!doctype html>
         option_group_names: "请补充选项组角色，例如字体组、设计组或尺寸/版式组",
         order_bindings: "请在“文字内容设置”里填写订单内容列名",
         text_policies: "请填写文字变量规则，系统会自动生成基础文字适配策略",
-        validation_sample: "请检查字段拆分规则，系统需要能生成一条可验证样例",
+        validation_sample: "请检查验证样例；未配置多区域拆分时可以留空",
         name_color_cycle: "请在“Name 多色循环”中至少保留两个颜色，并填写分隔符；颜色可填 #RRGGBB 或 Red、Black、Gold 等英文名",
         font_style_rules: "请检查“字体加粗规则”：每一条都需要目标字体集合和大于 0 的加粗值",
         exceptions: "当前模板仍有无法执行的旧规则，请将其改为页面中的固定规则后再保存",
@@ -2531,6 +2480,7 @@ INDEX_HTML = """<!doctype html>
       const savedBaseConfig = { ...baseConfig };
       delete savedBaseConfig.effects;
       delete savedBaseConfig.text_sequence_styles;
+      delete savedBaseConfig.notes;
       const textRule = collectTextContentRule(baseConfig);
       const nameColorCycle = collectNameColorCycle();
       const optionGroups = collectOptionGroups();
@@ -2577,8 +2527,6 @@ INDEX_HTML = """<!doctype html>
         style: document.getElementById("defaultStyle").value.trim(),
         color: document.getElementById("defaultColor").value.trim()
       };
-      const noteInput = document.getElementById("templateRuleNote");
-      const generalNote = noteInput ? noteInput.value.trim() : "";
       return {
         ...savedBaseConfig,
         version: 2,
@@ -2614,7 +2562,6 @@ INDEX_HTML = """<!doctype html>
           ...(isPlainObject(baseConfig.output) ? baseConfig.output : {}),
           color_mode: document.getElementById("outputColorMode").value
         },
-        notes: generalNote ? { general: generalNote } : {},
         exceptions: { status: "none" },
         assets: buildAssetsRulePayload(baseConfig),
         parser: {
@@ -3026,7 +2973,6 @@ INDEX_HTML = """<!doctype html>
     function renderTemplateRuleCheck(draft) {
       const missing = templateRuleMissingItems(draft);
       const optionGroups = draft.option_groups || [];
-      const generalNote = draft.notes && draft.notes.general ? "有备注（不影响渲染）" : "无";
       return `
         <div class="preview-grid">
           <div class="preview-chip"><span>规则状态</span><strong>${escapeHtml(missing.length ? "待补充" : "完整")}</strong></div>
@@ -3040,7 +2986,6 @@ INDEX_HTML = """<!doctype html>
           <div class="preview-chip"><span>多个文字位置</span><strong>${escapeHtml(displayTextSequences(draft.text_sequences || []))}</strong></div>
           <div class="preview-chip"><span>默认值</span><strong>${escapeHtml(describeDefaults(draft.defaults || {}))}</strong></div>
           <div class="preview-chip"><span>字体加粗</span><strong>${escapeHtml(displayFontStyleRules(draft.font_style_rules || []))}</strong></div>
-          <div class="preview-chip"><span>其他说明</span><strong>${escapeHtml(generalNote)}</strong></div>
           <div class="preview-chip"><span>已填写选项组</span><strong>${escapeHtml(optionGroups.map(group => `${group.name}=${displayOptionGroupRole(group.role)}`).join("；") || "未填写")}</strong></div>
           <div class="preview-chip"><span>缺失项</span><strong>${escapeHtml(missing.join("；") || "无")}</strong></div>
         </div>
@@ -3122,7 +3067,6 @@ INDEX_HTML = """<!doctype html>
       document.getElementById("textFitPolicy").value = "scale_to_box";
       document.getElementById("nameColorDelimiter").value = "|";
       setNameColorRows([]);
-      document.getElementById("templateRuleNote").value = "";
       document.getElementById("templateProfile").value = "unclassified";
       document.getElementById("scanVersion").value = "";
       document.getElementById("scanEvidence").textContent = "暂无扫描事实";
@@ -3133,7 +3077,6 @@ INDEX_HTML = """<!doctype html>
       document.getElementById("assetMappingsJson").value = "[]";
       document.getElementById("textPoliciesJson").value = "{}";
       document.getElementById("outputTransformsJson").value = "{}";
-      document.getElementById("validationSampleJson").value = "{}";
       document.getElementById("templateChangeSummary").value = "";
       document.getElementById("templateVersionHistory").textContent = "尚无已确认版本";
     }
@@ -3177,7 +3120,6 @@ INDEX_HTML = """<!doctype html>
       setHiddenRuleJson("assetMappingsJson", editableRules.asset_mappings || []);
       setHiddenRuleJson("textPoliciesJson", editableRules.text_policies || {});
       setHiddenRuleJson("outputTransformsJson", editableRules.transforms || {});
-      setHiddenRuleJson("validationSampleJson", (pack && pack.validation && pack.validation.sample) || {});
       const history = document.getElementById("templateVersionHistory");
       history.innerHTML = versions.length
         ? versions.map(item => `<div>v${item.version} ${escapeHtml(item.event)} ${escapeHtml(item.created_at || "")} <button class="btn-subtle" type="button" data-rule-rollback="${item.version}">回滚到此版本</button></div>`).join("")
@@ -3440,7 +3382,6 @@ INDEX_HTML = """<!doctype html>
         : legacyFontStyleRules(config.option_overrides);
       setFontStyleRuleRows(fontStyleRules);
 
-      document.getElementById("templateRuleNote").value = (config.notes && config.notes.general) || (config.exceptions && config.exceptions.note) || "";
     }
 
     function legacyOptionGroups(config) {

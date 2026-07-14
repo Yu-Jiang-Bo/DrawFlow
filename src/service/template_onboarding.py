@@ -407,7 +407,9 @@ def _validate_editable_sections(
             errors.append(_issue("text_policies", "Text policy requires fit or split."))
 
     sample = raw_validation.get("sample") if isinstance(raw_validation, Mapping) else None
-    if not isinstance(sample, Mapping) or not isinstance(sample.get("input"), Mapping) or not isinstance(
+    if sample in (None, {}, ""):
+        pass
+    elif not isinstance(sample, Mapping) or not isinstance(sample.get("input"), Mapping) or not isinstance(
         sample.get("expected"), Mapping
     ):
         errors.append(_issue("validation_sample", "Validation sample requires input and expected objects."))

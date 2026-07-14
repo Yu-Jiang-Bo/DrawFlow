@@ -76,6 +76,8 @@ def test_template_rule_editor_is_business_readable():
     assert "尺寸对象" in INDEX_HTML
     assert "文字内容设置" in INDEX_HTML
     assert "多个文字位置（可选）" in INDEX_HTML
+    assert "映射与文字策略" in INDEX_HTML
+    assert "映射、文字策略与验证样例" not in INDEX_HTML
     assert "适用设计/选项" in INDEX_HTML
     assert "变量前缀" in INDEX_HTML
     assert 'id="addDimensionRowBtn"' in INDEX_HTML
@@ -86,7 +88,7 @@ def test_template_rule_editor_is_business_readable():
     assert "字体加粗规则（可选）" in INDEX_HTML
     assert "文本效果规则" not in INDEX_HTML
     assert "添加文本效果" not in INDEX_HTML
-    assert "其他说明（可选，不参与渲染）" in INDEX_HTML
+    assert "其他说明（可选，不参与渲染）" not in INDEX_HTML
     assert "规则检查结果" in INDEX_HTML
     assert "data-option-group-name" in INDEX_HTML
     assert "data-dimension-target" in INDEX_HTML
@@ -155,12 +157,11 @@ def test_template_onboarding_requires_scan_check_and_confirmation():
     assert 'id="assetMappingsJson"' in INDEX_HTML
     assert 'id="textPoliciesJson"' in INDEX_HTML
     assert 'id="outputTransformsJson"' in INDEX_HTML
-    assert 'id="validationSampleJson"' in INDEX_HTML
+    assert 'id="validationSampleJson"' not in INDEX_HTML
     assert "prepareBusinessRuleEditor" in INDEX_HTML
     assert "profileWrapper.hidden = true" in INDEX_HTML
     assert "保存版本备注" in INDEX_HTML
-    assert "不参与渲染" in INDEX_HTML
-    assert 'id="templateRuleNote"' in INDEX_HTML
+    assert 'id="templateRuleNote"' not in INDEX_HTML
     assert "collectTextEffects" not in INDEX_HTML
     assert 'id="rescanTemplateBtn"' in INDEX_HTML
     assert "rescanTemplate" in INDEX_HTML
@@ -204,15 +205,14 @@ def test_template_onboarding_requires_scan_check_and_confirmation():
 def test_template_rule_check_infers_hidden_business_fields():
     assert "currentRulePackProfile" in INDEX_HTML
     assert "mergeTextPolicies" in INDEX_HTML
-    assert "mergeValidationSample" in INDEX_HTML
+    assert "mergeValidationSample" not in INDEX_HTML
     assert "rules.order_bindings = isPlainObject(rules.order_bindings)" in INDEX_HTML
     assert "rules.text_policies = mergeTextPolicies" in INDEX_HTML
-    assert "const sample = mergeValidationSample" in INDEX_HTML
+    assert "const sample = mergeValidationSample" not in INDEX_HTML
     assert "sequences.forEach(item =>" in INDEX_HTML
     assert "rules.slot_mappings.forEach(item =>" in INDEX_HTML
     assert "result[field] = field" in INDEX_HTML
-    assert "if (sequences.length)" in INDEX_HTML
-    assert "Object.values(splitGroups).forEach" in INDEX_HTML
+    assert "delete validation.sample" in INDEX_HTML
     assert "请选择模板规则类型" not in INDEX_HTML
     assert "模板类型仅供系统参考" in INDEX_HTML
     assert "每个模板文字对象都要有对应的订单内容来源" in INDEX_HTML
@@ -283,7 +283,7 @@ def test_template_rules_prefill_fixed_options_before_optional_supplement():
     assert "查看系统审计明细（可选）" in INDEX_HTML
     assert "当前配置与系统建议不同" in INDEX_HTML
     assert "文字内容设置" in INDEX_HTML
-    assert "其他说明（可选，不参与渲染）" in INDEX_HTML
+    assert "其他说明（可选，不参与渲染）" not in INDEX_HTML
     assert "多个文字位置（可选）" in INDEX_HTML
     assert "文本效果规则" not in INDEX_HTML
     assert 'id="textSourceColumn"' in INDEX_HTML

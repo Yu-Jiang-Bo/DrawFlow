@@ -64,6 +64,16 @@ def test_unclassified_profile_is_advisory_when_concrete_rules_are_complete():
     assert [item["code"] for item in result["warnings"]] == ["profile"]
 
 
+def test_check_allows_missing_validation_sample_for_single_text_rendering():
+    pack = ready_pack()
+    pack["validation"].pop("sample", None)
+
+    result = check_rule_pack(pack, template_id="DEMO001")
+
+    assert result["ok"] is True
+    assert not any(item["code"] == "validation_sample" for item in result["errors"])
+
+
 def test_confirmation_required_is_advisory_until_explicit_confirm():
     pack = ready_pack()
     pack["validation"]["unresolved_items"] = [
