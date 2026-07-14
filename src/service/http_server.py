@@ -918,6 +918,16 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
             except ValueError as exc:
                 self._send_error(HTTPStatus.BAD_REQUEST, str(exc))
             return
+        if len(parts) == 4 and parts[:2] == ["api", "templates"] and parts[3] == "activate":
+            template_id = unquote(parts[2])
+            try:
+                template = self._activate_template(template_id)
+                self._send_json({"template": self._template_payload(template)})
+            except KeyError as exc:
+                self._send_error(HTTPStatus.NOT_FOUND, str(exc))
+            except ValueError as exc:
+                self._send_error(HTTPStatus.BAD_REQUEST, str(exc))
+            return
         if path != "/api/render":
             self._send_error(HTTPStatus.NOT_FOUND, "not found")
             return
@@ -1073,9 +1083,14 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
                 existing = self.registry.get_template(template_id)
             except KeyError:
                 existing = None
-        if existing and existing.status == "active":
-            raise ValueError("Disable the active template before changing files or metadata.")
-
+        has_uploaded_files = any(
+            files.get(key)
+            for key in ("template_ai", "reference_ai", "design_font_assets", "template_assets")
+        )
+        if existing and existing.status == "active" and has_uploaded_files:
+            # Make replacement uploads fail-safe: an exception after the first file
+            # write must not leave the active template pointing at unscanned content.
+            self.registry.set_template_status(template_id, "draft")
         assets = list(existing.assets) if existing else []
         assets.extend(self._migrate_existing_primary_reference(template_id, existing, files))
         template_ai, template_ai_role, template_ai_source = self._resolve_template_ai(fields, files, template_id, existing)
@@ -1126,6 +1141,17 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
         if template_rules_config:
             item["template_rules_config"] = template_rules_config
         return self.registry.upsert_template(item)
+
+    def _activate_template(self, template_id: str) -> object:
+        """Restore a renderable draft without exposing a general disable workflow."""
+
+        template = self.registry.get_template(template_id)
+        check = check_template_definition(template)
+        if not check.get("renderable"):
+            missing = [str(item.get("message") or "") for item in check.get("missing", [])]
+            detail = "；".join(item for item in missing if item) or "请先补齐模板规则和文件。"
+            raise ValueError(f"模板当前还不能启用出图：{detail}")
+        return self.registry.set_template_status(template_id, "active")
 
     def _migrate_existing_primary_reference(
         self,

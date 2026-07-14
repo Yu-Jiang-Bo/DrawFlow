@@ -535,6 +535,104 @@ def test_destructive_template_action_requires_exact_id_confirmation():
     RenderRequestHandler._require_template_confirmation("DEMO001", {"confirmation": "DEMO001"})
 
 
+def test_activate_template_requires_a_renderable_template(tmp_path):
+    handler = object.__new__(RenderRequestHandler)
+    handler.registry = TemplateRegistry(tmp_path / "templates.json", tmp_path / "templates")
+    handler.registry.upsert_template(
+        {"template_id": "BROKEN001", "name": "Broken", "template_type": "pure_text", "status": "draft"}
+    )
+
+    with pytest.raises(ValueError, match="还不能启用出图"):
+        handler._activate_template("BROKEN001")
+
+
+def test_activate_template_restores_a_renderable_draft(tmp_path):
+    handler = object.__new__(RenderRequestHandler)
+    handler.registry = TemplateRegistry(tmp_path / "templates.json", tmp_path / "templates")
+    ai_path = handler.registry.save_uploaded_ai("READY001", "template.ai", b"ai")
+    handler.registry.upsert_template(
+        {
+            "template_id": "READY001",
+            "name": "Ready",
+            "template_type": "pure_text_color_design",
+            "pipeline": "jjmb_202508",
+            "status": "draft",
+            "template_ai": handler.registry.to_config_path(ai_path),
+        }
+    )
+
+    template = handler._activate_template("READY001")
+
+    assert template.status == "active"
+
+
+def test_activate_template_restores_a_complete_generic_draft(tmp_path):
+    handler = object.__new__(RenderRequestHandler)
+    handler.registry = TemplateRegistry(tmp_path / "templates.json", tmp_path / "templates")
+    ai_path = handler.registry.save_uploaded_ai("GENERICREADY001", "template.ai", b"ai")
+    rule_path = handler.registry.save_template_rules_config(
+        "GENERICREADY001",
+        json.dumps(
+            {
+                "mode": "pure_text",
+                "status": "confirmed",
+                "font_options": ["F1"],
+                "order_bindings": {"text": "Name"},
+                "slot_mappings": [{"name": "Name", "field": "text", "type": "replace_text"}],
+            }
+        ),
+    )
+    handler.registry.upsert_template(
+        {
+            "template_id": "GENERICREADY001",
+            "name": "Generic ready",
+            "template_type": "pure_text",
+            "status": "draft",
+            "template_ai": handler.registry.to_config_path(ai_path),
+            "template_rules_config": handler.registry.to_config_path(rule_path),
+        }
+    )
+
+    template = handler._activate_template("GENERICREADY001")
+
+    assert template.status == "active"
+
+
+def test_active_template_upload_failure_leaves_template_in_draft(tmp_path):
+    handler = object.__new__(RenderRequestHandler)
+    handler.registry = TemplateRegistry(tmp_path / "templates.json", tmp_path / "templates")
+    ai_path = handler.registry.save_uploaded_ai("SAFEUPDATE001", "template.ai", b"old scanned ai")
+    handler.registry.upsert_template(
+        {
+            "template_id": "SAFEUPDATE001",
+            "name": "Safe update",
+            "template_type": "pure_text_color_design",
+            "pipeline": "jjmb_202508",
+            "status": "active",
+            "template_ai": handler.registry.to_config_path(ai_path),
+        }
+    )
+
+    with pytest.raises(ValueError, match="必须是 .ai 格式"):
+        handler._register_template(
+            {
+                "template_id": "SAFEUPDATE001",
+                "name": "Safe update",
+                "template_type": "pure_text_color_design",
+                "pipeline": "jjmb_202508",
+            },
+            {
+                "template_ai": [{"filename": "replacement.ai", "content": b"new unscanned ai"}],
+                "design_font_assets": [{"filename": "invalid.txt", "content": b"not an ai asset"}],
+            },
+        )
+
+    template = handler.registry.get_template("SAFEUPDATE001")
+
+    assert template.status == "draft"
+    assert template.template_ai and template.template_ai.read_bytes() == b"new unscanned ai"
+
+
 def test_template_registry_rejects_directory_colliding_ids(tmp_path):
     registry = TemplateRegistry(tmp_path / "templates.json", tmp_path / "templates")
     with pytest.raises(ValueError, match="template_id may only contain"):

@@ -689,7 +689,8 @@ INDEX_HTML = """<!doctype html>
       text-decoration: underline;
     }
     .progress-overlay,
-    .error-overlay {
+    .error-overlay,
+    .confirm-overlay {
       position: fixed;
       inset: 0;
       display: none;
@@ -700,18 +701,55 @@ INDEX_HTML = """<!doctype html>
     }
     .progress-overlay { z-index: 60; }
     .error-overlay { z-index: 70; }
+    .confirm-overlay { z-index: 80; }
     .progress-overlay.active,
-    .error-overlay.active {
+    .error-overlay.active,
+    .confirm-overlay.active {
       display: flex;
     }
     .progress-dialog,
-    .error-dialog {
+    .error-dialog,
+    .confirm-dialog {
       width: min(520px, 100%);
       border: 1px solid var(--line);
       border-radius: 8px;
       background: #fff;
       box-shadow: 0 22px 60px rgba(23, 33, 43, 0.24);
       overflow: hidden;
+    }
+    .confirm-head {
+      padding: 18px 20px 12px;
+      border-bottom: 1px solid var(--line);
+    }
+    .confirm-title {
+      margin: 0;
+      font-size: 17px;
+    }
+    .confirm-body {
+      display: grid;
+      gap: 14px;
+      padding: 18px 20px 20px;
+    }
+    .confirm-warning {
+      margin: 0;
+      color: var(--warning);
+      line-height: 1.6;
+    }
+    .confirm-template-id {
+      margin: 0;
+      padding: 9px 10px;
+      border: 1px solid var(--line);
+      border-radius: 5px;
+      color: var(--ink);
+      background: var(--soft);
+      font-family: Consolas, "Microsoft YaHei", monospace;
+      font-weight: 700;
+    }
+    .confirm-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+      margin-top: 2px;
     }
     .error-dialog {
       width: min(460px, 100%);
@@ -1351,6 +1389,26 @@ INDEX_HTML = """<!doctype html>
     </div>
   </div>
 
+  <div class="confirm-overlay" id="templateRemoveConfirmOverlay" aria-hidden="true">
+    <div class="confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="templateRemoveConfirmTitle" aria-describedby="templateRemoveConfirmText">
+      <div class="confirm-head">
+        <h2 class="confirm-title" id="templateRemoveConfirmTitle">确认移除模板登记</h2>
+      </div>
+      <div class="confirm-body">
+        <p class="confirm-warning" id="templateRemoveConfirmText">此操作会从模板列表移除登记，但不会删除磁盘中的模板文件。请确认目标模板后继续。</p>
+        <p class="confirm-template-id" id="templateRemoveConfirmTarget">-</p>
+        <div>
+          <label for="templateRemoveConfirmInput">输入上方模板 ID 以确认</label>
+          <input id="templateRemoveConfirmInput" autocomplete="off" placeholder="模板 ID" />
+        </div>
+        <div class="confirm-actions">
+          <button class="btn-subtle" id="cancelTemplateRemoveBtn" type="button">取消</button>
+          <button class="btn-danger" id="confirmTemplateRemoveBtn" type="button" disabled>确认移除</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <script>
     const state = {
       templates: [],
@@ -1369,7 +1427,8 @@ INDEX_HTML = """<!doctype html>
       assetMappingsTouched: false,
       dimensionRowsTouched: false,
       textSequenceRowsTouched: false,
-      templateRulesDescriptionDirty: false
+      templateRulesDescriptionDirty: false,
+      pendingTemplateRemovalId: ""
     };
     let progressTimer = null;
     let progressValue = 0;
@@ -1450,6 +1509,12 @@ INDEX_HTML = """<!doctype html>
       document.getElementById("renderBtn").addEventListener("click", () => submitRender(false));
       document.getElementById("refreshJobsPageBtn").addEventListener("click", loadJobs);
       document.getElementById("closeRenderErrorBtn").addEventListener("click", hideRenderError);
+      document.getElementById("cancelTemplateRemoveBtn").addEventListener("click", closeTemplateRemoveConfirm);
+      document.getElementById("confirmTemplateRemoveBtn").addEventListener("click", confirmTemplateRemoval);
+      document.getElementById("templateRemoveConfirmInput").addEventListener("input", syncTemplateRemoveConfirmState);
+      document.getElementById("templateRemoveConfirmOverlay").addEventListener("click", event => {
+        if (event.target === event.currentTarget) closeTemplateRemoveConfirm();
+      });
       document.getElementById("newTemplateBtn").addEventListener("click", newTemplate);
       document.getElementById("checkTemplateRuleBtn").addEventListener("click", checkTemplateRule);
       document.getElementById("saveTemplateBtn").addEventListener("click", saveTemplate);
@@ -1864,7 +1929,9 @@ INDEX_HTML = """<!doctype html>
             <strong>${escapeHtml(template.template_id)}</strong>
             <span>${escapeHtml(template.name || "-")}</span>
           </button>
-          <button class="btn-subtle" data-template-disable="${escapeHtml(template.template_id)}">停用</button>
+          ${template.status !== "active" && template.rule_check && template.rule_check.renderable
+            ? `<button class="btn-subtle" data-template-activate="${escapeHtml(template.template_id)}">启用出图</button>`
+            : ""}
           <button class="btn-secondary" data-template-remove="${escapeHtml(template.template_id)}">移除</button>
         </div>
       `).join("");
@@ -1877,32 +1944,62 @@ INDEX_HTML = """<!doctype html>
           switchPage("templates");
         });
       });
-      target.querySelectorAll("[data-template-disable]").forEach(button => {
-        button.addEventListener("click", () => disableTemplate(button.dataset.templateDisable));
+      target.querySelectorAll("[data-template-activate]").forEach(button => {
+        button.addEventListener("click", () => activateTemplate(button.dataset.templateActivate));
       });
       target.querySelectorAll("[data-template-remove]").forEach(button => {
-        button.addEventListener("click", () => removeTemplate(button.dataset.templateRemove));
+        button.addEventListener("click", () => openTemplateRemoveConfirm(button.dataset.templateRemove));
       });
     }
 
-    async function disableTemplate(templateId) {
-      const confirmation = window.prompt(`输入模板 ID ${templateId} 确认停用。文件不会被删除。`);
-      if (confirmation !== templateId) return;
+    async function activateTemplate(templateId) {
       try {
-        await postJson(`/api/templates/${encodeURIComponent(templateId)}/disable`, { confirmation });
+        await postJson(`/api/templates/${encodeURIComponent(templateId)}/activate`, {});
         await loadTemplates(templateId);
+        setMessage("templateSaveMessage", `模板已恢复为可出图：${templateId}`, "ok");
       } catch (error) {
         setMessage("templateSaveMessage", String(error.message || error), "error");
       }
     }
 
-    async function removeTemplate(templateId) {
-      const confirmation = window.prompt(`输入模板 ID ${templateId} 确认移除登记。所有本地文件都会保留，可用于恢复。`);
-      if (confirmation !== templateId) return;
+    function openTemplateRemoveConfirm(templateId) {
+      const template = state.templates.find(item => item.template_id === templateId);
+      if (!template) return;
+      state.pendingTemplateRemovalId = templateId;
+      document.getElementById("templateRemoveConfirmTarget").textContent = `${templateId} | ${template.name || "未命名模板"}`;
+      const input = document.getElementById("templateRemoveConfirmInput");
+      input.value = "";
+      const overlay = document.getElementById("templateRemoveConfirmOverlay");
+      overlay.classList.add("active");
+      overlay.setAttribute("aria-hidden", "false");
+      syncTemplateRemoveConfirmState();
+      input.focus();
+    }
+
+    function closeTemplateRemoveConfirm() {
+      state.pendingTemplateRemovalId = "";
+      const overlay = document.getElementById("templateRemoveConfirmOverlay");
+      overlay.classList.remove("active");
+      overlay.setAttribute("aria-hidden", "true");
+      document.getElementById("templateRemoveConfirmInput").value = "";
+      syncTemplateRemoveConfirmState();
+    }
+
+    function syncTemplateRemoveConfirmState() {
+      const confirmation = document.getElementById("templateRemoveConfirmInput").value.trim();
+      document.getElementById("confirmTemplateRemoveBtn").disabled = !state.pendingTemplateRemovalId || confirmation !== state.pendingTemplateRemovalId;
+    }
+
+    async function confirmTemplateRemoval() {
+      const templateId = state.pendingTemplateRemovalId;
+      const confirmation = document.getElementById("templateRemoveConfirmInput").value.trim();
+      if (!templateId || confirmation !== templateId) return;
       try {
         await deleteJson(`/api/templates/${encodeURIComponent(templateId)}`, { confirmation });
+        closeTemplateRemoveConfirm();
         state.selectedTemplateId = "";
         await loadTemplates();
+        setMessage("templateSaveMessage", `已移除模板登记：${templateId}。本地文件仍保留。`, "ok");
       } catch (error) {
         setMessage("templateSaveMessage", String(error.message || error), "error");
       }
@@ -1936,7 +2033,7 @@ INDEX_HTML = """<!doctype html>
       const saveButton = document.getElementById("saveTemplateBtn");
       if (saveButton) saveButton.textContent = "检查并保存规则";
       const uploadButton = document.getElementById("uploadScanTemplateBtn");
-      if (uploadButton) uploadButton.disabled = Boolean(selectedTemplate() && selectedTemplate().status === "active");
+      if (uploadButton) uploadButton.disabled = false;
       const uploadStatus = document.getElementById("uploadScanStatus");
       if (uploadStatus && !hasDraft) uploadStatus.textContent = "选择文件后从这里开始";
       const rescanButton = document.getElementById("rescanTemplateBtn");
@@ -3413,11 +3510,6 @@ INDEX_HTML = """<!doctype html>
         }
         return;
       }
-      if (existingTemplate && existingTemplate.status === "active") {
-        setMessage("templateSaveMessage", "请先停用模板，再上传替换文件", "error");
-        return;
-      }
-
       const form = new FormData();
       form.append("template_id", templateId);
       form.append("name", name);
@@ -3522,7 +3614,7 @@ INDEX_HTML = """<!doctype html>
       const existingTemplate = formTemplate();
       if (hasScanDraft && existingTemplate && existingTemplate.status === "active") {
         if (name !== existingTemplate.name) {
-          setMessage("templateSaveMessage", "请先停用模板，再修改文件或基础信息；规则修改可直接确认", "error");
+          setMessage("templateSaveMessage", "已启用模板请通过“上传并扫描 .ai 模板”更新文件或基础信息；规则修改可直接确认", "error");
           return;
         }
         try {

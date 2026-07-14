@@ -175,11 +175,18 @@ def test_template_onboarding_requires_scan_check_and_confirmation():
     assert "data-rule-rollback" in INDEX_HTML
     assert "/scan" in INDEX_HTML
     assert "扫描草稿已生成" in INDEX_HTML
-    assert "data-template-disable" in INDEX_HTML
+    assert "data-template-disable" not in INDEX_HTML
+    assert "function disableTemplate" not in INDEX_HTML
+    assert "data-template-activate" in INDEX_HTML
+    assert "/activate" in INDEX_HTML
     assert "data-template-remove" in INDEX_HTML
+    assert 'id="templateRemoveConfirmOverlay"' in INDEX_HTML
+    assert 'id="templateRemoveConfirmInput"' in INDEX_HTML
+    assert "function openTemplateRemoveConfirm" in INDEX_HTML
+    assert "function confirmTemplateRemoval" in INDEX_HTML
     assert 'state.templates.filter(template => template.status === "active")' in INDEX_HTML
     assert 'existingTemplate.status === "active"' in INDEX_HTML
-    assert "请先停用模板，再修改文件或基础信息" in INDEX_HTML
+    assert "已启用模板请通过“上传并扫描 .ai 模板”更新文件或基础信息" in INDEX_HTML
 
     fill_body = INDEX_HTML[
         INDEX_HTML.index("function fillTemplateRuleFields"):

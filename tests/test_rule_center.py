@@ -224,6 +224,41 @@ def test_template_rule_check_accepts_design_font_options(tmp_path):
     assert check["renderable"] is True
 
 
+def test_complete_generic_draft_is_eligible_for_activation(tmp_path):
+    ai_path = tmp_path / "template.ai"
+    config_path = tmp_path / "template.rules.json"
+    ai_path.write_text("fake ai", encoding="utf-8")
+    config_path.write_text(
+        json.dumps(
+            {
+                "mode": "pure_text",
+                "status": "confirmed",
+                "font_options": ["F1"],
+                "order_bindings": {"text": "Name"},
+                "slot_mappings": [{"name": "Name", "field": "text", "type": "replace_text"}],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    registry = TemplateRegistry(tmp_path / "templates.json", tmp_path / "templates")
+    template = registry.upsert_template(
+        {
+            "template_id": "GENERIC-DRAFT-001",
+            "name": "generic draft",
+            "template_type": "pure_text",
+            "status": "draft",
+            "template_ai": str(ai_path),
+            "template_rules_config": str(config_path),
+        }
+    )
+
+    check = check_template_definition(template)
+
+    assert check["complete"] is True
+    assert check["renderable"] is True
+
+
 def test_runtime_reader_adapts_confirmed_canonical_rule_pack(tmp_path):
     path = tmp_path / "template.rules.json"
     path.write_text(

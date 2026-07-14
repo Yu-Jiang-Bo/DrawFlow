@@ -345,7 +345,9 @@ def check_template_definition(template: Any) -> Dict[str, Any]:
             "mode": mode,
             "status": str(config.get("status") or getattr(template, "status", "draft")),
             "complete": complete,
-            "renderable": complete and getattr(template, "status", "draft") == "active",
+            # Active is an execution gate in RenderService. Keep this as a capability
+            # check so a complete draft can be explicitly re-enabled.
+            "renderable": complete,
             "missing": missing,
             "warnings": warnings,
             "capabilities": capabilities,
