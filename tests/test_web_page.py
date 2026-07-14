@@ -84,8 +84,8 @@ def test_template_rule_editor_is_business_readable():
     assert "添加多个文字位置" in INDEX_HTML
     assert "默认值" in INDEX_HTML
     assert "特殊处理" in INDEX_HTML
-    assert "文本效果规则" in INDEX_HTML
-    assert "添加文本效果" in INDEX_HTML
+    assert "文本效果规则" not in INDEX_HTML
+    assert "添加文本效果" not in INDEX_HTML
     assert "其他说明（可选，不参与渲染）" in INDEX_HTML
     assert "规则检查结果" in INDEX_HTML
     assert "data-option-group-name" in INDEX_HTML
@@ -106,11 +106,11 @@ def test_template_rule_editor_is_business_readable():
     assert "data-override-target" in INDEX_HTML
     assert 'id="textSourceColumn"' in INDEX_HTML
     assert 'id="textTargetName"' in INDEX_HTML
-    assert 'id="textEffectRows"' in INDEX_HTML
-    assert 'data-effect-target' in INDEX_HTML
-    assert 'data-effect-selector' in INDEX_HTML
-    assert 'data-effect-action' in INDEX_HTML
-    assert 'data-effect-values' in INDEX_HTML
+    assert 'id="textEffectRows"' not in INDEX_HTML
+    assert 'data-effect-target' not in INDEX_HTML
+    assert 'data-effect-selector' not in INDEX_HTML
+    assert 'data-effect-action' not in INDEX_HTML
+    assert 'data-effect-values' not in INDEX_HTML
     assert 'id="alternatingColorEnabled"' not in INDEX_HTML
     assert "结构化规则 JSON" not in INDEX_HTML
     assert "新建空白" not in INDEX_HTML
@@ -156,7 +156,7 @@ def test_template_onboarding_requires_scan_check_and_confirmation():
     assert "保存版本备注" in INDEX_HTML
     assert "不参与渲染" in INDEX_HTML
     assert 'id="templateRuleNote"' in INDEX_HTML
-    assert "collectTextEffects" in INDEX_HTML
+    assert "collectTextEffects" not in INDEX_HTML
     assert 'id="rescanTemplateBtn"' in INDEX_HTML
     assert "rescanTemplate" in INDEX_HTML
     assert 'id="uploadScanTemplateBtn"' in INDEX_HTML
@@ -273,23 +273,22 @@ def test_template_rules_prefill_fixed_options_before_optional_supplement():
     assert "文字内容设置" in INDEX_HTML
     assert "其他说明（可选，不参与渲染）" in INDEX_HTML
     assert "多个文字位置（可选）" in INDEX_HTML
-    assert "文本效果规则" in INDEX_HTML
+    assert "文本效果规则" not in INDEX_HTML
     assert 'id="textSourceColumn"' in INDEX_HTML
     assert 'id="textTargetName"' in INDEX_HTML
     assert "function collectTextContentRule" in INDEX_HTML
-    assert "function collectTextEffects" in INDEX_HTML
-    assert "function effectRowsFromConfig" in INDEX_HTML
-    assert 'data-effect-condition' in INDEX_HTML
-    assert "function parseEffectCondition" in INDEX_HTML
-    assert "function formatEffectCondition" in INDEX_HTML
-    assert "text.split(/[;；]/)" in INDEX_HTML
-    assert ').join("; ")' in INDEX_HTML
-    assert "font=F2,F3; color=Gold" in INDEX_HTML
-    assert "grid-template-columns: repeat(4, minmax(0, 1fr));" in INDEX_HTML
-    assert "#textEffectRows" in INDEX_HTML
-    assert "@media (max-width: 720px)" in INDEX_HTML
-    assert "#D71920,#000000" in INDEX_HTML
-    assert "text_sequence_styles" in INDEX_HTML
+    assert "function collectTextEffects" not in INDEX_HTML
+    assert "function effectRowsFromConfig" not in INDEX_HTML
+    assert 'data-effect-condition' not in INDEX_HTML
+    assert "function parseEffectCondition" not in INDEX_HTML
+    assert "function formatEffectCondition" not in INDEX_HTML
+    assert "#textEffectRows" not in INDEX_HTML
+    assert "#D71920,#000000" not in INDEX_HTML
+    assert "文本效果规则" not in INDEX_HTML
+    assert "delete savedBaseConfig.effects" in INDEX_HTML
+    assert "delete savedBaseConfig.text_sequence_styles" in INDEX_HTML
+    assert "加粗" in INDEX_HTML
+    assert "option_overrides" in INDEX_HTML
     assert "function prefillScannedOptionSuggestions" in INDEX_HTML
     assert "function mergeScannedOptionGroups" in INDEX_HTML
     assert "const groups = mergeScannedOptionGroups(savedGroups, config);" in INDEX_HTML

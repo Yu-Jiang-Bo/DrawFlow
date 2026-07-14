@@ -250,64 +250,19 @@ def test_validation_sample_applies_delimiter_and_sequence_index():
     assert result["ok"] is True
 
 
-def test_check_accepts_declarative_text_effect():
+def test_check_discards_retired_text_effect_payload():
     pack = ready_pack()
     pack["rules"]["effects"] = [
         {
-            "stage": "text",
-            "target": {"field": "text", "name": "Name1"},
-            "selector": {"type": "split", "delimiter": "|", "positions": "all"},
-            "actions": [
-                {
-                    "type": "set_fill_color",
-                    "value": {"type": "cycle", "values": ["#D42129", "#FFFFFF"]},
-                }
-            ],
+            "stage": "unsupported",
+            "actions": [{"type": "run_template_script", "value": "ignored"}],
         }
     ]
-    pack["validation"]["sample"] = {
-        "input": {"custom_text": "Alice | Bob"},
-        "expected": {"Name1": "Alice | Bob"},
-    }
 
     result = check_rule_pack(pack, template_id="DEMO001")
 
     assert result["ok"] is True
-
-
-def test_check_rejects_effect_without_matching_text_mapping():
-    pack = ready_pack()
-    pack["rules"]["effects"] = [
-        {
-            "stage": "text",
-            "target": {"field": "text", "name": "UnknownName"},
-            "selector": {"type": "whole"},
-            "actions": [{"type": "set_fill_color", "value": {"type": "literal", "value": "#D42129"}}],
-        }
-    ]
-
-    result = check_rule_pack(pack, template_id="DEMO001")
-
-    assert any(
-        item["code"] == "effects" and "text -> UnknownName" in item["message"]
-        for item in result["errors"]
-    )
-
-
-def test_check_rejects_unknown_effect_action():
-    pack = ready_pack()
-    pack["rules"]["effects"] = [
-        {
-            "stage": "text",
-            "target": {"field": "text", "name": "Name1"},
-            "selector": {"type": "whole"},
-            "actions": [{"type": "run_template_script", "value": {"type": "literal", "value": "x"}}],
-        }
-    ]
-
-    result = check_rule_pack(pack, template_id="DEMO001")
-
-    assert any(item["code"] == "effects" and "run_template_script" in item["message"] for item in result["errors"])
+    assert "effects" not in result["pack"]["rules"]
 
 
 def test_validation_sample_preserves_numeric_zero():

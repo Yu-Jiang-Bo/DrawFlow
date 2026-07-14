@@ -8,7 +8,7 @@ import pytest
 SCRIPT = Path("scripts/illustrator/render_generic_rule_pack.jsx")
 
 
-def test_generic_renderer_has_no_template_specific_branch():
+def test_generic_renderer_hardcodes_name_alternating_colors_only():
     source = SCRIPT.read_text(encoding="utf-8")
 
     assert "task.orders.length" in source
@@ -20,11 +20,13 @@ def test_generic_renderer_has_no_template_specific_branch():
     assert "findPageItemsByName" in source
     assert 'String(variable.target || "") + "_ANCHOR"' in source
     assert "copyTextStyle(fontSource, frame)" in source
-    assert "applyTextEffects(frame, variable.effects || [])" in source
-    assert "TEXT_EFFECT_HANDLERS" in source
-    assert '"set_fill_color"' in source
-    assert '"set_tracking"' in source
-    assert "applyTextEffectRange" in source
+    assert 'applyNameAlternatingColors(frame, String(variable.target || ""), String(variable.name_delimiter || "|"))' in source
+    assert 'if (target !== "Name" || !delimiter) return;' in source
+    assert "[215, 25, 32]" in source
+    assert "[0, 0, 0]" in source
+    assert "applyTextEffects" not in source
+    assert "TEXT_EFFECT_HANDLERS" not in source
+    assert "applyTextEffectRange" not in source
     assert "applyCharacterStyles" not in source
     assert "doc-color-cmyk" in source
     assert "doc-color-rgb" in source

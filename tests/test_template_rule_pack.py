@@ -148,7 +148,7 @@ def test_migrates_legacy_custom_text_binding_to_standard_text_field():
     assert pack["rules"]["slot_mappings"] == [{"field": "text", "slot": "Name"}]
 
 
-def test_migrates_legacy_alternating_colors_to_declarative_effect():
+def test_discards_legacy_alternating_color_configuration():
     pack = normalize_template_rule_pack(
         {
             "$schema": RULE_PACK_SCHEMA,
@@ -169,20 +169,7 @@ def test_migrates_legacy_alternating_colors_to_declarative_effect():
     )
 
     assert "text_sequence_styles" not in pack["rules"]
-    assert pack["rules"]["effects"] == [
-        {
-            "id": "legacy-alternating-color-1",
-            "stage": "text",
-            "target": {"field": "text", "name": "Name"},
-            "selector": {"type": "split", "delimiter": "|", "positions": "all", "trim": False},
-            "actions": [
-                {
-                    "type": "set_fill_color",
-                    "value": {"type": "cycle", "values": ["#D71920", "#FFFFFF"]},
-                }
-            ],
-        }
-    ]
+    assert "effects" not in pack["rules"]
 
 
 def test_profiles_define_type_specific_requirements():

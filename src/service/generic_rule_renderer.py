@@ -8,7 +8,6 @@ from typing import Any, Dict, Iterable, Mapping
 from openpyxl import load_workbook
 
 from .template_registry import TemplateDefinition
-from .template_effects import compile_text_effects
 from .template_rule_execution import resolve_mapped_text
 
 
@@ -132,13 +131,22 @@ def _build_variables(
                 f"Order value cannot satisfy split policy for target: {target}"
             )
         variable = {"target": target, "field": field, "value": value}
-        effects = compile_text_effects(value, field, target, rules, selections)
-        if effects:
-            variable["effects"] = effects
+        if field == "text" and target == "Name":
+            variable["name_delimiter"] = _name_delimiter(mapping, rules)
         variables.append(variable)
     if not variables:
         raise GenericRuleRenderError("Order row does not produce any template variables.")
     return variables
+
+
+def _name_delimiter(mapping: Mapping[str, Any], rules: Mapping[str, Any]) -> str:
+    delimiter = str(mapping.get("delimiter") or "").strip()
+    if delimiter:
+        return delimiter
+    policies = rules.get("text_policies")
+    split_policy = policies.get("split") if isinstance(policies, Mapping) else None
+    delimiter = str(split_policy.get("delimiter") or "").strip() if isinstance(split_policy, Mapping) else ""
+    return delimiter or "|"
 
 
 def _read_rows(path: Path, *, sheet_name: str) -> list[Dict[str, Any]]:

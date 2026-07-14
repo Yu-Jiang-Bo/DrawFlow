@@ -15,7 +15,6 @@ from .template_rule_pack import (
 )
 from .template_locks import TEMPLATE_STATE_LOCK
 from .template_rule_execution import resolve_mapped_text
-from .template_effects import validate_template_effects
 
 
 ADVISORY_CODES = {"confirmation_required", "profile"}
@@ -319,7 +318,6 @@ def _validate_editable_sections(
         "order_bindings": Mapping,
         "asset_mappings": list,
         "text_policies": Mapping,
-        "effects": list,
         "transforms": Mapping,
     }
     for field, expected in expected_types.items():
@@ -377,12 +375,6 @@ def _validate_editable_sections(
             _validate_split_policy(split_policy, errors)
         if not fit_policy and not split_policy:
             errors.append(_issue("text_policies", "Text policy requires fit or split."))
-
-    effect_value = raw_rules.get("effects") if "effects" in raw_rules else rules.get("effects")
-    for message in validate_template_effects(
-        effect_value, bindings, slot_mapping_items, text_target_items
-    ):
-        errors.append(_issue("effects", message))
 
     sample = raw_validation.get("sample") if isinstance(raw_validation, Mapping) else None
     if not isinstance(sample, Mapping) or not isinstance(sample.get("input"), Mapping) or not isinstance(

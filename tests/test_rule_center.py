@@ -9,14 +9,11 @@ from src.service.rule_center import (
     parse_dimensions,
     parse_asset_mappings,
     parse_order_bindings,
-    parse_text_effects,
     parse_text_policies,
     parse_validation_sample,
     read_template_rule_config,
-    summarize_template_rule_draft,
 )
 from src.service.template_registry import TemplateRegistry
-from src.service.template_effects import compile_text_effects
 
 
 def test_template_rule_draft_extracts_curved_title_rules():
@@ -122,42 +119,13 @@ def test_natural_language_extracts_business_rule_sections():
     assert draft["validation_sample"]["expected"]["Name2"] == "Jerry"
 
 
-def test_natural_language_name_odd_even_colors_become_one_declarative_effect():
+def test_natural_language_name_odd_even_colors_remain_non_executable_note():
     text = "订单存在多个名字的时候，单数的Name用红色渲染，双数的Name用黑色渲染"
 
-    effects = parse_text_effects(text)
     draft = build_template_rule_draft("NATURAL-EFFECT-001", "pure_text", text)
 
-    assert effects == [
-        {
-            "id": "natural-name-alternating-color",
-            "stage": "text",
-            "target": {"field": "text", "name": "Name"},
-            "selector": {"type": "split", "delimiter": "|", "positions": "all", "trim": True},
-            "actions": [
-                {
-                    "type": "set_fill_color",
-                    "value": {"type": "cycle", "values": ["#D71920", "#000000"]},
-                }
-            ],
-        }
-    ]
-    assert draft["effects"] == effects
-    assert "可执行文本效果" in "\n".join(summarize_template_rule_draft(draft)["summary"])
-    assert compile_text_effects("Alice|Bob|Carol", "text", "Name", draft) == [
-        {
-            "type": "set_fill_color",
-            "ranges": [
-                {"start": 0, "length": 5, "value": "#D71920"},
-                {"start": 6, "length": 3, "value": "#000000"},
-                {"start": 10, "length": 5, "value": "#D71920"},
-            ],
-        }
-    ]
-
-
-def test_natural_language_name_effect_requires_both_odd_and_even_colors():
-    assert parse_text_effects("单数的 Name 用红色渲染") == []
+    assert "effects" not in draft
+    assert draft["raw_text"] == text
 
 
 def test_curved_layout_overrides_reads_structured_or_raw_dimensions():

@@ -173,26 +173,12 @@ def test_numeric_zero_is_preserved_as_template_text(tmp_path):
     assert task["orders"][0]["variables"][0]["value"] == "0"
 
 
-def test_builds_alternating_character_colors_for_one_text_target(tmp_path):
+def test_marks_name_target_for_hardcoded_alternating_colors(tmp_path):
     _, template = make_template(tmp_path)
     order_path = tmp_path / "orders.xlsx"
     make_orders(order_path, custom="Alice|Bob|Carol")
     rules = base_rules()
     rules["slot_mappings"] = [{"field": "text", "slot": "Name"}]
-    rules["effects"] = [
-        {
-            "id": "name-colors",
-            "stage": "text",
-            "target": {"field": "text", "name": "Name"},
-            "selector": {"type": "split", "delimiter": "|", "positions": "all"},
-            "actions": [
-                {
-                    "type": "set_fill_color",
-                    "value": {"type": "cycle", "values": ["#D71920", "#FFFFFF"]},
-                }
-            ],
-        }
-    ]
 
     task = build_generic_render_task(template, rules, order_path, tmp_path / "output.ai")
 
@@ -201,16 +187,7 @@ def test_builds_alternating_character_colors_for_one_text_target(tmp_path):
             "target": "Name",
             "field": "text",
             "value": "Alice|Bob|Carol",
-            "effects": [
-                {
-                    "type": "set_fill_color",
-                    "ranges": [
-                        {"start": 0, "length": 5, "value": "#D71920"},
-                        {"start": 6, "length": 3, "value": "#FFFFFF"},
-                        {"start": 10, "length": 5, "value": "#D71920"},
-                    ],
-                }
-            ],
+            "name_delimiter": "|",
         }
     ]
 
