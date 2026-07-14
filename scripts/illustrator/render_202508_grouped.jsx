@@ -11,6 +11,7 @@
     var colorMode = outputColorMode(outputConfig.color_mode);
     var pathfinderMerge = outputConfig.pathfinder_merge !== false;
     var cleanupStats = { attempted: 0, failed: 0 };
+    var fontStyles = task.font_styles || {};
 
     try { app.userInteractionLevel = UserInteractionLevel.DONTDISPLAYALERTS; } catch (e0) {}
 
@@ -263,6 +264,7 @@
         tf.contents = String(item.text || "");
         applyFontConfig(tf, font);
         applyColor(tf, item.apply_color_to_artwork ? colorConfig(config, item.color_option) : [0, 0, 0]);
+        applyFontBoldness(tf, fontStyles[String(item.font_option || "")]);
         return renderOutlinedTextToRect(tf, rect, minSize, maxSize, Number(design.rotation_deg || 0), shouldPreserveTextAspect(String(item.text || "")));
     }
 
@@ -317,6 +319,16 @@
         color.green = Number(rgb[1] || 0);
         color.blue = Number(rgb[2] || 0);
         tf.textRange.characterAttributes.fillColor = color;
+    }
+
+    function applyFontBoldness(tf, style) {
+        var boldness = Number(style && style.boldness);
+        if (isNaN(boldness) || boldness <= 0) return;
+        var attributes = tf.textRange.characterAttributes;
+        try { attributes.strokeColor = attributes.fillColor; } catch (e1) {}
+        try { attributes.strokeWeight = boldness; } catch (e2) {
+            try { attributes.strokeWidth = boldness; } catch (e3) {}
+        }
     }
 
     function fitTextToRect(tf, rect, minSize, maxSize) {

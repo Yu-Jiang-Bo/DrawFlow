@@ -13,6 +13,7 @@ from .template_rule_pack import (
     normalize_template_rule_pack,
     profile_definition,
 )
+from .font_style_rules import validate_font_style_rules
 from .name_color_cycle import validate_name_color_cycle
 from .template_locks import TEMPLATE_STATE_LOCK
 from .template_rule_execution import resolve_mapped_text
@@ -168,8 +169,20 @@ class TemplateOnboardingStore:
         return self.get_state(template_id)
 
     def check(self, template_id: str, payload: Mapping[str, Any]) -> Dict[str, Any]:
+        raw_font_style_errors = validate_font_style_rules(_raw_font_style_rules(payload))
         pack = self._verify_scan_evidence(template_id, payload)
         result = check_rule_pack(pack, template_id=template_id)
+        if raw_font_style_errors:
+            # Validate submitted rows before normalization can discard incomplete entries.
+            result["errors"].extend(
+                _issue("font_style_rules", message) for message in raw_font_style_errors
+            )
+            result["ok"] = False
+            result["pack"]["validation"]["status"] = "invalid"
+            result["pack"]["validation"]["issues"] = deepcopy(
+                [*result["errors"], *result["warnings"]]
+            )
+            return result
         self._write(self._directory(template_id) / "draft.json", result["pack"])
         return result
 
@@ -297,6 +310,15 @@ def _field_value(pack: Mapping[str, Any], field: str) -> Any:
     return value
 
 
+def _raw_font_style_rules(payload: Mapping[str, Any]) -> Any:
+    if not isinstance(payload, Mapping):
+        return None
+    rules = payload.get("rules")
+    if isinstance(rules, Mapping) and "font_style_rules" in rules:
+        return rules.get("font_style_rules")
+    return payload.get("font_style_rules") if "font_style_rules" in payload else None
+
+
 def _mark_field_sources(pack: Dict[str, Any]) -> None:
     sources = pack.get("audit", {}).get("field_sources", {})
     if not isinstance(sources, Mapping):
@@ -329,6 +351,9 @@ def _validate_editable_sections(
     color_cycle = raw_rules.get("name_color_cycle") if "name_color_cycle" in raw_rules else rules.get("name_color_cycle")
     for message in validate_name_color_cycle(color_cycle):
         errors.append(_issue("name_color_cycle", message))
+    font_style_rules = raw_rules.get("font_style_rules") if "font_style_rules" in raw_rules else rules.get("font_style_rules")
+    for message in validate_font_style_rules(font_style_rules):
+        errors.append(_issue("font_style_rules", message))
 
     profile = str(pack.get("template", {}).get("profile") or "")
     if profile != "bundle" and not rules.get("order_bindings"):

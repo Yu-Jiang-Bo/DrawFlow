@@ -6,6 +6,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, Mapping
 
+from .font_style_rules import normalize_font_style_rules, strip_legacy_font_bold_overrides
 from .llm_rule_parser import normalize_option_list
 from .name_color_cycle import normalize_name_color_cycle
 
@@ -80,6 +81,7 @@ def migrate_legacy_template_rule(payload: Mapping[str, Any], *, template_id: str
     assets = _normalize_assets(source.get("assets"))
     text_targets = _dict_list(source.get("text_targets") or source.get("slots"))
     unresolved = _dict_list(source.get("unresolved_items"))
+    legacy_option_overrides = _dict(source.get("option_overrides"))
     if profile == PROFILE_UNCLASSIFIED and not _has_unresolved_code(unresolved, "profile"):
         unresolved.append({"code": "profile", "message": "无法从旧规则确定模板 Profile，需要人工确认"})
 
@@ -101,7 +103,11 @@ def migrate_legacy_template_rule(payload: Mapping[str, Any], *, template_id: str
         "order_bindings": _dict(source.get("order_bindings")),
         "asset_mappings": _dict_list(source.get("asset_mappings")),
         "defaults": _dict(source.get("defaults")),
-        "option_overrides": _dict(source.get("option_overrides")),
+        "font_style_rules": normalize_font_style_rules(
+            source.get("font_style_rules"),
+            legacy_option_overrides=legacy_option_overrides,
+        ),
+        "option_overrides": strip_legacy_font_bold_overrides(legacy_option_overrides),
         "notes": _dict(source.get("notes")),
         "transforms": deepcopy(source.get("transforms", {})),
         "output": _dict(source.get("output")),

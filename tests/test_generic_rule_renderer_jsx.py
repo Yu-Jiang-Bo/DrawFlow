@@ -7,6 +7,7 @@ import pytest
 
 
 SCRIPT = Path("scripts/illustrator/render_generic_rule_pack.jsx")
+GROUPED_SCRIPT = Path("scripts/illustrator/render_config_grouped_text_sheet.jsx")
 
 
 def test_generic_renderer_cycles_configured_name_colors_only():
@@ -22,6 +23,8 @@ def test_generic_renderer_cycles_configured_name_colors_only():
     assert 'String(variable.target || "") + "_ANCHOR"' in source
     assert "copyTextStyle(fontSource, frame)" in source
     assert "applyNameColorCycle(frame, variable)" in source
+    assert "applyFontBoldness(frame, variable.font_style)" in source
+    assert "function applyFontBoldness(frame, style)" in source
     assert 'String(variable.target || "") !== "Name"' in source
     assert "var rgb = hexColor(colors[partIndex % colors.length]);" in source
     assert "function hexColor(value)" in source
@@ -59,6 +62,22 @@ def test_generic_renderer_javascript_parses_in_node():
     assert result.returncode == 0, result.stderr
 
 
+def test_grouped_renderer_applies_each_task_font_style_before_outlining():
+    source = GROUPED_SCRIPT.read_text(encoding="utf-8")
+
+    assert "var fontStyles = task.font_styles || {};" in source
+    assert 'applyFontBoldness(tf, fontStyles[String(item.font_option || "")]);' in source
+    assert "function applyFontBoldness(tf, style)" in source
+    assert "attributes.strokeColor = attributes.fillColor" in source
+    assert "attributes.strokeWeight = boldness" in source
+    design_body = source[source.index("function renderDesignAssetItem"):source.index("function replaceDesignTexts")]
+    assert "applyFontBoldnessToTextFrames(copy, fontStyle);" in design_body
+    assert design_body.index("applyFontBoldnessToTextFrames(copy, fontStyle);") < design_body.index(
+        "outlineTextFrames(copy);"
+    )
+    assert "function applyFontBoldnessToTextFrames(root, style)" in source
+
+
 def test_generic_renderer_cycles_actual_name_characters_in_node_harness():
     node = shutil.which("node")
     if not node:
@@ -82,6 +101,7 @@ def test_generic_renderer_cycles_actual_name_characters_in_node_harness():
                             "delimiter": "|",
                             "colors": ["#FF0000", "#000000", "#0000FF"],
                         },
+                        "font_style": {"boldness": 0.4},
                     }
                 ],
                 "assets": [],
@@ -136,6 +156,8 @@ const values = [0, 2, 4, 6].map(index => {{
 }});
 const expected = [[255, 0, 0], [0, 0, 0], [0, 0, 255], [255, 0, 0]];
 if (JSON.stringify(values) !== JSON.stringify(expected)) throw new Error(JSON.stringify(values));
+const weights = [0, 2, 4, 6].map(index => characters[index].characterAttributes.strokeWeight);
+if (JSON.stringify(weights) !== JSON.stringify([0.4, 0.4, 0.4, 0.4])) throw new Error(JSON.stringify(weights));
 console.log(JSON.stringify(values));
 """
 

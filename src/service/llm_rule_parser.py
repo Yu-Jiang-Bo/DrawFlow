@@ -78,7 +78,7 @@ class LlmRuleParser:
                         "capabilities, font_options, style_options, design_options, defaults, transforms, dimensions, "
                         "output, slots, assets, name_color_cycle。"
                         "模板规则不得返回脚本、表达式或可执行代码。"
-                        "加粗、转大写、禁止压缩字宽和固定颜色应使用已有 option_overrides；"
+                        "按字体设置加粗值应使用 font_style_rules=[{font_options:[...],boldness:0.4}]；"
                         "Name 多色循环使用 name_color_cycle={delimiter,colors}，其中 colors 是至少两个 #RRGGBB 字符串；"
                         "不要生成 effects 或可执行表达式。"
                         "font_options、style_options、design_font_options、capabilities 必须返回字符串数组，"

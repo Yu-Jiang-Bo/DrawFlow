@@ -288,6 +288,48 @@ def test_check_rejects_incomplete_name_color_cycle():
     assert "至少需要两个颜色" in " ".join(item["message"] for item in result["errors"])
 
 
+def test_check_keeps_all_dynamic_font_boldness_rules_and_rejects_duplicates():
+    pack = ready_pack()
+    pack["rules"]["font_style_rules"] = [
+        {"font_options": ["F2", "F3", "F10", "F11", "F12"], "boldness": 0.4},
+        {"font_options": ["F5", "F6", "F7", "F8", "F9"], "boldness": 0.5},
+    ]
+
+    result = check_rule_pack(pack, template_id="DEMO001")
+
+    assert result["ok"] is True
+    assert result["pack"]["rules"]["font_style_rules"][1] == {
+        "font_options": ["F5", "F6", "F7", "F8", "F9"],
+        "boldness": 0.5,
+    }
+
+    pack["rules"]["font_style_rules"].append({"font_options": ["F2"], "boldness": 0.6})
+    invalid = check_rule_pack(pack, template_id="DEMO001")
+
+    assert any(item["code"] == "font_style_rules" for item in invalid["errors"])
+    assert "重复设置了字体 F2" in " ".join(item["message"] for item in invalid["errors"])
+
+
+def test_store_rejects_incomplete_font_style_rule_without_overwriting_last_draft(tmp_path):
+    store = TemplateOnboardingStore(tmp_path)
+    pack = ready_pack()
+    pack["rules"]["font_style_rules"] = [{"font_options": ["F2"], "boldness": 0.4}]
+    store.save_scan_draft("DEMO001", pack)
+    submitted = deepcopy(pack)
+    submitted["rules"]["font_style_rules"].append({"font_options": [], "boldness": 0.5})
+
+    result = store.check("DEMO001", submitted)
+
+    assert result["ok"] is False
+    assert result["pack"]["validation"]["status"] == "invalid"
+    assert any(item["code"] == "font_style_rules" for item in result["errors"])
+    with pytest.raises(ValueError, match="unresolved validation"):
+        store.confirm("DEMO001", submitted, change_summary="Incomplete font rule")
+    assert store.get_state("DEMO001")["draft"]["rules"]["font_style_rules"] == [
+        {"font_options": ["F2"], "boldness": 0.4}
+    ]
+
+
 def test_validation_sample_preserves_numeric_zero():
     pack = ready_pack()
     pack["validation"]["sample"] = {

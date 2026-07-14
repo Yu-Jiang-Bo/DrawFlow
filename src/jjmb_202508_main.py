@@ -8,7 +8,7 @@ import re
 from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterable, List
+from typing import Dict, Iterable, List, Mapping
 
 from .jjmb_order_parser import read_xlsx_rows, split_personalization
 from .renderer.illustrator_bridge import IllustratorBridge, IllustratorBridgeError
@@ -293,6 +293,7 @@ def build_task(
     columns: int,
     show_style_boxes: bool,
     color_mode: str = "CMYK",
+    font_styles: Mapping[str, Mapping[str, float]] | None = None,
 ) -> Dict[str, object]:
     if not groups:
         raise ValueError("没有可渲染订单")
@@ -301,6 +302,11 @@ def build_task(
         "template_config": str(template_config),
         "output_ai": str(output_ai),
         "groups": [group.to_json_dict() for group in groups],
+        "font_styles": {
+            str(option).strip(): dict(style)
+            for option, style in (font_styles or {}).items()
+            if str(option).strip() and isinstance(style, Mapping)
+        },
         "layout": {
             "columns": max(columns, 1),
             "gap_mm": 8.0,

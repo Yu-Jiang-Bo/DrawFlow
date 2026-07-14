@@ -7,6 +7,7 @@ from typing import Any, Dict, Iterable, Mapping
 
 from openpyxl import load_workbook
 
+from .font_style_rules import font_style_by_option
 from .name_color_cycle import normalize_name_color_cycle
 from .template_registry import TemplateDefinition
 from .template_rule_execution import resolve_mapped_text
@@ -80,7 +81,15 @@ def _build_order(
         for key in ("font", "design", "style", "color")
         if ("" if values.get(key) is None else str(values.get(key))).strip()
     }
-    variables = _build_variables(values, rules)
+    font_styles = font_style_by_option(
+        rules.get("font_style_rules"),
+        legacy_option_overrides=rules.get("option_overrides"),
+    )
+    variables = _build_variables(
+        values,
+        rules,
+        font_style=font_styles.get(selections.get("font", "")),
+    )
     asset_tasks = []
     selected_options = set(selections.values())
     for mapping in _list_of_mappings(rules.get("asset_mappings")):
@@ -111,6 +120,8 @@ def _build_order(
 def _build_variables(
     values: Mapping[str, Any],
     rules: Mapping[str, Any],
+    *,
+    font_style: Mapping[str, Any] | None = None,
 ) -> list[Dict[str, Any]]:
     mappings = _list_of_mappings(rules.get("slot_mappings"))
     if not mappings:
@@ -134,6 +145,8 @@ def _build_variables(
         variable = {"target": target, "field": field, "value": value}
         if target == "Name" and name_color_cycle:
             variable["name_color_cycle"] = name_color_cycle
+        if font_style:
+            variable["font_style"] = dict(font_style)
         variables.append(variable)
     if not variables:
         raise GenericRuleRenderError("Order row does not produce any template variables.")

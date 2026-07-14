@@ -83,7 +83,7 @@ def test_template_rule_editor_is_business_readable():
     assert "添加尺寸" in INDEX_HTML
     assert "添加多个文字位置" in INDEX_HTML
     assert "默认值" in INDEX_HTML
-    assert "特殊处理" in INDEX_HTML
+    assert "字体加粗规则（可选）" in INDEX_HTML
     assert "文本效果规则" not in INDEX_HTML
     assert "添加文本效果" not in INDEX_HTML
     assert "其他说明（可选，不参与渲染）" in INDEX_HTML
@@ -103,7 +103,12 @@ def test_template_rule_editor_is_business_readable():
     assert 'id="fixedWidth"' in INDEX_HTML
     assert 'id="fixedHeight"' in INDEX_HTML
     assert "dimension-mode-card" in INDEX_HTML
-    assert "data-override-target" in INDEX_HTML
+    assert 'id="fontStyleRuleRows"' in INDEX_HTML
+    assert 'id="addFontStyleRuleBtn"' in INDEX_HTML
+    assert "data-font-style-options" in INDEX_HTML
+    assert "data-font-style-boldness" in INDEX_HTML
+    assert '<input data-font-style-boldness type="number" min="0.1"' in INDEX_HTML
+    assert "data-override-target" not in INDEX_HTML
     assert 'id="textSourceColumn"' in INDEX_HTML
     assert 'id="textTargetName"' in INDEX_HTML
     assert 'id="textEffectRows"' not in INDEX_HTML
@@ -296,6 +301,12 @@ def test_template_rules_prefill_fixed_options_before_optional_supplement():
     assert "delete savedBaseConfig.text_sequence_styles" in INDEX_HTML
     assert "加粗" in INDEX_HTML
     assert "option_overrides" in INDEX_HTML
+    assert "font_style_rules" in INDEX_HTML
+    assert "function collectFontStyleRules" in INDEX_HTML
+    assert "function displayFontStyleRules" in INDEX_HTML
+    assert "legacyFontStyleRules" in INDEX_HTML
+    assert "function nonBoldOptionOverrides" in INDEX_HTML
+    assert "option_overrides: nonBoldOptionOverrides(baseConfig.option_overrides)" in INDEX_HTML
     assert "function prefillScannedOptionSuggestions" in INDEX_HTML
     assert "function mergeScannedOptionGroups" in INDEX_HTML
     assert "const groups = mergeScannedOptionGroups(savedGroups, config);" in INDEX_HTML

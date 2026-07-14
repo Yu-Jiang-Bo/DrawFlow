@@ -172,6 +172,26 @@ def test_discards_legacy_alternating_color_configuration():
     assert "effects" not in pack["rules"]
 
 
+def test_migrates_legacy_bold_overrides_once_and_keeps_non_bold_overrides():
+    pack = normalize_template_rule_pack(
+        {
+            "template_id": "BOLD001",
+            "mode": "pure_text",
+            "option_overrides": {
+                "F2": {"action": "bold", "bold": True, "value": "加粗0.4"},
+                "F3": {"bold": True, "boldness": 0.4},
+                "F5": {"action": "uppercase"},
+            },
+        }
+    )
+
+    assert pack["rules"]["font_style_rules"] == [
+        {"font_options": ["F2", "F3"], "boldness": 0.4}
+    ]
+    assert pack["rules"]["option_overrides"] == {"F5": {"action": "uppercase"}}
+    assert normalize_template_rule_pack(pack)["rules"] == pack["rules"]
+
+
 def test_normalizes_name_color_cycle_without_a_color_count_limit():
     pack = normalize_template_rule_pack(
         {

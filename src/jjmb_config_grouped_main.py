@@ -38,6 +38,7 @@ def build_grouped_task(
     design_font_options: Iterable[str] | None = None,
     design_asset_path: Path | str | None = None,
     design_asset_mappings: Mapping[str, Mapping[str, str]] | None = None,
+    font_styles: Mapping[str, Mapping[str, float]] | None = None,
 ) -> ConfigGroupedSheetRenderTask:
     rows = read_xlsx_rows(xlsx_path, sheet_name=sheet_name)
     order_items = parse_order_items(rows, template_id=TEMPLATE_ID)
@@ -112,6 +113,11 @@ def build_grouped_task(
         groups=groups,
         columns=max(columns, 1),
         color_mode=color_mode,
+        font_styles={
+            str(option).strip(): dict(style)
+            for option, style in (font_styles or {}).items()
+            if str(option).strip() and isinstance(style, Mapping)
+        },
     )
 
 

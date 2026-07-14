@@ -10,6 +10,7 @@
     if (!task.groups || task.groups.length === 0) throw new Error("No order groups");
     var exportConfig = task.export || {};
     var colorMode = outputColorMode(exportConfig.color_mode);
+    var fontStyles = task.font_styles || {};
 
     try { app.userInteractionLevel = UserInteractionLevel.DONTDISPLAYALERTS; } catch (e) {}
 
@@ -88,7 +89,12 @@
             if (showStyleBoxes) drawStyleBox(layer, boxLeft, boxTop, styleWidth, styleHeight, String(item.style_option || ""));
 
             if (String(item.render_kind || "text") === "design_asset") {
-                var designItem = renderDesignAssetItem(layer, item, [boxLeft + padding, boxTop - padding, boxRight - padding, boxBottom + padding]);
+                var designItem = renderDesignAssetItem(
+                    layer,
+                    item,
+                    [boxLeft + padding, boxTop - padding, boxRight - padding, boxBottom + padding],
+                    fontStyles[String(item.font_option || "")]
+                );
                 try { designItem.name = String(item.order_no || "") + "_" + String(item.quantity_index || j + 1) + "_DESIGN"; } catch (eD0) {}
             } else {
                 var font = fontConfig(config, item.font_option);
@@ -96,6 +102,7 @@
                 tf.contents = String(item.text || "");
                 applyFontConfig(tf, font);
                 applyColor(tf, String(task.style && task.style.color_name || "black"));
+                applyFontBoldness(tf, fontStyles[String(item.font_option || "")]);
                 var outline = renderOutlinedTextToRect(tf, [boxLeft + padding, boxTop - padding, boxRight - padding, boxBottom + padding], minFontSize, maxFontSize);
                 try { outline.name = String(item.order_no || "") + "_" + String(item.quantity_index || j + 1) + "_TEXT"; } catch (e0) {}
             }
@@ -195,7 +202,7 @@
         applyFont(tf, String(font.font_name || font.font_family || ""));
     }
 
-    function renderDesignAssetItem(layer, item, rect) {
+    function renderDesignAssetItem(layer, item, rect, fontStyle) {
         var assetPath = String(item.design_asset || "");
         if (!assetPath) throw new Error("Design asset missing for: " + item.font_option);
         var assetFile = File(assetPath);
@@ -211,6 +218,7 @@
         var parts = item.text_parts || [];
         if (!parts.length && item.text) parts = String(item.text).split("|");
         replaceDesignTexts(copy, parts);
+        applyFontBoldnessToTextFrames(copy, fontStyle);
         designDoc.close(SaveOptions.DONOTSAVECHANGES);
         fitPageItemToRect(copy, rect);
         outlineTextFrames(copy);
@@ -228,6 +236,12 @@
             if (!frame && i < frames.length) frame = frames[i];
             if (frame) frame.contents = String(parts[i] || "");
         }
+    }
+
+    function applyFontBoldnessToTextFrames(root, style) {
+        var frames = [];
+        collectTextFrames(root, frames);
+        for (var i = 0; i < frames.length; i++) applyFontBoldness(frames[i], style);
     }
 
     function findTextFrameByName(frames, name) {
@@ -340,6 +354,16 @@
         color.green = rgb[1];
         color.blue = rgb[2];
         tf.textRange.characterAttributes.fillColor = color;
+    }
+
+    function applyFontBoldness(tf, style) {
+        var boldness = Number(style && style.boldness);
+        if (isNaN(boldness) || boldness <= 0) return;
+        var attributes = tf.textRange.characterAttributes;
+        try { attributes.strokeColor = attributes.fillColor; } catch (e1) {}
+        try { attributes.strokeWeight = boldness; } catch (e2) {
+            try { attributes.strokeWidth = boldness; } catch (e3) {}
+        }
     }
 
     function colorMap(name) {

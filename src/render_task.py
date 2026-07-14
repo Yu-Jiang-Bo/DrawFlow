@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
@@ -248,6 +248,7 @@ class ConfigGroupedSheetRenderTask:
     color_name: str = "black"
     columns: int = 4
     color_mode: str = "CMYK"
+    font_styles: Dict[str, Dict[str, float]] = field(default_factory=dict)
 
     def to_json_dict(self) -> Dict[str, Any]:
         if not self.template_config:
@@ -261,6 +262,7 @@ class ConfigGroupedSheetRenderTask:
             "template_config": str(self.template_config),
             "output_ai": str(self.output_ai),
             "groups": [group.to_json_dict() for group in self.groups],
+            "font_styles": self.font_styles,
             "style": {
                 "color_name": self.color_name,
             },

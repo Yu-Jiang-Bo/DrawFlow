@@ -69,6 +69,7 @@
                 if (fontSource) copyTextStyle(fontSource, frame);
                 applyTextColor(frame, String(selections.color || ""));
                 applyNameColorCycle(frame, variable);
+                applyFontBoldness(frame, variable.font_style);
                 if (dimension && String(policies.fit || "") !== "none") {
                     fitText(frame, Number(dimension.width_mm || 0), Number(dimension.height_mm || 0));
                 }
@@ -183,6 +184,27 @@
                 }
             }
             cursor += part.length + (partIndex < parts.length - 1 ? delimiter.length : 0);
+        }
+    }
+
+    function applyFontBoldness(frame, style) {
+        var boldness = Number(style && style.boldness);
+        if (isNaN(boldness) || boldness <= 0) return;
+        try {
+            var characters = frame.characters;
+            for (var index = 0; index < characters.length; index++) {
+                applyBoldnessToAttributes(characters[index].characterAttributes, boldness);
+            }
+            if (characters.length) return;
+        } catch (e1) {}
+        applyBoldnessToAttributes(frame.textRange.characterAttributes, boldness);
+    }
+
+    function applyBoldnessToAttributes(attributes, boldness) {
+        if (!attributes) return;
+        try { attributes.strokeColor = attributes.fillColor; } catch (e1) {}
+        try { attributes.strokeWeight = boldness; } catch (e2) {
+            try { attributes.strokeWidth = boldness; } catch (e3) {}
         }
     }
 

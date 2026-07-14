@@ -2,7 +2,7 @@ import json
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 import pytest
 
 from src.jjmb_config_grouped_main import build_grouped_task
@@ -122,6 +122,136 @@ def test_service_dry_run_creates_job_and_render_task(tmp_path):
     assert task["output"]["color_mode"] == "CMYK"
     assert task["output"]["outline_text"] is True
     assert task["output"]["pathfinder_merge"] is True
+
+
+def test_202508_task_receives_every_configured_font_boldness_mapping(tmp_path):
+    config_path = tmp_path / "templates.json"
+    order_path = tmp_path / "orders.xlsx"
+    rules_path = tmp_path / "template.rules.json"
+    write_templates_config(config_path)
+    write_order_xlsx(order_path)
+    rules_path.write_text(
+        json.dumps(
+            {
+                "font_style_rules": [
+                    {"font_options": ["F2", "F3", "F10", "F11", "F12"], "boldness": 0.4},
+                    {"font_options": ["F5", "F6", "F7", "F8", "F9"], "boldness": 0.5},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    config["templates"][0]["template_rules_config"] = str(rules_path)
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+
+    record = RenderService(
+        registry=TemplateRegistry(config_path),
+        jobs=JobStore(tmp_path / "jobs"),
+    ).submit(
+        {"template_id": "JJMB202508261001394920", "order_file": str(order_path), "dry_run": True}
+    )
+
+    task = json.loads(Path(record["outputs"]["render_task"]).read_text(encoding="utf-8"))
+    assert task["font_styles"] == {
+        "F2": {"boldness": 0.4},
+        "F3": {"boldness": 0.4},
+        "F10": {"boldness": 0.4},
+        "F11": {"boldness": 0.4},
+        "F12": {"boldness": 0.4},
+        "F5": {"boldness": 0.5},
+        "F6": {"boldness": 0.5},
+        "F7": {"boldness": 0.5},
+        "F8": {"boldness": 0.5},
+        "F9": {"boldness": 0.5},
+    }
+
+
+def test_202603_grouped_task_receives_every_configured_font_boldness_mapping(tmp_path):
+    config_path = tmp_path / "templates.json"
+    order_path = tmp_path / "orders.xlsx"
+    structure_path = tmp_path / "template.config.json"
+    rules_path = tmp_path / "template.rules.json"
+    write_templates_config(config_path)
+    write_order_xlsx(order_path)
+    structure_path.write_text("{}", encoding="utf-8")
+    rules_path.write_text(
+        json.dumps(
+            {
+                "font_style_rules": [
+                    {"font_options": ["F2", "F3", "F10", "F11", "F12"], "boldness": 0.4},
+                    {"font_options": ["F5", "F6", "F7", "F8", "F9"], "boldness": 0.5},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    config["templates"][0].update(
+        {
+            "template_id": "JJMB202603281027102517",
+            "template_type": "pure_text_style",
+            "pipeline": "jjmb_202603_grouped",
+            "template_config": str(structure_path),
+            "template_rules_config": str(rules_path),
+        }
+    )
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+    workbook = load_workbook(order_path)
+    workbook.active["H2"] = "JJMB202603281027102517"
+    workbook.active["N1"] = "Style Option"
+    workbook.active["N2"] = "Style 1"
+    workbook.save(order_path)
+
+    record = RenderService(
+        registry=TemplateRegistry(config_path),
+        jobs=JobStore(tmp_path / "jobs"),
+    ).submit(
+        {"template_id": "JJMB202603281027102517", "order_file": str(order_path), "dry_run": True}
+    )
+
+    assert record["status"] == "completed", record.get("error")
+    task = json.loads(Path(record["outputs"]["render_task"]).read_text(encoding="utf-8"))
+    assert task["font_styles"] == {
+        "F2": {"boldness": 0.4},
+        "F3": {"boldness": 0.4},
+        "F10": {"boldness": 0.4},
+        "F11": {"boldness": 0.4},
+        "F12": {"boldness": 0.4},
+        "F5": {"boldness": 0.5},
+        "F6": {"boldness": 0.5},
+        "F7": {"boldness": 0.5},
+        "F8": {"boldness": 0.5},
+        "F9": {"boldness": 0.5},
+    }
+
+
+def test_202603_grouped_design_asset_task_keeps_its_font_style_mapping(tmp_path):
+    order_path = tmp_path / "orders.xlsx"
+    design_asset_path = tmp_path / "F10.ai"
+    write_order_xlsx(order_path)
+    design_asset_path.write_text("placeholder", encoding="utf-8")
+    workbook = load_workbook(order_path)
+    workbook.active["H2"] = "JJMB202603281027102517"
+    workbook.active["K2"] = "F10"
+    workbook.active["N1"] = "Style Option"
+    workbook.active["N2"] = "Style 1"
+    workbook.save(order_path)
+
+    task = build_grouped_task(
+        xlsx_path=order_path,
+        template_config=tmp_path / "template.config.json",
+        output_ai=tmp_path / "out.ai",
+        columns=4,
+        allowed_font_options=["F10"],
+        design_font_options=["F10"],
+        design_asset_mappings={"F10": {"path": str(design_asset_path), "group": "F10"}},
+        font_styles={"F10": {"boldness": 0.4}},
+    )
+
+    task_json = task.to_json_dict()
+    assert task_json["groups"][0]["items"][0]["render_kind"] == "design_asset"
+    assert task_json["font_styles"] == {"F10": {"boldness": 0.4}}
 
 
 def test_service_rejects_draft_template_before_creating_job(tmp_path):

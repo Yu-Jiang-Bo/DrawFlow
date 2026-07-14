@@ -23,6 +23,7 @@ from ..jjmb_202509_curved_main import (
 from ..jjmb_config_grouped_main import build_grouped_task
 from ..renderer.illustrator_bridge import IllustratorBridge
 from .job_store import JobStore
+from .font_style_rules import font_style_by_option
 from .generic_rule_renderer import build_generic_render_task
 from .llm_rule_parser import normalize_option_list
 from .rule_center import check_template_definition, curved_layout_overrides, output_color_mode, read_template_rule_config
@@ -163,6 +164,10 @@ class RenderService:
             columns=request["columns"],
             show_style_boxes=not request["hide_boxes"],
             color_mode=output_color_mode(template_rules),
+            font_styles=font_style_by_option(
+                template_rules.get("font_style_rules"),
+                legacy_option_overrides=template_rules.get("option_overrides"),
+            ),
         )
         task_file = job_dir / "render-task.json"
         self._write_json(task_file, task)
@@ -217,6 +222,10 @@ class RenderService:
             design_asset_mappings=(
                 _design_asset_mappings(template, template_rules, design_fonts)
                 if has_design_mapping_rules else None
+            ),
+            font_styles=font_style_by_option(
+                template_rules.get("font_style_rules"),
+                legacy_option_overrides=template_rules.get("option_overrides"),
             ),
         )
         task_file = job_dir / "render-task.json"

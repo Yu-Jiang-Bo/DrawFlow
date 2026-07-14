@@ -523,6 +523,9 @@ INDEX_HTML = """<!doctype html>
     .structured-row.sequence {
       grid-template-columns: minmax(120px, 0.9fr) minmax(110px, 0.8fr) minmax(70px, 0.45fr) minmax(120px, 0.9fr) minmax(80px, 0.5fr) minmax(80px, 0.5fr) 42px;
     }
+    .structured-row.font-style {
+      grid-template-columns: minmax(220px, 1fr) minmax(130px, 0.45fr) 42px;
+    }
     .structured-row label {
       margin-bottom: 4px;
     }
@@ -546,6 +549,14 @@ INDEX_HTML = """<!doctype html>
       border-color: #efb0aa;
       color: var(--danger);
       background: #fff7f6;
+    }
+    .font-style-empty {
+      margin: 0;
+      padding: 10px 12px;
+      border: 1px dashed var(--line);
+      border-radius: 7px;
+      color: var(--muted);
+      font-size: 12px;
     }
     .advanced-rule-box {
       margin-top: 14px;
@@ -1194,36 +1205,12 @@ INDEX_HTML = """<!doctype html>
                 </div>
 
                 <div class="rule-section">
-                  <h3 class="rule-section-title">特殊处理</h3>
-                  <div class="structured-table" id="overrideRows">
-                    <div class="structured-row three">
-                      <div><label>对象/选项</label><input data-override-target placeholder="例如 F3" /></div>
-                      <div>
-                        <label>处理方式</label>
-                        <select data-override-action>
-                          <option value="">无</option>
-                          <option value="bold">加粗</option>
-                          <option value="uppercase">转大写</option>
-                          <option value="no_width_compress">禁止压缩字宽</option>
-                          <option value="fixed_color">固定颜色</option>
-                        </select>
-                      </div>
-                      <div><label>补充值</label><input data-override-value placeholder="可选" /></div>
-                    </div>
-                    <div class="structured-row three">
-                      <div><input data-override-target placeholder="例如 F7" /></div>
-                      <div>
-                        <select data-override-action>
-                          <option value="">无</option>
-                          <option value="bold">加粗</option>
-                          <option value="uppercase">转大写</option>
-                          <option value="no_width_compress">禁止压缩字宽</option>
-                          <option value="fixed_color">固定颜色</option>
-                        </select>
-                      </div>
-                      <div><input data-override-value placeholder="可选" /></div>
-                    </div>
+                  <div class="rule-section-head">
+                    <h3 class="rule-section-title">字体加粗规则（可选）</h3>
+                    <button class="btn-subtle rule-add-btn" id="addFontStyleRuleBtn" type="button">+ 添加字体加粗规则</button>
                   </div>
+                  <p class="rule-section-note">为一组字体应用相同的描边加粗值。多个字体用逗号分隔，例如 F2, F3, F10；可无限添加规则，数值单位为 pt。</p>
+                  <div class="structured-table" id="fontStyleRuleRows"></div>
                   <details class="advanced-rule-box">
                     <summary>其他说明（可选，不参与渲染）</summary>
                     <div class="advanced-rule-body">
@@ -1531,6 +1518,7 @@ INDEX_HTML = """<!doctype html>
       document.getElementById("rescanTemplateBtn").addEventListener("click", rescanTemplate);
       document.getElementById("addDimensionRowBtn").addEventListener("click", addDimensionRow);
       document.getElementById("addNameColorBtn").addEventListener("click", addNameColor);
+      document.getElementById("addFontStyleRuleBtn").addEventListener("click", addFontStyleRule);
       document.getElementById("dimensionMode").addEventListener("change", () => {
         state.dimensionRowsTouched = true;
         syncDimensionMode();
@@ -1578,8 +1566,6 @@ INDEX_HTML = """<!doctype html>
         "#textPoliciesJson",
         "#outputTransformsJson",
         "#validationSampleJson",
-        "#overrideRows input",
-        "#overrideRows select",
         "#templateAdvancedRules",
         "#templateExceptionStatus"
       ];
@@ -1634,6 +1620,17 @@ INDEX_HTML = """<!doctype html>
         if (!nameColorRows.querySelector(".name-color-row")) setNameColorRows([]);
         renderTemplateRulePreview();
       });
+      const fontStyleRuleRows = document.getElementById("fontStyleRuleRows");
+      ["input", "change"].forEach(eventName => {
+        fontStyleRuleRows.addEventListener(eventName, renderTemplateRulePreview);
+      });
+      fontStyleRuleRows.addEventListener("click", event => {
+        const button = event.target.closest("[data-remove-font-style-rule]");
+        if (!button) return;
+        const row = button.closest(".structured-row");
+        if (row) row.remove();
+        renderTemplateRulePreview();
+      });
       ["dimensionRows", "textSequenceRows"].forEach(id => {
         const container = document.getElementById(id);
         container.addEventListener("input", () => {
@@ -1678,6 +1675,13 @@ INDEX_HTML = """<!doctype html>
       const colors = Array.from(document.querySelectorAll("[data-name-color-value]"))
         .map(input => input.value.trim());
       setNameColorRows(colors.length ? [...colors, ""] : ["", ""], { includeEmpty: true });
+      renderTemplateRulePreview();
+    }
+
+    function addFontStyleRule() {
+      const rules = collectFontStyleRules({ includeEmpty: true });
+      rules.push(blankFontStyleRule());
+      setFontStyleRuleRows(rules, { includeEmpty: true });
       renderTemplateRulePreview();
     }
 
@@ -2491,6 +2495,7 @@ INDEX_HTML = """<!doctype html>
         text_policies: "请填写文字变量规则，系统会自动生成基础文字适配策略",
         validation_sample: "请检查字段拆分规则，系统需要能生成一条可验证样例",
         name_color_cycle: "请在“Name 多色循环”中至少保留两个 #RRGGBB 颜色，并填写分隔符",
+        font_style_rules: "请检查“字体加粗规则”：每一条都需要目标字体集合和大于 0 的加粗值",
         exceptions: "当前模板仍有无法执行的旧规则，请将其改为页面中的固定规则后再保存",
         scan_failed: "请重新上传并扫描模板文件"
       };
@@ -2537,7 +2542,7 @@ INDEX_HTML = """<!doctype html>
         slotMappings,
         state.textSequenceRowsTouched && !slotMappings.length ? [] : baseConfig.slots
       );
-      const overrides = collectOverrides();
+      const fontStyleRules = collectFontStyleRules();
       const fontOptions = optionsByRole(optionGroups, "font_options");
       const designFontOptions = optionsByRole(optionGroups, "design_font_options");
       const designOptions = optionsByRole(optionGroups, "design_options");
@@ -2583,10 +2588,8 @@ INDEX_HTML = """<!doctype html>
         text_policies: { fit: textRule.fit },
         name_color_cycle: nameColorCycle,
         defaults,
-        option_overrides: {
-          ...(isPlainObject(baseConfig.option_overrides) ? baseConfig.option_overrides : {}),
-          ...overrides
-        },
+        font_style_rules: fontStyleRules,
+        option_overrides: nonBoldOptionOverrides(baseConfig.option_overrides),
         output: {
           ...(isPlainObject(baseConfig.output) ? baseConfig.output : {}),
           color_mode: document.getElementById("outputColorMode").value
@@ -2603,6 +2606,13 @@ INDEX_HTML = """<!doctype html>
 
     function isPlainObject(value) {
       return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+    }
+
+    function nonBoldOptionOverrides(overrides) {
+      if (!isPlainObject(overrides)) return {};
+      return Object.fromEntries(Object.entries(overrides).filter(([, override]) => (
+        !isPlainObject(override) || (override.action !== "bold" && override.bold !== true)
+      )));
     }
 
     function collectTextContentRule(baseConfig = {}) {
@@ -2870,24 +2880,74 @@ INDEX_HTML = """<!doctype html>
       return rows;
     }
 
-    function collectOverrides() {
-      const targets = Array.from(document.querySelectorAll("[data-override-target]"));
-      const actions = Array.from(document.querySelectorAll("[data-override-action]"));
-      const values = Array.from(document.querySelectorAll("[data-override-value]"));
-      const result = {};
-      targets.forEach((input, index) => {
-        const target = input.value.trim();
-        const action = actions[index] ? actions[index].value : "";
-        const value = values[index] ? values[index].value.trim() : "";
-        if (!target || !action) return;
-        result[target] = { action };
-        if (action === "bold") result[target].bold = true;
-        if (action === "uppercase") result[target].uppercase = true;
-        if (action === "no_width_compress") result[target].no_width_compress = true;
-        if (action === "fixed_color" && value) result[target].color = value;
-        if (value) result[target].value = value;
+    function blankFontStyleRule() {
+      return { font_options: [], boldness: "" };
+    }
+
+    function normalizeFontStyleOptions(value) {
+      const source = Array.isArray(value) ? value.join(",") : String(value || "");
+      const seen = new Set();
+      return source.split(/[,\uFF0C;\uFF1B\\s]+/).map(item => item.trim()).filter(item => {
+        if (!item || seen.has(item)) return false;
+        seen.add(item);
+        return true;
       });
-      return result;
+    }
+
+    function collectFontStyleRules(options = {}) {
+      const includeEmpty = Boolean(options.includeEmpty);
+      return Array.from(document.querySelectorAll("#fontStyleRuleRows [data-font-style-rule]")).map(row => {
+        const fontOptions = normalizeFontStyleOptions(row.querySelector("[data-font-style-options]").value);
+        const rawBoldness = row.querySelector("[data-font-style-boldness]").value.trim();
+        return {
+          font_options: fontOptions,
+          boldness: rawBoldness === "" ? null : Number(rawBoldness)
+        };
+      }).filter(rule => includeEmpty || rule.font_options.length || rule.boldness !== null);
+    }
+
+    function setFontStyleRuleRows(rules, options = {}) {
+      const includeEmpty = Boolean(options.includeEmpty);
+      const rows = Array.isArray(rules) ? rules.filter(rule => {
+        if (includeEmpty) return true;
+        return normalizeFontStyleOptions(rule && rule.font_options).length || String((rule && rule.boldness) ?? "").trim();
+      }) : [];
+      const target = document.getElementById("fontStyleRuleRows");
+      target.innerHTML = rows.length
+        ? rows.map((rule, index) => renderFontStyleRule(rule, index)).join("")
+        : '<p class="font-style-empty">未配置字体加粗规则。需要时可添加任意多组字体和加粗值。</p>';
+    }
+
+    function renderFontStyleRule(rule, index) {
+      const fontOptions = normalizeFontStyleOptions(rule && rule.font_options).join(", ");
+      const boldness = rule && rule.boldness !== null && rule.boldness !== undefined ? String(rule.boldness) : "";
+      return `
+        <div class="structured-row dynamic font-style" data-font-style-rule>
+          <div><label>目标字体集合</label><input data-font-style-options placeholder="例如 F2, F3, F10" value="${escapeHtml(fontOptions)}" /></div>
+          <div><label>加粗值（pt）</label><input data-font-style-boldness type="number" min="0.1" step="0.1" placeholder="例如 0.4" value="${escapeHtml(boldness)}" /></div>
+          <div><button class="row-remove-btn" type="button" data-remove-font-style-rule aria-label="删除第 ${index + 1} 条字体加粗规则">×</button></div>
+        </div>
+      `;
+    }
+
+    function legacyFontStyleRules(overrides) {
+      if (!isPlainObject(overrides)) return [];
+      const groups = new Map();
+      Object.entries(overrides).forEach(([option, override]) => {
+        if (!isPlainObject(override) || (override.action !== "bold" && override.bold !== true)) return;
+        const direct = Number(override.boldness);
+        const value = Number.isFinite(direct) && direct > 0
+          ? direct
+          : Number(String(override.value || "").match(/[-+]?(?:\\d+(?:\\.\\d*)?|\\.\\d+)/)?.[0]);
+        if (!Number.isFinite(value) || value <= 0) return;
+        const key = String(value);
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(option);
+      });
+      return Array.from(groups.entries()).map(([boldness, fontOptions]) => ({
+        font_options: fontOptions,
+        boldness: Number(boldness)
+      }));
     }
 
     function inferTemplateTypeFromForm() {
@@ -2959,7 +3019,7 @@ INDEX_HTML = """<!doctype html>
           <div class="preview-chip"><span>Name 颜色循环</span><strong>${escapeHtml(displayNameColorCycle(draft.name_color_cycle))}</strong></div>
           <div class="preview-chip"><span>多个文字位置</span><strong>${escapeHtml(displayTextSequences(draft.text_sequences || []))}</strong></div>
           <div class="preview-chip"><span>默认值</span><strong>${escapeHtml(describeDefaults(draft.defaults || {}))}</strong></div>
-          <div class="preview-chip"><span>特殊处理</span><strong>${escapeHtml(displayOverrides(draft.option_overrides || {}))}</strong></div>
+          <div class="preview-chip"><span>字体加粗</span><strong>${escapeHtml(displayFontStyleRules(draft.font_style_rules || []))}</strong></div>
           <div class="preview-chip"><span>其他说明</span><strong>${escapeHtml(generalNote)}</strong></div>
           <div class="preview-chip"><span>已填写选项组</span><strong>${escapeHtml(optionGroups.map(group => `${group.name}=${displayOptionGroupRole(group.role)}`).join("；") || "未填写")}</strong></div>
           <div class="preview-chip"><span>缺失项</span><strong>${escapeHtml(missing.join("；") || "无")}</strong></div>
@@ -3011,20 +3071,15 @@ INDEX_HTML = """<!doctype html>
       return names[value] || "未选择";
     }
 
-    function displayOverrides(items) {
-      const keys = Object.keys(items || {});
-      if (!keys.length) return "无";
-      return keys.map(key => `${key}: ${displayOverrideAction(items[key].action)}`).join("；");
-    }
-
-    function displayOverrideAction(value) {
-      const names = {
-        bold: "加粗",
-        uppercase: "转大写",
-        no_width_compress: "禁止压缩字宽",
-        fixed_color: "固定颜色"
-      };
-      return names[value] || value || "-";
+    function displayFontStyleRules(rules) {
+      const rows = Array.isArray(rules) ? rules : [];
+      if (!rows.length) return "未配置";
+      return rows.map(rule => {
+        const options = normalizeFontStyleOptions(rule && rule.font_options);
+        const value = Number(rule && rule.boldness);
+        const boldness = Number.isFinite(value) && value > 0 ? `${value} pt` : "未填写加粗值";
+        return `${options.length ? options.join("、") : "未选择字体"}：${boldness}`;
+      }).join("；");
     }
 
     function resetTemplateRuleFields() {
@@ -3041,8 +3096,7 @@ INDEX_HTML = """<!doctype html>
       document.getElementById("defaultStyle").value = "";
       document.getElementById("defaultColor").value = "";
       document.getElementById("outputColorMode").value = "CMYK";
-      document.querySelectorAll("[data-override-target], [data-override-value]").forEach(input => { input.value = ""; });
-      document.querySelectorAll("[data-override-action]").forEach(select => { select.value = ""; });
+      setFontStyleRuleRows([]);
       document.getElementById("textSourceColumn").value = "";
       document.getElementById("textTargetName").value = "";
       document.getElementById("textFitPolicy").value = "scale_to_box";
@@ -3361,15 +3415,10 @@ INDEX_HTML = """<!doctype html>
       document.getElementById("defaultColor").value = defaults.color || "";
       document.getElementById("outputColorMode").value = (config.output && config.output.color_mode) || "CMYK";
 
-      const overrideEntries = Object.entries(config.option_overrides || {});
-      const overrideTargets = Array.from(document.querySelectorAll("[data-override-target]"));
-      const overrideActions = Array.from(document.querySelectorAll("[data-override-action]"));
-      const overrideValues = Array.from(document.querySelectorAll("[data-override-value]"));
-      overrideEntries.slice(0, overrideTargets.length).forEach(([key, value], index) => {
-        overrideTargets[index].value = key;
-        overrideActions[index].value = value.action || inferOverrideAction(value);
-        overrideValues[index].value = value.value || value.color || "";
-      });
+      const fontStyleRules = Array.isArray(config.font_style_rules)
+        ? config.font_style_rules
+        : legacyFontStyleRules(config.option_overrides);
+      setFontStyleRuleRows(fontStyleRules);
 
       document.getElementById("templateRuleNote").value = (config.notes && config.notes.general) || (config.exceptions && config.exceptions.note) || "";
     }
@@ -3477,15 +3526,6 @@ INDEX_HTML = """<!doctype html>
         }
       }
       return optionValues.join(" / ");
-    }
-
-    function inferOverrideAction(value) {
-      if (!value || typeof value !== "object") return "";
-      if (value.bold) return "bold";
-      if (value.uppercase) return "uppercase";
-      if (value.no_width_compress) return "no_width_compress";
-      if (value.color) return "fixed_color";
-      return value.action || "";
     }
 
     async function uploadAndScanTemplate() {

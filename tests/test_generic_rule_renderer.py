@@ -199,6 +199,24 @@ def test_passes_configured_name_color_cycle_to_exact_name_target(tmp_path):
     ]
 
 
+def test_passes_selected_font_boldness_to_every_text_variable(tmp_path):
+    _, template = make_template(tmp_path)
+    order_path = tmp_path / "orders.xlsx"
+    make_orders(order_path)
+    rules = base_rules()
+    rules["font_style_rules"] = [
+        {"font_options": ["F2", "F3", "F10", "F11", "F12"], "boldness": 0.4},
+        {"font_options": ["F5", "F6", "F7", "F8", "F9"], "boldness": 0.5},
+    ]
+
+    task = build_generic_render_task(template, rules, order_path, tmp_path / "output.ai")
+
+    assert [variable["font_style"] for variable in task["orders"][0]["variables"]] == [
+        {"boldness": 0.4},
+        {"boldness": 0.4},
+    ]
+
+
 def test_does_not_pass_name_color_cycle_to_numbered_name_targets(tmp_path):
     _, template = make_template(tmp_path)
     order_path = tmp_path / "orders.xlsx"
