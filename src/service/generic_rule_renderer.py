@@ -8,6 +8,7 @@ from typing import Any, Dict, Iterable, Mapping
 from openpyxl import load_workbook
 
 from .template_registry import TemplateDefinition
+from .template_effects import compile_text_effects
 from .template_rule_execution import resolve_mapped_text
 
 
@@ -74,12 +75,12 @@ def _build_order(
         str(field): row.get(str(column))
         for field, column in bindings.items()
     }
-    variables = _build_variables(values, rules)
     selections = {
         key: ("" if values.get(key) is None else str(values.get(key))).strip()
         for key in ("font", "design", "style", "color")
         if ("" if values.get(key) is None else str(values.get(key))).strip()
     }
+    variables = _build_variables(values, rules, selections)
     asset_tasks = []
     selected_options = set(selections.values())
     for mapping in _list_of_mappings(rules.get("asset_mappings")):
@@ -107,7 +108,11 @@ def _build_order(
     }
 
 
-def _build_variables(values: Mapping[str, Any], rules: Mapping[str, Any]) -> list[Dict[str, Any]]:
+def _build_variables(
+    values: Mapping[str, Any],
+    rules: Mapping[str, Any],
+    selections: Mapping[str, str],
+) -> list[Dict[str, Any]]:
     mappings = _list_of_mappings(rules.get("slot_mappings"))
     if not mappings:
         targets = _list_of_mappings(rules.get("text_targets"))
@@ -127,49 +132,13 @@ def _build_variables(values: Mapping[str, Any], rules: Mapping[str, Any]) -> lis
                 f"Order value cannot satisfy split policy for target: {target}"
             )
         variable = {"target": target, "field": field, "value": value}
-        character_styles = _alternating_character_styles(value, field, target, rules)
-        if character_styles:
-            variable["character_styles"] = character_styles
+        effects = compile_text_effects(value, field, target, rules, selections)
+        if effects:
+            variable["effects"] = effects
         variables.append(variable)
     if not variables:
         raise GenericRuleRenderError("Order row does not produce any template variables.")
     return variables
-
-
-def _alternating_character_styles(
-    value: str,
-    field: str,
-    target: str,
-    rules: Mapping[str, Any],
-) -> list[Dict[str, Any]]:
-    """Build per-name color ranges without changing the visible text value."""
-
-    styles = rules.get("text_sequence_styles", [])
-    if not isinstance(styles, list):
-        return []
-    for style in styles:
-        if not isinstance(style, Mapping):
-            continue
-        if str(style.get("field") or "text") != field or str(style.get("target") or "") != target:
-            continue
-        delimiter = str(style.get("delimiter") or "")
-        odd_color = str(style.get("odd_color") or "")
-        even_color = str(style.get("even_color") or "")
-        if not delimiter or not odd_color or not even_color:
-            continue
-        result: list[Dict[str, Any]] = []
-        offset = 0
-        for index, part in enumerate(value.split(delimiter), start=1):
-            result.append(
-                {
-                    "start": offset,
-                    "length": len(part),
-                    "color": odd_color if index % 2 else even_color,
-                }
-            )
-            offset += len(part) + len(delimiter)
-        return result
-    return []
 
 
 def _read_rows(path: Path, *, sheet_name: str) -> list[Dict[str, Any]]:

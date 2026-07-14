@@ -179,13 +179,18 @@ def test_builds_alternating_character_colors_for_one_text_target(tmp_path):
     make_orders(order_path, custom="Alice|Bob|Carol")
     rules = base_rules()
     rules["slot_mappings"] = [{"field": "text", "slot": "Name"}]
-    rules["text_sequence_styles"] = [
+    rules["effects"] = [
         {
-            "field": "text",
-            "target": "Name",
-            "delimiter": "|",
-            "odd_color": "#D71920",
-            "even_color": "#FFFFFF",
+            "id": "name-colors",
+            "stage": "text",
+            "target": {"field": "text", "name": "Name"},
+            "selector": {"type": "split", "delimiter": "|", "positions": "all"},
+            "actions": [
+                {
+                    "type": "set_fill_color",
+                    "value": {"type": "cycle", "values": ["#D71920", "#FFFFFF"]},
+                }
+            ],
         }
     ]
 
@@ -196,10 +201,15 @@ def test_builds_alternating_character_colors_for_one_text_target(tmp_path):
             "target": "Name",
             "field": "text",
             "value": "Alice|Bob|Carol",
-            "character_styles": [
-                {"start": 0, "length": 5, "color": "#D71920"},
-                {"start": 6, "length": 3, "color": "#FFFFFF"},
-                {"start": 10, "length": 5, "color": "#D71920"},
+            "effects": [
+                {
+                    "type": "set_fill_color",
+                    "ranges": [
+                        {"start": 0, "length": 5, "value": "#D71920"},
+                        {"start": 6, "length": 3, "value": "#FFFFFF"},
+                        {"start": 10, "length": 5, "value": "#D71920"},
+                    ],
+                }
             ],
         }
     ]

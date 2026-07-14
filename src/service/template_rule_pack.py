@@ -7,10 +7,11 @@ from dataclasses import dataclass
 from typing import Any, Dict, Iterable, Mapping
 
 from .llm_rule_parser import normalize_option_list
+from .template_effects import normalize_template_effects
 
 
 RULE_PACK_SCHEMA = "custom-renderer/template-rule-pack"
-RULE_PACK_VERSION = 1
+RULE_PACK_VERSION = 2
 
 PROFILE_PURE_TEXT = "pure_text"
 PROFILE_FIXED_FONT_DESIGN = "fixed_font_design"
@@ -100,7 +101,7 @@ def migrate_legacy_template_rule(payload: Mapping[str, Any], *, template_id: str
         "asset_mappings": _dict_list(source.get("asset_mappings")),
         "defaults": _dict(source.get("defaults")),
         "option_overrides": _dict(source.get("option_overrides")),
-        "text_sequence_styles": _dict_list(source.get("text_sequence_styles")),
+        "effects": normalize_template_effects(source),
         "notes": _dict(source.get("notes")),
         "transforms": deepcopy(source.get("transforms", {})),
         "output": _dict(source.get("output")),

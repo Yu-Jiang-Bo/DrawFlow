@@ -250,15 +250,19 @@ def test_validation_sample_applies_delimiter_and_sequence_index():
     assert result["ok"] is True
 
 
-def test_check_accepts_structured_alternating_name_colors():
+def test_check_accepts_declarative_text_effect():
     pack = ready_pack()
-    pack["rules"]["text_sequence_styles"] = [
+    pack["rules"]["effects"] = [
         {
-            "field": "text",
-            "target": "Name1",
-            "delimiter": "|",
-            "odd_color": "#D42129",
-            "even_color": "#FFFFFF",
+            "stage": "text",
+            "target": {"field": "text", "name": "Name1"},
+            "selector": {"type": "split", "delimiter": "|", "positions": "all"},
+            "actions": [
+                {
+                    "type": "set_fill_color",
+                    "value": {"type": "cycle", "values": ["#D42129", "#FFFFFF"]},
+                }
+            ],
         }
     ]
     pack["validation"]["sample"] = {
@@ -271,24 +275,39 @@ def test_check_accepts_structured_alternating_name_colors():
     assert result["ok"] is True
 
 
-def test_check_rejects_alternating_colors_without_matching_text_mapping():
+def test_check_rejects_effect_without_matching_text_mapping():
     pack = ready_pack()
-    pack["rules"]["text_sequence_styles"] = [
+    pack["rules"]["effects"] = [
         {
-            "field": "text",
-            "target": "UnknownName",
-            "delimiter": "|",
-            "odd_color": "#D42129",
-            "even_color": "#FFFFFF",
+            "stage": "text",
+            "target": {"field": "text", "name": "UnknownName"},
+            "selector": {"type": "whole"},
+            "actions": [{"type": "set_fill_color", "value": {"type": "literal", "value": "#D42129"}}],
         }
     ]
 
     result = check_rule_pack(pack, template_id="DEMO001")
 
     assert any(
-        item["code"] == "text_sequence_styles" and "text -> UnknownName" in item["message"]
+        item["code"] == "effects" and "text -> UnknownName" in item["message"]
         for item in result["errors"]
     )
+
+
+def test_check_rejects_unknown_effect_action():
+    pack = ready_pack()
+    pack["rules"]["effects"] = [
+        {
+            "stage": "text",
+            "target": {"field": "text", "name": "Name1"},
+            "selector": {"type": "whole"},
+            "actions": [{"type": "run_template_script", "value": {"type": "literal", "value": "x"}}],
+        }
+    ]
+
+    result = check_rule_pack(pack, template_id="DEMO001")
+
+    assert any(item["code"] == "effects" and "run_template_script" in item["message"] for item in result["errors"])
 
 
 def test_validation_sample_preserves_numeric_zero():

@@ -490,6 +490,9 @@ INDEX_HTML = """<!doctype html>
     .structured-row.sequence {
       grid-template-columns: minmax(120px, 0.9fr) minmax(110px, 0.8fr) minmax(70px, 0.45fr) minmax(120px, 0.9fr) minmax(80px, 0.5fr) minmax(80px, 0.5fr) 42px;
     }
+    .structured-row.effect {
+      grid-template-columns: repeat(3, minmax(130px, 1fr)) 42px;
+    }
     .structured-row label {
       margin-bottom: 4px;
     }
@@ -799,6 +802,7 @@ INDEX_HTML = """<!doctype html>
       .structured-row.two,
       .structured-row.three,
       .structured-row.sequence,
+      .structured-row.effect,
       .rule-detail-grid {
         grid-template-columns: 1fr;
       }
@@ -1111,17 +1115,14 @@ INDEX_HTML = """<!doctype html>
 
                 <div class="rule-section">
                   <h3 class="rule-section-title">特殊处理</h3>
-                  <div class="advanced-rule-box">
-                    <div class="advanced-rule-body">
-                      <label><input id="alternatingColorEnabled" type="checkbox" /> 按名字顺序交替颜色</label>
-                      <p class="rule-section-note">例如第 1、3、5... 个名字红色，第 2、4、6... 个名字白色。该规则会参与渲染，不是备注。</p>
-                      <div class="form-grid">
-                        <div><label for="nameSequenceDelimiter">名字分隔符</label><input id="nameSequenceDelimiter" value="|" placeholder="例如：|" /></div>
-                        <div><label for="oddNameColor">奇数位颜色</label><input id="oddNameColor" value="#D71920" placeholder="#D71920" /></div>
-                        <div><label for="evenNameColor">偶数位颜色</label><input id="evenNameColor" value="#FFFFFF" placeholder="#FFFFFF" /></div>
-                      </div>
+                  <div class="section-heading-row">
+                    <div>
+                      <strong>文本效果规则</strong>
+                      <p class="rule-section-note">按目标、内容范围、动作和值配置。多个值用英文逗号分隔，系统会按顺序循环应用，例如红白交替填写 #D71920,#FFFFFF。</p>
                     </div>
+                    <button class="btn-subtle" type="button" id="addTextEffectRowBtn">+ 添加文本效果</button>
                   </div>
+                  <div class="structured-table" id="textEffectRows"></div>
                   <div class="structured-table" id="overrideRows">
                     <div class="structured-row three">
                       <div><label>对象/选项</label><input data-override-target placeholder="例如 F3" /></div>
@@ -1442,6 +1443,7 @@ INDEX_HTML = """<!doctype html>
         });
       });
       document.getElementById("addTextSequenceRowBtn").addEventListener("click", addTextSequenceRow);
+      document.getElementById("addTextEffectRowBtn").addEventListener("click", addTextEffectRow);
       document.getElementById("referenceAiFile").addEventListener("change", renderAssetRows);
       document.getElementById("designFontAiFiles").addEventListener("change", renderAssetRows);
       document.getElementById("assetAiFiles").addEventListener("change", renderAssetRows);
@@ -1469,10 +1471,6 @@ INDEX_HTML = """<!doctype html>
         "#textSourceColumn",
         "#textTargetName",
         "#textFitPolicy",
-        "#alternatingColorEnabled",
-        "#nameSequenceDelimiter",
-        "#oddNameColor",
-        "#evenNameColor",
         "#templateRuleNote",
         "#templateProfile",
         "#orderBindingsJson",
@@ -1536,6 +1534,16 @@ INDEX_HTML = """<!doctype html>
           }
         });
       });
+      const effectRows = document.getElementById("textEffectRows");
+      effectRows.addEventListener("input", renderTemplateRulePreview);
+      effectRows.addEventListener("change", renderTemplateRulePreview);
+      effectRows.addEventListener("click", event => {
+        const button = event.target.closest("[data-remove-text-effect-row]");
+        if (!button) return;
+        const row = button.closest(".structured-row");
+        if (row) row.remove();
+        renderTemplateRulePreview();
+      });
     }
 
     function addDimensionRow() {
@@ -1551,6 +1559,13 @@ INDEX_HTML = """<!doctype html>
       const rows = collectTextSequenceRows({ includeEmpty: true });
       rows.push(blankTextSequenceRow());
       setTextSequenceRows(rows);
+      renderTemplateRulePreview();
+    }
+
+    function addTextEffectRow() {
+      const rows = collectTextEffectRows({ includeEmpty: true });
+      rows.push(blankTextEffectRow());
+      setTextEffectRows(rows);
       renderTemplateRulePreview();
     }
 
@@ -1594,6 +1609,46 @@ INDEX_HTML = """<!doctype html>
       document.getElementById("textSequenceRows").innerHTML = items
         .map((row, index) => renderTextSequenceRow(row, index))
         .join("");
+    }
+
+    function setTextEffectRows(rows) {
+      const items = rows && rows.length ? rows : [blankTextEffectRow()];
+      document.getElementById("textEffectRows").innerHTML = items
+        .map(row => renderTextEffectRow(row))
+        .join("");
+    }
+
+    function renderTextEffectRow(row) {
+      const selector = row.selector || "whole";
+      const positions = row.positions || "all";
+      const action = row.action || "";
+      return `
+        <div class="structured-row dynamic effect" data-text-effect-row>
+          <div><label>文字对象</label><input data-effect-target placeholder="例如 Name" value="${escapeHtml(row.target || "")}" /></div>
+          <div><label>内容范围</label><select data-effect-selector>
+            <option value="whole" ${selectedAttr(selector, "whole")}>整段文字</option>
+            <option value="split" ${selectedAttr(selector, "split")}>按分隔符</option>
+          </select></div>
+          <div><label>分隔符</label><input data-effect-delimiter placeholder="例如 |" value="${escapeHtml(row.delimiter || "")}" /></div>
+          <div><label>位置</label><select data-effect-positions>
+            <option value="all" ${selectedAttr(positions, "all")}>全部</option>
+            <option value="odd" ${selectedAttr(positions, "odd")}>奇数位</option>
+            <option value="even" ${selectedAttr(positions, "even")}>偶数位</option>
+          </select></div>
+          <div><label>效果动作</label><select data-effect-action>
+            <option value="">请选择</option>
+            <option value="set_fill_color" ${selectedAttr(action, "set_fill_color")}>填充颜色</option>
+            <option value="set_font_size" ${selectedAttr(action, "set_font_size")}>字号</option>
+            <option value="set_tracking" ${selectedAttr(action, "set_tracking")}>字距</option>
+            <option value="set_horizontal_scale" ${selectedAttr(action, "set_horizontal_scale")}>水平缩放</option>
+            <option value="set_vertical_scale" ${selectedAttr(action, "set_vertical_scale")}>垂直缩放</option>
+            <option value="set_baseline_shift" ${selectedAttr(action, "set_baseline_shift")}>基线偏移</option>
+          </select></div>
+          <div><label>效果值</label><input data-effect-values placeholder="单值或逗号分隔循环值" value="${escapeHtml(row.values || "")}" /></div>
+          <div><label>适用条件</label><input data-effect-condition placeholder="例如 font=F2,F3; color=Gold；留空为全部" value="${escapeHtml(row.condition || "")}" /></div>
+          <div><button class="row-remove-btn" type="button" data-remove-text-effect-row aria-label="删除文本效果规则">×</button></div>
+        </div>
+      `;
     }
 
     function renderDimensionRow(row, index) {
@@ -1647,6 +1702,10 @@ INDEX_HTML = """<!doctype html>
 
     function blankDimensionRow() {
       return { target: "", width: "", height: "", unit: "cm" };
+    }
+
+    function blankTextEffectRow() {
+      return { target: "", selector: "whole", delimiter: "", positions: "all", action: "", values: "", condition: "" };
     }
 
     function blankTextSequenceRow() {
@@ -2288,7 +2347,7 @@ INDEX_HTML = """<!doctype html>
         order_bindings: "请在“文字内容设置”里填写订单内容列名",
         text_policies: "请填写文字变量规则，系统会自动生成基础文字适配策略",
         validation_sample: "请检查字段拆分规则，系统需要能生成一条可验证样例",
-        text_sequence_styles: "请补全交替颜色规则的模板文字对象、名字分隔符以及奇数位/偶数位颜色",
+        effects: "请检查“文本效果规则”的文字对象、内容范围、动作和效果值",
         exceptions: "当前模板仍有无法执行的旧规则，请将其改为页面中的固定规则后再保存",
         scan_failed: "请重新上传并扫描模板文件"
       };
@@ -2375,7 +2434,7 @@ INDEX_HTML = """<!doctype html>
         slot_mappings: slotMappings,
         order_bindings: textRule.source_column ? { text: textRule.source_column } : {},
         text_policies: { fit: textRule.fit },
-        text_sequence_styles: collectAlternatingColorRule(textRule),
+        effects: collectTextEffects(textRule),
         defaults,
         option_overrides: {
           ...(isPlainObject(baseConfig.option_overrides) ? baseConfig.option_overrides : {}),
@@ -2415,15 +2474,46 @@ INDEX_HTML = """<!doctype html>
       };
     }
 
-    function collectAlternatingColorRule(textRule) {
-      if (!document.getElementById("alternatingColorEnabled").checked) return [];
-      return [{
-        field: "text",
-        target: textRule.target,
-        delimiter: document.getElementById("nameSequenceDelimiter").value.trim(),
-        odd_color: document.getElementById("oddNameColor").value.trim(),
-        even_color: document.getElementById("evenNameColor").value.trim()
-      }];
+    function collectTextEffects(textRule) {
+      return collectTextEffectRows().map((row, index) => {
+        const values = row.values.split(",").map(value => value.trim()).filter(Boolean);
+        const effect = {
+          id: `text-effect-${index + 1}`,
+          stage: "text",
+          target: { field: "text", name: row.target || textRule.target },
+          selector: {
+            type: row.selector,
+            delimiter: row.selector === "split" ? row.delimiter : "",
+            positions: row.positions,
+            trim: false
+          },
+          actions: [{
+            type: row.action,
+            value: values.length > 1
+              ? { type: "cycle", values }
+              : { type: "literal", value: values[0] || "" }
+          }]
+        };
+        const when = parseEffectCondition(row.condition);
+        if (when) effect.when = when;
+        return effect;
+      });
+    }
+
+    function parseEffectCondition(value) {
+      const text = String(value || "").trim();
+      if (!text) return null;
+      const selections = {};
+      text.split(/[;；]/).map(item => item.trim()).filter(Boolean).forEach(part => {
+        const separator = part.indexOf("=");
+        if (separator < 1) {
+          selections[part] = [];
+          return;
+        }
+        const key = part.slice(0, separator).trim();
+        selections[key] = part.slice(separator + 1).split(",").map(item => item.trim()).filter(Boolean);
+      });
+      return { selections };
     }
 
     function mergeDesignOptions(existing, optionValues) {
@@ -2652,6 +2742,18 @@ INDEX_HTML = """<!doctype html>
       ));
     }
 
+    function collectTextEffectRows(options = {}) {
+      return Array.from(document.querySelectorAll("[data-text-effect-row]")).map(row => ({
+        target: row.querySelector("[data-effect-target]")?.value.trim() || "",
+        selector: row.querySelector("[data-effect-selector]")?.value || "whole",
+        delimiter: row.querySelector("[data-effect-delimiter]")?.value || "",
+        positions: row.querySelector("[data-effect-positions]")?.value || "all",
+        action: row.querySelector("[data-effect-action]")?.value || "",
+        values: row.querySelector("[data-effect-values]")?.value.trim() || "",
+        condition: row.querySelector("[data-effect-condition]")?.value.trim() || ""
+      })).filter(row => options.includeEmpty || row.target || row.action || row.values || row.delimiter || row.condition);
+    }
+
     function buildSequenceVariables(prefix, startIndex, count) {
       if (!prefix) return [];
       if (count <= 1 && startIndex === null) return [prefix];
@@ -2752,9 +2854,7 @@ INDEX_HTML = """<!doctype html>
       const missing = templateRuleMissingItems(draft);
       const optionGroups = draft.option_groups || [];
       const generalNote = draft.notes && draft.notes.general ? "有备注（不影响渲染）" : "无";
-      const alternatingStyles = Array.isArray(draft.text_sequence_styles) && draft.text_sequence_styles.length
-        ? "按名字序号交替颜色"
-        : "无";
+      const textEffects = displayTextEffects(draft.effects || []);
       return `
         <div class="preview-grid">
           <div class="preview-chip"><span>规则状态</span><strong>${escapeHtml(missing.length ? "待补充" : "完整")}</strong></div>
@@ -2767,7 +2867,7 @@ INDEX_HTML = """<!doctype html>
           <div class="preview-chip"><span>多个文字位置</span><strong>${escapeHtml(displayTextSequences(draft.text_sequences || []))}</strong></div>
           <div class="preview-chip"><span>默认值</span><strong>${escapeHtml(describeDefaults(draft.defaults || {}))}</strong></div>
           <div class="preview-chip"><span>特殊处理</span><strong>${escapeHtml(displayOverrides(draft.option_overrides || {}))}</strong></div>
-          <div class="preview-chip"><span>交替颜色</span><strong>${escapeHtml(alternatingStyles)}</strong></div>
+          <div class="preview-chip"><span>文本效果</span><strong>${escapeHtml(textEffects)}</strong></div>
           <div class="preview-chip"><span>其他说明</span><strong>${escapeHtml(generalNote)}</strong></div>
           <div class="preview-chip"><span>已填写选项组</span><strong>${escapeHtml(optionGroups.map(group => `${group.name}=${displayOptionGroupRole(group.role)}`).join("；") || "未填写")}</strong></div>
           <div class="preview-chip"><span>缺失项</span><strong>${escapeHtml(missing.join("；") || "无")}</strong></div>
@@ -2801,6 +2901,23 @@ INDEX_HTML = """<!doctype html>
       const source = String(bindings.text || "").trim();
       const target = String(mapping.slot || mapping.name || "").trim();
       return source && target ? `${source} -> ${target}` : "未填写";
+    }
+
+    function displayTextEffects(effects) {
+      if (!Array.isArray(effects) || !effects.length) return "无";
+      const actionNames = {
+        set_fill_color: "填充颜色",
+        set_font_size: "字号",
+        set_tracking: "字距",
+        set_horizontal_scale: "水平缩放",
+        set_vertical_scale: "垂直缩放",
+        set_baseline_shift: "基线偏移"
+      };
+      return effects.map(effect => {
+        const target = effect.target && effect.target.name ? effect.target.name : "未指定对象";
+        const actions = Array.isArray(effect.actions) ? effect.actions : [];
+        return `${target}: ${actions.map(action => actionNames[action.type] || action.type).join("/") || "未指定动作"}`;
+      }).join("；");
     }
 
     function displayOptionGroupRole(value) {
@@ -2848,10 +2965,7 @@ INDEX_HTML = """<!doctype html>
       document.getElementById("textSourceColumn").value = "";
       document.getElementById("textTargetName").value = "";
       document.getElementById("textFitPolicy").value = "scale_to_box";
-      document.getElementById("alternatingColorEnabled").checked = false;
-      document.getElementById("nameSequenceDelimiter").value = "|";
-      document.getElementById("oddNameColor").value = "#D71920";
-      document.getElementById("evenNameColor").value = "#FFFFFF";
+      setTextEffectRows([]);
       document.getElementById("templateRuleNote").value = "";
       document.getElementById("templateProfile").value = "unclassified";
       document.getElementById("scanVersion").value = "";
@@ -3172,28 +3286,54 @@ INDEX_HTML = """<!doctype html>
         overrideValues[index].value = value.value || value.color || "";
       });
 
-      const styles = Array.isArray(config.text_sequence_styles) ? config.text_sequence_styles : [];
-      const alternating = styles[0] || legacyAlternatingNameColors(config, document.getElementById("textTargetName").value);
-      document.getElementById("alternatingColorEnabled").checked = Boolean(alternating.target);
-      document.getElementById("nameSequenceDelimiter").value = alternating.delimiter || "|";
-      document.getElementById("oddNameColor").value = alternating.odd_color || "#D71920";
-      document.getElementById("evenNameColor").value = alternating.even_color || "#FFFFFF";
+      setTextEffectRows(effectRowsFromConfig(config, document.getElementById("textTargetName").value));
       document.getElementById("templateRuleNote").value = (config.notes && config.notes.general) || (config.exceptions && config.exceptions.note) || "";
     }
 
-    function legacyAlternatingNameColors(config, target) {
-      const legacyNote = [
-        config.natural_text,
-        config.notes && config.notes.general,
-        config.exceptions && config.exceptions.note
-      ].filter(Boolean).join("\\n");
-      if (!target || !/名字/.test(legacyNote) || !/红色/.test(legacyNote) || !/白色/.test(legacyNote)) return {};
-      return {
-        target,
-        delimiter: "|",
-        odd_color: "#D71920",
-        even_color: "#FFFFFF"
-      };
+    function effectRowsFromConfig(config, target) {
+      const effects = Array.isArray(config.effects) ? config.effects : [];
+      const rows = [];
+      effects.forEach(effect => {
+        const selector = effect.selector || {};
+        (Array.isArray(effect.actions) ? effect.actions : []).forEach(action => {
+          const value = action.value || {};
+          const values = value.type === "cycle" && Array.isArray(value.values)
+            ? value.values.join(",")
+            : String(value.value ?? "");
+          rows.push({
+            target: (effect.target && effect.target.name) || target || "",
+            selector: selector.type || "whole",
+            delimiter: selector.delimiter || "",
+            positions: selector.positions || "all",
+            action: action.type || "",
+            values,
+            condition: formatEffectCondition(effect.when)
+          });
+        });
+      });
+      if (rows.length) return rows;
+      const legacyStyles = Array.isArray(config.text_sequence_styles) ? config.text_sequence_styles : [];
+      if (legacyStyles.length) {
+        return legacyStyles.map(style => ({
+          target: style.target || target || "",
+          selector: "split",
+          delimiter: style.delimiter || "|",
+          positions: "all",
+          action: "set_fill_color",
+          values: [style.odd_color, style.even_color].filter(Boolean).join(","),
+          condition: ""
+        }));
+      }
+      return [];
+    }
+
+    function formatEffectCondition(value) {
+      const selections = value && value.selections;
+      if (!isPlainObject(selections)) return "";
+      return Object.entries(selections).map(entry => {
+        const values = Array.isArray(entry[1]) ? entry[1] : [entry[1]];
+        return `${entry[0]}=${values.join(",")}`;
+      }).join("; ");
     }
 
     function legacyOptionGroups(config) {

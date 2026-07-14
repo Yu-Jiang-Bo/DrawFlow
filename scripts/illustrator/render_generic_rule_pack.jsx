@@ -68,7 +68,7 @@
                 frame.contents = String(variable.value || "");
                 if (fontSource) copyTextStyle(fontSource, frame);
                 applyTextColor(frame, String(selections.color || ""));
-                applyCharacterStyles(frame, variable.character_styles || []);
+                applyTextEffects(frame, variable.effects || []);
                 if (dimension && String(policies.fit || "") !== "none") {
                     fitText(frame, Number(dimension.width_mm || 0), Number(dimension.height_mm || 0));
                 }
@@ -161,18 +161,38 @@
         try { frame.textRange.characterAttributes.fillColor = color; } catch (e1) {}
     }
 
-    function applyCharacterStyles(frame, styles) {
-        for (var i = 0; i < styles.length; i++) {
-            var style = styles[i] || {};
-            var rgb = hexColor(String(style.color || ""));
-            if (!rgb) continue;
-            var start = Math.max(0, Number(style.start || 0));
-            var end = Math.min(frame.characters.length, start + Math.max(0, Number(style.length || 0)));
+    var TEXT_EFFECT_HANDLERS = {
+        "set_fill_color": function (attributes, value) {
+            var rgb = hexColor(String(value || "")) || colorValue(String(value || ""));
+            if (!rgb) throw new Error("Unsupported fill color: " + value);
             var color = new RGBColor();
             color.red = rgb[0]; color.green = rgb[1]; color.blue = rgb[2];
-            for (var index = start; index < end; index++) {
-                try { frame.characters[index].characterAttributes.fillColor = color; } catch (e1) {}
+            attributes.fillColor = color;
+        },
+        "set_font_size": function (attributes, value) { attributes.size = Number(value); },
+        "set_tracking": function (attributes, value) { attributes.tracking = Number(value); },
+        "set_horizontal_scale": function (attributes, value) { attributes.horizontalScale = Number(value); },
+        "set_vertical_scale": function (attributes, value) { attributes.verticalScale = Number(value); },
+        "set_baseline_shift": function (attributes, value) { attributes.baselineShift = Number(value); }
+    };
+
+    function applyTextEffects(frame, effects) {
+        for (var effectIndex = 0; effectIndex < effects.length; effectIndex++) {
+            var effect = effects[effectIndex] || {};
+            var handler = TEXT_EFFECT_HANDLERS[String(effect.type || "")];
+            if (!handler) throw new Error("Unsupported text effect action: " + effect.type);
+            var ranges = effect.ranges || [];
+            for (var rangeIndex = 0; rangeIndex < ranges.length; rangeIndex++) {
+                applyTextEffectRange(frame, ranges[rangeIndex] || {}, handler);
             }
+        }
+    }
+
+    function applyTextEffectRange(frame, range, handler) {
+        var start = Math.max(0, Number(range.start || 0));
+        var end = Math.min(frame.characters.length, start + Math.max(0, Number(range.length || 0)));
+        for (var index = start; index < end; index++) {
+            handler(frame.characters[index].characterAttributes, range.value);
         }
     }
 

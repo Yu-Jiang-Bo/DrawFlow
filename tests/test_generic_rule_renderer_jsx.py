@@ -20,6 +20,12 @@ def test_generic_renderer_has_no_template_specific_branch():
     assert "findPageItemsByName" in source
     assert 'String(variable.target || "") + "_ANCHOR"' in source
     assert "copyTextStyle(fontSource, frame)" in source
+    assert "applyTextEffects(frame, variable.effects || [])" in source
+    assert "TEXT_EFFECT_HANDLERS" in source
+    assert '"set_fill_color"' in source
+    assert '"set_tracking"' in source
+    assert "applyTextEffectRange" in source
+    assert "applyCharacterStyles" not in source
     assert "doc-color-cmyk" in source
     assert "doc-color-rgb" in source
     assert "output.outline_text" in source

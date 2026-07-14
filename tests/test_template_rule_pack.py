@@ -148,6 +148,43 @@ def test_migrates_legacy_custom_text_binding_to_standard_text_field():
     assert pack["rules"]["slot_mappings"] == [{"field": "text", "slot": "Name"}]
 
 
+def test_migrates_legacy_alternating_colors_to_declarative_effect():
+    pack = normalize_template_rule_pack(
+        {
+            "$schema": RULE_PACK_SCHEMA,
+            "template": {"template_id": "TEXT003", "profile": PROFILE_PURE_TEXT},
+            "rules": {
+                "text_sequence_styles": [
+                    {
+                        "field": "text",
+                        "target": "Name",
+                        "delimiter": "|",
+                        "odd_color": "#D71920",
+                        "even_color": "#FFFFFF",
+                    }
+                ]
+            },
+            "validation": {"status": "draft", "unresolved_items": []},
+        }
+    )
+
+    assert "text_sequence_styles" not in pack["rules"]
+    assert pack["rules"]["effects"] == [
+        {
+            "id": "legacy-alternating-color-1",
+            "stage": "text",
+            "target": {"field": "text", "name": "Name"},
+            "selector": {"type": "split", "delimiter": "|", "positions": "all", "trim": False},
+            "actions": [
+                {
+                    "type": "set_fill_color",
+                    "value": {"type": "cycle", "values": ["#D71920", "#FFFFFF"]},
+                }
+            ],
+        }
+    ]
+
+
 def test_profiles_define_type_specific_requirements():
     assert profile_definition(PROFILE_PURE_TEXT).required_rule_sections == ("font_options", "text_targets")
     assert profile_definition(PROFILE_FIXED_FONT_DESIGN).required_rule_sections == (
