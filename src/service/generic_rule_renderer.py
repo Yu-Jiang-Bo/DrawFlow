@@ -126,10 +126,50 @@ def _build_variables(values: Mapping[str, Any], rules: Mapping[str, Any]) -> lis
             raise GenericRuleRenderError(
                 f"Order value cannot satisfy split policy for target: {target}"
             )
-        variables.append({"target": target, "field": field, "value": value})
+        variable = {"target": target, "field": field, "value": value}
+        character_styles = _alternating_character_styles(value, field, target, rules)
+        if character_styles:
+            variable["character_styles"] = character_styles
+        variables.append(variable)
     if not variables:
         raise GenericRuleRenderError("Order row does not produce any template variables.")
     return variables
+
+
+def _alternating_character_styles(
+    value: str,
+    field: str,
+    target: str,
+    rules: Mapping[str, Any],
+) -> list[Dict[str, Any]]:
+    """Build per-name color ranges without changing the visible text value."""
+
+    styles = rules.get("text_sequence_styles", [])
+    if not isinstance(styles, list):
+        return []
+    for style in styles:
+        if not isinstance(style, Mapping):
+            continue
+        if str(style.get("field") or "text") != field or str(style.get("target") or "") != target:
+            continue
+        delimiter = str(style.get("delimiter") or "")
+        odd_color = str(style.get("odd_color") or "")
+        even_color = str(style.get("even_color") or "")
+        if not delimiter or not odd_color or not even_color:
+            continue
+        result: list[Dict[str, Any]] = []
+        offset = 0
+        for index, part in enumerate(value.split(delimiter), start=1):
+            result.append(
+                {
+                    "start": offset,
+                    "length": len(part),
+                    "color": odd_color if index % 2 else even_color,
+                }
+            )
+            offset += len(part) + len(delimiter)
+        return result
+    return []
 
 
 def _read_rows(path: Path, *, sheet_name: str) -> list[Dict[str, Any]]:

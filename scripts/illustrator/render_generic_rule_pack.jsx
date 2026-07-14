@@ -68,6 +68,7 @@
                 frame.contents = String(variable.value || "");
                 if (fontSource) copyTextStyle(fontSource, frame);
                 applyTextColor(frame, String(selections.color || ""));
+                applyCharacterStyles(frame, variable.character_styles || []);
                 if (dimension && String(policies.fit || "") !== "none") {
                     fitText(frame, Number(dimension.width_mm || 0), Number(dimension.height_mm || 0));
                 }
@@ -158,6 +159,28 @@
         var color = new RGBColor();
         color.red = rgb[0]; color.green = rgb[1]; color.blue = rgb[2];
         try { frame.textRange.characterAttributes.fillColor = color; } catch (e1) {}
+    }
+
+    function applyCharacterStyles(frame, styles) {
+        for (var i = 0; i < styles.length; i++) {
+            var style = styles[i] || {};
+            var rgb = hexColor(String(style.color || ""));
+            if (!rgb) continue;
+            var start = Math.max(0, Number(style.start || 0));
+            var end = Math.min(frame.characters.length, start + Math.max(0, Number(style.length || 0)));
+            var color = new RGBColor();
+            color.red = rgb[0]; color.green = rgb[1]; color.blue = rgb[2];
+            for (var index = start; index < end; index++) {
+                try { frame.characters[index].characterAttributes.fillColor = color; } catch (e1) {}
+            }
+        }
+    }
+
+    function hexColor(value) {
+        var match = String(value || "").match(/^#?([0-9a-f]{6})$/i);
+        if (!match) return null;
+        var hex = match[1];
+        return [parseInt(hex.substring(0, 2), 16), parseInt(hex.substring(2, 4), 16), parseInt(hex.substring(4, 6), 16)];
     }
 
     function colorValue(name) {

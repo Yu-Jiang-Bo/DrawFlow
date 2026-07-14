@@ -100,6 +100,8 @@ def migrate_legacy_template_rule(payload: Mapping[str, Any], *, template_id: str
         "asset_mappings": _dict_list(source.get("asset_mappings")),
         "defaults": _dict(source.get("defaults")),
         "option_overrides": _dict(source.get("option_overrides")),
+        "text_sequence_styles": _dict_list(source.get("text_sequence_styles")),
+        "notes": _dict(source.get("notes")),
         "transforms": deepcopy(source.get("transforms", {})),
         "output": _dict(source.get("output")),
         "exceptions": _dict(source.get("exceptions")),
@@ -188,6 +190,7 @@ def _normalize_canonical_pack(source: Dict[str, Any], *, template_id: str) -> Di
         }
     )
     normalized["assets"] = _normalize_pack_assets(source.get("assets"))
+    _migrate_legacy_text_binding(normalized["rules"])
     normalized["structure"] = {
         "scan_version": str(_dict(source.get("structure")).get("scan_version", "")),
         "evidence": deepcopy(_dict(source.get("structure")).get("evidence", {})),
@@ -200,6 +203,40 @@ def _normalize_canonical_pack(source: Dict[str, Any], *, template_id: str) -> Di
     normalized["validation"].setdefault("status", "draft")
     normalized["validation"].setdefault("unresolved_items", [])
     return normalized
+
+
+def _migrate_legacy_text_binding(rules: Dict[str, Any]) -> None:
+    """Keep old custom text field names out of the internal rule contract."""
+
+    bindings = _dict(rules.get("order_bindings"))
+    mappings = _dict_list(rules.get("slot_mappings"))
+    sequences = _dict_list(rules.get("text_sequences"))
+    migrated_legacy_text = False
+    if "text" not in bindings:
+        fields = {
+            str(item.get("field") or item.get("source") or "").strip()
+            for item in [*mappings, *sequences]
+            if str(item.get("field") or item.get("source") or "").strip()
+        }
+        legacy_fields = [field for field in fields if field in bindings]
+        if len(legacy_fields) == 1:
+            legacy_field = legacy_fields[0]
+            bindings["text"] = bindings.pop(legacy_field)
+            for item in mappings:
+                if str(item.get("field") or item.get("source") or "").strip() == legacy_field:
+                    item["field"] = "text"
+                    item.pop("source", None)
+            for item in sequences:
+                if str(item.get("field") or "").strip() == legacy_field:
+                    item["field"] = "text"
+            migrated_legacy_text = True
+    if migrated_legacy_text:
+        for item in mappings:
+            if not str(item.get("delimiter") or "").strip():
+                item.pop("sequence_index", None)
+    rules["order_bindings"] = bindings
+    rules["slot_mappings"] = mappings
+    rules["text_sequences"] = sequences
 
 
 def _normalize_design_options(value: Any) -> tuple[list[str], Dict[str, Any]]:

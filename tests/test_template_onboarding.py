@@ -250,6 +250,47 @@ def test_validation_sample_applies_delimiter_and_sequence_index():
     assert result["ok"] is True
 
 
+def test_check_accepts_structured_alternating_name_colors():
+    pack = ready_pack()
+    pack["rules"]["text_sequence_styles"] = [
+        {
+            "field": "text",
+            "target": "Name1",
+            "delimiter": "|",
+            "odd_color": "#D42129",
+            "even_color": "#FFFFFF",
+        }
+    ]
+    pack["validation"]["sample"] = {
+        "input": {"custom_text": "Alice | Bob"},
+        "expected": {"Name1": "Alice | Bob"},
+    }
+
+    result = check_rule_pack(pack, template_id="DEMO001")
+
+    assert result["ok"] is True
+
+
+def test_check_rejects_alternating_colors_without_matching_text_mapping():
+    pack = ready_pack()
+    pack["rules"]["text_sequence_styles"] = [
+        {
+            "field": "text",
+            "target": "UnknownName",
+            "delimiter": "|",
+            "odd_color": "#D42129",
+            "even_color": "#FFFFFF",
+        }
+    ]
+
+    result = check_rule_pack(pack, template_id="DEMO001")
+
+    assert any(
+        item["code"] == "text_sequence_styles" and "text -> UnknownName" in item["message"]
+        for item in result["errors"]
+    )
+
+
 def test_validation_sample_preserves_numeric_zero():
     pack = ready_pack()
     pack["validation"]["sample"] = {

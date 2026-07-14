@@ -74,16 +74,18 @@ def test_template_rule_editor_is_business_readable():
     assert "选项组角色" in INDEX_HTML
     assert "尺寸规则" in INDEX_HTML
     assert "尺寸对象" in INDEX_HTML
-    assert "字段拆分与变量序列" in INDEX_HTML
+    assert "文字内容设置" in INDEX_HTML
+    assert "多个文字位置（可选）" in INDEX_HTML
     assert "适用设计/选项" in INDEX_HTML
     assert "变量前缀" in INDEX_HTML
     assert 'id="addDimensionRowBtn"' in INDEX_HTML
     assert 'id="addTextSequenceRowBtn"' in INDEX_HTML
     assert "添加尺寸" in INDEX_HTML
-    assert "添加字段规则" in INDEX_HTML
+    assert "添加多个文字位置" in INDEX_HTML
     assert "默认值" in INDEX_HTML
     assert "特殊处理" in INDEX_HTML
-    assert "高级例外规则" in INDEX_HTML
+    assert "按名字顺序交替颜色" in INDEX_HTML
+    assert "其他说明（可选，不参与渲染）" in INDEX_HTML
     assert "规则检查结果" in INDEX_HTML
     assert "data-option-group-name" in INDEX_HTML
     assert "data-dimension-target" in INDEX_HTML
@@ -101,6 +103,9 @@ def test_template_rule_editor_is_business_readable():
     assert 'id="fixedHeight"' in INDEX_HTML
     assert "dimension-mode-card" in INDEX_HTML
     assert "data-override-target" in INDEX_HTML
+    assert 'id="textSourceColumn"' in INDEX_HTML
+    assert 'id="textTargetName"' in INDEX_HTML
+    assert 'id="alternatingColorEnabled"' in INDEX_HTML
     assert "结构化规则 JSON" not in INDEX_HTML
     assert "新建空白" not in INDEX_HTML
     assert "默认色彩模式" in INDEX_HTML
@@ -142,16 +147,10 @@ def test_template_onboarding_requires_scan_check_and_confirmation():
     assert 'id="validationSampleJson"' in INDEX_HTML
     assert "prepareBusinessRuleEditor" in INDEX_HTML
     assert "profileWrapper.hidden = true" in INDEX_HTML
-    assert 'id="templateRuleDescription"' in INDEX_HTML
-    assert "extractTemplateRules" in INDEX_HTML
-    assert "分析补充说明" in INDEX_HTML
-    assert "将补充说明生成草稿" not in INDEX_HTML
     assert "保存版本备注" in INDEX_HTML
     assert "不参与渲染" in INDEX_HTML
-    assert "特殊规则说明" in INDEX_HTML
-    assert "mergeExceptionNote" in INDEX_HTML
-    assert "appendAdvancedExceptionNote" in INDEX_HTML
-    assert "已作为待处理特殊规则保留" in INDEX_HTML
+    assert 'id="templateRuleNote"' in INDEX_HTML
+    assert "collectAlternatingColorRule" in INDEX_HTML
     assert 'id="rescanTemplateBtn"' in INDEX_HTML
     assert "rescanTemplate" in INDEX_HTML
     assert 'id="uploadScanTemplateBtn"' in INDEX_HTML
@@ -160,7 +159,6 @@ def test_template_onboarding_requires_scan_check_and_confirmation():
     assert INDEX_HTML.index('id="uploadScanTemplateBtn"') < INDEX_HTML.index("选项组角色")
     assert INDEX_HTML.count('addEventListener("click", uploadAndScanTemplate)') == 1
     assert "文件已保存为草稿，但扫描未完成" in INDEX_HTML
-    assert "templateRulesDescriptionDirty" in INDEX_HTML
     assert "formatScanEvidence" in INDEX_HTML
     assert "formatRawScanEvidence" in INDEX_HTML
     assert "formatFieldSources" in INDEX_HTML
@@ -187,11 +185,9 @@ def test_template_onboarding_requires_scan_check_and_confirmation():
 
 def test_template_rule_check_infers_hidden_business_fields():
     assert "currentRulePackProfile" in INDEX_HTML
-    assert "inferOrderBindingsFromRules" in INDEX_HTML
-    assert "mergeOrderBindings" in INDEX_HTML
     assert "mergeTextPolicies" in INDEX_HTML
     assert "mergeValidationSample" in INDEX_HTML
-    assert "rules.order_bindings = mergeOrderBindings" in INDEX_HTML
+    assert "rules.order_bindings = isPlainObject(rules.order_bindings)" in INDEX_HTML
     assert "rules.text_policies = mergeTextPolicies" in INDEX_HTML
     assert "const sample = mergeValidationSample" in INDEX_HTML
     assert "sequences.forEach(item =>" in INDEX_HTML
@@ -201,8 +197,8 @@ def test_template_rule_check_infers_hidden_business_fields():
     assert "Object.values(splitGroups).forEach" in INDEX_HTML
     assert "请选择模板规则类型" not in INDEX_HTML
     assert "模板类型仅供系统参考" in INDEX_HTML
-    assert "每个订单字段都要能生成对应模板变量" in INDEX_HTML
-    assert "字段拆分与变量序列" in INDEX_HTML
+    assert "每个模板文字对象都要有对应的订单内容来源" in INDEX_HTML
+    assert "文字内容设置" in INDEX_HTML
 
 
 def test_template_rule_payload_preserves_legacy_config():
@@ -268,10 +264,16 @@ def test_scan_evidence_defaults_to_summary_and_keeps_raw_details_collapsed():
 def test_template_rules_prefill_fixed_options_before_optional_supplement():
     assert "查看系统审计明细（可选）" in INDEX_HTML
     assert "当前配置与系统建议不同" in INDEX_HTML
-    assert 'specialSection.insertAdjacentElement("afterend", ruleSection)' in INDEX_HTML
-    assert "补充说明（可选）" in INDEX_HTML
-    assert "分析补充说明" in INDEX_HTML
-    assert "生成草稿不会覆盖已填写内容" in INDEX_HTML
+    assert "文字内容设置" in INDEX_HTML
+    assert "其他说明（可选，不参与渲染）" in INDEX_HTML
+    assert "多个文字位置（可选）" in INDEX_HTML
+    assert "按名字顺序交替颜色" in INDEX_HTML
+    assert 'id="textSourceColumn"' in INDEX_HTML
+    assert 'id="textTargetName"' in INDEX_HTML
+    assert "function collectTextContentRule" in INDEX_HTML
+    assert "function collectAlternatingColorRule" in INDEX_HTML
+    assert "function legacyAlternatingNameColors" in INDEX_HTML
+    assert '].filter(Boolean).join("\\n");' in INDEX_HTML
     assert "function prefillScannedOptionSuggestions" in INDEX_HTML
     assert "function mergeScannedOptionGroups" in INDEX_HTML
     assert "const groups = mergeScannedOptionGroups(savedGroups, config);" in INDEX_HTML

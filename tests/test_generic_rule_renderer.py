@@ -173,6 +173,38 @@ def test_numeric_zero_is_preserved_as_template_text(tmp_path):
     assert task["orders"][0]["variables"][0]["value"] == "0"
 
 
+def test_builds_alternating_character_colors_for_one_text_target(tmp_path):
+    _, template = make_template(tmp_path)
+    order_path = tmp_path / "orders.xlsx"
+    make_orders(order_path, custom="Alice|Bob|Carol")
+    rules = base_rules()
+    rules["slot_mappings"] = [{"field": "text", "slot": "Name"}]
+    rules["text_sequence_styles"] = [
+        {
+            "field": "text",
+            "target": "Name",
+            "delimiter": "|",
+            "odd_color": "#D71920",
+            "even_color": "#FFFFFF",
+        }
+    ]
+
+    task = build_generic_render_task(template, rules, order_path, tmp_path / "output.ai")
+
+    assert task["orders"][0]["variables"] == [
+        {
+            "target": "Name",
+            "field": "text",
+            "value": "Alice|Bob|Carol",
+            "character_styles": [
+                {"start": 0, "length": 5, "color": "#D71920"},
+                {"start": 6, "length": 3, "color": "#FFFFFF"},
+                {"start": 10, "length": 5, "color": "#D71920"},
+            ],
+        }
+    ]
+
+
 def test_builds_effective_transform_for_each_selected_option(tmp_path):
     _, template = make_template(tmp_path)
     order_path = tmp_path / "orders.xlsx"

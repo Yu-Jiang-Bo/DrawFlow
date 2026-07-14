@@ -1062,11 +1062,21 @@ INDEX_HTML = """<!doctype html>
                 </div>
 
                 <div class="rule-section">
-                  <div class="rule-section-head">
-                    <h3 class="rule-section-title">字段拆分与变量序列</h3>
-                    <button class="btn-subtle rule-add-btn" id="addTextSequenceRowBtn" type="button">+ 添加字段规则</button>
+                  <h3 class="rule-section-title">文字内容设置</h3>
+                  <p class="rule-section-note">每个订单只需指定名字/定制内容来自订单表哪一列，以及写入模板中的哪个文字对象。单文字模板不需要填写下方的多个文字位置。</p>
+                  <div class="form-grid">
+                    <div><label for="textSourceColumn">订单内容列名</label><input id="textSourceColumn" placeholder="例如：定制信息 或 names" /></div>
+                    <div><label for="textTargetName">模板文字对象</label><input id="textTargetName" placeholder="例如：Name" /></div>
+                    <div><label for="textFitPolicy">文字适配方式</label><select id="textFitPolicy"><option value="scale_to_box">自动缩放适配</option><option value="text_fit_box">适配文字框</option><option value="none">不自动缩放</option></select></div>
                   </div>
-                  <p class="rule-section-note">订单字段可按分隔符拆分，并按顺序写入 AI 模板中的变量序列，例如 Name 字段写入 Name1、Name2、Name3。</p>
+                </div>
+
+                <div class="rule-section">
+                  <div class="rule-section-head">
+                    <h3 class="rule-section-title">多个文字位置（可选）</h3>
+                    <button class="btn-subtle rule-add-btn" id="addTextSequenceRowBtn" type="button">+ 添加多个文字位置</button>
+                  </div>
+                  <p class="rule-section-note">只有模板实际存在 Name1、Name2、Name3 等多个文字对象时才填写。单文字模板请留空，系统会使用上方的文字内容设置。</p>
                   <div class="structured-table" id="textSequenceRows"></div>
                 </div>
 
@@ -1101,6 +1111,17 @@ INDEX_HTML = """<!doctype html>
 
                 <div class="rule-section">
                   <h3 class="rule-section-title">特殊处理</h3>
+                  <div class="advanced-rule-box">
+                    <div class="advanced-rule-body">
+                      <label><input id="alternatingColorEnabled" type="checkbox" /> 按名字顺序交替颜色</label>
+                      <p class="rule-section-note">例如第 1、3、5... 个名字红色，第 2、4、6... 个名字白色。该规则会参与渲染，不是备注。</p>
+                      <div class="form-grid">
+                        <div><label for="nameSequenceDelimiter">名字分隔符</label><input id="nameSequenceDelimiter" value="|" placeholder="例如：|" /></div>
+                        <div><label for="oddNameColor">奇数位颜色</label><input id="oddNameColor" value="#D71920" placeholder="#D71920" /></div>
+                        <div><label for="evenNameColor">偶数位颜色</label><input id="evenNameColor" value="#FFFFFF" placeholder="#FFFFFF" /></div>
+                      </div>
+                    </div>
+                  </div>
                   <div class="structured-table" id="overrideRows">
                     <div class="structured-row three">
                       <div><label>对象/选项</label><input data-override-target placeholder="例如 F3" /></div>
@@ -1131,12 +1152,10 @@ INDEX_HTML = """<!doctype html>
                     </div>
                   </div>
                   <details class="advanced-rule-box">
-                    <summary>高级例外规则（可选）</summary>
+                    <summary>其他说明（可选，不参与渲染）</summary>
                     <div class="advanced-rule-body">
-                      <label for="templateAdvancedRules">特殊规则说明</label>
-                      <textarea id="templateAdvancedRules" placeholder="例如：名字顺序 1、3、5、7 使用红色，2、4、6 使用白色。这里保存尚未结构化的特殊规则；标为待人工处理时会阻止启用，避免误以为已能自动出图。"></textarea>
-                      <label for="templateExceptionStatus">例外状态</label>
-                      <select id="templateExceptionStatus"><option value="none">无例外</option><option value="resolved">已解决</option><option value="manual_review">待人工处理（阻止启用）</option></select>
+                      <label for="templateRuleNote">补充备注</label>
+                      <textarea id="templateRuleNote" placeholder="记录给后续维护者看的说明，例如模板制作注意事项。这里不会影响渲染，也不会阻止启用。"></textarea>
                     </div>
                   </details>
                 </div>
@@ -1366,26 +1385,7 @@ INDEX_HTML = """<!doctype html>
       });
       const orderInput = document.getElementById("orderBindingsJson");
       const ruleSection = orderInput && orderInput.closest(".rule-section");
-      if (!ruleSection || document.getElementById("templateRuleDescription")) return;
-      const specialRules = document.getElementById("templateAdvancedRules");
-      const specialSection = specialRules && specialRules.closest(".rule-section");
-      if (specialSection) specialSection.insertAdjacentElement("afterend", ruleSection);
-      const title = ruleSection.querySelector(".rule-section-title");
-      if (title) title.textContent = "补充说明（可选）";
-      const note = ruleSection.querySelector(".rule-section-note");
-      if (note) note.textContent = "先完成上方固定项。这里只补充固定项无法表达的特殊业务条件；生成草稿不会覆盖已填写内容，仍需检查并确认保存。";
-      const formGrid = ruleSection.querySelector(".form-grid");
-      const panel = document.createElement("div");
-      panel.className = "extract-panel";
-      panel.innerHTML = `
-        <label for="templateRuleDescription">补充说明转草稿</label>
-        <textarea id="templateRuleDescription" placeholder="优先用于补充固定项写不下的说明。能识别的会生成草稿；暂不能识别成固定规则的内容会保留到“特殊规则说明”，等待人工处理或后续开发渲染支持。"></textarea>
-        <div class="extract-actions">
-          <button class="btn-subtle" id="extractTemplateRulesBtn" type="button">分析补充说明</button>
-          <span class="extract-status" id="templateExtractionStatus">未填写补充说明</span>
-        </div>
-        <div class="preview-box readonly-summary" id="templateExtractionSummary">填写补充说明后，系统会区分：已转成固定规则的内容，以及仅作为特殊规则说明保留的内容。</div>`;
-      if (formGrid) ruleSection.insertBefore(panel, formGrid);
+      if (ruleSection) ruleSection.hidden = true;
       const scanSection = profile && profile.closest(".rule-section");
       if (scanSection) {
         const scanTitle = scanSection.querySelector(".rule-section-title");
@@ -1416,11 +1416,6 @@ INDEX_HTML = """<!doctype html>
       document.getElementById("refreshJobsPageBtn").addEventListener("click", loadJobs);
       document.getElementById("closeRenderErrorBtn").addEventListener("click", hideRenderError);
       document.getElementById("newTemplateBtn").addEventListener("click", newTemplate);
-      document.getElementById("extractTemplateRulesBtn").addEventListener("click", extractTemplateRules);
-      document.getElementById("templateRuleDescription").addEventListener("input", () => {
-        state.templateRulesDescriptionDirty = true;
-        document.getElementById("templateExtractionStatus").textContent = "补充说明已修改，如需采用请重新分析";
-      });
       document.getElementById("checkTemplateRuleBtn").addEventListener("click", checkTemplateRule);
       document.getElementById("saveTemplateBtn").addEventListener("click", saveTemplate);
       document.getElementById("uploadScanTemplateBtn").addEventListener("click", uploadAndScanTemplate);
@@ -1471,13 +1466,20 @@ INDEX_HTML = """<!doctype html>
         "#defaultStyle",
         "#defaultColor",
         "#outputColorMode",
+        "#textSourceColumn",
+        "#textTargetName",
+        "#textFitPolicy",
+        "#alternatingColorEnabled",
+        "#nameSequenceDelimiter",
+        "#oddNameColor",
+        "#evenNameColor",
+        "#templateRuleNote",
         "#templateProfile",
         "#orderBindingsJson",
         "#assetMappingsJson",
         "#textPoliciesJson",
         "#outputTransformsJson",
         "#validationSampleJson",
-        "#templateRuleDescription",
         "#overrideRows input",
         "#overrideRows select",
         "#templateAdvancedRules",
@@ -2150,10 +2152,7 @@ INDEX_HTML = """<!doctype html>
       const source = state.templateOnboarding && state.templateOnboarding.draft;
       if (!source) throw new Error("缺少扫描草稿，不能确认模板");
       const rules = buildTemplateRulePayload();
-      rules.order_bindings = mergeOrderBindings(
-        parseJsonField("orderBindingsJson", {}),
-        inferOrderBindingsFromRules(rules)
-      );
+      rules.order_bindings = isPlainObject(rules.order_bindings) ? rules.order_bindings : {};
       rules.asset_mappings = collectDesignAssetMappings();
       rules.text_policies = mergeTextPolicies(parseJsonField("textPoliciesJson", {}), rules);
       rules.transforms = parseJsonField("outputTransformsJson", {});
@@ -2208,7 +2207,10 @@ INDEX_HTML = """<!doctype html>
     }
 
     function mergeTextPolicies(existing, rules) {
-      const merged = { ...(isPlainObject(existing) ? existing : {}) };
+      const merged = {
+        ...(isPlainObject(existing) ? existing : {}),
+        ...(isPlainObject(rules.text_policies) ? rules.text_policies : {})
+      };
       if (!merged.fit && hasSlotsOrMappings(rules)) merged.fit = "scale_to_box";
       const sequences = Array.isArray(rules.text_sequences) ? rules.text_sequences : [];
       const splitSequence = sequences.find(item => item && item.delimiter);
@@ -2280,13 +2282,14 @@ INDEX_HTML = """<!doctype html>
       const code = String((item && item.code) || "");
       const names = {
         profile: "模板类型仅供系统参考；启用与否只按已填写的具体规则检查",
-        text_targets: "请在“字段拆分与变量序列”里填写要替换的订单字段和模板变量",
-        slot_mappings: "请检查“字段拆分与变量序列”：每个订单字段都要能生成对应模板变量",
+        text_targets: "请在“文字内容设置”里填写订单内容列名和模板文字对象",
+        slot_mappings: "请检查“文字内容设置”或“多个文字位置”：每个模板文字对象都要有对应的订单内容来源",
         option_group_names: "请补充选项组角色，例如字体组、设计组或尺寸/版式组",
-        order_bindings: "请在“字段拆分与变量序列”里填写订单字段名，系统会自动生成字段对应关系",
+        order_bindings: "请在“文字内容设置”里填写订单内容列名",
         text_policies: "请填写文字变量规则，系统会自动生成基础文字适配策略",
         validation_sample: "请检查字段拆分规则，系统需要能生成一条可验证样例",
-        exceptions: "请处理高级例外，未解决的例外不能启用模板",
+        text_sequence_styles: "请补全交替颜色规则的模板文字对象、名字分隔符以及奇数位/偶数位颜色",
+        exceptions: "当前模板仍有无法执行的旧规则，请将其改为页面中的固定规则后再保存",
         scan_failed: "请重新上传并扫描模板文件"
       };
       return names[code] || String((item && item.message) || "规则配置不完整");
@@ -2298,6 +2301,7 @@ INDEX_HTML = """<!doctype html>
 
     function buildTemplateRulePayload() {
       const baseConfig = isPlainObject(state.templateRuleBaseConfig) ? state.templateRuleBaseConfig : {};
+      const textRule = collectTextContentRule(baseConfig);
       const optionGroups = collectOptionGroups();
       const dimensionMode = document.getElementById("dimensionMode").value;
       const collectedDimensions = dimensionMode === "fixed" ? collectFixedDimensions() : collectDimensions();
@@ -2312,12 +2316,17 @@ INDEX_HTML = """<!doctype html>
       const collectedTextSequences = collectTextSequences();
       const textSequences = state.textSequenceRowsTouched
         ? mergeTextSequences([], collectedTextSequences)
-        : mergeTextSequences(baseTextSequences, collectedTextSequences);
+        : (textRule.source_column && textRule.target ? [] : mergeTextSequences(baseTextSequences, collectedTextSequences));
       const sequenceSlotMappings = slotMappingsFromTextSequences(textSequences);
       const legacySlotMappingRows = !state.textSequenceRowsTouched && Array.isArray(baseConfig.slot_mappings) && baseConfig.slot_mappings.length
         ? baseConfig.slot_mappings
         : (!state.textSequenceRowsTouched ? legacySlotMappings(baseConfig.slots || []) : []);
-      const slotMappings = sequenceSlotMappings.length ? sequenceSlotMappings : legacySlotMappingRows;
+      const simpleTextMapping = textRule.source_column && textRule.target
+        ? [{ field: "text", slot: textRule.target }]
+        : [];
+      const slotMappings = sequenceSlotMappings.length
+        ? sequenceSlotMappings
+        : (simpleTextMapping.length ? simpleTextMapping : legacySlotMappingRows);
       const slots = buildSlotsFromMappings(
         slotMappings,
         state.textSequenceRowsTouched && !slotMappings.length ? [] : baseConfig.slots
@@ -2337,7 +2346,8 @@ INDEX_HTML = """<!doctype html>
         style: document.getElementById("defaultStyle").value.trim(),
         color: document.getElementById("defaultColor").value.trim()
       };
-      const advancedText = document.getElementById("templateAdvancedRules").value.trim();
+      const noteInput = document.getElementById("templateRuleNote");
+      const generalNote = noteInput ? noteInput.value.trim() : "";
       return {
         ...baseConfig,
         version: 2,
@@ -2346,7 +2356,7 @@ INDEX_HTML = """<!doctype html>
         template_type: inferTemplateTypeFromForm(),
         status: "draft",
         rule_source: "structured_form",
-        natural_text: document.getElementById("templateRuleDescription").value.trim(),
+        natural_text: "",
         raw_text: state.dimensionRowsTouched ? "" : (baseConfig.raw_text || ""),
         option_groups: optionGroups,
         font_options: state.optionGroupsTouched ? fontOptions : (fontOptions.length ? fontOptions : normalizeOptions(baseConfig.font_options)),
@@ -2363,6 +2373,9 @@ INDEX_HTML = """<!doctype html>
         slots,
         text_sequences: textSequences,
         slot_mappings: slotMappings,
+        order_bindings: textRule.source_column ? { text: textRule.source_column } : {},
+        text_policies: { fit: textRule.fit },
+        text_sequence_styles: collectAlternatingColorRule(textRule),
         defaults,
         option_overrides: {
           ...(isPlainObject(baseConfig.option_overrides) ? baseConfig.option_overrides : {}),
@@ -2372,11 +2385,8 @@ INDEX_HTML = """<!doctype html>
           ...(isPlainObject(baseConfig.output) ? baseConfig.output : {}),
           color_mode: document.getElementById("outputColorMode").value
         },
-        exceptions: {
-          ...(isPlainObject(baseConfig.exceptions) ? baseConfig.exceptions : {}),
-          note: advancedText,
-          status: document.getElementById("templateExceptionStatus").value || (advancedText ? "manual_review" : "none")
-        },
+        notes: generalNote ? { general: generalNote } : {},
+        exceptions: { status: "none" },
         assets: buildAssetsRulePayload(baseConfig),
         parser: {
           ...(isPlainObject(baseConfig.parser) ? baseConfig.parser : {}),
@@ -2387,6 +2397,33 @@ INDEX_HTML = """<!doctype html>
 
     function isPlainObject(value) {
       return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+    }
+
+    function collectTextContentRule(baseConfig = {}) {
+      const bindings = isPlainObject(baseConfig.order_bindings) ? baseConfig.order_bindings : {};
+      const mappings = Array.isArray(baseConfig.slot_mappings) ? baseConfig.slot_mappings : [];
+      const firstMapping = mappings.find(item => item && (item.slot || item.name)) || {};
+      const legacyField = String(firstMapping.field || firstMapping.source || "").trim();
+      const sourceColumn = document.getElementById("textSourceColumn").value.trim()
+        || String(bindings.text || (legacyField && bindings[legacyField]) || "").trim();
+      const target = document.getElementById("textTargetName").value.trim()
+        || String(firstMapping.slot || firstMapping.name || "").trim();
+      return {
+        source_column: sourceColumn,
+        target,
+        fit: document.getElementById("textFitPolicy").value || "scale_to_box"
+      };
+    }
+
+    function collectAlternatingColorRule(textRule) {
+      if (!document.getElementById("alternatingColorEnabled").checked) return [];
+      return [{
+        field: "text",
+        target: textRule.target,
+        delimiter: document.getElementById("nameSequenceDelimiter").value.trim(),
+        odd_color: document.getElementById("oddNameColor").value.trim(),
+        even_color: document.getElementById("evenNameColor").value.trim()
+      }];
     }
 
     function mergeDesignOptions(existing, optionValues) {
@@ -2714,7 +2751,10 @@ INDEX_HTML = """<!doctype html>
     function renderTemplateRuleCheck(draft) {
       const missing = templateRuleMissingItems(draft);
       const optionGroups = draft.option_groups || [];
-      const advancedNote = draft.exceptions && draft.exceptions.note ? "有高级例外，需要人工确认" : "无";
+      const generalNote = draft.notes && draft.notes.general ? "有备注（不影响渲染）" : "无";
+      const alternatingStyles = Array.isArray(draft.text_sequence_styles) && draft.text_sequence_styles.length
+        ? "按名字序号交替颜色"
+        : "无";
       return `
         <div class="preview-grid">
           <div class="preview-chip"><span>规则状态</span><strong>${escapeHtml(missing.length ? "待补充" : "完整")}</strong></div>
@@ -2723,10 +2763,12 @@ INDEX_HTML = """<!doctype html>
           <div class="preview-chip"><span>设计组</span><strong>${escapeHtml(displayOptions(draft.design_options))}</strong></div>
           <div class="preview-chip"><span>尺寸/版式组</span><strong>${escapeHtml(displayOptions(draft.style_options))}</strong></div>
           <div class="preview-chip"><span>尺寸对象</span><strong>${escapeHtml(displayDimensionTargets(draft.dimensions || {}, draft.dimension_mode))}</strong></div>
-          <div class="preview-chip"><span>字段拆分</span><strong>${escapeHtml(displayTextSequences(draft.text_sequences || []))}</strong></div>
+          <div class="preview-chip"><span>文字内容</span><strong>${escapeHtml(displayTextContent(draft))}</strong></div>
+          <div class="preview-chip"><span>多个文字位置</span><strong>${escapeHtml(displayTextSequences(draft.text_sequences || []))}</strong></div>
           <div class="preview-chip"><span>默认值</span><strong>${escapeHtml(describeDefaults(draft.defaults || {}))}</strong></div>
           <div class="preview-chip"><span>特殊处理</span><strong>${escapeHtml(displayOverrides(draft.option_overrides || {}))}</strong></div>
-          <div class="preview-chip"><span>高级例外</span><strong>${escapeHtml(advancedNote)}</strong></div>
+          <div class="preview-chip"><span>交替颜色</span><strong>${escapeHtml(alternatingStyles)}</strong></div>
+          <div class="preview-chip"><span>其他说明</span><strong>${escapeHtml(generalNote)}</strong></div>
           <div class="preview-chip"><span>已填写选项组</span><strong>${escapeHtml(optionGroups.map(group => `${group.name}=${displayOptionGroupRole(group.role)}`).join("；") || "未填写")}</strong></div>
           <div class="preview-chip"><span>缺失项</span><strong>${escapeHtml(missing.join("；") || "无")}</strong></div>
         </div>
@@ -2750,6 +2792,15 @@ INDEX_HTML = """<!doctype html>
         const delimiter = item.delimiter ? ` 按 ${item.delimiter} 拆分` : "";
         return `${scope}${item.field}${delimiter} -> ${variables}`;
       }).join("；");
+    }
+
+    function displayTextContent(draft) {
+      const bindings = isPlainObject(draft.order_bindings) ? draft.order_bindings : {};
+      const mappings = Array.isArray(draft.slot_mappings) ? draft.slot_mappings : [];
+      const mapping = mappings.find(item => item && (item.field === "text" || item.source === "text")) || {};
+      const source = String(bindings.text || "").trim();
+      const target = String(mapping.slot || mapping.name || "").trim();
+      return source && target ? `${source} -> ${target}` : "未填写";
     }
 
     function displayOptionGroupRole(value) {
@@ -2794,16 +2845,19 @@ INDEX_HTML = """<!doctype html>
       document.getElementById("outputColorMode").value = "CMYK";
       document.querySelectorAll("[data-override-target], [data-override-value]").forEach(input => { input.value = ""; });
       document.querySelectorAll("[data-override-action]").forEach(select => { select.value = ""; });
-      document.getElementById("templateAdvancedRules").value = "";
-      document.getElementById("templateExceptionStatus").value = "none";
+      document.getElementById("textSourceColumn").value = "";
+      document.getElementById("textTargetName").value = "";
+      document.getElementById("textFitPolicy").value = "scale_to_box";
+      document.getElementById("alternatingColorEnabled").checked = false;
+      document.getElementById("nameSequenceDelimiter").value = "|";
+      document.getElementById("oddNameColor").value = "#D71920";
+      document.getElementById("evenNameColor").value = "#FFFFFF";
+      document.getElementById("templateRuleNote").value = "";
       document.getElementById("templateProfile").value = "unclassified";
       document.getElementById("scanVersion").value = "";
       document.getElementById("scanEvidence").textContent = "暂无扫描事实";
       document.getElementById("scanEvidenceRaw").value = "";
       document.getElementById("fieldSources").value = "";
-      document.getElementById("templateRuleDescription").value = "";
-      document.getElementById("templateExtractionStatus").textContent = "未填写补充说明";
-      document.getElementById("templateExtractionSummary").textContent = "填写补充说明后，系统会区分：已转成固定规则的内容，以及仅作为特殊规则说明保留的内容。";
       state.templateRulesDescriptionDirty = false;
       document.getElementById("orderBindingsJson").value = "{}";
       document.getElementById("assetMappingsJson").value = "[]";
@@ -2848,8 +2902,6 @@ INDEX_HTML = """<!doctype html>
       document.getElementById("scanEvidence").textContent = formatScanEvidence(evidence);
       document.getElementById("scanEvidenceRaw").value = formatRawScanEvidence(evidence);
       document.getElementById("fieldSources").value = formatFieldSources(audit.field_sources || {}, editableRules);
-      document.getElementById("templateRuleDescription").value = editableRules.natural_text || editableRules.raw_text || "";
-      document.getElementById("templateExtractionStatus").textContent = editableRules.natural_text ? "已保存补充说明" : "未填写补充说明";
       state.templateRulesDescriptionDirty = false;
       setHiddenRuleJson("orderBindingsJson", editableRules.order_bindings || {});
       setHiddenRuleJson("assetMappingsJson", editableRules.asset_mappings || []);
@@ -3088,11 +3140,20 @@ INDEX_HTML = """<!doctype html>
       setDimensionRows(dimensionRows.length ? dimensionRows : defaultDimensionRows());
       syncDimensionMode();
 
-      fillTextSequenceFields(
-        Array.isArray(config.text_sequences) && config.text_sequences.length
-          ? config.text_sequences
-          : legacyTextSequences(config)
-      );
+      const savedSequences = Array.isArray(config.text_sequences) && config.text_sequences.length
+        ? config.text_sequences
+        : legacyTextSequences(config);
+      fillTextSequenceFields(savedSequences.filter(sequence => (
+        sequence && (sequence.delimiter || (sequence.variables || []).length > 1)
+      )));
+
+      const bindings = isPlainObject(config.order_bindings) ? config.order_bindings : {};
+      const mappings = Array.isArray(config.slot_mappings) ? config.slot_mappings : [];
+      const firstMapping = mappings.find(item => item && (item.slot || item.name)) || {};
+      const legacyField = String(firstMapping.field || firstMapping.source || "").trim();
+      document.getElementById("textSourceColumn").value = bindings.text || (legacyField && bindings[legacyField]) || "";
+      document.getElementById("textTargetName").value = firstMapping.slot || firstMapping.name || "";
+      document.getElementById("textFitPolicy").value = (config.text_policies && config.text_policies.fit) || "scale_to_box";
 
       const defaults = config.defaults || {};
       document.getElementById("defaultFont").value = defaults.font || "";
@@ -3111,8 +3172,28 @@ INDEX_HTML = """<!doctype html>
         overrideValues[index].value = value.value || value.color || "";
       });
 
-      document.getElementById("templateAdvancedRules").value = (config.exceptions && config.exceptions.note) || config.raw_text || "";
-      document.getElementById("templateExceptionStatus").value = (config.exceptions && config.exceptions.status) || "none";
+      const styles = Array.isArray(config.text_sequence_styles) ? config.text_sequence_styles : [];
+      const alternating = styles[0] || legacyAlternatingNameColors(config, document.getElementById("textTargetName").value);
+      document.getElementById("alternatingColorEnabled").checked = Boolean(alternating.target);
+      document.getElementById("nameSequenceDelimiter").value = alternating.delimiter || "|";
+      document.getElementById("oddNameColor").value = alternating.odd_color || "#D71920";
+      document.getElementById("evenNameColor").value = alternating.even_color || "#FFFFFF";
+      document.getElementById("templateRuleNote").value = (config.notes && config.notes.general) || (config.exceptions && config.exceptions.note) || "";
+    }
+
+    function legacyAlternatingNameColors(config, target) {
+      const legacyNote = [
+        config.natural_text,
+        config.notes && config.notes.general,
+        config.exceptions && config.exceptions.note
+      ].filter(Boolean).join("\\n");
+      if (!target || !/名字/.test(legacyNote) || !/红色/.test(legacyNote) || !/白色/.test(legacyNote)) return {};
+      return {
+        target,
+        delimiter: "|",
+        odd_color: "#D71920",
+        even_color: "#FFFFFF"
+      };
     }
 
     function legacyOptionGroups(config) {

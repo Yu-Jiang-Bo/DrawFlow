@@ -131,6 +131,23 @@ def test_normalizes_existing_pack_without_losing_scan_evidence():
     assert normalize_template_rule_pack(pack) == pack
 
 
+def test_migrates_legacy_custom_text_binding_to_standard_text_field():
+    pack = normalize_template_rule_pack(
+        {
+            "$schema": RULE_PACK_SCHEMA,
+            "template": {"template_id": "TEXT002", "profile": PROFILE_PURE_TEXT},
+            "rules": {
+                "order_bindings": {"names": "Names Column"},
+                "slot_mappings": [{"field": "names", "slot": "Name", "sequence_index": 1}],
+            },
+            "validation": {"status": "draft", "unresolved_items": []},
+        }
+    )
+
+    assert pack["rules"]["order_bindings"] == {"text": "Names Column"}
+    assert pack["rules"]["slot_mappings"] == [{"field": "text", "slot": "Name"}]
+
+
 def test_profiles_define_type_specific_requirements():
     assert profile_definition(PROFILE_PURE_TEXT).required_rule_sections == ("font_options", "text_targets")
     assert profile_definition(PROFILE_FIXED_FONT_DESIGN).required_rule_sections == (

@@ -318,6 +318,7 @@ def _validate_editable_sections(
         "order_bindings": Mapping,
         "asset_mappings": list,
         "text_policies": Mapping,
+        "text_sequence_styles": list,
         "transforms": Mapping,
     }
     for field, expected in expected_types.items():
@@ -343,6 +344,8 @@ def _validate_editable_sections(
 
     slot_mappings = rules.get("slot_mappings", [])
     slot_mapping_items = [item for item in slot_mappings if isinstance(item, Mapping)] if isinstance(slot_mappings, list) else []
+    text_targets = rules.get("text_targets", [])
+    text_target_items = [item for item in text_targets if isinstance(item, Mapping)] if isinstance(text_targets, list) else []
     mapping_fields = {
         str(item.get("field") or item.get("source") or "").strip()
         for item in slot_mapping_items
@@ -373,6 +376,14 @@ def _validate_editable_sections(
             _validate_split_policy(split_policy, errors)
         if not fit_policy and not split_policy:
             errors.append(_issue("text_policies", "Text policy requires fit or split."))
+
+    _validate_text_sequence_styles(
+        rules.get("text_sequence_styles"),
+        bindings,
+        slot_mapping_items,
+        text_target_items,
+        errors,
+    )
 
     sample = raw_validation.get("sample") if isinstance(raw_validation, Mapping) else None
     if not isinstance(sample, Mapping) or not isinstance(sample.get("input"), Mapping) or not isinstance(
@@ -532,6 +543,54 @@ def _predict_sample_output(rules: Mapping[str, Any], sample_input: Mapping[str, 
             if resolved:
                 predicted[str(target.get("name") or "")] = value
     return {key: value for key, value in predicted.items() if key}
+
+
+def _validate_text_sequence_styles(
+    value: Any,
+    bindings: Any,
+    slot_mappings: list[Mapping[str, Any]],
+    text_targets: list[Mapping[str, Any]],
+    errors: list[Dict[str, str]],
+) -> None:
+    if value in (None, []):
+        return
+    if not isinstance(value, list):
+        errors.append(_issue("text_sequence_styles", "Text sequence styles must be a list."))
+        return
+    bound_fields = set(bindings) if isinstance(bindings, Mapping) else set()
+    for index, style in enumerate(value, start=1):
+        if not isinstance(style, Mapping):
+            errors.append(_issue("text_sequence_styles", f"Text sequence style {index} must be an object."))
+            continue
+        field = str(style.get("field") or "text").strip()
+        target = str(style.get("target") or "").strip()
+        delimiter = str(style.get("delimiter") or "").strip()
+        odd_color = str(style.get("odd_color") or "").strip()
+        even_color = str(style.get("even_color") or "").strip()
+        if field not in bound_fields:
+            errors.append(_issue("text_sequence_styles", f"Text sequence style {index} requires a bound field: {field}"))
+        if not target:
+            errors.append(_issue("text_sequence_styles", f"Text sequence style {index} requires a template text target."))
+        elif not any(
+            str(mapping.get("field") or mapping.get("source") or "").strip() == field
+            and str(mapping.get("slot") or mapping.get("name") or "").strip() == target
+            for mapping in slot_mappings
+        ) and not (
+            field == "text"
+            and len(bound_fields) == 1
+            and len(text_targets) == 1
+            and str(text_targets[0].get("name") or "").strip() == target
+        ):
+            errors.append(
+                _issue(
+                    "text_sequence_styles",
+                    f"Text sequence style {index} must match an executable text mapping: {field} -> {target}",
+                )
+            )
+        if not delimiter:
+            errors.append(_issue("text_sequence_styles", f"Text sequence style {index} requires a name delimiter."))
+        if not odd_color or not even_color:
+            errors.append(_issue("text_sequence_styles", f"Text sequence style {index} requires odd and even colors."))
 
 
 def _validate_split_policy(value: Any, errors: list[Dict[str, str]]) -> None:
