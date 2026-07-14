@@ -343,7 +343,12 @@ def test_template_rule_supports_an_expandable_name_color_cycle():
     assert "function collectNameColorCycle" in INDEX_HTML
     assert "function displayNameColorCycle" in INDEX_HTML
     assert "name_color_cycle: nameColorCycle" in INDEX_HTML
-    assert "name_color_cycle: \"请在“Name 多色循环”中至少保留两个 #RRGGBB 颜色，并填写分隔符\"" in INDEX_HTML
+    assert "支持 #RRGGBB 或常见英文颜色名，例如 Red、Black、Gold" in INDEX_HTML
+    assert 'placeholder="#RRGGBB 或 Red"' in INDEX_HTML
+    assert "function normalizeNameColorValue" in INDEX_HTML
+    assert ".map(input => normalizeNameColorValue(input.value) || input.value.trim())" in INDEX_HTML
+    assert 'rosegold: "#B76E79"' in INDEX_HTML
+    assert "name_color_cycle: \"请在“Name 多色循环”中至少保留两个颜色，并填写分隔符；颜色可填 #RRGGBB 或 Red、Black、Gold 等英文名\"" in INDEX_HTML
     assert "colors.length >= 5" not in INDEX_HTML
 
 

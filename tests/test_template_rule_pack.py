@@ -213,6 +213,22 @@ def test_normalizes_name_color_cycle_without_a_color_count_limit():
     }
 
 
+def test_normalizes_name_color_cycle_color_names_in_rule_pack():
+    pack = normalize_template_rule_pack(
+        {
+            "$schema": RULE_PACK_SCHEMA,
+            "template": {"template_id": "TEXT005", "profile": PROFILE_PURE_TEXT},
+            "rules": {"name_color_cycle": {"delimiter": "|", "colors": ["Red", "Black", "Gold"]}},
+            "validation": {"status": "draft", "unresolved_items": []},
+        }
+    )
+
+    assert pack["rules"]["name_color_cycle"] == {
+        "delimiter": "|",
+        "colors": ["#FF0000", "#000000", "#D4AF37"],
+    }
+
+
 def test_profiles_define_type_specific_requirements():
     assert profile_definition(PROFILE_PURE_TEXT).required_rule_sections == ("font_options", "text_targets")
     assert profile_definition(PROFILE_FIXED_FONT_DESIGN).required_rule_sections == (

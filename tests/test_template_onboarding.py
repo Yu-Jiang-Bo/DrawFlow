@@ -278,6 +278,16 @@ def test_check_validates_name_color_cycle_without_a_color_count_limit():
     assert result["pack"]["rules"]["name_color_cycle"]["colors"][-1] == "#663399".upper()
 
 
+def test_check_accepts_common_name_color_cycle_color_names():
+    pack = ready_pack()
+    pack["rules"]["name_color_cycle"] = {"delimiter": "|", "colors": ["Red", "Black", "Gold"]}
+
+    result = check_rule_pack(pack, template_id="DEMO001")
+
+    assert result["ok"] is True
+    assert result["pack"]["rules"]["name_color_cycle"]["colors"] == ["#FF0000", "#000000", "#D4AF37"]
+
+
 def test_check_rejects_incomplete_name_color_cycle():
     pack = ready_pack()
     pack["rules"]["name_color_cycle"] = {"delimiter": "", "colors": ["#D71920"]}

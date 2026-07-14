@@ -1159,7 +1159,7 @@ INDEX_HTML = """<!doctype html>
                     <h3 class="rule-section-title">Name 多色循环（可选）</h3>
                     <button class="btn-subtle rule-add-btn" id="addNameColorBtn" type="button">+ 添加颜色</button>
                   </div>
-                  <p class="rule-section-note">仅作用于名称恰好为 Name 的文字对象。系统按分隔符拆分内容，再按颜色顺序循环；不配置时保留模板原有颜色。</p>
+                  <p class="rule-section-note">仅作用于名称恰好为 Name 的文字对象。系统按分隔符拆分内容，再按颜色顺序循环；支持 #RRGGBB 或常见英文颜色名，例如 Red、Black、Gold。</p>
                   <div class="name-color-cycle-grid">
                     <div><label for="nameColorDelimiter">分隔符</label><input id="nameColorDelimiter" value="|" placeholder="例如 |" /></div>
                     <div><label>循环颜色</label><div class="name-color-list" id="nameColorRows"></div></div>
@@ -1607,7 +1607,7 @@ INDEX_HTML = """<!doctype html>
         if (event.target.matches("[data-name-color-picker]") && value) {
           value.value = event.target.value.toUpperCase();
         } else if (event.target.matches("[data-name-color-value]") && picker) {
-          const color = normalizeNameColorHex(event.target.value);
+          const color = normalizeNameColorValue(event.target.value);
           if (color) picker.value = color;
         }
         renderTemplateRulePreview();
@@ -1698,24 +1698,44 @@ INDEX_HTML = """<!doctype html>
 
     function renderNameColorRow(color, index) {
       const value = String(color || "").trim();
-      const pickerValue = normalizeNameColorHex(value) || "#000000";
+      const pickerValue = normalizeNameColorValue(value) || "#000000";
       return `
         <div class="name-color-row">
           <input type="color" data-name-color-picker value="${pickerValue}" aria-label="第 ${index + 1} 个循环颜色" />
-          <input data-name-color-value value="${escapeHtml(value)}" placeholder="#RRGGBB" aria-label="第 ${index + 1} 个循环颜色代码" />
+          <input data-name-color-value value="${escapeHtml(value)}" placeholder="#RRGGBB 或 Red" aria-label="第 ${index + 1} 个循环颜色代码" />
           <button class="row-remove-btn" type="button" data-remove-name-color aria-label="删除第 ${index + 1} 个循环颜色">×</button>
         </div>
       `;
     }
 
-    function normalizeNameColorHex(value) {
+    function normalizeNameColorValue(value) {
       const color = String(value || "").trim();
-      return /^#[0-9a-f]{6}$/i.test(color) ? color.toUpperCase() : "";
+      if (/^#[0-9a-f]{6}$/i.test(color)) return color.toUpperCase();
+      const aliases = {
+        black: "#000000",
+        white: "#FFFFFF",
+        red: "#FF0000",
+        blue: "#0000FF",
+        green: "#008000",
+        darkgreen: "#005A37",
+        navy: "#0A1848",
+        pink: "#F4AAC8",
+        gold: "#D4AF37",
+        silver: "#C0C0C0",
+        rosegold: "#B76E79",
+        gray: "#808080",
+        grey: "#808080",
+        yellow: "#FFFF00",
+        orange: "#FFA500",
+        purple: "#800080",
+        brown: "#A52A2A"
+      };
+      return aliases[color.replace(/[\\s_-]+/g, "").toLowerCase()] || "";
     }
 
     function collectNameColors() {
       return Array.from(document.querySelectorAll("[data-name-color-value]"))
-        .map(input => input.value.trim())
+        .map(input => normalizeNameColorValue(input.value) || input.value.trim())
         .filter(Boolean);
     }
 
@@ -2494,7 +2514,7 @@ INDEX_HTML = """<!doctype html>
         order_bindings: "请在“文字内容设置”里填写订单内容列名",
         text_policies: "请填写文字变量规则，系统会自动生成基础文字适配策略",
         validation_sample: "请检查字段拆分规则，系统需要能生成一条可验证样例",
-        name_color_cycle: "请在“Name 多色循环”中至少保留两个 #RRGGBB 颜色，并填写分隔符",
+        name_color_cycle: "请在“Name 多色循环”中至少保留两个颜色，并填写分隔符；颜色可填 #RRGGBB 或 Red、Black、Gold 等英文名",
         font_style_rules: "请检查“字体加粗规则”：每一条都需要目标字体集合和大于 0 的加粗值",
         exceptions: "当前模板仍有无法执行的旧规则，请将其改为页面中的固定规则后再保存",
         scan_failed: "请重新上传并扫描模板文件"

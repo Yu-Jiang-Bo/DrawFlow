@@ -79,7 +79,7 @@ class LlmRuleParser:
                         "output, slots, assets, name_color_cycle。"
                         "模板规则不得返回脚本、表达式或可执行代码。"
                         "按字体设置加粗值应使用 font_style_rules=[{font_options:[...],boldness:0.4}]；"
-                        "Name 多色循环使用 name_color_cycle={delimiter,colors}，其中 colors 是至少两个 #RRGGBB 字符串；"
+                        "Name 多色循环使用 name_color_cycle={delimiter,colors}，其中 colors 是至少两个 #RRGGBB 或常见英文颜色名字符串；"
                         "不要生成 effects 或可执行表达式。"
                         "font_options、style_options、design_font_options、capabilities 必须返回字符串数组，"
                         "例如 [\"F1\",\"F2\"]，不要返回对象数组。"
