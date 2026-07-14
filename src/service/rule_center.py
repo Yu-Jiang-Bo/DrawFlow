@@ -85,6 +85,7 @@ def build_template_rule_draft(
     asset_mappings = parse_asset_mappings(raw)
     text_policies = parse_text_policies(raw)
     text_sequences = parse_text_sequences(raw, text_policies)
+    effects = parse_text_effects(raw)
     validation_sample = parse_validation_sample(raw)
 
     return {
@@ -107,6 +108,7 @@ def build_template_rule_draft(
         "text_policies": text_policies,
         "text_sequences": text_sequences,
         "slot_mappings": slot_mappings_from_sequences(text_sequences),
+        "effects": effects,
         "validation_sample": validation_sample,
         "output": output,
         "slots": slots,
@@ -245,6 +247,64 @@ def parse_text_sequences(text: str, policies: Dict[str, Any] | None = None) -> L
     return result
 
 
+_NAME_COLOR_WORDS = {
+    "红": "#D71920",
+    "红色": "#D71920",
+    "black": "#000000",
+    "黑": "#000000",
+    "黑色": "#000000",
+}
+
+
+def parse_text_effects(text: str) -> List[Dict[str, Any]]:
+    """Turn explicit Name odd/even color wording into one safe effect rule."""
+
+    raw = text or ""
+    if not re.search(r"\bname\b|名字|姓名", raw, re.I):
+        return []
+    odd_color = _name_position_color(raw, r"奇数|单数|奇数位|单数位|odd")
+    even_color = _name_position_color(raw, r"偶数|双数|偶数位|双数位|even")
+    if not odd_color or not even_color:
+        return []
+    return [
+        {
+            "id": "natural-name-alternating-color",
+            "stage": "text",
+            "target": {"field": "text", "name": "Name"},
+            "selector": {
+                "type": "split",
+                "delimiter": _effect_delimiter(raw),
+                "positions": "all",
+                "trim": True,
+            },
+            "actions": [
+                {
+                    "type": "set_fill_color",
+                    "value": {"type": "cycle", "values": [odd_color, even_color]},
+                }
+            ],
+        }
+    ]
+
+
+def _name_position_color(text: str, position_pattern: str) -> str:
+    match = re.search(
+        rf"(?:{position_pattern})[^，,；;。\n]{{0,24}}?(?:用|为|是)?\s*"
+        r"(?P<color>红色?|黑色?|black)",
+        text,
+        re.I,
+    )
+    return _NAME_COLOR_WORDS.get(str(match.group("color") if match else "").lower(), "")
+
+
+def _effect_delimiter(text: str) -> str:
+    match = re.search(
+        r"(?:按|使用|以|分隔符(?:为|是)?)\s*[\"“']?(?P<delimiter>[|,;/])[\"”']?\s*(?:拆分|分隔|分开|切分)?",
+        text,
+    )
+    return str(match.group("delimiter") if match else "|")
+
+
 def slot_mappings_from_sequences(sequences: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     result: List[Dict[str, Any]] = []
     for sequence in sequences:
@@ -299,6 +359,8 @@ def summarize_template_rule_draft(draft: Dict[str, Any]) -> Dict[str, Any]:
     policies = draft.get("text_policies") or {}
     if policies:
         summary.append("识别到文字适配或拆分策略")
+    if draft.get("effects"):
+        summary.append(f"识别到 {len(draft['effects'])} 条可执行文本效果")
     if draft.get("validation_sample"):
         summary.append("识别到验证订单和预期结果")
     unresolved = []

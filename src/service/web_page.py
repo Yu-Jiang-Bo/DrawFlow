@@ -491,7 +491,25 @@ INDEX_HTML = """<!doctype html>
       grid-template-columns: minmax(120px, 0.9fr) minmax(110px, 0.8fr) minmax(70px, 0.45fr) minmax(120px, 0.9fr) minmax(80px, 0.5fr) minmax(80px, 0.5fr) 42px;
     }
     .structured-row.effect {
-      grid-template-columns: repeat(3, minmax(130px, 1fr)) 42px;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 16px 14px;
+      align-items: start;
+      padding: 16px;
+    }
+    .structured-row.effect > div {
+      min-width: 0;
+    }
+    .structured-row.effect label {
+      margin-bottom: 7px;
+    }
+    .structured-row.effect > div:last-child {
+      display: flex;
+      align-items: end;
+      min-height: 64px;
+    }
+    #textEffectRows {
+      gap: 14px;
+      margin-top: 14px;
     }
     .structured-row label {
       margin-bottom: 4px;
@@ -802,7 +820,6 @@ INDEX_HTML = """<!doctype html>
       .structured-row.two,
       .structured-row.three,
       .structured-row.sequence,
-      .structured-row.effect,
       .rule-detail-grid {
         grid-template-columns: 1fr;
       }
@@ -814,6 +831,14 @@ INDEX_HTML = """<!doctype html>
       }
       .asset-list-head, .asset-row {
         grid-template-columns: 1fr;
+      }
+    }
+    @media (max-width: 720px) {
+      .structured-row.effect {
+        grid-template-columns: 1fr;
+      }
+      .structured-row.effect > div:last-child {
+        min-height: 36px;
       }
     }
   </style>
@@ -1118,7 +1143,7 @@ INDEX_HTML = """<!doctype html>
                   <div class="section-heading-row">
                     <div>
                       <strong>文本效果规则</strong>
-                      <p class="rule-section-note">按目标、内容范围、动作和值配置。多个值用英文逗号分隔，系统会按顺序循环应用，例如红白交替填写 #D71920,#FFFFFF。</p>
+                      <p class="rule-section-note">按目标、内容范围、动作和值配置。多个值用英文逗号分隔，系统会按顺序循环应用，例如 Name 多项红黑交替填写 #D71920,#000000。</p>
                     </div>
                     <button class="btn-subtle" type="button" id="addTextEffectRowBtn">+ 添加文本效果</button>
                   </div>

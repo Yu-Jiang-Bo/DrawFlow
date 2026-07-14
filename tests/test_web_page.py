@@ -285,6 +285,10 @@ def test_template_rules_prefill_fixed_options_before_optional_supplement():
     assert "text.split(/[;；]/)" in INDEX_HTML
     assert ').join("; ")' in INDEX_HTML
     assert "font=F2,F3; color=Gold" in INDEX_HTML
+    assert "grid-template-columns: repeat(4, minmax(0, 1fr));" in INDEX_HTML
+    assert "#textEffectRows" in INDEX_HTML
+    assert "@media (max-width: 720px)" in INDEX_HTML
+    assert "#D71920,#000000" in INDEX_HTML
     assert "text_sequence_styles" in INDEX_HTML
     assert "function prefillScannedOptionSuggestions" in INDEX_HTML
     assert "function mergeScannedOptionGroups" in INDEX_HTML
