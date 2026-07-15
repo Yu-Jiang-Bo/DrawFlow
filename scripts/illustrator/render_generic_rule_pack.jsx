@@ -15,7 +15,7 @@
             var sheetOutput = File(String(task.output_ai));
             ensureFolder(sheetOutput.parent);
             if (sheetOutput.exists) sheetOutput.remove();
-            saveAsAI8(sheet, sheetOutput);
+            saveAsNativeAI(sheet, sheetOutput);
             outputs.push(sheetOutput.fsName);
         } finally {
             sheet.close(SaveOptions.DONOTSAVECHANGES);
@@ -36,7 +36,7 @@
             var output = File(String(order.output_ai));
             ensureFolder(output.parent);
             if (output.exists) output.remove();
-            saveAsAI8(doc, output);
+            saveAsNativeAI(doc, output);
             outputs.push(output.fsName);
         } finally {
             doc.close(SaveOptions.DONOTSAVECHANGES);
@@ -610,10 +610,8 @@
         );
     }
 
-    function saveAsAI8(doc, file) {
+    function saveAsNativeAI(doc, file) {
         var options = new IllustratorSaveOptions();
-        options.compatibility = Compatibility.ILLUSTRATOR8;
-        options.pdfCompatible = false;
         options.compressed = true;
         doc.saveAs(file, options);
     }
