@@ -8,7 +8,7 @@ import re
 from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterable, List, Mapping
+from typing import Any, Dict, Iterable, List, Mapping
 
 from .jjmb_order_parser import read_xlsx_rows, split_personalization
 from .renderer.illustrator_bridge import IllustratorBridge, IllustratorBridgeError
@@ -225,11 +225,14 @@ def compact_label(*parts: str) -> str:
     return "  ".join(part.strip() for part in parts if part and part.strip())
 
 
-def parse_items(rows: Iterable[Dict[str, str]]) -> List[ColorDesignOrderItem]:
+def parse_items(
+    rows: Iterable[Dict[str, str]], *, template_id: str = TEMPLATE_ID, preserve_personalization: bool = False
+) -> List[ColorDesignOrderItem]:
     result: List[ColorDesignOrderItem] = []
     department_rules = load_department_rules()
+    selected_template_id = str(template_id or TEMPLATE_ID).strip()
     for row in rows:
-        if (row.get("模板") or "").strip() != TEMPLATE_ID:
+        if (row.get("模板") or "").strip() != selected_template_id:
             continue
         font = normalize_font(row.get("字体", ""))
         if not font:
@@ -242,7 +245,8 @@ def parse_items(rows: Iterable[Dict[str, str]]) -> List[ColorDesignOrderItem]:
         rule = resolve_department_rule(department, department_rules)
         apply_color = rule_bool(rule, "apply_color_to_artwork", is_h_department(department))
         show_frame = rule_bool(rule, "show_frame", "D" in normalize_department(department))
-        values = split_personalization(row.get("定制信息", ""))
+        raw_personalization = (row.get("定制信息") or "").strip()
+        values = [raw_personalization] if preserve_personalization and raw_personalization else split_personalization(raw_personalization)
         for index, text in enumerate(values, start=1):
             result.append(
                 ColorDesignOrderItem(
@@ -294,14 +298,22 @@ def build_task(
     show_style_boxes: bool,
     color_mode: str = "CMYK",
     font_styles: Mapping[str, Mapping[str, float]] | None = None,
+    text_actions: List[List[List[Dict[str, Any]]]] | None = None,
 ) -> Dict[str, object]:
     if not groups:
         raise ValueError("没有可渲染订单")
-    return {
+    serialized_groups = [group.to_json_dict() for group in groups]
+    if text_actions is not None:
+        for group_index, group in enumerate(serialized_groups):
+            action_rows = text_actions[group_index] if group_index < len(text_actions) else []
+            for item_index, item in enumerate(group["items"]):
+                actions = action_rows[item_index] if item_index < len(action_rows) else []
+                item["text_actions"] = actions if isinstance(actions, list) else []
+    task: Dict[str, object] = {
         "type": "jjmb_202508_grouped",
         "template_config": str(template_config),
         "output_ai": str(output_ai),
-        "groups": [group.to_json_dict() for group in groups],
+        "groups": serialized_groups,
         "font_styles": {
             str(option).strip(): dict(style)
             for option, style in (font_styles or {}).items()
@@ -336,6 +348,7 @@ def build_task(
             "report_path": str(output_ai.with_suffix(".debug.json")),
         },
     }
+    return task
 
 
 def write_json(path: Path, payload: Dict[str, object]) -> None:

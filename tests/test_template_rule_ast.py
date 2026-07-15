@@ -94,7 +94,7 @@ def test_rejects_malformed_ast_field_types_from_llm_candidates():
     assert any("缺少有效文字目标" in message for message in errors)
 
 
-def test_context_validation_rejects_unknown_targets_and_pipeline_actions():
+def test_context_validation_rejects_unknown_targets_but_supports_202508_colors():
     text = "Name 奇数红色偶数白色"
     ast = compile_local_rule_ast(text)
 
@@ -103,14 +103,14 @@ def test_context_validation_rejects_unknown_targets_and_pipeline_actions():
         natural_text=text,
         context={"pipeline": "generic_rules_only", "text_targets": ["Text1"], "require_known_targets": True},
     )
-    unsupported_pipeline = validate_rule_ast(
+    supported_pipeline = validate_rule_ast(
         ast,
         natural_text=text,
         context={"pipeline": "jjmb_202508", "text_targets": ["Name"], "require_known_targets": True},
     )
 
     assert any("不存在的文字对象" in message for message in unknown_target)
-    assert any("不受当前渲染管线" in message for message in unsupported_pipeline)
+    assert supported_pipeline == []
 
 
 def test_context_validation_requires_configured_font_options_before_confirmation():

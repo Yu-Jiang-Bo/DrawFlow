@@ -19,7 +19,7 @@ _CONDITION_OPERATORS = {"equals", "in", "not_empty"}
 _SOURCE_HASH = re.compile(r"^[0-9a-f]{64}$")
 _PIPELINE_ACTIONS = {
     "generic_rules_only": {"fill_color", "stroke_width"},
-    "jjmb_202508": {"stroke_width"},
+    "jjmb_202508": {"fill_color", "stroke_width"},
     "jjmb_202603_grouped": {"stroke_width"},
     "jjmb_202509_curved": set(),
 }

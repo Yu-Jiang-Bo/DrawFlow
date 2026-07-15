@@ -28,7 +28,7 @@ from .generic_rule_renderer import build_generic_render_task
 from .llm_rule_parser import normalize_option_list
 from .rule_center import check_template_definition, curved_layout_overrides, output_color_mode, read_template_rule_config
 from .template_registry import TemplateDefinition, TemplateRegistry
-from .template_rule_ast import RULE_AST_SCHEMA, font_styles_from_ast
+from .template_rule_ast import RULE_AST_SCHEMA, font_styles_from_ast, runtime_actions
 
 
 SUPPORTED_RENDER_PIPELINES = frozenset(
@@ -166,8 +166,13 @@ class RenderService:
                 raise RenderServiceError("模板缺少可用的 .ai 模板文件")
             export_202508_config(template.template_ai, template_config, request["visible"])
 
+        template_rules = read_template_rule_config(template.template_rules_config)
         rows = read_202508_rows(order_file, sheet_name=request["sheet_name"] or None)
-        items = parse_202508_items(rows)
+        items = parse_202508_items(
+            rows,
+            template_id=template.template_id,
+            preserve_personalization=_202508_preserves_personalization(template_rules),
+        )
         groups = group_202508_items(items)
         if not request["dry_run"]:
             self._complete_202508_template_config(
@@ -177,7 +182,6 @@ class RenderService:
                 job_dir=job_dir,
                 visible=request["visible"],
             )
-        template_rules = read_template_rule_config(template.template_rules_config)
         task = build_202508_task(
             template_config=template_config,
             output_ai=output_ai,
@@ -186,6 +190,7 @@ class RenderService:
             show_style_boxes=not request["hide_boxes"],
             color_mode=output_color_mode(template_rules),
             font_styles=_font_styles(template_rules),
+            text_actions=_202508_text_actions(template_rules, groups),
         )
         task_file = job_dir / "render-task.json"
         self._write_json(task_file, task)
@@ -487,6 +492,57 @@ def _font_styles(rules: Mapping[str, Any]) -> Dict[str, Dict[str, float]]:
         rules.get("font_style_rules"),
         legacy_option_overrides=rules.get("option_overrides"),
     )
+
+
+def _202508_text_actions(
+    rules: Mapping[str, Any], groups: Iterable[Any]
+) -> List[List[List[Dict[str, Any]]]] | None:
+    """Compile only color actions for the legacy 202508 text-frame adapter."""
+
+    ast = rules.get("rule_ast")
+    if not isinstance(ast, Mapping) or ast.get("$schema") != RULE_AST_SCHEMA:
+        return None
+
+    result: List[List[List[Dict[str, Any]]]] = []
+    for group in groups:
+        group_actions: List[List[Dict[str, Any]]] = []
+        for item in getattr(group, "items", []) or []:
+            actions = runtime_actions(
+                ast,
+                target="Name",
+                selections={
+                    "font": getattr(item, "font_option", ""),
+                    "design": getattr(item, "design_option", ""),
+                    "color": getattr(item, "color_option", ""),
+                    "text": getattr(item, "text", ""),
+                },
+            )
+            group_actions.append(
+                [action for action in actions if action.get("type") == "fill_color"]
+            )
+        result.append(group_actions)
+    return result
+
+
+def _202508_preserves_personalization(rules: Mapping[str, Any]) -> bool:
+    """Keep delimiters in one text frame when an AST colors its segments."""
+
+    ast = rules.get("rule_ast")
+    if not isinstance(ast, Mapping) or ast.get("$schema") != RULE_AST_SCHEMA:
+        return False
+    for rule in ast.get("rules", []):
+        if not isinstance(rule, Mapping):
+            continue
+        target = rule.get("target") if isinstance(rule.get("target"), Mapping) else {}
+        selector = rule.get("selector") if isinstance(rule.get("selector"), Mapping) else {}
+        if target.get("name") not in {"Name", "*"} or selector.get("type") != "segments":
+            continue
+        if any(
+            isinstance(operation, Mapping) and operation.get("type") == "fill_color"
+            for operation in rule.get("operations", [])
+        ):
+            return True
+    return False
 
 
 def _design_asset_path(template: TemplateDefinition) -> Path | None:

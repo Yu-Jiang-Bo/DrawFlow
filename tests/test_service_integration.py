@@ -10,6 +10,7 @@ from src.render_task import RenderTaskError
 from src.service.job_store import JobStore
 from src.service.http_server import RenderRequestHandler
 from src.service.llm_rule_parser import LlmRuleParser
+from src.service.template_rule_compiler import compile_local_rule_ast
 from src.service.render_service import (
     RenderService,
     RenderServiceError,
@@ -166,6 +167,50 @@ def test_202508_task_receives_every_configured_font_boldness_mapping(tmp_path):
         "F8": {"boldness": 0.5},
         "F9": {"boldness": 0.5},
     }
+
+
+def test_202508_task_receives_compiled_segment_color_actions(tmp_path):
+    config_path = tmp_path / "templates.json"
+    order_path = tmp_path / "orders.xlsx"
+    rules_path = tmp_path / "template.rules.json"
+    write_templates_config(config_path)
+    write_order_xlsx(order_path)
+    rules_path.write_text(
+        json.dumps(
+            {
+                "rule_ast": compile_local_rule_ast(
+                    "Name列按 | 分隔，奇数位渲染为红色，偶数位渲染为白色"
+                )
+            }
+        ),
+        encoding="utf-8",
+    )
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    config["templates"][0]["template_rules_config"] = str(rules_path)
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+    workbook = load_workbook(order_path)
+    workbook.active["L2"] = "Alice|Bob|Cara"
+    workbook.save(order_path)
+
+    record = RenderService(
+        registry=TemplateRegistry(config_path),
+        jobs=JobStore(tmp_path / "jobs"),
+    ).submit(
+        {"template_id": "JJMB202508261001394920", "order_file": str(order_path), "dry_run": True}
+    )
+
+    task = json.loads(Path(record["outputs"]["render_task"]).read_text(encoding="utf-8"))
+    assert len(task["groups"]) == 1
+    assert len(task["groups"][0]["items"]) == 1
+    assert task["groups"][0]["items"][0]["text"] == "Alice|Bob|Cara"
+    assert task["groups"][0]["items"][0]["text_actions"] == [
+        {
+            "type": "fill_color",
+            "strategy": "cycle",
+            "values": ["#FF0000", "#FFFFFF"],
+            "selector": {"type": "segments", "delimiter": "|"},
+        }
+    ]
 
 
 def test_202603_grouped_task_receives_every_configured_font_boldness_mapping(tmp_path):

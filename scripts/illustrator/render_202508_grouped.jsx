@@ -114,7 +114,7 @@
                 var contentRight = contentLeft + contentSize.width;
                 var contentBottom = contentTop - contentSize.height;
 
-                drawPersonalizedText(layer, item, font, design, [contentLeft + padding, contentTop - padding, contentRight - padding, contentBottom + padding], minFontSize, maxFontSize);
+                drawPersonalizedText(layer, item, font, design, [contentLeft + padding, contentTop - padding, contentRight - padding, contentBottom + padding], minFontSize, maxFontSize, item.text_actions || []);
                 cursorTop = contentBottom - itemGap;
                 continue;
             }
@@ -124,7 +124,7 @@
             var anchor = mapAnchor(design, productLeft, productTop, productSize.width, productSize.height);
             if (drawFrame) drawBox(layer, anchor[0], anchor[1], anchor[2] - anchor[0], anchor[1] - anchor[3], item.design_option + "_BOX");
 
-            drawPersonalizedText(layer, item, font, design, [anchor[0] + padding, anchor[1] - padding, anchor[2] - padding, anchor[3] + padding], minFontSize, maxFontSize);
+            drawPersonalizedText(layer, item, font, design, [anchor[0] + padding, anchor[1] - padding, anchor[2] - padding, anchor[3] + padding], minFontSize, maxFontSize, item.text_actions || []);
             cursorTop = productBottom - itemGap;
         }
     }
@@ -259,11 +259,12 @@
         return rect;
     }
 
-    function drawPersonalizedText(layer, item, font, design, rect, minSize, maxSize) {
+    function drawPersonalizedText(layer, item, font, design, rect, minSize, maxSize, actions) {
         var tf = layer.textFrames.add();
         tf.contents = String(item.text || "");
         applyFontConfig(tf, font);
         applyColor(tf, item.apply_color_to_artwork ? colorConfig(config, item.color_option) : [0, 0, 0]);
+        applyTextActions(tf, actions || []);
         applyFontBoldness(tf, fontStyles[String(item.font_option || "")]);
         return renderOutlinedTextToRect(tf, rect, minSize, maxSize, Number(design.rotation_deg || 0), shouldPreserveTextAspect(String(item.text || "")));
     }
@@ -321,14 +322,74 @@
         tf.textRange.characterAttributes.fillColor = color;
     }
 
+    function applyTextActions(tf, actions) {
+        for (var actionIndex = 0; actionIndex < actions.length; actionIndex++) {
+            var action = actions[actionIndex] || {};
+            if (String(action.type || "") === "fill_color") {
+                applyFillColorAction(tf, action);
+            } else {
+                throw new Error("Unsupported compiled rule action: " + action.type);
+            }
+        }
+    }
+
+    function applyFillColorAction(tf, action) {
+        var values = action.values || [];
+        if (!values.length) return;
+        var selector = action.selector || {};
+        if (String(selector.type || "whole") !== "segments") {
+            var wholeRgb = hexColor(values[0]);
+            if (wholeRgb) applyColor(tf, wholeRgb);
+            return;
+        }
+        var delimiter = String(selector.delimiter || "");
+        var parts = String(tf.contents || "").split(delimiter);
+        if (!delimiter || parts.length < 2) return;
+        var cursor = 0;
+        for (var partIndex = 0; partIndex < parts.length; partIndex++) {
+            var rgb = hexColor(values[partIndex % values.length]);
+            if (rgb) {
+                var color = new RGBColor();
+                color.red = rgb[0]; color.green = rgb[1]; color.blue = rgb[2];
+                for (var charIndex = 0; charIndex < parts[partIndex].length; charIndex++) {
+                    tf.characters[cursor + charIndex].characterAttributes.fillColor = color;
+                }
+            }
+            cursor += parts[partIndex].length + (partIndex < parts.length - 1 ? delimiter.length : 0);
+        }
+    }
+
     function applyFontBoldness(tf, style) {
         var boldness = Number(style && style.boldness);
         if (isNaN(boldness) || boldness <= 0) return;
-        var attributes = tf.textRange.characterAttributes;
+        try {
+            var characters = tf.characters;
+            var appliedToAll = characters.length > 0;
+            for (var index = 0; index < characters.length; index++) {
+                if (!applyBoldnessToAttributes(characters[index].characterAttributes, boldness)) appliedToAll = false;
+            }
+            if (appliedToAll) return;
+        } catch (e1) {}
+        applyBoldnessToAttributes(tf.textRange.characterAttributes, boldness);
+    }
+
+    function applyBoldnessToAttributes(attributes, boldness) {
+        if (!attributes) return false;
         try { attributes.strokeColor = attributes.fillColor; } catch (e1) {}
-        try { attributes.strokeWeight = boldness; } catch (e2) {
-            try { attributes.strokeWidth = boldness; } catch (e3) {}
-        }
+        try { attributes.strokeWeight = boldness; return true; } catch (e2) {}
+        try { attributes.strokeWidth = boldness; return true; } catch (e3) {}
+        return false;
+    }
+
+    function hexColor(value) {
+        var match = String(value || "").match(/^#([0-9a-f]{6})$/i);
+        if (!match) return null;
+        var hex = match[1];
+        return [
+            parseInt(hex.substring(0, 2), 16),
+            parseInt(hex.substring(2, 4), 16),
+            parseInt(hex.substring(4, 6), 16)
+        ];
     }
 
     function fitTextToRect(tf, rect, minSize, maxSize) {
