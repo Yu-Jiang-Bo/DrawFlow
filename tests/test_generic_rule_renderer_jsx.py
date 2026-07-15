@@ -22,6 +22,10 @@ def test_generic_renderer_cycles_configured_name_colors_only():
     assert "findPageItemsByName" in source
     assert "resolveVariableTargets" in source
     assert "findFallbackNameTextFrames" in source
+    assert "function createNameColumnsDocument(task, order)" in source
+    assert "function drawNameColumns(doc, order, layout, fontSource)" in source
+    assert "function colorForNamePart(actions, index, legacyCycle)" in source
+    assert "task.allow_unnamed_name_fallback === true" in source
     assert 'String(variable.target || "") + "_ANCHOR"' in source
     assert "copyTextStyle(fontSource, frame)" in source
     assert "applyNameColorCycle(frame, variable)" in source
@@ -96,6 +100,7 @@ def test_generic_renderer_cycles_actual_name_characters_in_node_harness():
         "dimensions": {},
         "text_policies": {},
         "output": {},
+        "allow_unnamed_name_fallback": True,
         "orders": [
             {
                 "selections": {},
@@ -185,6 +190,7 @@ def test_generic_renderer_uses_blank_name_placeholder_when_target_is_unnamed():
         "dimensions": {},
         "text_policies": {},
         "output": {},
+        "allow_unnamed_name_fallback": True,
         "orders": [
             {
                 "selections": {},

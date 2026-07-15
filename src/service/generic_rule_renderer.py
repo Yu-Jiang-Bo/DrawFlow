@@ -39,6 +39,7 @@ IMPLICIT_ORDER_BINDINGS = {
     "design": ("design", "design option", "\u8bbe\u8ba1", "\u8bbe\u8ba1\u9009\u9879"),
     "style": ("style", "style option", "\u5c3a\u5bf8", "\u6b3e\u5f0f"),
     "color": ("color", "color option", "\u989c\u8272", "\u5b57\u4f53\u989c\u8272"),
+    "department": ("department", "production department", "\u751f\u4ea7\u90e8\u95e8", "\u90e8\u95e8"),
     "text": (
         "text",
         "name",
@@ -78,6 +79,9 @@ def build_generic_render_task(
     ]
     if not orders:
         raise GenericRuleRenderError("Order sheet contains no data rows.")
+    render_layout = _mapping(rules.get("render_layout"))
+    if render_layout:
+        orders = _build_layout_orders(orders, render_layout)
     for index, order in enumerate(orders, start=1):
         order["output_ai"] = str(
             (
@@ -96,10 +100,55 @@ def build_generic_render_task(
         "option_groups": _list_of_mappings(rules.get("option_groups")),
         "dimensions": _mapping(rules.get("dimensions")),
         "text_policies": _mapping(rules.get("text_policies")),
+        "render_layout": render_layout,
+        "allow_unnamed_name_fallback": bool(rules.get("allow_unnamed_name_fallback", False)),
         "layout": {"columns": max(1, int(columns)), "gap_mm": 8.0, "margin_mm": 8.0},
         "output": _mapping(rules.get("output")),
         "transforms": _mapping(rules.get("transforms")),
     }
+
+
+def _build_layout_orders(orders: list[Dict[str, Any]], layout: Mapping[str, Any]) -> list[Dict[str, Any]]:
+    """Group source rows into declaratively configured output sheets."""
+
+    if str(layout.get("type") or "").strip() != "name_columns":
+        raise GenericRuleRenderError(f"Unsupported render layout: {layout.get('type')}")
+    groups: Dict[tuple[str, ...], Dict[str, Any]] = {}
+    for order in orders:
+        mode = _layout_mode(order, layout)
+        group_by = mode.get("group_by", ["row"])
+        if not isinstance(group_by, list) or not group_by:
+            group_by = ["row"]
+        key = tuple(_layout_group_value(order, field) for field in group_by)
+        bucket = groups.setdefault(key, {"mode": mode, "members": []})
+        bucket["members"].append(order)
+
+    result: list[Dict[str, Any]] = []
+    for bucket in groups.values():
+        members = bucket["members"]
+        leader = dict(members[0])
+        leader["layout_members"] = members
+        leader["layout_mode"] = bucket["mode"]
+        result.append(leader)
+    return result
+
+
+def _layout_mode(order: Mapping[str, Any], layout: Mapping[str, Any]) -> Dict[str, Any]:
+    base = _mapping(layout.get("default"))
+    department = str(_mapping(order.get("values")).get("department") or "").strip().casefold()
+    overrides = _mapping(layout.get("department_overrides"))
+    for name, override in overrides.items():
+        if str(name).strip().casefold() == department and isinstance(override, Mapping):
+            return {**base, **dict(override)}
+    return base
+
+
+def _layout_group_value(order: Mapping[str, Any], field: Any) -> str:
+    if str(field) == "row":
+        return str(order.get("row_index") or "")
+    values = _mapping(order.get("values"))
+    selections = _mapping(order.get("selections"))
+    return str(values.get(str(field), selections.get(str(field), "")) or "").strip().casefold()
 
 
 def _build_order(

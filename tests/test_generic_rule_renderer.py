@@ -225,6 +225,36 @@ def test_passes_configured_name_color_cycle_to_exact_name_target(tmp_path):
     ]
 
 
+def test_name_columns_layout_groups_t_department_by_order_and_color(tmp_path):
+    _, template = make_template(tmp_path)
+    order_path = tmp_path / "orders.xlsx"
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["Order", "Custom", "Font", "Color", "Department"])
+    sheet.append(["A-1", "Alice|Bob", "F2", "Black", "T"])
+    sheet.append(["A-1", "Carol|Dan", "F3", "Black", "T"])
+    sheet.append(["A-1", "Eve", "F4", "Red", "T"])
+    sheet.append(["B-1", "Frank", "F5", "Black", "T"])
+    workbook.save(order_path)
+    rules = {
+        **base_rules(),
+        "order_bindings": {"order_no": "Order", "text": "Custom", "font": "Font", "color": "Color", "department": "Department"},
+        "slot_mappings": [{"field": "text", "slot": "Name"}],
+        "render_layout": {
+            "type": "name_columns",
+            "default": {"group_by": ["row"]},
+            "department_overrides": {"T": {"group_by": ["order_no", "color"], "header_fields": ["order_no", "color"]}},
+        },
+    }
+
+    task = build_generic_render_task(template, rules, order_path, tmp_path / "output.ai")
+
+    assert task["render_layout"]["type"] == "name_columns"
+    assert len(task["orders"]) == 3
+    assert [member["order_no"] for member in task["orders"][0]["layout_members"]] == ["A-1", "A-1"]
+    assert task["orders"][0]["layout_mode"]["header_fields"] == ["order_no", "color"]
+
+
 def test_passes_selected_font_boldness_to_every_text_variable(tmp_path):
     _, template = make_template(tmp_path)
     order_path = tmp_path / "orders.xlsx"

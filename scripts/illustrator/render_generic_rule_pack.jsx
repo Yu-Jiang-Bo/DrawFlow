@@ -11,13 +11,15 @@
     var outputs = [];
     for (var orderIndex = 0; orderIndex < task.orders.length; orderIndex++) {
         var order = task.orders[orderIndex];
-        var doc = app.open(File(String(task.template_ai)));
+        var doc = usesNameColumnsLayout(task) ? createNameColumnsDocument(task, order) : app.open(File(String(task.template_ai)));
         try {
-            applyOptionGroups(doc, task.option_groups || [], order.selections || {});
-            applyVariables(doc, order.variables || [], task.dimensions || {}, task.text_policies || {}, order.selections || {});
-            applyAssets(doc, order.assets || []);
-            applyTransforms(doc, order.transforms || task.transforms || {}, order.variables || []);
-            applyOutputSettings(doc, task.output || {}, order.variables || []);
+            if (!usesNameColumnsLayout(task)) {
+                applyOptionGroups(doc, task.option_groups || [], order.selections || {});
+                applyVariables(doc, order.variables || [], task.dimensions || {}, task.text_policies || {}, order.selections || {}, task.allow_unnamed_name_fallback === true);
+                applyAssets(doc, order.assets || []);
+                applyTransforms(doc, order.transforms || task.transforms || {}, order.variables || []);
+                applyOutputSettings(doc, task.output || {}, order.variables || []);
+            }
             var output = File(String(order.output_ai));
             ensureFolder(output.parent);
             if (output.exists) output.remove();
@@ -52,12 +54,150 @@
         return "";
     }
 
-    function applyVariables(doc, variables, dimensions, policies, selections) {
+    function usesNameColumnsLayout(task) {
+        return task.render_layout && String(task.render_layout.type || "") === "name_columns";
+    }
+
+    function createNameColumnsDocument(task, order) {
+        var layout = task.render_layout || {};
+        var width = mmToPt(Number(layout.width_mm || 100));
+        var height = mmToPt(Number(layout.height_mm || 220));
+        var source = app.open(File(String(task.template_ai)));
+        var fontSource = null;
+        try {
+            var selected = String(order.selections && order.selections.font || "");
+            if (selected) fontSource = firstTextFrame(findPageItemByName(source, selected));
+            var doc = app.documents.add(DocumentColorSpace.RGB, width, height);
+            var background = String(layout.background_color || "");
+            if (background) {
+                var rectangle = doc.pathItems.rectangle(height, 0, width, height);
+                var backgroundColor = rgbColor(background);
+                if (backgroundColor) rectangle.fillColor = backgroundColor;
+                rectangle.stroked = false;
+            }
+            drawNameColumns(doc, order, layout, fontSource);
+            return doc;
+        } finally {
+            source.close(SaveOptions.DONOTSAVECHANGES);
+        }
+    }
+
+    function drawNameColumns(doc, order, layout, fontSource) {
+        var mode = order.layout_mode || layout.default || {};
+        var members = order.layout_members || [order];
+        var margin = mmToPt(Number(layout.margin_mm || 10));
+        var headerHeight = mmToPt(Number(layout.header_height_mm || 24));
+        var footerHeight = mmToPt(Number(layout.footer_height_mm || 12));
+        var name = layout.name || {};
+        var nameSize = Number(name.font_size_pt || 72);
+        var lineGap = mmToPt(Number(name.line_gap_mm || 8));
+        var columnGap = mmToPt(Number(name.column_gap_mm || 12));
+        var bounds = doc.artboards[0].artboardRect;
+        var width = bounds[2] - bounds[0];
+        var height = bounds[1] - bounds[3];
+        var top = height - margin;
+        var headerFields = mode.header_fields || [];
+        if (headerFields.length) {
+            addLayoutText(doc, joinFields(members[0], headerFields), width / 2, top, Number(layout.header_font_size_pt || 16), rgbColor(layout.header_color || "#000000"), null, true);
+        }
+        var availableWidth = width - margin * 2;
+        var columnWidth = (availableWidth - Math.max(0, members.length - 1) * columnGap) / Math.max(1, members.length);
+        var startY = top - headerHeight;
+        for (var memberIndex = 0; memberIndex < members.length; memberIndex++) {
+            var member = members[memberIndex];
+            var variable = findNameVariable(member.variables || []);
+            if (!variable) throw new Error("Name columns layout requires a Name variable");
+            var parts = splitNameParts(variable.value, String(name.delimiter || "|"));
+            var x = margin + memberIndex * (columnWidth + columnGap) + columnWidth / 2;
+            for (var partIndex = 0; partIndex < parts.length; partIndex++) {
+                var y = startY - partIndex * (nameSize + lineGap);
+                var color = colorForNamePart(variable.actions || [], partIndex, layout.name_color_cycle || {});
+                var frame = addLayoutText(doc, parts[partIndex], x, y, nameSize, color, fontSource, true);
+                applyNonColorActions(frame, variable.actions || []);
+            }
+        }
+        var footerField = String(mode.footer_field || "");
+        if (footerField) {
+            addLayoutText(doc, fieldValue(members[0], footerField), width / 2, margin + footerHeight, Number(layout.footer_font_size_pt || 20), rgbColor(layout.footer_color || "#FFFFFF"), null, true);
+        }
+    }
+
+    function addLayoutText(doc, text, x, y, size, color, fontSource, centered) {
+        var frame = doc.textFrames.add();
+        frame.contents = String(text || "");
+        if (fontSource) copyTextStyle(fontSource, frame);
+        try { frame.textRange.characterAttributes.size = size; } catch (e1) {}
+        if (color) {
+            try { frame.textRange.characterAttributes.fillColor = color; } catch (e2) {}
+        }
+        try { frame.textRange.paragraphAttributes.justification = centered ? Justification.CENTER : Justification.LEFT; } catch (e3) {}
+        frame.position = [x, y];
+        if (centered) {
+            try { frame.left = x - (frame.width / 2); } catch (e4) {}
+        }
+        return frame;
+    }
+
+    function splitNameParts(value, delimiter) {
+        var text = String(value || "");
+        var parts = delimiter ? text.split(delimiter) : [text];
+        var result = [];
+        for (var i = 0; i < parts.length; i++) {
+            var part = trimText(parts[i]);
+            if (part) result.push(part);
+        }
+        return result.length ? result : [text];
+    }
+
+    function findNameVariable(variables) {
+        for (var i = 0; i < variables.length; i++) {
+            if (String(variables[i].target || "") === "Name") return variables[i];
+        }
+        return null;
+    }
+
+    function colorForNamePart(actions, index, legacyCycle) {
+        for (var i = 0; i < actions.length; i++) {
+            var action = actions[i] || {};
+            var selector = action.selector || {};
+            if (String(action.type || "") === "fill_color" && String(selector.type || "") === "segments") {
+                var values = action.values || [];
+                if (values.length) return rgbColor(values[index % values.length]);
+            }
+        }
+        var legacyColors = legacyCycle.colors || [];
+        return legacyColors.length ? rgbColor(legacyColors[index % legacyColors.length]) : null;
+    }
+
+    function applyNonColorActions(frame, actions) {
+        for (var i = 0; i < actions.length; i++) {
+            var action = actions[i] || {};
+            if (String(action.type || "") === "stroke_width") applyFontBoldness(frame, {boldness: action.value});
+        }
+    }
+
+    function fieldValue(order, field) {
+        var values = order.values || {};
+        var selections = order.selections || {};
+        if (field === "order_no") return String(order.order_no || values.order_no || "");
+        return String(values[field] || selections[field] || "");
+    }
+
+    function joinFields(order, fields) {
+        var values = [];
+        for (var i = 0; i < fields.length; i++) {
+            var value = fieldValue(order, String(fields[i]));
+            if (value) values.push(value);
+        }
+        return values.join("\r");
+    }
+
+    function applyVariables(doc, variables, dimensions, policies, selections, allowUnnamedNameFallback) {
         var selectedFont = String(selections.font || "");
         var fontSource = selectedFont ? firstTextFrame(findPageItemByName(doc, selectedFont)) : null;
         for (var i = 0; i < variables.length; i++) {
             var variable = variables[i];
-            var items = resolveVariableTargets(doc, variable);
+            var items = resolveVariableTargets(doc, variable, allowUnnamedNameFallback);
             if (!items.length) throw new Error("Text target not found: " + variable.target);
             var dimension = dimensions[String(variable.target || "")];
             if (!dimension) dimension = dimensions[String(variable.target || "") + "_ANCHOR"];
@@ -266,6 +406,14 @@
         ];
     }
 
+    function rgbColor(value) {
+        var rgb = hexColor(value) || colorValue(value);
+        if (!rgb) return null;
+        var color = new RGBColor();
+        color.red = rgb[0]; color.green = rgb[1]; color.blue = rgb[2];
+        return color;
+    }
+
     function colorValue(name) {
         var map = {
             "black": [0, 0, 0], "white": [255, 255, 255], "red": [255, 0, 0],
@@ -290,11 +438,11 @@
         return result;
     }
 
-    function resolveVariableTargets(doc, variable) {
+    function resolveVariableTargets(doc, variable, allowUnnamedNameFallback) {
         var target = String(variable.target || "");
         var items = findPageItemsByName(doc, target);
         if (items.length) return items;
-        if (target === "Name") return findFallbackNameTextFrames(doc);
+        if (target === "Name" && allowUnnamedNameFallback) return findFallbackNameTextFrames(doc);
         return items;
     }
 
