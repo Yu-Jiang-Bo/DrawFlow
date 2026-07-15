@@ -53,10 +53,11 @@
     }
 
     function applyVariables(doc, variables, dimensions, policies, selections) {
-        var fontSource = firstTextFrame(findPageItemByName(doc, String(selections.font || "")));
+        var selectedFont = String(selections.font || "");
+        var fontSource = selectedFont ? firstTextFrame(findPageItemByName(doc, selectedFont)) : null;
         for (var i = 0; i < variables.length; i++) {
             var variable = variables[i];
-            var items = findPageItemsByName(doc, String(variable.target || ""));
+            var items = resolveVariableTargets(doc, variable);
             if (!items.length) throw new Error("Text target not found: " + variable.target);
             var dimension = dimensions[String(variable.target || "")];
             if (!dimension) dimension = dimensions[String(variable.target || "") + "_ANCHOR"];
@@ -289,6 +290,31 @@
         return result;
     }
 
+    function resolveVariableTargets(doc, variable) {
+        var target = String(variable.target || "");
+        var items = findPageItemsByName(doc, target);
+        if (items.length) return items;
+        if (target === "Name") return findFallbackNameTextFrames(doc);
+        return items;
+    }
+
+    function findFallbackNameTextFrames(doc) {
+        var frames = [];
+        for (var l = 0; l < doc.layers.length; l++) collectTextFrames(doc.layers[l], frames);
+        var candidates = [];
+        for (var i = 0; i < frames.length; i++) {
+            var frame = frames[i];
+            if (hasAncestorNamed(frame, "Font")) continue;
+            if (String(frame.name || "").match(/^F\d+$/i)) continue;
+            if (trimText(frame.contents).length) continue;
+            var area = itemArea(frame);
+            if (area <= 1) continue;
+            candidates.push({frame: frame, area: area});
+        }
+        candidates.sort(function (a, b) { return b.area - a.area; });
+        return candidates.length ? [candidates[0].frame] : [];
+    }
+
     function collectInContainer(container, name, result) {
         if (!container || !container.pageItems) return;
         for (var i = 0; i < container.pageItems.length; i++) {
@@ -296,6 +322,17 @@
             if (item.name === name) result.push(item);
             if (item.typename === "GroupItem" || item.typename === "Layer") {
                 collectInContainer(item, name, result);
+            }
+        }
+    }
+
+    function collectTextFrames(container, result) {
+        if (!container || !container.pageItems) return;
+        for (var i = 0; i < container.pageItems.length; i++) {
+            var item = container.pageItems[i];
+            if (item.typename === "TextFrame") result.push(item);
+            if (item.typename === "GroupItem" || item.typename === "Layer") {
+                collectTextFrames(item, result);
             }
         }
     }
@@ -311,6 +348,29 @@
             }
         }
         return null;
+    }
+
+    function hasAncestorNamed(item, name) {
+        var current = item ? item.parent : null;
+        while (current) {
+            if (String(current.name || "") === name) return true;
+            if (current.typename === "Document") break;
+            current = current.parent;
+        }
+        return false;
+    }
+
+    function itemArea(item) {
+        try {
+            var bounds = item.visibleBounds;
+            return Math.abs(Number(bounds[2]) - Number(bounds[0])) * Math.abs(Number(bounds[1]) - Number(bounds[3]));
+        } catch (e1) {
+            return 0;
+        }
+    }
+
+    function trimText(value) {
+        return String(value || "").replace(/^\s+|\s+$/g, "");
     }
 
     function firstTextFrame(item) {

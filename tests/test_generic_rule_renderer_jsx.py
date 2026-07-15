@@ -20,6 +20,8 @@ def test_generic_renderer_cycles_configured_name_colors_only():
     assert "task.dimensions" in source
     assert "task.text_policies" in source
     assert "findPageItemsByName" in source
+    assert "resolveVariableTargets" in source
+    assert "findFallbackNameTextFrames" in source
     assert 'String(variable.target || "") + "_ANCHOR"' in source
     assert "copyTextStyle(fontSource, frame)" in source
     assert "applyNameColorCycle(frame, variable)" in source
@@ -169,3 +171,82 @@ console.log(JSON.stringify(values));
 
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout) == [[255, 0, 0], [0, 0, 0], [0, 0, 255], [255, 0, 0]]
+
+
+def test_generic_renderer_uses_blank_name_placeholder_when_target_is_unnamed():
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node.js is unavailable")
+    script_path = SCRIPT.resolve()
+    task = {
+        "type": "generic_template_rules",
+        "template_ai": "template.ai",
+        "option_groups": [],
+        "dimensions": {},
+        "text_policies": {},
+        "output": {},
+        "orders": [
+            {
+                "selections": {},
+                "variables": [{"target": "Name", "field": "text", "value": "Alice"}],
+                "assets": [],
+                "transforms": {},
+                "output_ai": "output.ai",
+            }
+        ],
+    }
+    harness = f"""
+const fs = require('fs');
+const source = fs.readFileSync({json.dumps(str(script_path))}, 'utf8').replace(/^#target.*\\r?\\n/, '');
+const task = {json.dumps(task)};
+const folder = {{ exists: true, parent: null, create: () => true }};
+global.$ = {{ getenv: () => 'task.json' }};
+global.File = function(path) {{
+  return {{
+    fsName: path,
+    exists: path === 'task.json',
+    parent: folder,
+    open: () => true,
+    read: () => JSON.stringify(task),
+    close: () => undefined,
+    remove: () => undefined
+  }};
+}};
+global.RGBColor = function() {{}};
+global.IllustratorSaveOptions = function() {{}};
+global.Compatibility = {{ ILLUSTRATOR8: 8 }};
+global.SaveOptions = {{ DONOTSAVECHANGES: 0 }};
+function textFrame(contents, bounds) {{
+  return {{
+    typename: 'TextFrame',
+    name: '',
+    contents,
+    visibleBounds: bounds,
+    textRange: {{ characterAttributes: {{}}, paragraphAttributes: {{}} }},
+    characters: []
+  }};
+}}
+const document = {{ typename: 'Document', layers: [], saveAs: () => undefined, close: () => undefined }};
+const layer = {{ typename: 'Layer', name: 'Layer 1', pageItems: [], parent: document }};
+const fontGroup = {{ typename: 'GroupItem', name: 'Font', pageItems: [], parent: layer }};
+const instruction = textFrame('名字说明，不应该被覆盖', [0, 100, 400, 80]);
+const fontBlank = textFrame('', [0, 200, 500, 100]);
+const placeholder = textFrame('', [0, 50, 200, 0]);
+instruction.parent = layer;
+fontBlank.parent = fontGroup;
+placeholder.parent = layer;
+fontGroup.pageItems = [fontBlank];
+layer.pageItems = [instruction, fontGroup, placeholder];
+document.layers = [layer];
+global.app = {{ open: () => document, executeMenuCommand: () => undefined }};
+new Function(source)();
+if (placeholder.contents !== 'Alice') throw new Error('placeholder not filled: ' + placeholder.contents);
+if (instruction.contents !== '名字说明，不应该被覆盖') throw new Error('instruction overwritten');
+if (fontBlank.contents !== '') throw new Error('font group overwritten');
+console.log(placeholder.contents);
+"""
+
+    result = subprocess.run([node, "-e", harness], capture_output=True, text=True, check=False)
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "Alice"
