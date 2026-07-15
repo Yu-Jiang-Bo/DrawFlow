@@ -16,7 +16,7 @@
     try { app.userInteractionLevel = UserInteractionLevel.DONTDISPLAYALERTS; } catch (e0) {}
 
     var layout = task.layout || {};
-    var showBoxes = layout.show_style_boxes !== false;
+    var showBoxes = layout.show_style_boxes === true;
     var compactOutput = !showBoxes;
     var columns = Math.max(Number(layout.columns || 4), 1);
     var gap = mmToPt(Number(compactOutput ? (layout.compact_gap_mm || 4) : (layout.gap_mm || 8)));
@@ -99,7 +99,7 @@
             var productRight = productLeft + productSize.width;
             var productBottom = productTop - productSize.height;
             var itemLabel = item.production_label || (item.show_color_label ? item.order_no + "  " + item.font_option + "  " + item.color_option : item.order_no);
-            var drawFrame = !compactOutput && (showBoxes || item.show_frame === true);
+            var drawFrame = !compactOutput && showBoxes;
 
             if (compactOutput) {
                 if (j === 0) {

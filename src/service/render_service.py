@@ -101,7 +101,9 @@ class RenderService:
             "order_file": str(order_file.resolve()),
             "sheet_name": str(payload.get("sheet_name", "") or "").strip(),
             "columns": int(payload.get("columns") or template.default_columns),
-            "hide_boxes": _to_bool(payload.get("hide_boxes", template.default_hide_boxes)),
+            # Diagnostic frames are never part of a production render request.
+            # Developers can still generate them through the explicit CLI debug flag.
+            "hide_boxes": True,
             "dry_run": _to_bool(payload.get("dry_run", False)),
             "visible": _to_bool(payload.get("visible", False)),
             "output_name": str(payload.get("output_name", "")).strip(),

@@ -387,7 +387,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-ai", required=True, help="输出 AI 路径")
     parser.add_argument("--template-config", default="", help="template.config.json 输出/复用路径")
     parser.add_argument("--columns", type=int, default=4, help="订单组列数")
-    parser.add_argument("--hide-boxes", action="store_true", help="不渲染测试尺寸框")
+    parser.add_argument("--show-debug-boxes", action="store_true", help="仅测试时渲染红色尺寸框")
     parser.add_argument("--color-mode", choices=["CMYK", "RGB"], default="CMYK", help="输出色彩模式")
     parser.add_argument("--skip-export", action="store_true", help="跳过模板配置导出")
     parser.add_argument("--dry-run", action="store_true", help="只生成任务，不渲染")
@@ -415,7 +415,7 @@ def main() -> int:
             output_ai=output_ai,
             groups=groups,
             columns=args.columns,
-            show_style_boxes=not args.hide_boxes,
+            show_style_boxes=args.show_debug_boxes,
             color_mode=args.color_mode,
         )
         task_file = output_ai.parent / "render-tasks" / "jjmb-202508-render-task.json"

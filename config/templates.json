@@ -20,7 +20,7 @@
       "template_ai": "../test/ai测试/JJMB202603281027102517--文本+颜色/JJMB202603281027102517/JJMB202603281027102517.ai",
       "template_config": "output/template-configs/JJMB202603281027102517/template.config.json",
       "default_columns": 4,
-      "default_hide_boxes": false
+      "default_hide_boxes": true
     },
     {
       "template_id": "JJMB202509231236046265",

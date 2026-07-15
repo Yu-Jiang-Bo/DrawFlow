@@ -173,6 +173,9 @@ def test_202508_renderer_accepts_compiled_fill_color_actions():
     assert "function applyFillColorAction(tf, action)" in source
     assert "values[partIndex % values.length]" in source
     assert "function applyBoldnessToAttributes(attributes, boldness)" in source
+    assert "var showBoxes = layout.show_style_boxes === true;" in source
+    assert "var drawFrame = !compactOutput && showBoxes;" in source
+    assert "item.show_frame === true" not in source
 
     node = shutil.which("node")
     if not node:

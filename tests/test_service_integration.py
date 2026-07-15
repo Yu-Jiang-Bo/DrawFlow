@@ -900,7 +900,7 @@ def test_activation_rejects_registered_asset_when_file_is_missing(tmp_path):
         )
 
 
-def test_service_accepts_string_boolean_flags(tmp_path):
+def test_service_never_enables_diagnostic_boxes_from_request_flags(tmp_path):
     config_path = tmp_path / "templates.json"
     order_path = tmp_path / "orders.xlsx"
     write_templates_config(config_path)
@@ -923,7 +923,7 @@ def test_service_accepts_string_boolean_flags(tmp_path):
     assert record["status"] == "completed"
     task_path = Path(record["outputs"]["render_task"])
     task = json.loads(task_path.read_text(encoding="utf-8"))
-    assert task["layout"]["show_style_boxes"] is True
+    assert task["layout"]["show_style_boxes"] is False
 
 
 def test_grouped_pipeline_reports_template_mismatch_when_no_groups(tmp_path):

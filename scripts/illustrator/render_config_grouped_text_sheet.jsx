@@ -21,7 +21,7 @@
     var orderLabelHeight = mmToPt(Number(layout.order_label_height_mm || 7));
     var orderLabelFontSize = Number(layout.order_label_font_size_pt || 12);
     var itemGap = mmToPt(Number(layout.item_gap_mm || 4));
-    var showStyleBoxes = layout.show_style_boxes !== false;
+    var showStyleBoxes = layout.show_style_boxes === true;
     var padding = mmToPt(numberOrDefault(task.fit && task.fit.padding_mm, 1));
     var minFontSize = numberOrDefault(task.fit && task.fit.min_font_size_pt, 4);
     var maxFontSize = numberOrDefault(task.fit && task.fit.max_font_size_pt, 300);
