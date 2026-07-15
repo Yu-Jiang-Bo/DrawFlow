@@ -68,8 +68,12 @@
                 frame.contents = String(variable.value || "");
                 if (fontSource) copyTextStyle(fontSource, frame);
                 applyTextColor(frame, String(selections.color || ""));
-                applyNameColorCycle(frame, variable);
-                applyFontBoldness(frame, variable.font_style);
+                if (variable.actions && variable.actions.length) {
+                    applyRuleActions(frame, variable.actions);
+                } else {
+                    applyNameColorCycle(frame, variable);
+                    applyFontBoldness(frame, variable.font_style);
+                }
                 if (dimension && String(policies.fit || "") !== "none") {
                     fitText(frame, Number(dimension.width_mm || 0), Number(dimension.height_mm || 0));
                 }
@@ -184,6 +188,48 @@
                 }
             }
             cursor += part.length + (partIndex < parts.length - 1 ? delimiter.length : 0);
+        }
+    }
+
+    function applyRuleActions(frame, actions) {
+        for (var actionIndex = 0; actionIndex < actions.length; actionIndex++) {
+            var action = actions[actionIndex] || {};
+            if (String(action.type || "") === "fill_color") {
+                applyFillColorAction(frame, action);
+            } else if (String(action.type || "") === "stroke_width") {
+                applyFontBoldness(frame, {boldness: action.value});
+            } else {
+                throw new Error("Unsupported compiled rule action: " + action.type);
+            }
+        }
+    }
+
+    function applyFillColorAction(frame, action) {
+        var values = action.values || [];
+        if (!values.length) return;
+        var selector = action.selector || {};
+        if (String(selector.type || "whole") !== "segments") {
+            var wholeRgb = hexColor(values[0]);
+            if (!wholeRgb) return;
+            var wholeColor = new RGBColor();
+            wholeColor.red = wholeRgb[0]; wholeColor.green = wholeRgb[1]; wholeColor.blue = wholeRgb[2];
+            try { frame.textRange.characterAttributes.fillColor = wholeColor; } catch (e1) {}
+            return;
+        }
+        var delimiter = String(selector.delimiter || "");
+        var parts = String(frame.contents || "").split(delimiter);
+        if (!delimiter || parts.length < 2) return;
+        var cursor = 0;
+        for (var partIndex = 0; partIndex < parts.length; partIndex++) {
+            var rgb = hexColor(values[partIndex % values.length]);
+            if (rgb) {
+                var color = new RGBColor();
+                color.red = rgb[0]; color.green = rgb[1]; color.blue = rgb[2];
+                for (var charIndex = 0; charIndex < parts[partIndex].length; charIndex++) {
+                    frame.characters[cursor + charIndex].characterAttributes.fillColor = color;
+                }
+            }
+            cursor += parts[partIndex].length + (partIndex < parts.length - 1 ? delimiter.length : 0);
         }
     }
 

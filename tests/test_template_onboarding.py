@@ -9,6 +9,7 @@ from src.service.template_onboarding import (
     merge_rescan_draft,
 )
 from src.service.template_scan import build_rule_draft_from_scan
+from src.service.template_rule_compiler import compile_local_rule_ast
 
 
 def scan(version="scan-1", design_name="Design1"):
@@ -343,6 +344,22 @@ def test_check_accepts_common_name_color_cycle_color_names():
 
     assert result["ok"] is True
     assert result["pack"]["rules"]["name_color_cycle"]["colors"] == ["#FF0000", "#000000", "#D4AF37"]
+
+
+def test_check_rejects_compiled_ast_target_missing_from_template_rules():
+    pack = ready_pack()
+    text = "Name 奇数红色偶数白色"
+    pack["rules"]["special_rules_text"] = text
+    pack["rules"]["rule_ast"] = compile_local_rule_ast(text)
+
+    result = check_rule_pack(
+        pack,
+        template_id="DEMO001",
+        rule_context={"pipeline": "generic_rules_only"},
+    )
+
+    assert result["ok"] is False
+    assert any(item["code"] == "rule_ast" and "不存在的文字对象" in item["message"] for item in result["errors"])
 
 
 def test_check_rejects_incomplete_name_color_cycle():

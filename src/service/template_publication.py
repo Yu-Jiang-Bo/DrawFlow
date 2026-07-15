@@ -24,9 +24,15 @@ class TemplatePublicationService:
         *,
         change_summary: str,
     ) -> Dict[str, Any]:
+        template = self.registry.get_template(template_id)
         return self._publish(
             template_id,
-            lambda: self.store.confirm(template_id, payload, change_summary=change_summary),
+            lambda: self.store.confirm(
+                template_id,
+                payload,
+                change_summary=change_summary,
+                rule_context={"pipeline": str(getattr(template, "pipeline", "") or "")},
+            ),
             activate=True,
             validation_payload=payload,
         )

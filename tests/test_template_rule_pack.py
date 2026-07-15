@@ -189,6 +189,9 @@ def test_migrates_legacy_bold_overrides_once_and_keeps_non_bold_overrides():
         {"font_options": ["F2", "F3"], "boldness": 0.4}
     ]
     assert pack["rules"]["option_overrides"] == {"F5": {"action": "uppercase"}}
+    assert pack["rules"]["rule_ast"]["rules"][0]["operations"] == [
+        {"type": "stroke_width", "value": 0.4, "unit": "pt", "color_source": "fill"}
+    ]
     assert normalize_template_rule_pack(pack)["rules"] == pack["rules"]
 
 
@@ -211,6 +214,9 @@ def test_normalizes_name_color_cycle_without_a_color_count_limit():
         "delimiter": "|",
         "colors": ["#D71920", "#000000", "#0000FF", "#00AA00", "#FFAA00", "#663399".upper()],
     }
+    assert pack["rules"]["rule_ast"]["rules"][0]["operations"][0]["values"] == [
+        "#D71920", "#000000", "#0000FF", "#00AA00", "#FFAA00", "#663399"
+    ]
 
 
 def test_normalizes_name_color_cycle_color_names_in_rule_pack():

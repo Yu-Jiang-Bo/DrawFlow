@@ -5,6 +5,7 @@ from __future__ import annotations
 from copy import deepcopy
 import hashlib
 import math
+import re
 from typing import Any, Dict, Iterable, List, Mapping
 
 from .font_style_rules import normalize_font_style_rules
@@ -15,6 +16,7 @@ RULE_AST_SCHEMA = "custom-renderer/template-rule-ast"
 RULE_AST_VERSION = 1
 _CONDITION_FIELDS = {"font", "design", "style", "color", "text"}
 _CONDITION_OPERATORS = {"equals", "in", "not_empty"}
+_SOURCE_HASH = re.compile(r"^[0-9a-f]{64}$")
 _PIPELINE_ACTIONS = {
     "generic_rules_only": {"fill_color", "stroke_width"},
     "jjmb_202508": {"stroke_width"},
@@ -48,6 +50,9 @@ def validate_rule_ast(
         errors.append(f"规则顶层包含不支持的字段：{', '.join(unknown_root)}。")
     if value.get("$schema") != RULE_AST_SCHEMA or value.get("version") != RULE_AST_VERSION:
         errors.append("规则协议版本不受支持，请重新编译。")
+    source_hash = value.get("source_hash")
+    if not isinstance(source_hash, str) or not _SOURCE_HASH.fullmatch(source_hash):
+        errors.append("规则来源摘要格式无效，请重新编译。")
     if natural_text and value.get("source_hash") != rule_source_hash(natural_text):
         errors.append("自然语言说明已变化，请重新编译规则。")
     rules = value.get("rules")
@@ -59,8 +64,17 @@ def validate_rule_ast(
     unresolved = value.get("unresolved", [])
     if not isinstance(unresolved, list):
         errors.append("未识别内容必须是列表。")
-    elif unresolved:
-        errors.append("仍有未识别的特殊规则，不能确认保存。")
+    else:
+        for item in unresolved:
+            if (
+                not isinstance(item, Mapping)
+                or set(item) != {"text", "reason"}
+                or not all(isinstance(item.get(key), str) and item.get(key).strip() for key in ("text", "reason"))
+            ):
+                errors.append("未识别内容必须包含非空的 text 和 reason 字符串。")
+                break
+        if unresolved:
+            errors.append("仍有未识别的特殊规则，不能确认保存。")
     for index, rule in enumerate(rules, start=1):
         errors.extend(_validate_rule(rule, index))
         errors.extend(_validate_rule_context(rule, index, context or {}))
@@ -165,15 +179,25 @@ def _validate_rule(value: Any, index: int) -> List[str]:
     unknown_rule = sorted(set(value) - {"id", "target", "conditions", "selector", "operations"})
     if unknown_rule:
         errors.append(f"{prefix}包含不支持的字段：{', '.join(unknown_rule)}。")
+    rule_id = value.get("id")
+    if rule_id is not None and (not isinstance(rule_id, str) or not rule_id.strip()):
+        errors.append(f"{prefix}的 id 必须是非空字符串。")
     target = value.get("target")
-    if not isinstance(target, Mapping) or target.get("type") != "text" or not str(target.get("name") or ""):
+    if (
+        not isinstance(target, Mapping)
+        or target.get("type") != "text"
+        or not isinstance(target.get("name"), str)
+        or not target.get("name", "").strip()
+    ):
         errors.append(f"{prefix}缺少有效文字目标。")
     elif set(target) - {"type", "name"}:
         errors.append(f"{prefix}的文字目标包含不支持的字段。")
     selector = value.get("selector")
     if not isinstance(selector, Mapping) or selector.get("type") not in {"whole", "segments"}:
         errors.append(f"{prefix}使用了不支持的文字选择器。")
-    elif selector.get("type") == "segments" and not str(selector.get("delimiter") or ""):
+    elif selector.get("type") == "segments" and (
+        not isinstance(selector.get("delimiter"), str) or not selector.get("delimiter", "")
+    ):
         errors.append(f"{prefix}的分段选择器缺少分隔符。")
     elif set(selector) - ({"type", "delimiter"} if selector.get("type") == "segments" else {"type"}):
         errors.append(f"{prefix}的文字选择器包含不支持的字段。")
@@ -185,12 +209,23 @@ def _validate_rule(value: Any, index: int) -> List[str]:
             if not isinstance(condition, Mapping) or condition.get("field") not in _CONDITION_FIELDS:
                 errors.append(f"{prefix}包含不支持的条件字段。")
                 continue
-            if condition.get("operator") not in _CONDITION_OPERATORS:
+            operator = condition.get("operator")
+            if operator not in _CONDITION_OPERATORS:
                 errors.append(f"{prefix}包含不支持的条件操作符。")
             if set(condition) - {"field", "operator", "values"}:
                 errors.append(f"{prefix}的触发条件包含不支持的字段。")
-            if condition.get("operator") in {"equals", "in"} and not isinstance(condition.get("values"), list):
-                errors.append(f"{prefix}的条件值必须是列表。")
+            values = condition.get("values")
+            if operator in {"equals", "in"}:
+                if (
+                    not isinstance(values, list)
+                    or not values
+                    or any(not isinstance(item, str) or not item.strip() for item in values)
+                ):
+                    errors.append(f"{prefix}的条件值必须是非空字符串列表。")
+                elif operator == "equals" and len(values) != 1:
+                    errors.append(f"{prefix}的 equals 条件只能包含一个值。")
+            elif operator == "not_empty" and values not in (None, []):
+                errors.append(f"{prefix}的 not_empty 条件不能包含条件值。")
     operations = value.get("operations")
     if not isinstance(operations, list) or not operations:
         errors.append(f"{prefix}没有可执行动作。")
@@ -212,7 +247,8 @@ def _validate_rule(value: Any, index: int) -> List[str]:
         elif operation.get("type") == "stroke_width":
             if set(operation) - {"type", "value", "unit", "color_source"}:
                 errors.append(f"{prefix}的描边动作包含不支持的字段。")
-            width = _finite_number(operation.get("value"))
+            raw_width = operation.get("value")
+            width = _finite_number(raw_width) if isinstance(raw_width, (int, float)) and not isinstance(raw_width, bool) else None
             if width is None or width <= 0 or width > 10 or operation.get("unit") != "pt":
                 errors.append(f"{prefix}的描边加粗值必须为 0 到 10 pt。")
             if operation.get("color_source") != "fill":

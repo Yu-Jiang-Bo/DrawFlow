@@ -22,6 +22,7 @@ from .template_registry import TemplateRegistry
 from .template_onboarding import TemplateOnboardingStore
 from .template_inspector import TemplateInspector
 from .template_publication import TemplatePublicationService
+from .template_rule_compiler import compile_rule_ast
 from .web_page import INDEX_HTML as WORKBENCH_HTML
 
 
@@ -858,15 +859,27 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
             except Exception as exc:
                 self._send_error(HTTPStatus.BAD_REQUEST, str(exc))
             return
+        if path == "/api/templates/rules/compile":
+            try:
+                self._send_json(self._compile_template_special_rules(self._read_json()))
+            except Exception as exc:
+                self._send_error(HTTPStatus.BAD_REQUEST, str(exc))
+            return
         parts = path.strip("/").split("/")
         if len(parts) == 5 and parts[:2] == ["api", "templates"]:
             template_id = unquote(parts[2])
             action = "/".join(parts[3:])
             try:
                 payload = self._read_json()
-                self.registry.get_template(template_id)
+                template = self.registry.get_template(template_id)
                 if action == "rules/check":
-                    self._send_json(self._onboarding_store().check(template_id, payload.get("pack", payload)))
+                    self._send_json(
+                        self._onboarding_store().check(
+                            template_id,
+                            payload.get("pack", payload),
+                            rule_context={"pipeline": template.pipeline},
+                        )
+                    )
                     return
                 if action == "rules/confirm":
                     record = self._publication_service().confirm(
@@ -1073,6 +1086,38 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
         )
         feedback = summarize_template_rule_draft(draft)
         return {"draft": draft, **feedback}
+
+    def _compile_template_special_rules(self, payload: dict[str, object]) -> dict[str, object]:
+        template_id = str(payload.get("template_id", "")).strip()
+        natural_text = str(payload.get("natural_text", "")).strip()
+        if not template_id:
+            raise ValueError("缺少 template_id")
+        if not natural_text:
+            raise ValueError("请填写模板特殊规则")
+        template = self.registry.get_template(template_id)
+        onboarding = self._onboarding_store().get_state(template_id)
+        draft = onboarding.get("draft", {}) if isinstance(onboarding, dict) else {}
+        rules = draft.get("rules", {}) if isinstance(draft, dict) else {}
+        targets = {
+            str(item.get("name") or item.get("slot") or "").strip()
+            for field in ("text_targets", "slot_mappings")
+            for item in (rules.get(field, []) if isinstance(rules, dict) else [])
+            if isinstance(item, dict) and str(item.get("name") or item.get("slot") or "").strip()
+        }
+        return compile_rule_ast(
+            self.llm_parser,
+            natural_text=natural_text,
+            context={
+                "template_id": template_id,
+                "template_type": template.template_type,
+                "pipeline": template.pipeline,
+                "text_targets": sorted(targets),
+                "font_options": rules.get("font_options", []) if isinstance(rules, dict) else [],
+                "require_known_targets": True,
+                "require_known_font_options": True,
+                "template": self._template_payload(template),
+            },
+        )
 
     def _register_template(self, fields: dict[str, str], files: dict[str, list[dict[str, object]]]) -> object:
         template_id = fields.get("template_id", "").strip()

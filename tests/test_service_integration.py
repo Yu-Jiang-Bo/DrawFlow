@@ -9,6 +9,7 @@ from src.jjmb_config_grouped_main import build_grouped_task
 from src.render_task import RenderTaskError
 from src.service.job_store import JobStore
 from src.service.http_server import RenderRequestHandler
+from src.service.llm_rule_parser import LlmRuleParser
 from src.service.render_service import (
     RenderService,
     RenderServiceError,
@@ -23,7 +24,7 @@ from src.service.template_onboarding import TemplateOnboardingStore
 from src.service.template_publication import TemplatePublicationService
 
 
-def write_order_xlsx(path: Path) -> None:
+def write_order_xlsx(path: Path, *, template_id: str = "JJMB202508261001394920") -> None:
     workbook = Workbook()
     sheet = workbook.active
     sheet.append(
@@ -53,7 +54,7 @@ def write_order_xlsx(path: Path) -> None:
             "平纹方形皮质首饰盒",
             "1",
             "K",
-            "JJMB202508261001394920",
+            template_id,
             "DETAIL1",
             "SPU1",
             "F7",
@@ -321,13 +322,13 @@ def test_scan_confirm_publish_then_render_dry_run(tmp_path):
     )
     active = record["template"]
     order_path = tmp_path / "orders.xlsx"
-    write_order_xlsx(order_path)
+    write_order_xlsx(order_path, template_id=active.template_id)
 
     result = RenderService(registry=registry, jobs=JobStore(tmp_path / "jobs")).submit(
         {"template_id": active.template_id, "order_file": str(order_path), "dry_run": True}
     )
 
-    assert result["status"] == "completed"
+    assert result["status"] == "completed", result
     assert active.template_rules_config and active.template_rules_config.exists()
 
 
@@ -674,6 +675,37 @@ def test_activate_template_requires_a_renderable_template(tmp_path):
 
     with pytest.raises(ValueError, match="还不能启用出图"):
         handler._activate_template("BROKEN001")
+
+
+def test_template_special_rule_compile_endpoint_builds_a_reviewable_ast(tmp_path):
+    handler = object.__new__(RenderRequestHandler)
+    handler.registry = TemplateRegistry(tmp_path / "templates.json", tmp_path / "templates")
+    handler.llm_parser = LlmRuleParser(api_key="", base_url="")
+    handler._onboarding_store = lambda: type(
+        "Onboarding",
+        (),
+        {"get_state": lambda _self, _template_id: {"draft": {"rules": {"text_targets": [{"name": "Name"}]}}}},
+    )()
+    handler.registry.upsert_template(
+        {
+            "template_id": "RULE001",
+            "name": "Rule",
+            "template_type": "pure_text",
+            "pipeline": "generic_rules_only",
+            "status": "draft",
+        }
+    )
+
+    result = handler._compile_template_special_rules(
+        {
+            "template_id": "RULE001",
+            "natural_text": "Name列的数据，奇数位渲染为红色，偶数位渲染为白色",
+        }
+    )
+
+    assert result["errors"] == ["自然语言规则模型未配置，当前结果仅供预览，不能确认保存。"]
+    assert result["summary"] == ["Name 按 | 分段，循环填充 #FF0000 / #FFFFFF"]
+    assert result["compiler"] == {"source": "local", "llm_configured": False}
 
 
 def test_activate_template_restores_a_renderable_draft(tmp_path):

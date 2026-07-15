@@ -9,6 +9,7 @@ from typing import Any, Dict, Iterable, Mapping
 from .font_style_rules import normalize_font_style_rules, strip_legacy_font_bold_overrides
 from .llm_rule_parser import normalize_option_list
 from .name_color_cycle import normalize_name_color_cycle
+from .template_rule_ast import migrate_legacy_rule_ast, normalize_rule_ast
 
 
 RULE_PACK_SCHEMA = "custom-renderer/template-rule-pack"
@@ -82,6 +83,18 @@ def migrate_legacy_template_rule(payload: Mapping[str, Any], *, template_id: str
     text_targets = _dict_list(source.get("text_targets") or source.get("slots"))
     unresolved = _dict_list(source.get("unresolved_items"))
     legacy_option_overrides = _dict(source.get("option_overrides"))
+    special_rules_text = str(source.get("special_rules_text") or "").strip()
+    legacy_rule_ast = migrate_legacy_rule_ast(
+        source_text=special_rules_text,
+        name_color_cycle=source.get("name_color_cycle"),
+        font_style_rules=source.get("font_style_rules"),
+        option_overrides=legacy_option_overrides,
+    )
+    rule_ast = (
+        normalize_rule_ast(source.get("rule_ast"), natural_text=special_rules_text)
+        if isinstance(source.get("rule_ast"), Mapping)
+        else legacy_rule_ast
+    )
     if profile == PROFILE_UNCLASSIFIED and not _has_unresolved_code(unresolved, "profile"):
         unresolved.append({"code": "profile", "message": "无法从旧规则确定模板 Profile，需要人工确认"})
 
@@ -108,6 +121,8 @@ def migrate_legacy_template_rule(payload: Mapping[str, Any], *, template_id: str
             legacy_option_overrides=legacy_option_overrides,
         ),
         "option_overrides": strip_legacy_font_bold_overrides(legacy_option_overrides),
+        "special_rules_text": special_rules_text,
+        "rule_ast": rule_ast,
         "notes": _dict(source.get("notes")),
         "transforms": deepcopy(source.get("transforms", {})),
         "output": _dict(source.get("output")),

@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from src.service.llm_rule_parser import LlmRuleParser, extract_json_object
@@ -104,3 +106,33 @@ def test_extract_json_object_from_markdown_response():
 
     assert payload["status"] == "draft"
     assert payload["capabilities"] == ["text_fit_box"]
+
+
+def test_llm_special_rule_request_enables_json_output_and_safe_ast_prompt(monkeypatch):
+    captured = {}
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return b'{"choices":[{"message":{"content":"{\\"rules\\":[]}"}}]}'
+
+    def fake_urlopen(request, timeout):
+        captured["request"] = request
+        captured["timeout"] = timeout
+        return Response()
+
+    monkeypatch.setattr("src.service.llm_rule_parser.urllib.request.urlopen", fake_urlopen)
+    parser = LlmRuleParser(api_key="key", base_url="https://api.deepseek.com", model="deepseek-chat")
+
+    parser._call_llm(kind="template_special_rules", natural_text="Name 奇数红色偶数白色", context={})
+
+    payload = json.loads(captured["request"].data.decode("utf-8"))
+    assert payload["response_format"] == {"type": "json_object"}
+    assert payload["model"] == "deepseek-chat"
+    assert "不得返回脚本" in payload["messages"][0]["content"]
+    assert captured["request"].full_url.endswith("/v1/chat/completions")

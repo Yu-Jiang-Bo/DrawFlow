@@ -25,6 +25,10 @@ def test_generic_renderer_cycles_configured_name_colors_only():
     assert "applyNameColorCycle(frame, variable)" in source
     assert "applyFontBoldness(frame, variable.font_style)" in source
     assert "function applyFontBoldness(frame, style)" in source
+    assert "function applyRuleActions(frame, actions)" in source
+    assert 'String(action.type || "") === "fill_color"' in source
+    assert 'String(action.type || "") === "stroke_width"' in source
+    assert "Unsupported compiled rule action" in source
     assert 'String(variable.target || "") !== "Name"' in source
     assert "var rgb = hexColor(colors[partIndex % colors.length]);" in source
     assert "function hexColor(value)" in source

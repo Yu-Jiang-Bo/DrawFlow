@@ -43,6 +43,7 @@ def check_rule_pack(
     *,
     template_id: str = "",
     supported_capabilities: Iterable[str] | None = None,
+    rule_context: Mapping[str, Any] | None = None,
 ) -> Dict[str, Any]:
     """Normalize and validate an editable pack without activating it."""
 
@@ -94,7 +95,14 @@ def check_rule_pack(
             errors.append(_issue("capability", f"Unsupported capability: {capability}"))
 
     validate_sample = _should_validate_sample(raw_validation)
-    _validate_editable_sections(raw_rules, raw_validation, pack, errors, validate_sample=validate_sample)
+    _validate_editable_sections(
+        raw_rules,
+        raw_validation,
+        pack,
+        errors,
+        validate_sample=validate_sample,
+        rule_context=rule_context,
+    )
 
     checked = deepcopy(pack)
     if not validate_sample:
@@ -172,10 +180,16 @@ class TemplateOnboardingStore:
             self._write(draft_path, draft)
         return self.get_state(template_id)
 
-    def check(self, template_id: str, payload: Mapping[str, Any]) -> Dict[str, Any]:
+    def check(
+        self,
+        template_id: str,
+        payload: Mapping[str, Any],
+        *,
+        rule_context: Mapping[str, Any] | None = None,
+    ) -> Dict[str, Any]:
         raw_font_style_errors = validate_font_style_rules(_raw_font_style_rules(payload))
         pack = self._verify_scan_evidence(template_id, payload)
-        result = check_rule_pack(pack, template_id=template_id)
+        result = check_rule_pack(pack, template_id=template_id, rule_context=rule_context)
         if raw_font_style_errors:
             # Validate submitted rows before normalization can discard incomplete entries.
             result["errors"].extend(
@@ -196,8 +210,9 @@ class TemplateOnboardingStore:
         payload: Mapping[str, Any],
         *,
         change_summary: str,
+        rule_context: Mapping[str, Any] | None = None,
     ) -> Dict[str, Any]:
-        result = self.check(template_id, payload)
+        result = self.check(template_id, payload, rule_context=rule_context)
         if not result["ok"]:
             raise ValueError("Rule pack has unresolved validation errors.")
         pack = deepcopy(result["pack"])
@@ -323,6 +338,20 @@ def _raw_font_style_rules(payload: Mapping[str, Any]) -> Any:
     return payload.get("font_style_rules") if "font_style_rules" in payload else None
 
 
+def _configured_text_targets(rules: Mapping[str, Any]) -> list[str]:
+    targets = {
+        str(item.get("name") or "").strip()
+        for item in rules.get("text_targets", [])
+        if isinstance(item, Mapping) and str(item.get("name") or "").strip()
+    }
+    targets.update(
+        str(item.get("slot") or item.get("name") or "").strip()
+        for item in rules.get("slot_mappings", [])
+        if isinstance(item, Mapping) and str(item.get("slot") or item.get("name") or "").strip()
+    )
+    return sorted(targets)
+
+
 def _mark_field_sources(pack: Dict[str, Any]) -> None:
     sources = pack.get("audit", {}).get("field_sources", {})
     if not isinstance(sources, Mapping):
@@ -339,6 +368,7 @@ def _validate_editable_sections(
     errors: list[Dict[str, str]],
     *,
     validate_sample: bool = False,
+    rule_context: Mapping[str, Any] | None = None,
 ) -> None:
     if not isinstance(raw_rules, Mapping):
         errors.append(_issue("rules", "Rules must be a JSON object."))
@@ -367,7 +397,16 @@ def _validate_editable_sections(
     if special_rules_text and not isinstance(raw_rule_ast, Mapping):
         errors.append(_issue("rule_ast", "模板特殊规则需要先编译并确认。"))
     elif isinstance(raw_rule_ast, Mapping):
-        for message in validate_rule_ast(raw_rule_ast, natural_text=special_rules_text):
+        context = dict(rule_context or {})
+        context.setdefault("text_targets", _configured_text_targets(rules))
+        context.setdefault("font_options", rules.get("font_options", []))
+        context.setdefault("require_known_targets", True)
+        context.setdefault("require_known_font_options", True)
+        for message in validate_rule_ast(
+            raw_rule_ast,
+            natural_text=special_rules_text,
+            context=context,
+        ):
             errors.append(_issue("rule_ast", message))
 
     profile = str(pack.get("template", {}).get("profile") or "")

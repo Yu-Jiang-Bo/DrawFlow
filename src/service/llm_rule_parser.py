@@ -60,7 +60,7 @@ class LlmRuleParser:
             draft = with_parser_meta(normalize_rule_draft(fallback), source="local", configured=True)
             draft["parser"]["llm_error"] = str(exc)
             return draft
-        merged = merge_drafts(fallback, parsed)
+        merged = parsed if kind == "template_special_rules" else merge_drafts(fallback, parsed)
         return with_parser_meta(normalize_rule_draft(merged), source="llm", configured=True)
 
     def _call_llm(self, *, kind: str, natural_text: str, context: Dict[str, Any]) -> Dict[str, Any]:
@@ -70,24 +70,7 @@ class LlmRuleParser:
             "messages": [
                 {
                     "role": "system",
-                    "content": (
-                        "你是制图规则解析器。只返回 JSON，不要返回解释。"
-                        "不得编造业务字段，不确定的字段留空数组或空字符串。"
-                        "如果规则提到输出 RGB 或 CMYK，请在 output.color_mode 中返回 RGB 或 CMYK。"
-                        "模板规则 JSON 字段必须尽量使用：version, template_id, mode, status, rule_source, raw_text, "
-                        "capabilities, font_options, style_options, design_options, defaults, transforms, dimensions, "
-                        "output, slots, assets, name_color_cycle。"
-                        "模板规则不得返回脚本、表达式或可执行代码。"
-                        "按字体设置加粗值应使用 font_style_rules=[{font_options:[...],boldness:0.4}]；"
-                        "Name 多色循环使用 name_color_cycle={delimiter,colors}，其中 colors 是至少两个 #RRGGBB 或常见英文颜色名字符串；"
-                        "不要生成 effects 或可执行表达式。"
-                        "font_options、style_options、design_font_options、capabilities 必须返回字符串数组，"
-                        "例如 [\"F1\",\"F2\"]，不要返回对象数组。"
-                        "如果业务把 F10-F12 这类字体选项描述为独立设计/设计款，也要保留在 font_options，"
-                        "并在 design_options 或 design_font_options 中表达这些设计型字体选项。"
-                        "如果规则提到 Text1/Text2/Text3 等变量，slots 中必须分别返回 replace_text 槽位。"
-                        "如果规则提到 Style1-5 或作图区尺寸框，style_options 必须返回 Style1 等规范值。"
-                    ),
+                    "content": _system_prompt(kind),
                 },
                 {
                     "role": "user",
@@ -103,6 +86,7 @@ class LlmRuleParser:
                 },
             ],
             "temperature": 0,
+            "response_format": {"type": "json_object"},
         }
         request = urllib.request.Request(
             endpoint,
@@ -251,3 +235,30 @@ def extract_json_object(text: str) -> Dict[str, Any]:
     if not isinstance(payload, dict):
         raise ValueError("LLM JSON 顶层必须是对象")
     return payload
+
+
+def _system_prompt(kind: str) -> str:
+    if kind == "template_special_rules":
+        return (
+            "你是模板特殊规则编译器。只返回 JSON 对象，不要解释，不得返回脚本、表达式或代码。"
+            "顶层必须是 {$schema:'custom-renderer/template-rule-ast',version:1,source_hash:'',rules:[],unresolved:[]}。"
+            "每条规则只能包含 id,target,conditions,selector,operations。"
+            "target 只能是 {type:'text',name:'文字对象名或*'}。"
+            "conditions 只能使用 field=font/design/style/color/text，operator=equals/in/not_empty，values 为字符串数组。"
+            "selector 只能是 {type:'whole'} 或 {type:'segments',delimiter:'|'}。"
+            "operations 只允许 fill_color 或 stroke_width："
+            "fill_color={type:'fill_color',strategy:'fixed或cycle',values:['#RRGGBB']}；"
+            "stroke_width={type:'stroke_width',value:0.4,unit:'pt',color_source:'fill'}。"
+            "不在白名单内的语义不要发明动作，将原文和原因放入 unresolved。"
+            "示例：Name 奇数红色偶数白色应生成 segments + fill_color cycle；"
+            "F2/F3 加粗0.4应生成 font in 条件 + stroke_width。"
+        )
+    return (
+        "你是制图规则解析器。只返回 JSON，不要返回解释。"
+        "不得编造业务字段，不确定的字段留空数组或空字符串。"
+        "如果规则提到输出 RGB 或 CMYK，请在 output.color_mode 中返回 RGB 或 CMYK。"
+        "模板规则 JSON 字段尽量使用 version, template_id, mode, status, rule_source, raw_text, capabilities, "
+        "font_options, style_options, design_options, defaults, transforms, dimensions, output, slots, assets。"
+        "模板规则不得返回脚本、表达式或可执行代码。"
+        "font_options、style_options、design_font_options、capabilities 必须返回字符串数组。"
+    )
