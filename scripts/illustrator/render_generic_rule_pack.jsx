@@ -614,7 +614,7 @@
         var options = new IllustratorSaveOptions();
         options.compatibility = Compatibility.ILLUSTRATOR8;
         options.pdfCompatible = false;
-        options.compressed = false;
+        options.compressed = true;
         doc.saveAs(file, options);
     }
 
