@@ -4,6 +4,7 @@ import json
 import pytest
 from openpyxl import Workbook
 
+from src.service import render_service as render_service_module
 from src.service.generic_rule_renderer import GenericRuleRenderError, build_generic_render_task
 from src.service.job_store import JobStore
 from src.service.render_service import RenderService
@@ -331,6 +332,51 @@ def test_generic_pipeline_dry_run_consumes_confirmed_rule_pack(tmp_path):
     task = Path(result["outputs"]["render_task"]).read_text(encoding="utf-8")
     assert '"target": "Name1"' in task
     assert '"value": "Alice"' in task
+
+
+def test_generic_pipeline_splits_large_illustrator_runs_into_chunks(tmp_path, monkeypatch):
+    registry, template = make_template(tmp_path)
+    pack = {
+        "$schema": "custom-renderer/template-rule-pack",
+        "template": {"template_id": template.template_id, "profile": "composite"},
+        "rules": base_rules(),
+        "assets": {"items": [], "policy": {"mode": "inline"}},
+        "capabilities": ["replace_text", "scale_to_box"],
+        "validation": {"status": "confirmed", "unresolved_items": []},
+    }
+    template = registry.apply_confirmed_rule_pack(template.template_id, pack, activate=True)
+    order_path = tmp_path / "many-orders.xlsx"
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["Order", "Custom", "Font", "Design", "Style", "Color"])
+    for index in range(17):
+        sheet.append([f"A-{index}", f"Alice {index} | Bob {index}", "F2", "Design1", "Style3", "Gold"])
+    workbook.save(order_path)
+    calls = []
+
+    class Bridge:
+        def __init__(self, visible=False):
+            self.visible = visible
+
+        def render(self, script, task_path):
+            task = json.loads(Path(task_path).read_text(encoding="utf-8"))
+            calls.append((Path(task_path).name, len(task["orders"])))
+            for output in task["output_ai_files"]:
+                Path(output).write_text("ai", encoding="utf-8")
+
+    monkeypatch.setattr(render_service_module, "IllustratorBridge", Bridge)
+
+    result = RenderService(registry=registry, jobs=JobStore(tmp_path / "jobs")).submit(
+        {"template_id": template.template_id, "order_file": str(order_path), "dry_run": False}
+    )
+
+    assert result["status"] == "completed", result.get("error")
+    assert calls == [
+        ("render-task-001.json", 8),
+        ("render-task-002.json", 8),
+        ("render-task-003.json", 1),
+    ]
+    assert len(result["outputs"]["output_ai_files"]) == 17
 
 
 def test_render_service_uses_generic_rules_when_legacy_pipeline_has_executable_pack(tmp_path):

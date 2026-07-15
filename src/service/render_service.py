@@ -34,6 +34,7 @@ from .template_rule_ast import RULE_AST_SCHEMA, font_styles_from_ast
 SUPPORTED_RENDER_PIPELINES = frozenset(
     {"generic_rules_only", "jjmb_202508", "jjmb_202603_grouped", "jjmb_202509_curved"}
 )
+GENERIC_RULE_RENDER_CHUNK_SIZE = 8
 
 
 class RenderServiceError(RuntimeError):
@@ -120,7 +121,21 @@ class RenderService:
         self._write_json(task_file, task)
         if not request["dry_run"]:
             script = Path(__file__).resolve().parents[2] / "scripts" / "illustrator" / "render_generic_rule_pack.jsx"
-            IllustratorBridge(visible=request["visible"]).render(script, task_file)
+            for chunk_index, orders in enumerate(
+                _chunked(task["orders"], GENERIC_RULE_RENDER_CHUNK_SIZE),
+                start=1,
+            ):
+                chunk_task = dict(task)
+                chunk_task["orders"] = orders
+                chunk_task["output_ai_files"] = [order["output_ai"] for order in orders]
+                chunk_file = (
+                    task_file
+                    if len(orders) == len(task["orders"])
+                    else job_dir / f"render-task-{chunk_index:03d}.json"
+                )
+                if chunk_file != task_file:
+                    self._write_json(chunk_file, chunk_task)
+                IllustratorBridge(visible=request["visible"]).render(script, chunk_file)
         return {
             "outputs": {
                 "output_ai": task["output_ai_files"][0],
@@ -374,6 +389,12 @@ def _effective_pipeline(template: TemplateDefinition) -> str:
     if isinstance(bindings, Mapping) and bindings and has_targets:
         return "generic_rules_only"
     return template.pipeline
+
+
+def _chunked(items: List[Any], size: int) -> Iterable[List[Any]]:
+    chunk_size = max(1, int(size))
+    for start in range(0, len(items), chunk_size):
+        yield items[start : start + chunk_size]
 
 
 def _configured_font_options(*configs: Dict[str, Any]) -> List[str] | None:
