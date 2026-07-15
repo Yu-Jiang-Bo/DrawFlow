@@ -5,10 +5,11 @@ from pathlib import Path
 from openpyxl import Workbook, load_workbook
 import pytest
 
+import src.service.http_server as http_server
 from src.jjmb_config_grouped_main import build_grouped_task
 from src.render_task import RenderTaskError
 from src.service.job_store import JobStore
-from src.service.http_server import RenderRequestHandler
+from src.service.http_server import ExclusiveThreadingHTTPServer, RenderRequestHandler
 from src.service.llm_rule_parser import LlmRuleParser
 from src.service.template_rule_compiler import compile_local_rule_ast
 from src.service.render_service import (
@@ -23,6 +24,25 @@ from src.service.template_registry import TemplateRegistry
 from src.service.template_inspector import TemplateInspector
 from src.service.template_onboarding import TemplateOnboardingStore
 from src.service.template_publication import TemplatePublicationService
+
+
+def test_http_server_uses_exclusive_windows_port(monkeypatch):
+    calls = []
+
+    class FakeSocket:
+        def setsockopt(self, *args):
+            calls.append(args)
+
+    server = object.__new__(ExclusiveThreadingHTTPServer)
+    server.socket = FakeSocket()
+    monkeypatch.setattr(http_server.os, "name", "nt")
+    monkeypatch.setattr(http_server.socket, "SO_EXCLUSIVEADDRUSE", 12345, raising=False)
+    monkeypatch.setattr(http_server.ThreadingHTTPServer, "server_bind", lambda self: calls.append("bind"))
+
+    server.server_bind()
+
+    assert server.allow_reuse_address is False
+    assert calls == [(http_server.socket.SOL_SOCKET, 12345, 1), "bind"]
 
 
 def write_order_xlsx(path: Path, *, template_id: str = "JJMB202508261001394920") -> None:

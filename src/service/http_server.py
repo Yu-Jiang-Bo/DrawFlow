@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import socket
 import uuid
 from email import policy
 from email.parser import BytesParser
@@ -741,6 +743,18 @@ function displayTemplateType(value) {
 """
 
 
+class ExclusiveThreadingHTTPServer(ThreadingHTTPServer):
+    """Prevent multiple local renderer processes from sharing one Windows port."""
+
+    def server_bind(self) -> None:
+        if os.name == "nt":
+            self.allow_reuse_address = False
+            exclusive = getattr(socket, "SO_EXCLUSIVEADDRUSE", None)
+            if exclusive is not None:
+                self.socket.setsockopt(socket.SOL_SOCKET, exclusive, 1)
+        super().server_bind()
+
+
 class RenderRequestHandler(BaseHTTPRequestHandler):
     registry = TemplateRegistry()
     jobs = JobStore()
@@ -1413,7 +1427,7 @@ def _design_asset_count(assets: object) -> int:
 
 def main() -> int:
     args = parse_args()
-    server = ThreadingHTTPServer((args.host, args.port), RenderRequestHandler)
+    server = ExclusiveThreadingHTTPServer((args.host, args.port), RenderRequestHandler)
     print(f"Renderer service listening on http://{args.host}:{args.port}")
     server.serve_forever()
     return 0
