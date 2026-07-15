@@ -158,6 +158,56 @@
       "F11",
       "F12"
     ],
+    "font_option_styles": {
+      "F1": {
+        "font_name": "Milkshake",
+        "font_family": "Milkshake"
+      },
+      "F2": {
+        "font_name": "GrafolitaScriptW01-Bold",
+        "font_family": "GrafolitaScriptW01-Bold"
+      },
+      "F3": {
+        "font_name": "Austral",
+        "font_family": "Austral"
+      },
+      "F4": {
+        "font_name": "PapernotesRegular",
+        "font_family": "Papernotes"
+      },
+      "F5": {
+        "font_name": "BabyStory",
+        "font_family": "Baby Story"
+      },
+      "F6": {
+        "font_name": "LucidaHandwritingStd",
+        "font_family": "Lucida Handwriting Std"
+      },
+      "F7": {
+        "font_name": "MonotypeCorsiva",
+        "font_family": "Monotype Corsiva"
+      },
+      "F8": {
+        "font_name": "Charline",
+        "font_family": "Charline"
+      },
+      "F9": {
+        "font_name": "DancingScript-Regular",
+        "font_family": "Dancing Script"
+      },
+      "F10": {
+        "font_name": "Alice-Regular",
+        "font_family": "Alice"
+      },
+      "F11": {
+        "font_name": "Beloved-Teacher",
+        "font_family": "Beloved Teacher"
+      },
+      "F12": {
+        "font_name": "TimesNewRomanPSMT",
+        "font_family": "Times New Roman"
+      }
+    },
     "design_options": [],
     "design_settings": {},
     "design_font_options": [],
@@ -182,7 +232,12 @@
     "render_layout": {
       "type": "name_columns",
       "output_mode": "single_file",
+      "packing": "masonry",
+      "artboard_mode": "single",
+      "max_artboard_size_mm": 5750,
       "page_rows": 6,
+      "page_height_mm": 1320,
+      "card_gap_mm": 8,
       "width_mm": 100,
       "height_mm": 220,
       "margin_mm": 10,

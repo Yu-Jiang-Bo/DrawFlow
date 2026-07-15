@@ -92,6 +92,22 @@ def test_builds_generic_task_from_bindings_and_split_variables(tmp_path):
     assert task["output"]["color_mode"] == "CMYK"
 
 
+def test_passes_declared_font_option_styles_to_generic_task(tmp_path):
+    _, template = make_template(tmp_path)
+    order_path = tmp_path / "orders.xlsx"
+    make_orders(order_path)
+    rules = base_rules()
+    rules["font_option_styles"] = {
+        "F2": {"font_name": "Milkshake", "font_family": "Milkshake"}
+    }
+
+    task = build_generic_render_task(template, rules, order_path, tmp_path / "output.ai")
+
+    assert task["font_option_styles"] == {
+        "F2": {"font_name": "Milkshake", "font_family": "Milkshake"}
+    }
+
+
 def test_generic_task_resolves_case_and_common_chinese_order_columns(tmp_path):
     _, template = make_template(tmp_path)
     order_path = tmp_path / "orders.xlsx"
@@ -242,6 +258,9 @@ def test_name_columns_layout_groups_t_department_by_order_and_color(tmp_path):
         "slot_mappings": [{"field": "text", "slot": "Name"}],
         "render_layout": {
             "type": "name_columns",
+            "packing": "masonry",
+            "page_height_mm": 1320,
+            "card_gap_mm": 8,
             "default": {"group_by": ["row"]},
             "department_overrides": {"T": {"group_by": ["order_no", "color"], "header_fields": ["order_no", "color"]}},
         },
@@ -250,6 +269,8 @@ def test_name_columns_layout_groups_t_department_by_order_and_color(tmp_path):
     task = build_generic_render_task(template, rules, order_path, tmp_path / "output.ai")
 
     assert task["render_layout"]["type"] == "name_columns"
+    assert task["render_layout"]["packing"] == "masonry"
+    assert task["render_layout"]["page_height_mm"] == 1320
     assert len(task["orders"]) == 3
     assert [member["order_no"] for member in task["orders"][0]["layout_members"]] == ["A-1", "A-1"]
     assert task["orders"][0]["layout_mode"]["header_fields"] == ["order_no", "color"]

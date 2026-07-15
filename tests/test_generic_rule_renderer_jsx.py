@@ -25,6 +25,29 @@ def test_generic_renderer_cycles_configured_name_colors_only():
     assert "function createNameColumnsDocument(task, order)" in source
     assert "function drawNameColumns(doc, order, layout, fontSource, cell)" in source
     assert "function createNameColumnsSheet(task)" in source
+    assert "app.documents.add(DocumentColorSpace.RGB, pageWidth, height)" in source
+    assert 'String(layout.artboard_mode || "") === "single"' in source
+    assert "function planNameColumnsSingleArtboard(orders, layout, requestedColumns, cellWidth, maxArtboardSize)" in source
+    assert "function planNameColumnsMasonryUnbounded(orders, layout, columns)" in source
+    assert "function drawCardBackground(doc, left, top, width, height, color)" in source
+    assert "drawCardBackground(doc, left, cardTop, width, height, cardBackground)" in source
+    assert "function addNameBlockText(doc, parts, x, y, size, lineGap, actions, legacyCycle, fontSource)" in source
+    assert 'parts.join("\\r")' in source
+    assert "function applyNameBlockColors(frame, parts, actions, legacyCycle)" in source
+    assert "function applyNameBlockBoldness(frame, actions)" in source
+    assert "function applyLineBoldness(frame, value)" in source
+    assert "var lines = frame.lines;" in source
+    assert "function fittedNameSize(parts, baseSize, maxWidth, minSize)" in source
+    assert "function fitLayoutTextWidth(frame, maxWidth, minSize)" in source
+    assert "function estimatedLayoutTextWidth(text, size)" in source
+    assert "function fontStyleForSelection(source, targetDoc, cache, selected, declaredStyles)" in source
+    assert "function applyLayoutTextStyle(style, target)" in source
+    assert "function applyConfiguredFontStyle(config, target)" in source
+    assert "function applyFontByName(target, fontName)" in source
+    assert "app.textFonts.getByName" not in source
+    assert "function createFontPrototype(sourceFrame, targetDoc)" in source
+    assert "function removeFontPrototypes(cache)" in source
+    assert "fontSource.prototype.duplicate(doc.layers[0], ElementPlacement.PLACEATEND)" in source
     assert "function colorForNamePart(actions, index, legacyCycle)" in source
     assert "task.allow_unnamed_name_fallback === true" in source
     assert 'String(variable.target || "") + "_ANCHOR"' in source
@@ -35,6 +58,8 @@ def test_generic_renderer_cycles_configured_name_colors_only():
     assert "function applyRuleActions(frame, actions)" in source
     assert 'String(action.type || "") === "fill_color"' in source
     assert 'String(action.type || "") === "stroke_width"' in source
+    assert "applyFrameBoldness(frame, action.value)" in source
+    assert "function applyFrameBoldness(frame, value)" in source
     assert "Unsupported compiled rule action" in source
     assert 'String(variable.target || "") !== "Name"' in source
     assert "var rgb = hexColor(colors[partIndex % colors.length]);" in source
@@ -51,26 +76,80 @@ def test_generic_renderer_cycles_configured_name_colors_only():
     assert "settings.rotation_deg" in source
     assert "settings.scale_percent" in source
     assert "settings.offset_x_mm" in source
+    assert "options.compatibility = Compatibility.ILLUSTRATOR8;" in source
+    assert "options.pdfCompatible = false;" in source
+    assert "options.compressed = false;" in source
+    assert "options.compressed = true;" not in source
+    assert "doc.pathItems.rectangle(height, 0, width, height)" not in source
     outline_body = source[source.index("if (transforms.outline_text)"):source.index("function applyOutputSettings")]
     assert "findPageItemsByName" in outline_body
     assert "outlineItems.length" in outline_body
     assert "JJMB" not in source
 
 
-def test_generic_renderer_javascript_parses_in_node():
-    node = shutil.which("node")
-    if not node:
-        pytest.skip("Node.js is unavailable")
-    source = SCRIPT.read_text(encoding="utf-8").replace("#target illustrator", "", 1)
+def assert_javascript_parses_in_node(node, source, tmp_path):
+    source_file = tmp_path / "source.js"
+    source_file.write_text(source, encoding="utf-8")
 
-    result = subprocess.run(
-        [node, "-e", "new Function(process.argv[1]);", source],
+    return subprocess.run(
+        [
+            node,
+            "-e",
+            "const fs = require('fs'); new Function(fs.readFileSync(process.argv[1], 'utf8'));",
+            str(source_file),
+        ],
         capture_output=True,
         text=True,
         check=False,
     )
 
+
+def test_generic_renderer_javascript_parses_in_node(tmp_path):
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node.js is unavailable")
+    source = SCRIPT.read_text(encoding="utf-8").replace("#target illustrator", "", 1)
+
+    result = assert_javascript_parses_in_node(node, source, tmp_path)
+
     assert result.returncode == 0, result.stderr
+
+
+def test_single_artboard_masonry_expands_columns_to_fit_canvas():
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node.js is unavailable")
+    script_path = SCRIPT.resolve()
+    harness = f"""
+const fs = require('fs');
+let source = fs.readFileSync({json.dumps(str(script_path))}, 'utf8').replace(/^#target.*\\r?\\n/, '');
+source = source.replace(
+  '(function () {{',
+  '(function () {{ global.__planner = planNameColumnsSingleArtboard; global.__mmToPt = mmToPt; return;'
+);
+new Function(source)();
+const layout = {{
+  margin_mm: 10,
+  header_height_mm: 24,
+  footer_height_mm: 12,
+  card_gap_mm: 8,
+  default: {{ header_fields: ['order_no'], footer_field: 'year' }},
+  name: {{ delimiter: '|', font_size_pt: 72, line_gap_mm: 8 }}
+}};
+const orders = Array.from({{ length: 144 }}, (_, index) => ({{
+  order_no: String(index + 1),
+  year: '2026',
+  variables: [{{ target: 'Name', value: 'A|B|C|D' }}]
+}}));
+const plan = global.__planner(orders, layout, 4, global.__mmToPt(100), global.__mmToPt(5750));
+if (!plan) throw new Error('single artboard plan not found');
+console.log(JSON.stringify({{ pages: plan.pages, columns: plan.columns, items: plan.items.length }}));
+"""
+
+    result = subprocess.run([node, "-e", harness], capture_output=True, text=True, check=False)
+
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == {"pages": 1, "columns": 5, "items": 144}
 
 
 def test_grouped_renderer_applies_each_task_font_style_before_outlining():
@@ -105,18 +184,13 @@ def test_grouped_renderer_removes_diagnostic_frames_from_design_assets():
     assert "Number(color.magenta) >= 70" in source
 
 
-def test_grouped_renderer_javascript_parses_in_node():
+def test_grouped_renderer_javascript_parses_in_node(tmp_path):
     node = shutil.which("node")
     if not node:
         pytest.skip("Node.js is unavailable")
     source = GROUPED_SCRIPT.read_text(encoding="utf-8").replace("#target illustrator", "", 1)
 
-    result = subprocess.run(
-        [node, "-e", "new Function(process.argv[1]);", source],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    result = assert_javascript_parses_in_node(node, source, tmp_path)
 
     assert result.returncode == 0, result.stderr
 

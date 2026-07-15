@@ -102,6 +102,7 @@ def build_generic_render_task(
         "dimensions": _mapping(rules.get("dimensions")),
         "text_policies": _mapping(rules.get("text_policies")),
         "render_layout": render_layout,
+        "font_option_styles": _mapping(rules.get("font_option_styles")),
         "allow_unnamed_name_fallback": bool(rules.get("allow_unnamed_name_fallback", False)),
         "layout": {"columns": max(1, int(columns)), "gap_mm": 8.0, "margin_mm": 8.0},
         "output": _mapping(rules.get("output")),
