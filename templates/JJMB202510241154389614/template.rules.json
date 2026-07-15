@@ -182,6 +182,7 @@
     "render_layout": {
       "type": "name_columns",
       "output_mode": "single_file",
+      "page_rows": 6,
       "width_mm": 100,
       "height_mm": 220,
       "margin_mm": 10,

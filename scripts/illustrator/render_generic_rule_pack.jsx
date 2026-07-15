@@ -76,12 +76,18 @@
         var cellWidth = mmToPt(Number(layout.width_mm || 100));
         var cellHeight = mmToPt(Number(layout.height_mm || 220));
         var columns = Math.max(1, Number(task.layout && task.layout.columns || 4));
-        var rows = Math.ceil(task.orders.length / columns);
-        var width = cellWidth * columns;
-        var height = cellHeight * rows;
+        var pageRows = Math.max(1, Number(layout.page_rows || 6));
+        var pageSize = columns * pageRows;
+        var pages = Math.ceil(task.orders.length / pageSize);
+        var pageWidth = cellWidth * columns;
+        var height = cellHeight * pageRows;
+        var width = pageWidth * pages;
         var source = app.open(File(String(task.template_ai)));
         try {
             var doc = app.documents.add(DocumentColorSpace.RGB, width, height);
+            for (var pageIndex = 1; pageIndex < pages; pageIndex++) {
+                doc.artboards.add([pageIndex * pageWidth, height, (pageIndex + 1) * pageWidth, 0]);
+            }
             var backgroundColor = rgbColor(String(layout.background_color || ""));
             if (backgroundColor) {
                 var background = doc.pathItems.rectangle(height, 0, width, height);
@@ -92,10 +98,12 @@
                 var order = task.orders[index];
                 var selected = String(order.selections && order.selections.font || "");
                 var fontSource = selected ? firstTextFrame(findPageItemByName(source, selected)) : null;
-                var column = index % columns;
-                var row = Math.floor(index / columns);
+                var page = Math.floor(index / pageSize);
+                var pageItemIndex = index % pageSize;
+                var column = pageItemIndex % columns;
+                var row = Math.floor(pageItemIndex / columns);
                 drawNameColumns(doc, order, layout, fontSource, {
-                    left: column * cellWidth,
+                    left: page * pageWidth + column * cellWidth,
                     top: height - row * cellHeight,
                     width: cellWidth,
                     height: cellHeight
