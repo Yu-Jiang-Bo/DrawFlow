@@ -435,38 +435,31 @@ INDEX_HTML = """<!doctype html>
       font-size: 12px;
       line-height: 1.5;
     }
-    .name-color-cycle-grid {
-      display: grid;
-      grid-template-columns: minmax(150px, 0.42fr) minmax(0, 1fr);
-      gap: 12px 16px;
-      align-items: start;
+    .special-rule-editor {
+      padding: 16px;
+      border: 1px solid #cfdbe7;
+      border-radius: 9px;
+      background: linear-gradient(145deg, #f7fafc 0%, #ffffff 72%);
     }
-    .name-color-list {
-      display: grid;
-      gap: 8px;
+    .special-rule-editor textarea {
+      min-height: 130px;
+      resize: vertical;
+      line-height: 1.65;
     }
-    .name-color-row {
-      display: grid;
-      grid-template-columns: 42px minmax(0, 1fr) 36px;
-      gap: 8px;
+    .special-rule-actions {
+      display: flex;
       align-items: center;
+      gap: 12px;
+      margin-top: 12px;
+      flex-wrap: wrap;
     }
-    .name-color-row input[type="color"] {
-      width: 42px;
-      min-width: 42px;
-      min-height: 38px;
-      padding: 3px;
-      cursor: pointer;
-    }
-    .name-color-row input[data-name-color-value] {
-      min-width: 0;
-      text-transform: uppercase;
-    }
-    .name-color-empty {
-      margin: 0;
-      padding: 7px 0;
+    .special-rule-status {
       color: var(--muted);
       font-size: 12px;
+    }
+    .special-rule-preview {
+      margin-top: 12px;
+      white-space: pre-wrap;
     }
     .dimension-mode-card {
       display: grid;
@@ -523,9 +516,6 @@ INDEX_HTML = """<!doctype html>
     .structured-row.sequence {
       grid-template-columns: minmax(120px, 0.9fr) minmax(110px, 0.8fr) minmax(70px, 0.45fr) minmax(120px, 0.9fr) minmax(80px, 0.5fr) minmax(80px, 0.5fr) 42px;
     }
-    .structured-row.font-style {
-      grid-template-columns: minmax(220px, 1fr) minmax(130px, 0.45fr) 42px;
-    }
     .structured-row label {
       margin-bottom: 4px;
     }
@@ -549,14 +539,6 @@ INDEX_HTML = """<!doctype html>
       border-color: #efb0aa;
       color: var(--danger);
       background: #fff7f6;
-    }
-    .font-style-empty {
-      margin: 0;
-      padding: 10px 12px;
-      border: 1px dashed var(--line);
-      border-radius: 7px;
-      color: var(--muted);
-      font-size: 12px;
     }
     .advanced-rule-box {
       margin-top: 14px;
@@ -877,7 +859,6 @@ INDEX_HTML = """<!doctype html>
       .preview-grid,
       .dimension-mode-card,
       .fixed-dimension-fields,
-      .name-color-cycle-grid,
       .structured-row,
       .structured-row.two,
       .structured-row.three,
@@ -1004,7 +985,6 @@ INDEX_HTML = """<!doctype html>
                 </div>
                 <div class="actions">
                   <button class="btn-primary" id="uploadScanTemplateBtn" type="button">上传并扫描 .ai 模板</button>
-                  <span class="extract-status" id="uploadScanStatus">选择文件后从这里开始</span>
                 </div>
               </div>
               <div class="field-full">
@@ -1155,18 +1135,6 @@ INDEX_HTML = """<!doctype html>
 
                 <div class="rule-section">
                   <div class="rule-section-head">
-                    <h3 class="rule-section-title">Name 多色循环（可选）</h3>
-                    <button class="btn-subtle rule-add-btn" id="addNameColorBtn" type="button">+ 添加颜色</button>
-                  </div>
-                  <p class="rule-section-note">仅作用于名称恰好为 Name 的文字对象。系统按分隔符拆分内容，再按颜色顺序循环；支持 #RRGGBB 或常见英文颜色名，例如 Red、Black、Gold。</p>
-                  <div class="name-color-cycle-grid">
-                    <div><label for="nameColorDelimiter">分隔符</label><input id="nameColorDelimiter" value="|" placeholder="例如 |" /></div>
-                    <div><label>循环颜色</label><div class="name-color-list" id="nameColorRows"></div></div>
-                  </div>
-                </div>
-
-                <div class="rule-section">
-                  <div class="rule-section-head">
                     <h3 class="rule-section-title">多个文字位置（可选）</h3>
                     <button class="btn-subtle rule-add-btn" id="addTextSequenceRowBtn" type="button">+ 添加多个文字位置</button>
                   </div>
@@ -1204,12 +1172,17 @@ INDEX_HTML = """<!doctype html>
                 </div>
 
                 <div class="rule-section">
-                  <div class="rule-section-head">
-                    <h3 class="rule-section-title">字体加粗规则（可选）</h3>
-                    <button class="btn-subtle rule-add-btn" id="addFontStyleRuleBtn" type="button">+ 添加字体加粗规则</button>
+                  <h3 class="rule-section-title">模板特殊规则（可选）</h3>
+                  <p class="rule-section-note">尺寸、选项组、资源映射和文字来源仍在上方填写。这里只描述无法用固定项表达的特殊渲染逻辑，系统编译后会展示实际执行摘要，确认无误才会保存。</p>
+                  <div class="special-rule-editor">
+                    <label for="templateSpecialRules">用自然语言描述特殊规则</label>
+                    <textarea id="templateSpecialRules" placeholder="例如：Name 列按 | 分隔，奇数位渲染为红色，偶数位渲染为白色；F2、F3 使用 0.4 pt 描边加粗。"></textarea>
+                    <div class="special-rule-actions">
+                      <button class="btn-subtle" id="compileSpecialRulesBtn" type="button">编译特殊规则</button>
+                      <span class="special-rule-status" id="specialRuleStatus">未配置特殊规则</span>
+                    </div>
+                    <div class="preview-box special-rule-preview" id="specialRulePreview">未配置特殊规则，渲染时保持模板默认效果。</div>
                   </div>
-                  <p class="rule-section-note">为一组字体应用相同的描边加粗值。多个字体用逗号分隔，例如 F2, F3, F10；可无限添加规则，数值单位为 pt。</p>
-                  <div class="structured-table" id="fontStyleRuleRows"></div>
                 </div>
 
                 <div class="rule-section">
@@ -1406,7 +1379,9 @@ INDEX_HTML = """<!doctype html>
       assetMappingsTouched: false,
       dimensionRowsTouched: false,
       textSequenceRowsTouched: false,
-      templateRulesDescriptionDirty: false,
+      specialRulesDirty: false,
+      compiledRuleAst: null,
+      specialRuleCompileResult: null,
       pendingTemplateRemovalId: ""
     };
     let progressTimer = null;
@@ -1498,6 +1473,8 @@ INDEX_HTML = """<!doctype html>
       document.getElementById("checkTemplateRuleBtn").addEventListener("click", checkTemplateRule);
       document.getElementById("saveTemplateBtn").addEventListener("click", saveTemplate);
       document.getElementById("uploadScanTemplateBtn").addEventListener("click", uploadAndScanTemplate);
+      document.getElementById("compileSpecialRulesBtn").addEventListener("click", compileSpecialRules);
+      document.getElementById("templateSpecialRules").addEventListener("input", handleSpecialRulesInput);
       document.getElementById("addOptionGroupBtn").addEventListener("click", () => {
         state.optionGroupsTouched = true;
         addOptionGroupRow();
@@ -1509,8 +1486,6 @@ INDEX_HTML = """<!doctype html>
       document.getElementById("restoreSuggestionsBtn").addEventListener("click", restoreRuleSuggestions);
       document.getElementById("rescanTemplateBtn").addEventListener("click", rescanTemplate);
       document.getElementById("addDimensionRowBtn").addEventListener("click", addDimensionRow);
-      document.getElementById("addNameColorBtn").addEventListener("click", addNameColor);
-      document.getElementById("addFontStyleRuleBtn").addEventListener("click", addFontStyleRule);
       document.getElementById("dimensionMode").addEventListener("change", () => {
         state.dimensionRowsTouched = true;
         syncDimensionMode();
@@ -1550,14 +1525,11 @@ INDEX_HTML = """<!doctype html>
         "#textSourceColumn",
         "#textTargetName",
         "#textFitPolicy",
-        "#nameColorDelimiter",
         "#templateProfile",
         "#orderBindingsJson",
         "#assetMappingsJson",
         "#textPoliciesJson",
-        "#outputTransformsJson",
-        "#templateAdvancedRules",
-        "#templateExceptionStatus"
+        "#outputTransformsJson"
       ];
       document.querySelectorAll(selectors.join(",")).forEach(element => {
         element.addEventListener("input", renderTemplateRulePreview);
@@ -1586,39 +1558,6 @@ INDEX_HTML = """<!doctype html>
         if (!button) return;
         button.closest(".structured-row").remove();
         state.assetMappingsTouched = true;
-        renderTemplateRulePreview();
-      });
-      const nameColorRows = document.getElementById("nameColorRows");
-      nameColorRows.addEventListener("input", event => {
-        const row = event.target.closest(".name-color-row");
-        if (!row) return;
-        const picker = row.querySelector("[data-name-color-picker]");
-        const value = row.querySelector("[data-name-color-value]");
-        if (event.target.matches("[data-name-color-picker]") && value) {
-          value.value = event.target.value.toUpperCase();
-        } else if (event.target.matches("[data-name-color-value]") && picker) {
-          const color = normalizeNameColorValue(event.target.value);
-          if (color) picker.value = color;
-        }
-        renderTemplateRulePreview();
-      });
-      nameColorRows.addEventListener("click", event => {
-        const button = event.target.closest("[data-remove-name-color]");
-        if (!button) return;
-        const row = button.closest(".name-color-row");
-        if (row) row.remove();
-        if (!nameColorRows.querySelector(".name-color-row")) setNameColorRows([]);
-        renderTemplateRulePreview();
-      });
-      const fontStyleRuleRows = document.getElementById("fontStyleRuleRows");
-      ["input", "change"].forEach(eventName => {
-        fontStyleRuleRows.addEventListener(eventName, renderTemplateRulePreview);
-      });
-      fontStyleRuleRows.addEventListener("click", event => {
-        const button = event.target.closest("[data-remove-font-style-rule]");
-        if (!button) return;
-        const row = button.closest(".structured-row");
-        if (row) row.remove();
         renderTemplateRulePreview();
       });
       ["dimensionRows", "textSequenceRows"].forEach(id => {
@@ -1661,81 +1600,103 @@ INDEX_HTML = """<!doctype html>
       renderTemplateRulePreview();
     }
 
-    function addNameColor() {
-      const colors = Array.from(document.querySelectorAll("[data-name-color-value]"))
-        .map(input => input.value.trim());
-      setNameColorRows(colors.length ? [...colors, ""] : ["", ""], { includeEmpty: true });
+    function handleSpecialRulesInput() {
+      const text = document.getElementById("templateSpecialRules").value.trim();
+      state.compiledRuleAst = null;
+      state.specialRuleCompileResult = null;
+      state.specialRulesDirty = Boolean(text);
+      document.getElementById("specialRuleStatus").textContent = text ? "内容已修改，需要重新编译" : "未配置特殊规则";
+      renderSpecialRulePreview();
       renderTemplateRulePreview();
     }
 
-    function addFontStyleRule() {
-      const rules = collectFontStyleRules({ includeEmpty: true });
-      rules.push(blankFontStyleRule());
-      setFontStyleRuleRows(rules, { includeEmpty: true });
-      renderTemplateRulePreview();
+    async function compileSpecialRules() {
+      const templateId = document.getElementById("templateId").value.trim();
+      const naturalText = document.getElementById("templateSpecialRules").value.trim();
+      if (!templateId) {
+        setMessage("templateSaveMessage", "请先填写模板 ID", "error");
+        return;
+      }
+      if (!naturalText) {
+        state.compiledRuleAst = null;
+        state.specialRuleCompileResult = null;
+        state.specialRulesDirty = false;
+        renderSpecialRulePreview();
+        renderTemplateRulePreview();
+        return;
+      }
+      const status = document.getElementById("specialRuleStatus");
+      status.textContent = "正在编译特殊规则";
+      try {
+        const result = await postJson("/api/templates/rules/compile", {
+          template_id: templateId,
+          natural_text: naturalText
+        });
+        state.specialRuleCompileResult = result;
+        const errors = Array.isArray(result.errors) ? result.errors : [];
+        const ast = isPlainObject(result.ast) && Array.isArray(result.ast.rules) && result.ast.rules.length
+          ? result.ast
+          : null;
+        if (!ast && !errors.length) {
+          errors.push("编译服务未返回可执行规则，请修改描述后重试");
+        }
+        if (errors.length) {
+          state.compiledRuleAst = null;
+          state.specialRulesDirty = true;
+          status.textContent = "编译未通过";
+          setMessage("templateSaveMessage", errors[0], "error");
+        } else {
+          state.compiledRuleAst = ast;
+          state.specialRulesDirty = false;
+          status.textContent = "已编译，等待保存确认";
+          setMessage("templateSaveMessage", "特殊规则已编译，请核对执行摘要后保存", "ok");
+        }
+        renderSpecialRulePreview();
+        renderTemplateRulePreview();
+      } catch (error) {
+        state.compiledRuleAst = null;
+        state.specialRulesDirty = true;
+        status.textContent = "编译失败";
+        setMessage("templateSaveMessage", String(error.message || error), "error");
+      }
     }
 
-    function setNameColorRows(colors, options = {}) {
-      const includeEmpty = Boolean(options.includeEmpty);
-      const values = Array.isArray(colors)
-        ? colors.map(color => String(color || "").trim()).filter(color => includeEmpty || color)
-        : [];
-      const target = document.getElementById("nameColorRows");
-      target.innerHTML = values.length
-        ? values.map((color, index) => renderNameColorRow(color, index)).join("")
-        : '<p class="name-color-empty">未配置循环颜色，Name 会保留模板原有颜色。</p>';
+    function renderSpecialRulePreview() {
+      const target = document.getElementById("specialRulePreview");
+      const result = state.specialRuleCompileResult;
+      const lines = [];
+      if (result) {
+        const summary = Array.isArray(result.summary) ? result.summary : [];
+        const errors = Array.isArray(result.errors) ? result.errors : [];
+        const warnings = Array.isArray(result.warnings) ? result.warnings : [];
+        lines.push(...summary.map(item => `执行：${item}`));
+        lines.push(...errors.map(item => `阻断：${item}`));
+        lines.push(...warnings.map(item => `提示：${item}`));
+      } else {
+        lines.push(...describeSpecialRuleAst(state.compiledRuleAst));
+      }
+      target.textContent = lines.length ? lines.join("\\n") : "未配置特殊规则，渲染时保持模板默认效果。";
     }
 
-    function renderNameColorRow(color, index) {
-      const value = String(color || "").trim();
-      const pickerValue = normalizeNameColorValue(value) || "#000000";
-      return `
-        <div class="name-color-row">
-          <input type="color" data-name-color-picker value="${pickerValue}" aria-label="第 ${index + 1} 个循环颜色" />
-          <input data-name-color-value value="${escapeHtml(value)}" placeholder="#RRGGBB 或 Red" aria-label="第 ${index + 1} 个循环颜色代码" />
-          <button class="row-remove-btn" type="button" data-remove-name-color aria-label="删除第 ${index + 1} 个循环颜色">×</button>
-        </div>
-      `;
-    }
-
-    function normalizeNameColorValue(value) {
-      const color = String(value || "").trim();
-      if (/^#[0-9a-f]{6}$/i.test(color)) return color.toUpperCase();
-      const aliases = {
-        black: "#000000",
-        white: "#FFFFFF",
-        red: "#FF0000",
-        blue: "#0000FF",
-        green: "#008000",
-        darkgreen: "#005A37",
-        navy: "#0A1848",
-        pink: "#F4AAC8",
-        gold: "#D4AF37",
-        silver: "#C0C0C0",
-        rosegold: "#B76E79",
-        gray: "#808080",
-        grey: "#808080",
-        yellow: "#FFFF00",
-        orange: "#FFA500",
-        purple: "#800080",
-        brown: "#A52A2A"
-      };
-      return aliases[color.replace(/[\\s_-]+/g, "").toLowerCase()] || "";
-    }
-
-    function collectNameColors() {
-      return Array.from(document.querySelectorAll("[data-name-color-value]"))
-        .map(input => normalizeNameColorValue(input.value) || input.value.trim())
-        .filter(Boolean);
-    }
-
-    function collectNameColorCycle() {
-      const colors = collectNameColors();
-      if (!colors.length) return {};
-      return {
-        delimiter: document.getElementById("nameColorDelimiter").value.trim(),
-        colors
-      };
+    function describeSpecialRuleAst(ast) {
+      const rules = ast && Array.isArray(ast.rules) ? ast.rules : [];
+      return rules.map(rule => {
+        const target = String((rule.target && rule.target.name) || "所有文字对象");
+        const selector = rule.selector || {};
+        const operations = Array.isArray(rule.operations) ? rule.operations : [];
+        const fontCondition = (rule.conditions || []).find(item => item && item.field === "font");
+        const fonts = fontCondition && Array.isArray(fontCondition.values) ? fontCondition.values.join("、") : "";
+        return operations.map(operation => {
+          if (operation.type === "fill_color") {
+            const colors = Array.isArray(operation.values) ? operation.values.join(" / ") : "";
+            return `已保存：${target} 按 ${selector.delimiter || "整体"} 使用颜色 ${colors}`;
+          }
+          if (operation.type === "stroke_width") {
+            return `已保存：${fonts ? `字体 ${fonts}` : target} 使用 ${operation.value} pt 描边加粗`;
+          }
+          return `已保存：${target} 包含一条特殊规则`;
+        }).join("；");
+      }).filter(Boolean);
     }
 
     function removeDynamicRuleRow(button, rowType) {
@@ -2234,105 +2195,9 @@ INDEX_HTML = """<!doctype html>
       target.innerHTML = renderTemplateRuleCheck(draft);
     }
 
-    async function extractTemplateRules() {
-      const templateId = document.getElementById("templateId").value.trim();
-      const description = document.getElementById("templateRuleDescription").value.trim();
-      if (!templateId || !description) {
-        setMessage("templateSaveMessage", "请先填写模板 ID 和补充说明", "error");
-        return;
-      }
-      const status = document.getElementById("templateExtractionStatus");
-      status.textContent = "正在生成补充草稿";
-      try {
-        const result = await postJson("/api/templates/rules/draft", {
-          template_id: templateId,
-          template_type: inferTemplateTypeFromForm(),
-          natural_text: description,
-          asset_count: uploadedAssetCount()
-        });
-        const current = buildTemplateRulePayload();
-        const draft = result.draft || {};
-        const merged = { ...current };
-        Object.entries(draft).forEach(([key, value]) => {
-          if (key !== "natural_text" && key !== "raw_text" && !hasConfiguredRuleValue(merged[key]) && hasConfiguredRuleValue(value)) {
-            merged[key] = value;
-          }
-        });
-        merged.natural_text = description;
-        const recognizedItems = Array.isArray(result.summary) ? result.summary : [];
-        const storedAsException = recognizedItems.length === 0;
-        if (storedAsException) {
-          merged.exceptions = mergeExceptionNote(merged.exceptions, description, "manual_review");
-        }
-        state.templateRuleBaseConfig = merged;
-        state.optionGroupsTouched = false;
-        state.dimensionRowsTouched = false;
-        state.textSequenceRowsTouched = false;
-        fillTemplateRuleFields(merged);
-        if (storedAsException) {
-          appendAdvancedExceptionNote(description);
-          document.getElementById("templateExceptionStatus").value = "manual_review";
-        }
-        setHiddenRuleJson("orderBindingsJson", merged.order_bindings || {});
-        setHiddenRuleJson("assetMappingsJson", merged.asset_mappings || []);
-        setHiddenRuleJson("textPoliciesJson", merged.text_policies || {});
-        setHiddenRuleJson("outputTransformsJson", merged.transforms || {});
-        state.templateRulesDescriptionDirty = false;
-        renderTemplateExtractionFeedback(result, storedAsException);
-        renderTemplateRulePreview();
-        status.textContent = storedAsException ? "已作为待处理特殊规则保留" : "已生成补充草稿，未覆盖固定项";
-        setMessage("templateSaveMessage", storedAsException ? "补充说明已保留为特殊规则；当前尚未自动参与渲染，需处理后再启用" : "补充规则草稿已生成，请核对后再检查", storedAsException ? "warn" : "ok");
-      } catch (error) {
-        status.textContent = "补充草稿生成失败";
-        setMessage("templateSaveMessage", String(error.message || error), "error");
-      }
-    }
-
-    function hasConfiguredRuleValue(value) {
-      if (Array.isArray(value)) return value.length > 0;
-      if (value && typeof value === "object") return Object.keys(value).length > 0;
-      return String(value == null ? "" : value).trim().length > 0;
-    }
-
-    function mergeExceptionNote(existing, note, status = "manual_review") {
-      const result = { ...(isPlainObject(existing) ? existing : {}) };
-      const text = String(note || "").trim();
-      if (!text) return result;
-      const current = String(result.note || "").trim();
-      result.note = current && !current.includes(text) ? `${current}\n${text}` : (current || text);
-      result.status = status;
-      return result;
-    }
-
-    function appendAdvancedExceptionNote(note) {
-      const input = document.getElementById("templateAdvancedRules");
-      if (!input) return;
-      const text = String(note || "").trim();
-      if (!text) return;
-      const current = input.value.trim();
-      input.value = current && !current.includes(text) ? `${current}\n${text}` : (current || text);
-    }
-
     function setHiddenRuleJson(id, value) {
       const input = document.getElementById(id);
       if (input) input.value = JSON.stringify(value == null ? {} : value);
-    }
-
-    function renderTemplateExtractionFeedback(result, storedAsException = false) {
-      const summary = Array.isArray(result.summary) ? result.summary : [];
-      const unresolved = Array.isArray(result.unresolved) ? result.unresolved : [];
-      const lines = [];
-      lines.push(summary.length ? "已转成固定规则草稿：" : "暂未识别到可直接转成固定项的规则。");
-      summary.forEach(item => lines.push(`- ${item}`));
-      if (storedAsException) {
-        lines.push("已保留为特殊规则说明：");
-        lines.push("- 这类规则目前不会自动参与渲染，已放入“特殊规则说明”并标记为待人工处理。");
-      }
-      if (unresolved.length) {
-        lines.push("如果你希望系统自动生成固定规则，还需要补充：");
-        unresolved.forEach(item => lines.push(`- ${item}`));
-      }
-      document.getElementById("templateExtractionSummary").textContent = lines.join("\\n");
     }
 
     async function checkTemplateRule() {
@@ -2463,8 +2328,7 @@ INDEX_HTML = """<!doctype html>
         order_bindings: "请在“文字内容设置”里填写订单内容列名",
         text_policies: "请填写文字变量规则，系统会自动生成基础文字适配策略",
         validation_sample: "请检查验证样例；未配置多区域拆分时可以留空",
-        name_color_cycle: "请在“Name 多色循环”中至少保留两个颜色，并填写分隔符；颜色可填 #RRGGBB 或 Red、Black、Gold 等英文名",
-        font_style_rules: "请检查“字体加粗规则”：每一条都需要目标字体集合和大于 0 的加粗值",
+        rule_ast: "请检查“模板特殊规则”的编译结果；说明修改后必须重新编译",
         exceptions: "当前模板仍有无法执行的旧规则，请将其改为页面中的固定规则后再保存",
         scan_failed: "请重新上传并扫描模板文件"
       };
@@ -2481,8 +2345,10 @@ INDEX_HTML = """<!doctype html>
       delete savedBaseConfig.effects;
       delete savedBaseConfig.text_sequence_styles;
       delete savedBaseConfig.notes;
+      delete savedBaseConfig.name_color_cycle;
+      delete savedBaseConfig.font_style_rules;
       const textRule = collectTextContentRule(baseConfig);
-      const nameColorCycle = collectNameColorCycle();
+      const specialRulesText = document.getElementById("templateSpecialRules").value.trim();
       const optionGroups = collectOptionGroups();
       const dimensionMode = document.getElementById("dimensionMode").value;
       const collectedDimensions = dimensionMode === "fixed" ? collectFixedDimensions() : collectDimensions();
@@ -2512,7 +2378,6 @@ INDEX_HTML = """<!doctype html>
         slotMappings,
         state.textSequenceRowsTouched && !slotMappings.length ? [] : baseConfig.slots
       );
-      const fontStyleRules = collectFontStyleRules();
       const fontOptions = optionsByRole(optionGroups, "font_options");
       const designFontOptions = optionsByRole(optionGroups, "design_font_options");
       const designOptions = optionsByRole(optionGroups, "design_options");
@@ -2554,9 +2419,9 @@ INDEX_HTML = """<!doctype html>
         slot_mappings: slotMappings,
         order_bindings: textRule.source_column ? { text: textRule.source_column } : {},
         text_policies: { fit: textRule.fit },
-        name_color_cycle: nameColorCycle,
+        special_rules_text: specialRulesText,
+        rule_ast: state.compiledRuleAst || undefined,
         defaults,
-        font_style_rules: fontStyleRules,
         option_overrides: nonBoldOptionOverrides(baseConfig.option_overrides),
         output: {
           ...(isPlainObject(baseConfig.output) ? baseConfig.output : {}),
@@ -2847,76 +2712,6 @@ INDEX_HTML = """<!doctype html>
       return rows;
     }
 
-    function blankFontStyleRule() {
-      return { font_options: [], boldness: "" };
-    }
-
-    function normalizeFontStyleOptions(value) {
-      const source = Array.isArray(value) ? value.join(",") : String(value || "");
-      const seen = new Set();
-      return source.split(/[,\uFF0C;\uFF1B\\s]+/).map(item => item.trim()).filter(item => {
-        if (!item || seen.has(item)) return false;
-        seen.add(item);
-        return true;
-      });
-    }
-
-    function collectFontStyleRules(options = {}) {
-      const includeEmpty = Boolean(options.includeEmpty);
-      return Array.from(document.querySelectorAll("#fontStyleRuleRows [data-font-style-rule]")).map(row => {
-        const fontOptions = normalizeFontStyleOptions(row.querySelector("[data-font-style-options]").value);
-        const rawBoldness = row.querySelector("[data-font-style-boldness]").value.trim();
-        return {
-          font_options: fontOptions,
-          boldness: rawBoldness === "" ? null : Number(rawBoldness)
-        };
-      }).filter(rule => includeEmpty || rule.font_options.length || rule.boldness !== null);
-    }
-
-    function setFontStyleRuleRows(rules, options = {}) {
-      const includeEmpty = Boolean(options.includeEmpty);
-      const rows = Array.isArray(rules) ? rules.filter(rule => {
-        if (includeEmpty) return true;
-        return normalizeFontStyleOptions(rule && rule.font_options).length || String((rule && rule.boldness) ?? "").trim();
-      }) : [];
-      const target = document.getElementById("fontStyleRuleRows");
-      target.innerHTML = rows.length
-        ? rows.map((rule, index) => renderFontStyleRule(rule, index)).join("")
-        : '<p class="font-style-empty">未配置字体加粗规则。需要时可添加任意多组字体和加粗值。</p>';
-    }
-
-    function renderFontStyleRule(rule, index) {
-      const fontOptions = normalizeFontStyleOptions(rule && rule.font_options).join(", ");
-      const boldness = rule && rule.boldness !== null && rule.boldness !== undefined ? String(rule.boldness) : "";
-      return `
-        <div class="structured-row dynamic font-style" data-font-style-rule>
-          <div><label>目标字体集合</label><input data-font-style-options placeholder="例如 F2, F3, F10" value="${escapeHtml(fontOptions)}" /></div>
-          <div><label>加粗值（pt）</label><input data-font-style-boldness type="number" min="0.1" step="0.1" placeholder="例如 0.4" value="${escapeHtml(boldness)}" /></div>
-          <div><button class="row-remove-btn" type="button" data-remove-font-style-rule aria-label="删除第 ${index + 1} 条字体加粗规则">×</button></div>
-        </div>
-      `;
-    }
-
-    function legacyFontStyleRules(overrides) {
-      if (!isPlainObject(overrides)) return [];
-      const groups = new Map();
-      Object.entries(overrides).forEach(([option, override]) => {
-        if (!isPlainObject(override) || (override.action !== "bold" && override.bold !== true)) return;
-        const direct = Number(override.boldness);
-        const value = Number.isFinite(direct) && direct > 0
-          ? direct
-          : Number(String(override.value || "").match(/[-+]?(?:\\d+(?:\\.\\d*)?|\\.\\d+)/)?.[0]);
-        if (!Number.isFinite(value) || value <= 0) return;
-        const key = String(value);
-        if (!groups.has(key)) groups.set(key, []);
-        groups.get(key).push(option);
-      });
-      return Array.from(groups.entries()).map(([boldness, fontOptions]) => ({
-        font_options: fontOptions,
-        boldness: Number(boldness)
-      }));
-    }
-
     function inferTemplateTypeFromForm() {
       const existingTemplate = formTemplate();
       if (existingTemplate && existingTemplate.template_type) return existingTemplate.template_type;
@@ -2982,10 +2777,9 @@ INDEX_HTML = """<!doctype html>
           <div class="preview-chip"><span>尺寸/版式组</span><strong>${escapeHtml(displayOptions(draft.style_options))}</strong></div>
           <div class="preview-chip"><span>尺寸对象</span><strong>${escapeHtml(displayDimensionTargets(draft.dimensions || {}, draft.dimension_mode))}</strong></div>
           <div class="preview-chip"><span>文字内容</span><strong>${escapeHtml(displayTextContent(draft))}</strong></div>
-          <div class="preview-chip"><span>Name 颜色循环</span><strong>${escapeHtml(displayNameColorCycle(draft.name_color_cycle))}</strong></div>
+          <div class="preview-chip"><span>模板特殊规则</span><strong>${escapeHtml(displaySpecialRules(draft))}</strong></div>
           <div class="preview-chip"><span>多个文字位置</span><strong>${escapeHtml(displayTextSequences(draft.text_sequences || []))}</strong></div>
           <div class="preview-chip"><span>默认值</span><strong>${escapeHtml(describeDefaults(draft.defaults || {}))}</strong></div>
-          <div class="preview-chip"><span>字体加粗</span><strong>${escapeHtml(displayFontStyleRules(draft.font_style_rules || []))}</strong></div>
           <div class="preview-chip"><span>已填写选项组</span><strong>${escapeHtml(optionGroups.map(group => `${group.name}=${displayOptionGroupRole(group.role)}`).join("；") || "未填写")}</strong></div>
           <div class="preview-chip"><span>缺失项</span><strong>${escapeHtml(missing.join("；") || "无")}</strong></div>
         </div>
@@ -3020,10 +2814,13 @@ INDEX_HTML = """<!doctype html>
       return source && target ? `${source} -> ${target}` : "未填写";
     }
 
-    function displayNameColorCycle(value) {
-      if (!isPlainObject(value) || !Array.isArray(value.colors) || !value.colors.length) return "未配置";
-      const delimiter = String(value.delimiter || "").trim() || "未填写分隔符";
-      return `按 ${delimiter} 循环：${value.colors.join(" / ")}`;
+    function displaySpecialRules(draft) {
+      const text = String((draft && draft.special_rules_text) || "").trim();
+      const ast = draft && draft.rule_ast;
+      const count = ast && Array.isArray(ast.rules) ? ast.rules.length : 0;
+      if (state.specialRulesDirty) return "已修改，等待重新编译";
+      if (count) return `${count} 条已编译规则${text ? "，等待保存确认" : ""}`;
+      return text ? "等待编译" : "未配置";
     }
 
     function displayOptionGroupRole(value) {
@@ -3034,17 +2831,6 @@ INDEX_HTML = """<!doctype html>
         style_options: "尺寸/版式组"
       };
       return names[value] || "未选择";
-    }
-
-    function displayFontStyleRules(rules) {
-      const rows = Array.isArray(rules) ? rules : [];
-      if (!rows.length) return "未配置";
-      return rows.map(rule => {
-        const options = normalizeFontStyleOptions(rule && rule.font_options);
-        const value = Number(rule && rule.boldness);
-        const boldness = Number.isFinite(value) && value > 0 ? `${value} pt` : "未填写加粗值";
-        return `${options.length ? options.join("、") : "未选择字体"}：${boldness}`;
-      }).join("；");
     }
 
     function resetTemplateRuleFields() {
@@ -3061,18 +2847,20 @@ INDEX_HTML = """<!doctype html>
       document.getElementById("defaultStyle").value = "";
       document.getElementById("defaultColor").value = "";
       document.getElementById("outputColorMode").value = "CMYK";
-      setFontStyleRuleRows([]);
       document.getElementById("textSourceColumn").value = "";
       document.getElementById("textTargetName").value = "";
       document.getElementById("textFitPolicy").value = "scale_to_box";
-      document.getElementById("nameColorDelimiter").value = "|";
-      setNameColorRows([]);
+      document.getElementById("templateSpecialRules").value = "";
+      state.compiledRuleAst = null;
+      state.specialRuleCompileResult = null;
+      state.specialRulesDirty = false;
+      document.getElementById("specialRuleStatus").textContent = "未配置特殊规则";
+      renderSpecialRulePreview();
       document.getElementById("templateProfile").value = "unclassified";
       document.getElementById("scanVersion").value = "";
       document.getElementById("scanEvidence").textContent = "暂无扫描事实";
       document.getElementById("scanEvidenceRaw").value = "";
       document.getElementById("fieldSources").value = "";
-      state.templateRulesDescriptionDirty = false;
       document.getElementById("orderBindingsJson").value = "{}";
       document.getElementById("assetMappingsJson").value = "[]";
       document.getElementById("textPoliciesJson").value = "{}";
@@ -3115,7 +2903,7 @@ INDEX_HTML = """<!doctype html>
       document.getElementById("scanEvidence").textContent = formatScanEvidence(evidence);
       document.getElementById("scanEvidenceRaw").value = formatRawScanEvidence(evidence);
       document.getElementById("fieldSources").value = formatFieldSources(audit.field_sources || {}, editableRules);
-      state.templateRulesDescriptionDirty = false;
+      state.specialRulesDirty = false;
       setHiddenRuleJson("orderBindingsJson", editableRules.order_bindings || {});
       setHiddenRuleJson("assetMappingsJson", editableRules.asset_mappings || []);
       setHiddenRuleJson("textPoliciesJson", editableRules.text_policies || {});
@@ -3366,9 +3154,14 @@ INDEX_HTML = """<!doctype html>
       document.getElementById("textSourceColumn").value = bindings.text || (legacyField && bindings[legacyField]) || "";
       document.getElementById("textTargetName").value = firstMapping.slot || firstMapping.name || "";
       document.getElementById("textFitPolicy").value = (config.text_policies && config.text_policies.fit) || "scale_to_box";
-      const nameColorCycle = isPlainObject(config.name_color_cycle) ? config.name_color_cycle : {};
-      document.getElementById("nameColorDelimiter").value = nameColorCycle.delimiter || "|";
-      setNameColorRows(nameColorCycle.colors || []);
+      document.getElementById("templateSpecialRules").value = String(config.special_rules_text || "");
+      state.compiledRuleAst = isPlainObject(config.rule_ast) ? config.rule_ast : null;
+      state.specialRuleCompileResult = null;
+      state.specialRulesDirty = false;
+      document.getElementById("specialRuleStatus").textContent = state.compiledRuleAst && Array.isArray(state.compiledRuleAst.rules) && state.compiledRuleAst.rules.length
+        ? "已加载已保存规则"
+        : "未配置特殊规则";
+      renderSpecialRulePreview();
 
       const defaults = config.defaults || {};
       document.getElementById("defaultFont").value = defaults.font || "";
@@ -3376,11 +3169,6 @@ INDEX_HTML = """<!doctype html>
       document.getElementById("defaultStyle").value = defaults.style || "";
       document.getElementById("defaultColor").value = defaults.color || "";
       document.getElementById("outputColorMode").value = (config.output && config.output.color_mode) || "CMYK";
-
-      const fontStyleRules = Array.isArray(config.font_style_rules)
-        ? config.font_style_rules
-        : legacyFontStyleRules(config.option_overrides);
-      setFontStyleRuleRows(fontStyleRules);
 
     }
 
@@ -3575,8 +3363,8 @@ INDEX_HTML = """<!doctype html>
         setMessage("templateSaveMessage", "请填写模板 ID 和模板名称", "error");
         return;
       }
-      if (state.templateRulesDescriptionDirty) {
-        setMessage("templateSaveMessage", "补充说明已修改，请先点击“分析补充说明”", "error");
+      if (state.specialRulesDirty) {
+        setMessage("templateSaveMessage", "模板特殊规则已修改，请先点击“编译特殊规则”", "error");
         return;
       }
       if (!state.templateOnboarding || !state.templateOnboarding.draft) {

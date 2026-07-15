@@ -58,7 +58,8 @@ def test_template_rule_form_uses_structured_check():
 def test_template_rule_preview_normalizes_object_options():
     assert "function normalizeOptions" in INDEX_HTML
     assert "function optionText" in INDEX_HTML
-    assert 'values.join(" / ")' not in INDEX_HTML
+    assert 'return options.length ? options.join(" / ") : "未识别"' in INDEX_HTML
+    assert 'return values.join(" / ")' not in INDEX_HTML
 
 
 def test_template_form_hides_type_and_status_from_user():
@@ -85,7 +86,7 @@ def test_template_rule_editor_is_business_readable():
     assert "添加尺寸" in INDEX_HTML
     assert "添加多个文字位置" in INDEX_HTML
     assert "默认值" in INDEX_HTML
-    assert "字体加粗规则（可选）" in INDEX_HTML
+    assert "模板特殊规则（可选）" in INDEX_HTML
     assert "文本效果规则" not in INDEX_HTML
     assert "添加文本效果" not in INDEX_HTML
     assert "其他说明（可选，不参与渲染）" not in INDEX_HTML
@@ -105,11 +106,12 @@ def test_template_rule_editor_is_business_readable():
     assert 'id="fixedWidth"' in INDEX_HTML
     assert 'id="fixedHeight"' in INDEX_HTML
     assert "dimension-mode-card" in INDEX_HTML
-    assert 'id="fontStyleRuleRows"' in INDEX_HTML
-    assert 'id="addFontStyleRuleBtn"' in INDEX_HTML
-    assert "data-font-style-options" in INDEX_HTML
-    assert "data-font-style-boldness" in INDEX_HTML
-    assert '<input data-font-style-boldness type="number" min="0.1"' in INDEX_HTML
+    assert 'id="templateSpecialRules"' in INDEX_HTML
+    assert 'id="compileSpecialRulesBtn"' in INDEX_HTML
+    assert 'id="specialRuleStatus"' in INDEX_HTML
+    assert 'id="specialRulePreview"' in INDEX_HTML
+    assert 'id="fontStyleRuleRows"' not in INDEX_HTML
+    assert 'id="addFontStyleRuleBtn"' not in INDEX_HTML
     assert "data-override-target" not in INDEX_HTML
     assert 'id="textSourceColumn"' in INDEX_HTML
     assert 'id="textTargetName"' in INDEX_HTML
@@ -301,10 +303,10 @@ def test_template_rules_prefill_fixed_options_before_optional_supplement():
     assert "delete savedBaseConfig.text_sequence_styles" in INDEX_HTML
     assert "加粗" in INDEX_HTML
     assert "option_overrides" in INDEX_HTML
-    assert "font_style_rules" in INDEX_HTML
-    assert "function collectFontStyleRules" in INDEX_HTML
-    assert "function displayFontStyleRules" in INDEX_HTML
-    assert "legacyFontStyleRules" in INDEX_HTML
+    assert "delete savedBaseConfig.font_style_rules" in INDEX_HTML
+    assert "function collectFontStyleRules" not in INDEX_HTML
+    assert "function displayFontStyleRules" not in INDEX_HTML
+    assert "legacyFontStyleRules" not in INDEX_HTML
     assert "function nonBoldOptionOverrides" in INDEX_HTML
     assert "option_overrides: nonBoldOptionOverrides(baseConfig.option_overrides)" in INDEX_HTML
     assert "function prefillScannedOptionSuggestions" in INDEX_HTML
@@ -330,26 +332,29 @@ def test_template_rules_prefill_fixed_options_before_optional_supplement():
     assert "state.optionGroupsTouched = true" in INDEX_HTML
     assert "font_options: state.optionGroupsTouched ? fontOptions" in INDEX_HTML
     assert "design_font_options: state.optionGroupsTouched" in INDEX_HTML
-    assert "const current = buildTemplateRulePayload();" in INDEX_HTML
-    assert "!hasConfiguredRuleValue(merged[key])" in INDEX_HTML
+    assert 'postJson("/api/templates/rules/compile"' in INDEX_HTML
+    assert "special_rules_text: specialRulesText" in INDEX_HTML
+    assert "rule_ast: state.compiledRuleAst || undefined" in INDEX_HTML
+    assert "state.specialRulesDirty" in INDEX_HTML
 
 
-def test_template_rule_supports_an_expandable_name_color_cycle():
-    assert "Name 多色循环（可选）" in INDEX_HTML
-    assert 'id="nameColorDelimiter"' in INDEX_HTML
-    assert 'id="nameColorRows"' in INDEX_HTML
-    assert 'id="addNameColorBtn"' in INDEX_HTML
-    assert "function addNameColor" in INDEX_HTML
-    assert "function collectNameColorCycle" in INDEX_HTML
-    assert "function displayNameColorCycle" in INDEX_HTML
-    assert "name_color_cycle: nameColorCycle" in INDEX_HTML
-    assert "支持 #RRGGBB 或常见英文颜色名，例如 Red、Black、Gold" in INDEX_HTML
-    assert 'placeholder="#RRGGBB 或 Red"' in INDEX_HTML
-    assert "function normalizeNameColorValue" in INDEX_HTML
-    assert ".map(input => normalizeNameColorValue(input.value) || input.value.trim())" in INDEX_HTML
-    assert 'rosegold: "#B76E79"' in INDEX_HTML
-    assert "name_color_cycle: \"请在“Name 多色循环”中至少保留两个颜色，并填写分隔符；颜色可填 #RRGGBB 或 Red、Black、Gold 等英文名\"" in INDEX_HTML
-    assert "colors.length >= 5" not in INDEX_HTML
+def test_template_rule_uses_one_natural_language_special_rule_editor():
+    assert "模板特殊规则（可选）" in INDEX_HTML
+    assert "这里只描述无法用固定项表达的特殊渲染逻辑" in INDEX_HTML
+    assert 'id="templateSpecialRules"' in INDEX_HTML
+    assert 'id="compileSpecialRulesBtn"' in INDEX_HTML
+    assert "function compileSpecialRules" in INDEX_HTML
+    assert "function renderSpecialRulePreview" in INDEX_HTML
+    assert "function describeSpecialRuleAst" in INDEX_HTML
+    assert "内容已修改，需要重新编译" in INDEX_HTML
+    assert "编译服务未返回可执行规则，请修改描述后重试" in INDEX_HTML
+    assert "特殊规则已编译，请核对执行摘要后保存" in INDEX_HTML
+    assert "Name 多色循环（可选）" not in INDEX_HTML
+    assert "字体加粗规则（可选）" not in INDEX_HTML
+    assert 'id="nameColorRows"' not in INDEX_HTML
+    assert 'id="fontStyleRuleRows"' not in INDEX_HTML
+    assert "function collectNameColorCycle" not in INDEX_HTML
+    assert "function collectFontStyleRules" not in INDEX_HTML
 
 
 def test_scanned_option_suggestions_render_as_editable_option_groups():
