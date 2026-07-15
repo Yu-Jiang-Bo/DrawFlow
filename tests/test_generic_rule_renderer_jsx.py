@@ -23,7 +23,8 @@ def test_generic_renderer_cycles_configured_name_colors_only():
     assert "resolveVariableTargets" in source
     assert "findFallbackNameTextFrames" in source
     assert "function createNameColumnsDocument(task, order)" in source
-    assert "function drawNameColumns(doc, order, layout, fontSource)" in source
+    assert "function drawNameColumns(doc, order, layout, fontSource, cell)" in source
+    assert "function createNameColumnsSheet(task)" in source
     assert "function colorForNamePart(actions, index, legacyCycle)" in source
     assert "task.allow_unnamed_name_fallback === true" in source
     assert 'String(variable.target || "") + "_ANCHOR"' in source

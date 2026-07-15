@@ -9,6 +9,19 @@
     try { app.userInteractionLevel = UserInteractionLevel.DONTDISPLAYALERTS; } catch (e0) {}
 
     var outputs = [];
+    if (usesNameColumnsLayout(task) && String(task.render_layout.output_mode || "") === "single_file") {
+        var sheet = createNameColumnsSheet(task);
+        try {
+            var sheetOutput = File(String(task.output_ai));
+            ensureFolder(sheetOutput.parent);
+            if (sheetOutput.exists) sheetOutput.remove();
+            saveAsAI8(sheet, sheetOutput);
+            outputs.push(sheetOutput.fsName);
+        } finally {
+            sheet.close(SaveOptions.DONOTSAVECHANGES);
+        }
+        return outputs.join("\n");
+    }
     for (var orderIndex = 0; orderIndex < task.orders.length; orderIndex++) {
         var order = task.orders[orderIndex];
         var doc = usesNameColumnsLayout(task) ? createNameColumnsDocument(task, order) : app.open(File(String(task.template_ai)));
@@ -58,6 +71,42 @@
         return task.render_layout && String(task.render_layout.type || "") === "name_columns";
     }
 
+    function createNameColumnsSheet(task) {
+        var layout = task.render_layout || {};
+        var cellWidth = mmToPt(Number(layout.width_mm || 100));
+        var cellHeight = mmToPt(Number(layout.height_mm || 220));
+        var columns = Math.max(1, Number(task.layout && task.layout.columns || 4));
+        var rows = Math.ceil(task.orders.length / columns);
+        var width = cellWidth * columns;
+        var height = cellHeight * rows;
+        var source = app.open(File(String(task.template_ai)));
+        try {
+            var doc = app.documents.add(DocumentColorSpace.RGB, width, height);
+            var backgroundColor = rgbColor(String(layout.background_color || ""));
+            if (backgroundColor) {
+                var background = doc.pathItems.rectangle(height, 0, width, height);
+                background.fillColor = backgroundColor;
+                background.stroked = false;
+            }
+            for (var index = 0; index < task.orders.length; index++) {
+                var order = task.orders[index];
+                var selected = String(order.selections && order.selections.font || "");
+                var fontSource = selected ? firstTextFrame(findPageItemByName(source, selected)) : null;
+                var column = index % columns;
+                var row = Math.floor(index / columns);
+                drawNameColumns(doc, order, layout, fontSource, {
+                    left: column * cellWidth,
+                    top: height - row * cellHeight,
+                    width: cellWidth,
+                    height: cellHeight
+                });
+            }
+            return doc;
+        } finally {
+            source.close(SaveOptions.DONOTSAVECHANGES);
+        }
+    }
+
     function createNameColumnsDocument(task, order) {
         var layout = task.render_layout || {};
         var width = mmToPt(Number(layout.width_mm || 100));
@@ -82,7 +131,7 @@
         }
     }
 
-    function drawNameColumns(doc, order, layout, fontSource) {
+    function drawNameColumns(doc, order, layout, fontSource, cell) {
         var mode = order.layout_mode || layout.default || {};
         var members = order.layout_members || [order];
         var margin = mmToPt(Number(layout.margin_mm || 10));
@@ -93,12 +142,13 @@
         var lineGap = mmToPt(Number(name.line_gap_mm || 8));
         var columnGap = mmToPt(Number(name.column_gap_mm || 12));
         var bounds = doc.artboards[0].artboardRect;
-        var width = bounds[2] - bounds[0];
-        var height = bounds[1] - bounds[3];
-        var top = height - margin;
+        var width = cell ? cell.width : bounds[2] - bounds[0];
+        var height = cell ? cell.height : bounds[1] - bounds[3];
+        var left = cell ? cell.left : 0;
+        var top = (cell ? cell.top : height) - margin;
         var headerFields = mode.header_fields || [];
         if (headerFields.length) {
-            addLayoutText(doc, joinFields(members[0], headerFields), width / 2, top, Number(layout.header_font_size_pt || 16), rgbColor(layout.header_color || "#000000"), null, true);
+            addLayoutText(doc, joinFields(members[0], headerFields), left + width / 2, top, Number(layout.header_font_size_pt || 16), rgbColor(layout.header_color || "#000000"), null, true);
         }
         var availableWidth = width - margin * 2;
         var columnWidth = (availableWidth - Math.max(0, members.length - 1) * columnGap) / Math.max(1, members.length);
@@ -108,7 +158,7 @@
             var variable = findNameVariable(member.variables || []);
             if (!variable) throw new Error("Name columns layout requires a Name variable");
             var parts = splitNameParts(variable.value, String(name.delimiter || "|"));
-            var x = margin + memberIndex * (columnWidth + columnGap) + columnWidth / 2;
+            var x = left + margin + memberIndex * (columnWidth + columnGap) + columnWidth / 2;
             for (var partIndex = 0; partIndex < parts.length; partIndex++) {
                 var y = startY - partIndex * (nameSize + lineGap);
                 var color = colorForNamePart(variable.actions || [], partIndex, layout.name_color_cycle || {});
@@ -118,7 +168,7 @@
         }
         var footerField = String(mode.footer_field || "");
         if (footerField) {
-            addLayoutText(doc, fieldValue(members[0], footerField), width / 2, margin + footerHeight, Number(layout.footer_font_size_pt || 20), rgbColor(layout.footer_color || "#FFFFFF"), null, true);
+            addLayoutText(doc, fieldValue(members[0], footerField), left + width / 2, (cell ? cell.top - height : height) + margin + footerHeight, Number(layout.footer_font_size_pt || 20), rgbColor(layout.footer_color || "#FFFFFF"), null, true);
         }
     }
 

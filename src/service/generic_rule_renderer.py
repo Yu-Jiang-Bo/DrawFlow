@@ -82,11 +82,12 @@ def build_generic_render_task(
     render_layout = _mapping(rules.get("render_layout"))
     if render_layout:
         orders = _build_layout_orders(orders, render_layout)
+    single_output = str(render_layout.get("output_mode") or "").strip() == "single_file"
     for index, order in enumerate(orders, start=1):
         order["output_ai"] = str(
             (
                 output_ai
-                if len(orders) == 1
+                if single_output or len(orders) == 1
                 else output_ai.with_name(f"{output_ai.stem}-{index:03d}{output_ai.suffix}")
             ).resolve()
         )
@@ -95,7 +96,7 @@ def build_generic_render_task(
         "template_id": template.template_id,
         "template_ai": str(template.template_ai.resolve()),
         "output_ai": str(output_ai.resolve()),
-        "output_ai_files": [order["output_ai"] for order in orders],
+        "output_ai_files": [str(output_ai.resolve())] if single_output else [order["output_ai"] for order in orders],
         "orders": orders,
         "option_groups": _list_of_mappings(rules.get("option_groups")),
         "dimensions": _mapping(rules.get("dimensions")),

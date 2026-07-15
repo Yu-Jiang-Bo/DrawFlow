@@ -126,10 +126,8 @@ class RenderService:
             script = Path(__file__).resolve().parents[2] / "scripts" / "illustrator" / "render_generic_rule_pack.jsx"
             bridge = IllustratorBridge(visible=request["visible"], fresh_instance=True, reuse_instance=True)
             try:
-                for chunk_index, orders in enumerate(
-                    _chunked(task["orders"], GENERIC_RULE_RENDER_CHUNK_SIZE),
-                    start=1,
-                ):
+                chunks = [task["orders"]] if task["render_layout"].get("output_mode") == "single_file" else _chunked(task["orders"], GENERIC_RULE_RENDER_CHUNK_SIZE)
+                for chunk_index, orders in enumerate(chunks, start=1):
                     chunk_task = dict(task)
                     chunk_task["orders"] = orders
                     chunk_task["output_ai_files"] = [order["output_ai"] for order in orders]
