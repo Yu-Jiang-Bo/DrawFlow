@@ -18,10 +18,14 @@ class IllustratorBridge:
         *,
         fresh_instance: bool = False,
         quit_after: bool = False,
+        reuse_instance: bool = False,
     ) -> None:
         self.visible = visible
         self.fresh_instance = fresh_instance
         self.quit_after = quit_after
+        self.reuse_instance = reuse_instance
+        self._app: Any = None
+        self._apartment: ComApartment | None = None
 
     def render(self, render_script: Path | str, task_file: Path | str) -> str:
         script = Path(render_script).resolve()
@@ -34,9 +38,10 @@ class IllustratorBridge:
         error_report = task.with_name(task.name + ".jsx-error.txt")
         error_report.unlink(missing_ok=True)
         bootstrap = self._build_bootstrap(script, task)
-        with ComApartment():
-            app = None
-            try:
+        apartment = self._ensure_apartment()
+        app = self._app if self.reuse_instance else None
+        try:
+            if app is None:
                 import win32com.client
 
                 dispatch = (
@@ -44,33 +49,60 @@ class IllustratorBridge:
                     if self.fresh_instance else win32com.client.Dispatch
                 )
                 app = dispatch("Illustrator.Application")
-                try:
-                    app.Visible = self.visible
-                except Exception:
-                    pass
-                result = app.DoJavaScript(bootstrap)
-                return str(result) if result else ""
-            except ImportError as exc:
-                raise IllustratorBridgeError("缺少 pywin32，无法调用 Illustrator") from exc
-            except Exception as exc:
-                detail = _read_text(error_report)
-                if detail:
-                    raise IllustratorBridgeError(f"Illustrator JSX failed: {exc}: {detail}") from exc
-                raise IllustratorBridgeError(f"执行 Illustrator JSX 失败: {exc}") from exc
+                if self.reuse_instance:
+                    self._app = app
+            try:
+                app.Visible = self.visible
+            except Exception:
+                pass
+            result = app.DoJavaScript(bootstrap)
+            return str(result) if result else ""
+        except ImportError as exc:
+            raise IllustratorBridgeError("缺少 pywin32，无法调用 Illustrator") from exc
+        except Exception as exc:
+            detail = _read_text(error_report)
+            if detail:
+                raise IllustratorBridgeError(f"Illustrator JSX failed: {exc}: {detail}") from exc
+            raise IllustratorBridgeError(f"执行 Illustrator JSX 失败: {exc}") from exc
 
-            finally:
-                if self.quit_after and app is not None:
-                    try:
-                        app.Quit()
-                    except Exception:
-                        pass
-                    app = None
-                    try:
-                        import gc
+        finally:
+            if self.quit_after and not self.reuse_instance:
+                self.close(app)
+            if not self.reuse_instance:
+                apartment.__exit__(None, None, None)
 
-                        gc.collect()
-                    except Exception:
-                        pass
+    def _ensure_apartment(self) -> "ComApartment":
+        if self.reuse_instance:
+            if self._apartment is None:
+                self._apartment = ComApartment()
+                self._apartment.__enter__()
+            return self._apartment
+        apartment = ComApartment()
+        apartment.__enter__()
+        return apartment
+
+    def reset(self) -> None:
+        self.close(self._app)
+        self._app = None
+
+    def close(self, app: Any = None) -> None:
+        target = app if app is not None else self._app
+        if target is None:
+            return
+        try:
+            target.Quit()
+        except Exception:
+            pass
+        self._app = None
+        if self._apartment is not None:
+            self._apartment.__exit__(None, None, None)
+            self._apartment = None
+        try:
+            import gc
+
+            gc.collect()
+        except Exception:
+            pass
 
     def _build_bootstrap(self, render_script: Path, task_file: Path) -> str:
         return "\n".join(

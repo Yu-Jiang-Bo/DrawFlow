@@ -364,6 +364,9 @@ def test_generic_pipeline_splits_large_illustrator_runs_into_chunks(tmp_path, mo
             for output in task["output_ai_files"]:
                 Path(output).write_text("ai", encoding="utf-8")
 
+        def close(self):
+            return None
+
     monkeypatch.setattr(render_service_module, "IllustratorBridge", Bridge)
 
     result = RenderService(registry=registry, jobs=JobStore(tmp_path / "jobs")).submit(
@@ -372,11 +375,57 @@ def test_generic_pipeline_splits_large_illustrator_runs_into_chunks(tmp_path, mo
 
     assert result["status"] == "completed", result.get("error")
     assert calls == [
-        ("render-task-001.json", 8, {"visible": False, "fresh_instance": True, "quit_after": True}),
-        ("render-task-002.json", 8, {"visible": False, "fresh_instance": True, "quit_after": True}),
-        ("render-task-003.json", 1, {"visible": False, "fresh_instance": True, "quit_after": True}),
+        ("render-task-001.json", 8, {"visible": False, "fresh_instance": True, "reuse_instance": True}),
+        ("render-task-002.json", 8, {"visible": False, "fresh_instance": True, "reuse_instance": True}),
+        ("render-task-003.json", 1, {"visible": False, "fresh_instance": True, "reuse_instance": True}),
     ]
     assert len(result["outputs"]["output_ai_files"]) == 17
+
+
+def test_generic_pipeline_retries_only_transient_illustrator_com_errors(tmp_path, monkeypatch):
+    from src.renderer.illustrator_bridge import IllustratorBridgeError
+
+    registry, template = make_template(tmp_path)
+    pack = {
+        "$schema": "custom-renderer/template-rule-pack",
+        "template": {"template_id": template.template_id, "profile": "composite"},
+        "rules": base_rules(),
+        "assets": {"items": [], "policy": {"mode": "inline"}},
+        "capabilities": ["replace_text", "scale_to_box"],
+        "validation": {"status": "confirmed", "unresolved_items": []},
+    }
+    template = registry.apply_confirmed_rule_pack(template.template_id, pack, activate=True)
+    order_path = tmp_path / "one-order.xlsx"
+    make_orders(order_path)
+    calls = []
+
+    class Bridge:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+        def render(self, script, task_path):
+            calls.append(Path(task_path).name)
+            if len(calls) < 3:
+                raise IllustratorBridgeError("执行 Illustrator JSX 失败: (-2147417851, 'server unavailable')")
+            task = json.loads(Path(task_path).read_text(encoding="utf-8"))
+            for output in task["output_ai_files"]:
+                Path(output).write_text("ai", encoding="utf-8")
+
+        def reset(self):
+            return None
+
+        def close(self):
+            return None
+
+    monkeypatch.setattr(render_service_module, "IllustratorBridge", Bridge)
+    monkeypatch.setattr(render_service_module.time, "sleep", lambda seconds: None)
+
+    result = RenderService(registry=registry, jobs=JobStore(tmp_path / "jobs")).submit(
+        {"template_id": template.template_id, "order_file": str(order_path), "dry_run": False}
+    )
+
+    assert result["status"] == "completed", result.get("error")
+    assert calls == ["render-task.json", "render-task.json", "render-task.json"]
 
 
 def test_render_service_uses_generic_rules_when_legacy_pipeline_has_executable_pack(tmp_path):

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping
 
@@ -21,7 +22,7 @@ from ..jjmb_202509_curved_main import (
     read_xlsx_rows as read_202509_curved_rows,
 )
 from ..jjmb_config_grouped_main import build_grouped_task
-from ..renderer.illustrator_bridge import IllustratorBridge
+from ..renderer.illustrator_bridge import IllustratorBridge, IllustratorBridgeError
 from .job_store import JobStore
 from .font_style_rules import font_style_by_option
 from .generic_rule_renderer import build_generic_render_task
@@ -35,6 +36,8 @@ SUPPORTED_RENDER_PIPELINES = frozenset(
     {"generic_rules_only", "jjmb_202508", "jjmb_202603_grouped", "jjmb_202509_curved"}
 )
 GENERIC_RULE_RENDER_CHUNK_SIZE = 8
+GENERIC_RULE_COM_RETRY_ATTEMPTS = 3
+GENERIC_RULE_COM_RETRY_DELAY_SECONDS = 3.0
 
 
 class RenderServiceError(RuntimeError):
@@ -121,25 +124,25 @@ class RenderService:
         self._write_json(task_file, task)
         if not request["dry_run"]:
             script = Path(__file__).resolve().parents[2] / "scripts" / "illustrator" / "render_generic_rule_pack.jsx"
-            for chunk_index, orders in enumerate(
-                _chunked(task["orders"], GENERIC_RULE_RENDER_CHUNK_SIZE),
-                start=1,
-            ):
-                chunk_task = dict(task)
-                chunk_task["orders"] = orders
-                chunk_task["output_ai_files"] = [order["output_ai"] for order in orders]
-                chunk_file = (
-                    task_file
-                    if len(orders) == len(task["orders"])
-                    else job_dir / f"render-task-{chunk_index:03d}.json"
-                )
-                if chunk_file != task_file:
-                    self._write_json(chunk_file, chunk_task)
-                IllustratorBridge(
-                    visible=request["visible"],
-                    fresh_instance=True,
-                    quit_after=True,
-                ).render(script, chunk_file)
+            bridge = IllustratorBridge(visible=request["visible"], fresh_instance=True, reuse_instance=True)
+            try:
+                for chunk_index, orders in enumerate(
+                    _chunked(task["orders"], GENERIC_RULE_RENDER_CHUNK_SIZE),
+                    start=1,
+                ):
+                    chunk_task = dict(task)
+                    chunk_task["orders"] = orders
+                    chunk_task["output_ai_files"] = [order["output_ai"] for order in orders]
+                    chunk_file = (
+                        task_file
+                        if len(orders) == len(task["orders"])
+                        else job_dir / f"render-task-{chunk_index:03d}.json"
+                    )
+                    if chunk_file != task_file:
+                        self._write_json(chunk_file, chunk_task)
+                    _render_generic_chunk(bridge, script, chunk_file)
+            finally:
+                bridge.close()
         return {
             "outputs": {
                 "output_ai": task["output_ai_files"][0],
@@ -404,6 +407,24 @@ def _chunked(items: List[Any], size: int) -> Iterable[List[Any]]:
     chunk_size = max(1, int(size))
     for start in range(0, len(items), chunk_size):
         yield items[start : start + chunk_size]
+
+
+def _render_generic_chunk(bridge: IllustratorBridge, script: Path, task_file: Path) -> None:
+    """Retry only when Illustrator's COM server disappears during a batch."""
+
+    for attempt in range(GENERIC_RULE_COM_RETRY_ATTEMPTS):
+        try:
+            bridge.render(script, task_file)
+            return
+        except IllustratorBridgeError as exc:
+            if attempt + 1 >= GENERIC_RULE_COM_RETRY_ATTEMPTS or not _is_retryable_com_failure(exc):
+                raise
+            bridge.reset()
+            time.sleep(GENERIC_RULE_COM_RETRY_DELAY_SECONDS)
+
+
+def _is_retryable_com_failure(exc: IllustratorBridgeError) -> bool:
+    return "-2147417851" in str(exc)
 
 
 def _configured_font_options(*configs: Dict[str, Any]) -> List[str] | None:
