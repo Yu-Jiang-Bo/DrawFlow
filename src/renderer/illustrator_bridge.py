@@ -12,8 +12,16 @@ class IllustratorBridgeError(RuntimeError):
 
 
 class IllustratorBridge:
-    def __init__(self, visible: bool = False) -> None:
+    def __init__(
+        self,
+        visible: bool = False,
+        *,
+        fresh_instance: bool = False,
+        quit_after: bool = False,
+    ) -> None:
         self.visible = visible
+        self.fresh_instance = fresh_instance
+        self.quit_after = quit_after
 
     def render(self, render_script: Path | str, task_file: Path | str) -> str:
         script = Path(render_script).resolve()
@@ -27,10 +35,15 @@ class IllustratorBridge:
         error_report.unlink(missing_ok=True)
         bootstrap = self._build_bootstrap(script, task)
         with ComApartment():
+            app = None
             try:
                 import win32com.client
 
-                app = win32com.client.Dispatch("Illustrator.Application")
+                dispatch = (
+                    getattr(win32com.client, "DispatchEx", win32com.client.Dispatch)
+                    if self.fresh_instance else win32com.client.Dispatch
+                )
+                app = dispatch("Illustrator.Application")
                 try:
                     app.Visible = self.visible
                 except Exception:
@@ -44,6 +57,20 @@ class IllustratorBridge:
                 if detail:
                     raise IllustratorBridgeError(f"Illustrator JSX failed: {exc}: {detail}") from exc
                 raise IllustratorBridgeError(f"执行 Illustrator JSX 失败: {exc}") from exc
+
+            finally:
+                if self.quit_after and app is not None:
+                    try:
+                        app.Quit()
+                    except Exception:
+                        pass
+                    app = None
+                    try:
+                        import gc
+
+                        gc.collect()
+                    except Exception:
+                        pass
 
     def _build_bootstrap(self, render_script: Path, task_file: Path) -> str:
         return "\n".join(

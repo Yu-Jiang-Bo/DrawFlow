@@ -355,12 +355,12 @@ def test_generic_pipeline_splits_large_illustrator_runs_into_chunks(tmp_path, mo
     calls = []
 
     class Bridge:
-        def __init__(self, visible=False):
-            self.visible = visible
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
 
         def render(self, script, task_path):
             task = json.loads(Path(task_path).read_text(encoding="utf-8"))
-            calls.append((Path(task_path).name, len(task["orders"])))
+            calls.append((Path(task_path).name, len(task["orders"]), self.kwargs))
             for output in task["output_ai_files"]:
                 Path(output).write_text("ai", encoding="utf-8")
 
@@ -372,9 +372,9 @@ def test_generic_pipeline_splits_large_illustrator_runs_into_chunks(tmp_path, mo
 
     assert result["status"] == "completed", result.get("error")
     assert calls == [
-        ("render-task-001.json", 8),
-        ("render-task-002.json", 8),
-        ("render-task-003.json", 1),
+        ("render-task-001.json", 8, {"visible": False, "fresh_instance": True, "quit_after": True}),
+        ("render-task-002.json", 8, {"visible": False, "fresh_instance": True, "quit_after": True}),
+        ("render-task-003.json", 1, {"visible": False, "fresh_instance": True, "quit_after": True}),
     ]
     assert len(result["outputs"]["output_ai_files"]) == 17
 

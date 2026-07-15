@@ -135,7 +135,11 @@ class RenderService:
                 )
                 if chunk_file != task_file:
                     self._write_json(chunk_file, chunk_task)
-                IllustratorBridge(visible=request["visible"]).render(script, chunk_file)
+                IllustratorBridge(
+                    visible=request["visible"],
+                    fresh_instance=True,
+                    quit_after=True,
+                ).render(script, chunk_file)
         return {
             "outputs": {
                 "output_ai": task["output_ai_files"][0],
