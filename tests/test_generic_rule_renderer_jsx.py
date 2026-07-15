@@ -87,6 +87,38 @@ def test_grouped_renderer_applies_each_task_font_style_before_outlining():
         "outlineTextFrames(copy);"
     )
     assert "function applyFontBoldnessToTextFrames(root, style)" in source
+    assert "var showStyleBoxes = layout.show_style_boxes === true;" in source
+
+
+def test_grouped_renderer_removes_diagnostic_frames_from_design_assets():
+    source = GROUPED_SCRIPT.read_text(encoding="utf-8")
+
+    design_body = source[source.index("function renderDesignAssetItem"):source.index("function replaceDesignTexts")]
+    assert "removeDiagnosticFrames(copy);" in design_body
+    assert design_body.index("removeDiagnosticFrames(copy);") < design_body.index("replaceDesignTexts(copy, parts);")
+    assert "function removeDiagnosticFrames(root)" in source
+    assert "function isUnfilledStrokedRed(item)" in source
+    assert "function isLargeFrame(item, rootBounds)" in source
+    assert "item.filled === true" in source
+    assert "item.stroked !== true" in source
+    assert "Number(color.red) >= 180" in source
+    assert "Number(color.magenta) >= 70" in source
+
+
+def test_grouped_renderer_javascript_parses_in_node():
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node.js is unavailable")
+    source = GROUPED_SCRIPT.read_text(encoding="utf-8").replace("#target illustrator", "", 1)
+
+    result = subprocess.run(
+        [node, "-e", "new Function(process.argv[1]);", source],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
 
 
 def test_generic_renderer_cycles_actual_name_characters_in_node_harness():

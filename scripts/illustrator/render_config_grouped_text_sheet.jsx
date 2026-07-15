@@ -215,6 +215,7 @@
             throw new Error("Design group not found: " + groupName);
         }
         var copy = sourceGroup.duplicate(layer, ElementPlacement.PLACEATEND);
+        removeDiagnosticFrames(copy);
         var parts = item.text_parts || [];
         if (!parts.length && item.text) parts = String(item.text).split("|");
         replaceDesignTexts(copy, parts);
@@ -225,6 +226,78 @@
         cleanupOutline(copy);
         recordFitDelta(fitPageItemToRect(copy, rect));
         return copy;
+    }
+
+    function removeDiagnosticFrames(root) {
+        var rootBounds = safeGeometricBounds(root);
+        removeDiagnosticFramesInContainer(root, rootBounds);
+    }
+
+    function removeDiagnosticFramesInContainer(item, rootBounds) {
+        if (!item || !item.pageItems) return;
+        for (var i = item.pageItems.length - 1; i >= 0; i--) {
+            var child = item.pageItems[i];
+            removeDiagnosticFramesInContainer(child, rootBounds);
+            if (isDiagnosticFrame(child, rootBounds)) {
+                try { child.remove(); } catch (e0) {}
+            }
+        }
+    }
+
+    function isDiagnosticFrame(item, rootBounds) {
+        var type = String(item && item.typename || "");
+        if (type !== "PathItem" && type !== "CompoundPathItem") return false;
+        var name = String(item.name || "").toLowerCase();
+        var namedFrame = name.indexOf("_box") >= 0 || name.indexOf("box") >= 0 || name.indexOf("frame") >= 0 || name.indexOf("bounds") >= 0;
+        if (namedFrame) return true;
+        if (!isUnfilledStrokedRed(item)) return false;
+        return isLargeFrame(item, rootBounds);
+    }
+
+    function isUnfilledStrokedRed(item) {
+        try {
+            if (item.filled === true) return false;
+            if (item.stroked !== true) return false;
+            return isRedLikeColor(item.strokeColor);
+        } catch (e0) {
+            return false;
+        }
+    }
+
+    function isRedLikeColor(color) {
+        if (!color) return false;
+        var type = String(color.typename || "");
+        if (type === "RGBColor") {
+            return Number(color.red) >= 180 && Number(color.green) <= 140 && Number(color.blue) <= 170;
+        }
+        if (type === "CMYKColor") {
+            return Number(color.magenta) >= 70 && Number(color.yellow) >= 50 && Number(color.cyan) <= 30 && Number(color.black) <= 30;
+        }
+        if (type === "SpotColor") {
+            return isRedLikeColor(color.spot && color.spot.color);
+        }
+        return false;
+    }
+
+    function isLargeFrame(item, rootBounds) {
+        if (!rootBounds) return true;
+        var b = safeGeometricBounds(item);
+        if (!b) return false;
+        var itemWidth = Math.abs(b[2] - b[0]);
+        var itemHeight = Math.abs(b[1] - b[3]);
+        var rootWidth = Math.abs(rootBounds[2] - rootBounds[0]);
+        var rootHeight = Math.abs(rootBounds[1] - rootBounds[3]);
+        if (rootWidth <= 0 || rootHeight <= 0) return false;
+        return itemWidth >= rootWidth * 0.65 && itemHeight >= rootHeight * 0.65;
+    }
+
+    function safeGeometricBounds(item) {
+        try {
+            var b = item.geometricBounds;
+            return [Number(b[0]), Number(b[1]), Number(b[2]), Number(b[3])];
+        } catch (e0) {
+            return null;
+        }
     }
 
     function replaceDesignTexts(root, parts) {
