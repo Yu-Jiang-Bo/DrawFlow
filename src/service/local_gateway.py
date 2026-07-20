@@ -36,8 +36,14 @@ class LocalGatewayRequestHandler(BaseHTTPRequestHandler):
         if path == "/":
             self._send_central_or_fallback("/")
             return
+        if path in {"/local/jobs", "/api/jobs"}:
+            self._send_local_jobs()
+            return
         if path.startswith("/local/jobs/"):
             self._handle_local_job(path)
+            return
+        if path.startswith("/api/jobs/"):
+            self._handle_api_job(path)
             return
         if path.startswith("/api/"):
             self._proxy("GET")
@@ -90,15 +96,31 @@ class LocalGatewayRequestHandler(BaseHTTPRequestHandler):
     def _handle_local_job(self, path: str) -> None:
         parts = path.strip("/").split("/")
         if len(parts) == 3:
-            try:
-                self._send_json(self.drawflow_client.jobs.load(parts[2]))
-            except KeyError as exc:
-                self._send_error(HTTPStatus.NOT_FOUND, str(exc))
+            self._send_local_job(parts[2])
             return
         if len(parts) == 4 and parts[3] == "output":
             self._send_job_output(parts[2], "output_ai")
             return
         self._send_error(HTTPStatus.NOT_FOUND, "not found")
+
+    def _handle_api_job(self, path: str) -> None:
+        parts = path.strip("/").split("/")
+        if len(parts) == 3:
+            self._send_local_job(parts[2])
+            return
+        if len(parts) == 5 and parts[3] == "download" and parts[4] in {"output_ai", "render_task"}:
+            self._send_job_output(parts[2], parts[4])
+            return
+        self._send_error(HTTPStatus.NOT_FOUND, "not found")
+
+    def _send_local_jobs(self) -> None:
+        self._send_json({"jobs": self.drawflow_client.jobs.list_recent(30)})
+
+    def _send_local_job(self, job_id: str) -> None:
+        try:
+            self._send_json(self.drawflow_client.jobs.load(job_id))
+        except KeyError as exc:
+            self._send_error(HTTPStatus.NOT_FOUND, str(exc))
 
     def _read_render_payload(self) -> dict[str, object]:
         content_type = self.headers.get("Content-Type", "")
