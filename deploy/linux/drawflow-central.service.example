@@ -1,0 +1,20 @@
+[Unit]
+Description=DrawFlow central service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=drawflow
+Group=drawflow
+WorkingDirectory=/opt/drawflow-central
+EnvironmentFile=-/etc/drawflow-central/drawflow.env
+ExecStart=/opt/drawflow-central/.venv/bin/python -u -m src.service.http_server --role central --host 0.0.0.0 --port 8765
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ReadWritePaths=/opt/drawflow-central/output /opt/drawflow-data
+
+[Install]
+WantedBy=multi-user.target

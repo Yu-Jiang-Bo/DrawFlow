@@ -45,6 +45,51 @@ def test_http_server_uses_exclusive_windows_port(monkeypatch):
     assert calls == [(http_server.socket.SOL_SOCKET, 12345, 1), "bind"]
 
 
+def test_http_render_rejects_concurrent_request():
+    errors = []
+
+    class BusyHandler(RenderRequestHandler):
+        path = "/api/render"
+        render_lock = http_server.threading.Lock()
+
+        def _send_error(self, status, message):
+            errors.append((status, message))
+
+    handler = object.__new__(BusyHandler)
+    BusyHandler.render_lock.acquire()
+    try:
+        handler.do_POST()
+    finally:
+        BusyHandler.render_lock.release()
+
+    assert errors == [(http_server.HTTPStatus.CONFLICT, "DrawFlow 正在处理另一项出图任务，请稍后再试")]
+
+
+def test_http_render_releases_lock_after_failure():
+    errors = []
+
+    class FailingService:
+        def submit(self, _payload):
+            raise RuntimeError("render failed")
+
+    class FailingHandler(RenderRequestHandler):
+        path = "/api/render"
+        render_lock = http_server.threading.Lock()
+        service = FailingService()
+
+        def _read_render_payload(self):
+            return {"template_id": "T1"}
+
+        def _send_error(self, status, message):
+            errors.append((status, message))
+
+    object.__new__(FailingHandler).do_POST()
+
+    assert errors == [(http_server.HTTPStatus.BAD_REQUEST, "render failed")]
+    assert FailingHandler.render_lock.acquire(blocking=False)
+    FailingHandler.render_lock.release()
+
+
 def write_order_xlsx(path: Path, *, template_id: str = "JJMB202508261001394920") -> None:
     workbook = Workbook()
     sheet = workbook.active

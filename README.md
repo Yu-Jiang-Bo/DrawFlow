@@ -1,4 +1,4 @@
-# Custom Renderer
+# DrawFlow
 
 定制效果图自动生成服务的初版实现。
 
@@ -35,8 +35,8 @@ python -m src.main --csv samples/orders_text.csv --output output
 
 ```powershell
 python -m src.jjmb_template_main `
-  --xlsx "C:\Users\Administrator\Desktop\image\test\ai测试\JJMB202603281027102517--文本+颜色\JJMB202603281027102517\C-208.xlsx" `
-  --template-ai "C:\Users\Administrator\Desktop\image\test\ai测试\JJMB202603281027102517--文本+颜色\JJMB202603281027102517\JJMB202603281027102517.ai" `
+  --xlsx ".\orders\C-208.xlsx" `
+  --template-ai ".\templates\JJMB202603281027102517\template.ai" `
   --output output\jjmb202603281027102517-text `
   --dry-run
 ```
@@ -45,8 +45,8 @@ python -m src.jjmb_template_main `
 
 ```powershell
 python -m src.jjmb_template_main `
-  --xlsx "C:\Users\Administrator\Desktop\image\test\ai测试\JJMB202603281027102517--文本+颜色\JJMB202603281027102517\C-208.xlsx" `
-  --template-ai "C:\Users\Administrator\Desktop\image\test\ai测试\JJMB202603281027102517--文本+颜色\JJMB202603281027102517\JJMB202603281027102517.ai" `
+  --xlsx ".\orders\C-208.xlsx" `
+  --template-ai ".\templates\JJMB202603281027102517\template.ai" `
   --output output\jjmb202603281027102517-text `
   --limit 1
 ```
@@ -64,7 +64,7 @@ scripts/illustrator/run_render_template_text_task.jsx
 启动服务：
 
 ```powershell
-python -m src.service.http_server --host 127.0.0.1 --port 8765
+python -m src.service.http_server --host 0.0.0.0 --port 8765
 ```
 
 浏览器打开：
@@ -119,10 +119,12 @@ config/department_rule_drafts.json     # 部门规则页面新增/编辑的草�
 LLM 规则解析是可选能力。未配置时服务会回退到本地启发式解析；正式渲染不会调用 LLM。需要接入真实接口时配置：
 
 ```powershell
-$env:CUSTOM_RENDERER_LLM_API_KEY="your-api-key"
-$env:CUSTOM_RENDERER_LLM_BASE_URL="https://your-llm-host/v1"
-$env:CUSTOM_RENDERER_LLM_MODEL="your-model"
+$env:DRAWFLOW_LLM_API_KEY="your-api-key"
+$env:DRAWFLOW_LLM_BASE_URL="https://your-llm-host/v1"
+$env:DRAWFLOW_LLM_MODEL="your-model"
 ```
+
+历史 `CUSTOM_RENDERER_LLM_*` 变量仍可兼容读取。Windows 测试机部署、Illustrator 初始化和更新流程见 `deploy/DEPLOY-WINDOWS.md`。
 
 `POST /api/render` 使用 `multipart/form-data` 上传订单表格：
 

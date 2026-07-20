@@ -2,36 +2,93 @@
   "version": 1,
   "templates": [
     {
-      "template_id": "JJMB202508261001394920",
-      "name": "平纹方形皮质首饰盒文字颜色模板",
-      "template_type": "pure_text_color_design",
-      "pipeline": "jjmb_202508",
-      "status": "active",
-      "template_ai": "../test/ai测试/JJMB202508261001394920.ai",
-      "default_columns": 5,
-      "default_hide_boxes": true
-    },
-    {
-      "template_id": "JJMB202603281027102517",
-      "name": "文本加颜色 F1-F9 纯文字模板",
-      "template_type": "pure_text_style",
-      "pipeline": "jjmb_202603_grouped",
-      "status": "active",
-      "template_ai": "../test/ai测试/JJMB202603281027102517--文本+颜色/JJMB202603281027102517/JJMB202603281027102517.ai",
-      "template_config": "output/template-configs/JJMB202603281027102517/template.config.json",
-      "default_columns": 4,
-      "default_hide_boxes": true
-    },
-    {
       "template_id": "JJMB202509231236046265",
       "name": "弯曲标题文字模板 F1-F14",
       "template_type": "curved_title_text",
       "pipeline": "jjmb_202509_curved",
       "status": "active",
-      "template_ai": "output/template-named/JJMB202509231236046265/JJMB202509231236046265.curved-title-marked.ai",
-      "template_config": "output/template-named/JJMB202509231236046265/curved-title-mark-report.json",
+      "template_ai": "templates/JJMB202509231236046265/template.ai",
+      "template_ai_role": "尺寸/作图区模板",
       "default_columns": 5,
-      "default_hide_boxes": true
+      "default_hide_boxes": true,
+      "template_config": "output/template-named/JJMB202509231236046265/curved-title-mark-report.json",
+      "template_rules_config": "templates/JJMB202509231236046265/template.config.json",
+      "assets": [
+        {
+          "file_name": "JJMB202509231236046265 (1).ai",
+          "stored_path": "templates/JJMB202509231236046265/assets/JJMB202509231236046265__1_.ai",
+          "asset_type": "ai_template",
+          "role": "原始参考模板",
+          "status": "uploaded",
+          "size_bytes": 7543007
+        }
+      ]
+    },
+    {
+      "template_id": "JJMB202508261001394920",
+      "name": "平纹方形皮质首饰盒文字颜色模板",
+      "template_type": "pure_text_color_design",
+      "pipeline": "jjmb_202508",
+      "status": "active",
+      "template_ai": "templates/JJMB202508261001394920/template.ai",
+      "template_ai_role": "尺寸/作图区模板",
+      "default_columns": 5,
+      "default_hide_boxes": true,
+      "template_rules_config": "templates/JJMB202508261001394920/template.rules.json",
+      "assets": [
+        {
+          "file_name": "JJMB202508261001394920.ai",
+          "stored_path": "templates/JJMB202508261001394920/assets/JJMB202508261001394920.ai",
+          "asset_type": "ai_template",
+          "role": "原始参考模板",
+          "status": "uploaded",
+          "size_bytes": 23649989
+        }
+      ]
+    },
+    {
+      "template_id": "JJMB202510241154389614",
+      "name": "圣诞花环家庭树脂挂件",
+      "template_type": "pure_text_color_design",
+      "pipeline": "generic_rules_only",
+      "status": "active",
+      "template_ai": "templates/JJMB202510241154389614/template.ai",
+      "template_ai_role": "原始参考模板",
+      "default_columns": 4,
+      "default_hide_boxes": true,
+      "assets": [],
+      "template_rules_config": "templates/JJMB202510241154389614/template.rules.json"
+    },
+    {
+      "template_id": "JJMB202603281027102517",
+      "name": "文本加设计",
+      "template_type": "pure_text_style",
+      "pipeline": "jjmb_202603_grouped",
+      "status": "active",
+      "template_ai": "templates/JJMB202603281027102517/template.ai",
+      "template_ai_role": "原始参考模板",
+      "default_columns": 4,
+      "default_hide_boxes": true,
+      "template_config": "output/template-configs/JJMB202603281027102517/template.config.json",
+      "template_rules_config": "templates/JJMB202603281027102517/template.rules.json",
+      "assets": [
+        {
+          "file_name": "JJMB202509231236046265.ai",
+          "stored_path": "templates/JJMB202603281027102517/assets/JJMB202509231236046265.ai",
+          "asset_type": "ai_template",
+          "role": "原始参考模板",
+          "status": "uploaded",
+          "size_bytes": 8408549
+        },
+        {
+          "file_name": "JJMB202603281027102517F10-12.ai",
+          "stored_path": "templates/JJMB202603281027102517/assets/JJMB202603281027102517F10-12-2.ai",
+          "asset_type": "ai_template",
+          "role": "独立设计字体资源",
+          "status": "uploaded",
+          "size_bytes": 1252834
+        }
+      ]
     }
   ]
 }

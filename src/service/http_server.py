@@ -6,6 +6,7 @@ import argparse
 import json
 import os
 import socket
+import threading
 import uuid
 from email import policy
 from email.parser import BytesParser
@@ -20,6 +21,7 @@ from .paths import PROJECT_ROOT, SERVICE_UPLOADS_DIR
 from .render_service import RenderService
 from .rule_center import build_template_rule_draft, check_template_definition, summarize_template_rule_draft
 from .rule_store import DepartmentRuleStore
+from .runtime_templates import RuntimeTemplateError, RuntimeTemplateService, sha256_file
 from .template_registry import TemplateRegistry
 from .template_onboarding import TemplateOnboardingStore
 from .template_inspector import TemplateInspector
@@ -33,7 +35,7 @@ LEGACY_INDEX_HTML = """<!doctype html>
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>制图渲染服务</title>
+  <title>DrawFlow</title>
   <style>
     :root {
       color-scheme: light;
@@ -386,7 +388,7 @@ LEGACY_INDEX_HTML = """<!doctype html>
 <header class="topbar">
   <div class="topbar-inner">
     <div class="brand">
-      <h1 class="brand-title">制图渲染服务</h1>
+      <h1 class="brand-title">DrawFlow</h1>
       <div class="brand-subtitle">模板管理 / 订单解析 / AI8 渲染</div>
     </div>
     <div class="service-status"><span class="status-dot"></span><span id="healthText">服务检查中</span></div>
@@ -471,7 +473,7 @@ LEGACY_INDEX_HTML = """<!doctype html>
         <div class="field-full">
           <label for="templateAiFile">上传模板 AI 文件</label>
           <input id="templateAiFile" type="file" accept=".ai" />
-          <div class="form-hint">上传后会复制到 custom-renderer/templates/&lt;模板ID&gt;/template.ai。</div>
+          <div class="form-hint">上传后会保存到 DrawFlow 模板目录的 &lt;模板ID&gt;/template.ai。</div>
         </div>
         <div class="field-full">
           <label for="templateRulesJson">模板特有规则 JSON</label>
@@ -762,17 +764,44 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
     rule_store = DepartmentRuleStore()
     llm_parser = LlmRuleParser()
     template_inspector = TemplateInspector()
+    runtime_templates = RuntimeTemplateService(registry)
+    render_lock = threading.Lock()
+    service_role = "legacy-renderer"
+    allow_render = True
+    allow_scan = True
 
     def do_GET(self) -> None:
         path = urlparse(self.path).path
+        parts = path.strip("/").split("/")
         if path == "/":
             self._send_html(WORKBENCH_HTML)
             return
+        if path == "/health":
+            self._send_json(self._health_payload())
+            return
         if path == "/api/health":
-            self._send_json({"ok": True})
+            self._send_json(self._health_payload())
+            return
+        if path.startswith("/local/jobs/"):
+            if len(parts) == 4 and parts[0] == "local" and parts[1] == "jobs" and parts[3] == "output":
+                self._send_job_output(parts[2], "output_ai")
+                return
+            self._send_error(HTTPStatus.NOT_FOUND, "not found")
             return
         if path == "/api/templates":
             self._send_json({"templates": [self._template_payload(item) for item in self.registry.list_templates()]})
+            return
+        if len(parts) == 5 and parts[:3] == ["api", "runtime", "templates"] and parts[4] == "manifest":
+            try:
+                self._send_json(self.runtime_templates.active_manifest(unquote(parts[3])))
+            except (KeyError, RuntimeTemplateError) as exc:
+                self._send_error(HTTPStatus.NOT_FOUND, str(exc))
+            return
+        if len(parts) == 6 and parts[:3] == ["api", "runtime", "templates"] and parts[4] == "bundle":
+            try:
+                self._send_runtime_bundle(unquote(parts[3]), unquote(parts[5]))
+            except (KeyError, RuntimeTemplateError) as exc:
+                self._send_error(HTTPStatus.NOT_FOUND, str(exc))
             return
         if path.startswith("/api/templates/") and path.endswith("/onboarding"):
             template_id = unquote(path.split("/")[3])
@@ -797,7 +826,6 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
             except KeyError as exc:
                 self._send_error(HTTPStatus.NOT_FOUND, str(exc))
             return
-        parts = path.strip("/").split("/")
         if (
             len(parts) == 6
             and parts[0] == "api"
@@ -841,6 +869,25 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         path = urlparse(self.path).path
+        if path == "/api/templates/import-scan":
+            try:
+                self._send_json(self.runtime_templates.import_scan(self._read_json()))
+            except (RuntimeTemplateError, ValueError) as exc:
+                self._send_error(HTTPStatus.BAD_REQUEST, str(exc))
+            return
+        parts = path.strip("/").split("/")
+        if len(parts) == 5 and parts[:3] == ["api", "runtime", "templates"] and parts[4] == "publish":
+            try:
+                payload = self._read_json()
+                self._send_json(
+                    self.runtime_templates.publish_from_registry(
+                        unquote(parts[3]),
+                        version=str(payload.get("version") or "").strip() or None,
+                    )
+                )
+            except (KeyError, RuntimeTemplateError, ValueError) as exc:
+                self._send_error(HTTPStatus.BAD_REQUEST, str(exc))
+            return
         if path == "/api/templates":
             try:
                 fields, files = self._read_template_payload()
@@ -879,7 +926,6 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
             except Exception as exc:
                 self._send_error(HTTPStatus.BAD_REQUEST, str(exc))
             return
-        parts = path.strip("/").split("/")
         if len(parts) == 5 and parts[:2] == ["api", "templates"]:
             template_id = unquote(parts[2])
             action = "/".join(parts[3:])
@@ -919,6 +965,12 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
                 return
         if len(parts) == 4 and parts[:2] == ["api", "templates"] and parts[3] == "scan":
             template_id = unquote(parts[2])
+            if not self.allow_scan:
+                self._send_error(
+                    HTTPStatus.BAD_REQUEST,
+                    "中央服务不执行本机 Illustrator 扫描，请通过 DrawFlowClient 本地网关上传扫描结果。",
+                )
+                return
             try:
                 payload = self._read_json()
                 template = self.registry.get_template(template_id)
@@ -955,14 +1007,25 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
             except ValueError as exc:
                 self._send_error(HTTPStatus.BAD_REQUEST, str(exc))
             return
-        if path != "/api/render":
+        if path not in {"/api/render", "/local/render"}:
             self._send_error(HTTPStatus.NOT_FOUND, "not found")
+            return
+        if not self.allow_render:
+            self._send_error(
+                HTTPStatus.BAD_REQUEST,
+                "中央服务不执行本机 Illustrator 渲染，请通过 DrawFlowClient 本地网关生成效果图。",
+            )
+            return
+        if not self.render_lock.acquire(blocking=False):
+            self._send_error(HTTPStatus.CONFLICT, "DrawFlow 正在处理另一项出图任务，请稍后再试")
             return
         try:
             payload = self._read_render_payload()
             self._send_json(self.service.submit(payload))
         except Exception as exc:
             self._send_error(HTTPStatus.BAD_REQUEST, str(exc))
+        finally:
+            self.render_lock.release()
 
     def do_DELETE(self) -> None:
         path = urlparse(self.path).path
@@ -1002,6 +1065,9 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length", "0") or "0")
         body = self.rfile.read(length).decode("utf-8") if length else "{}"
         return json.loads(body or "{}")
+
+    def _health_payload(self) -> dict[str, object]:
+        return {"ok": True, "role": self.service_role}
 
     def _onboarding_store(self) -> TemplateOnboardingStore:
         return TemplateOnboardingStore(self.registry.storage_dir)
@@ -1345,6 +1411,17 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def _send_runtime_bundle(self, template_id: str, version: str) -> None:
+        path = self.runtime_templates.bundle_path(template_id, version)
+        data = path.read_bytes()
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "application/zip")
+        self.send_header("Content-Disposition", f'attachment; filename="{_safe_download_name(path.name)}"')
+        self.send_header("X-DrawFlow-SHA256", sha256_file(path))
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
     def _save_uploaded_order(self, filename: str, content: bytes) -> Path:
         if not content:
             raise ValueError("上传的订单表格为空")
@@ -1394,10 +1471,29 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
         self._send_json({"error": message}, status)
 
 
+class CentralRequestHandler(RenderRequestHandler):
+    service_role = "central"
+    allow_render = False
+    allow_scan = False
+
+    def _health_payload(self) -> dict[str, object]:
+        return {
+            "ok": True,
+            "role": self.service_role,
+            "illustrator": "not_required",
+            "runtime_templates": str(self.runtime_templates.templates_dir),
+        }
+
+
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="启动本地制图渲染 Web/API 服务")
-    parser.add_argument("--host", default="127.0.0.1")
+    parser = argparse.ArgumentParser(description="启动 DrawFlow Web/API 服务")
+    parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=8765)
+    parser.add_argument(
+        "--role",
+        choices=["central", "legacy-renderer"],
+        default=os.environ.get("DRAWFLOW_ROLE", "central"),
+    )
     return parser.parse_args()
 
 
@@ -1427,8 +1523,16 @@ def _design_asset_count(assets: object) -> int:
 
 def main() -> int:
     args = parse_args()
-    server = ExclusiveThreadingHTTPServer((args.host, args.port), RenderRequestHandler)
-    print(f"Renderer service listening on http://{args.host}:{args.port}")
+    handler = CentralRequestHandler if args.role == "central" else RenderRequestHandler
+    if args.role == "central":
+        prepared = handler.runtime_templates.ensure_active_registry_versions()
+        summary = ", ".join(
+            f"{item['template_id']}={item['version']}({item['action']})"
+            for item in prepared
+        )
+        print(f"DrawFlow runtime templates ready: {summary or 'none'}")
+    server = ExclusiveThreadingHTTPServer((args.host, args.port), handler)
+    print(f"DrawFlow listening on http://{args.host}:{args.port}")
     server.serve_forever()
     return 0
 

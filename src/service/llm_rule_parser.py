@@ -10,6 +10,10 @@ import urllib.request
 from typing import Any, Dict, List
 
 
+def _env_value(primary: str, legacy: str, default: str = "") -> str:
+    return os.getenv(primary) or os.getenv(legacy) or default
+
+
 class LlmRuleParser:
     """OpenAI-compatible rule parser with deterministic fallback."""
 
@@ -21,13 +25,29 @@ class LlmRuleParser:
         model: str | None = None,
         timeout_seconds: float | None = None,
     ) -> None:
-        self.api_key = api_key if api_key is not None else os.getenv("CUSTOM_RENDERER_LLM_API_KEY", "")
-        self.base_url = base_url if base_url is not None else os.getenv("CUSTOM_RENDERER_LLM_BASE_URL", "")
-        self.model = model if model is not None else os.getenv("CUSTOM_RENDERER_LLM_MODEL", "rule-parser")
+        self.api_key = (
+            api_key
+            if api_key is not None
+            else _env_value("DRAWFLOW_LLM_API_KEY", "CUSTOM_RENDERER_LLM_API_KEY")
+        )
+        self.base_url = (
+            base_url
+            if base_url is not None
+            else _env_value("DRAWFLOW_LLM_BASE_URL", "CUSTOM_RENDERER_LLM_BASE_URL")
+        )
+        self.model = (
+            model
+            if model is not None
+            else _env_value("DRAWFLOW_LLM_MODEL", "CUSTOM_RENDERER_LLM_MODEL", "rule-parser")
+        )
         self.timeout_seconds = float(
             timeout_seconds
             if timeout_seconds is not None
-            else os.getenv("CUSTOM_RENDERER_LLM_TIMEOUT_SECONDS", "30")
+            else _env_value(
+                "DRAWFLOW_LLM_TIMEOUT_SECONDS",
+                "CUSTOM_RENDERER_LLM_TIMEOUT_SECONDS",
+                "30",
+            )
         )
 
     @property
@@ -46,7 +66,7 @@ class LlmRuleParser:
     ) -> Dict[str, Any]:
         if not self.configured:
             if require_llm:
-                raise RuntimeError("LLM 规则编译未配置，请设置 CUSTOM_RENDERER_LLM_API_KEY 和 CUSTOM_RENDERER_LLM_BASE_URL")
+                raise RuntimeError("LLM 规则编译未配置，请设置 DRAWFLOW_LLM_API_KEY 和 DRAWFLOW_LLM_BASE_URL")
             return with_parser_meta(normalize_rule_draft(fallback), source="local", configured=False)
         if not allow_llm:
             if require_llm:
@@ -94,7 +114,7 @@ class LlmRuleParser:
             headers={
                 "Authorization": f"Bearer {self.api_key}",
                 "Content-Type": "application/json",
-                "User-Agent": "Mozilla/5.0 custom-renderer/1.0",
+                "User-Agent": "Mozilla/5.0 DrawFlow/1.0",
             },
             method="POST",
         )

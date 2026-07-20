@@ -5,7 +5,7 @@ INDEX_HTML = """<!doctype html>
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>制图渲染工作台</title>
+  <title>DrawFlow</title>
   <style>
     :root {
       color-scheme: light;
@@ -882,8 +882,8 @@ INDEX_HTML = """<!doctype html>
   <header class="app-header">
     <div class="header-inner">
       <div class="brand">
-        <h1>制图渲染工作台</h1>
-        <p>模板资产、订单出图、规则配置</p>
+        <h1>DrawFlow</h1>
+        <p>订单效果图与模板管理</p>
       </div>
       <div class="health"><span class="health-dot"></span><span id="healthText">服务检查中</span></div>
     </div>
@@ -1382,6 +1382,7 @@ INDEX_HTML = """<!doctype html>
       specialRulesDirty: false,
       compiledRuleAst: null,
       specialRuleCompileResult: null,
+      runtimeRole: "unknown",
       pendingTemplateRemovalId: ""
     };
     let progressTimer = null;
@@ -1831,8 +1832,11 @@ INDEX_HTML = """<!doctype html>
 
     async function checkHealth() {
       try {
-        await getJson("/api/health");
-        document.getElementById("healthText").textContent = "服务在线";
+        const health = await getJson("/health").catch(() => getJson("/api/health"));
+        state.runtimeRole = health.role || "central";
+        document.getElementById("healthText").textContent = state.runtimeRole === "local-client"
+          ? "本地网关在线"
+          : "中央服务在线，请通过 DrawFlowClient 出图";
       } catch (error) {
         document.getElementById("healthText").textContent = "服务异常";
         throw error;
@@ -2140,33 +2144,7 @@ INDEX_HTML = """<!doctype html>
     }
 
     async function rescanTemplate() {
-      const templateId = document.getElementById("templateId").value.trim();
-      if (!templateId || !selectedTemplate()) {
-        setMessage("templateSaveMessage", "请先保存模板文件，再重新扫描", "error");
-        return;
-      }
-      setMessage("templateSaveMessage", "正在扫描已保存的模板文件，请稍候", "");
-      try {
-        const result = await postJson("/api/templates/" + encodeURIComponent(templateId) + "/scan", {});
-        await loadTemplates(templateId);
-        if (result.scan_ok) {
-          const uploadStatus = document.getElementById("uploadScanStatus");
-          if (uploadStatus) uploadStatus.textContent = "扫描完成，请核对规则";
-          setMessage("templateSaveMessage", "扫描完成，已生成规则草稿，请核对后确认保存", "ok");
-        } else {
-          setMessage(
-            "templateSaveMessage",
-            "扫描未完全成功，文件和草稿已保留：" +
-              (result.scan_error || "请检查 Illustrator 和模板文件后重试") +
-              "。可点击“重新扫描已保存文件”继续",
-            "error"
-          );
-          const uploadStatus = document.getElementById("uploadScanStatus");
-          if (uploadStatus) uploadStatus.textContent = "文件已保存，扫描失败，可重新扫描";
-        }
-      } catch (error) {
-        setMessage("templateSaveMessage", String(error.message || error), "error");
-      }
+      setMessage("templateSaveMessage", "方案二扫描必须从本机重新选择 .ai 文件并通过 DrawFlowClient 上传扫描，中央服务不直接调用 Illustrator。", "error");
     }
 
     function displayAssetStatus(status) {
@@ -3314,18 +3292,14 @@ INDEX_HTML = """<!doctype html>
       setMessage("templateSaveMessage", "正在保存文件并扫描，请稍候", "");
       if (uploadStatus) uploadStatus.textContent = "正在上传并扫描";
       try {
-        const result = await postForm("/api/templates", form);
-        registeredTemplateId = result.template.template_id;
+        const result = await postForm("/local/templates/scan", form);
+        registeredTemplateId = result.template_id || templateId;
         state.selectedTemplateId = registeredTemplateId;
-        const scan = await postJson("/api/templates/" + encodeURIComponent(registeredTemplateId) + "/scan", {});
         document.getElementById("referenceAiFile").value = "";
         document.getElementById("primaryAiFile").value = "";
         document.getElementById("designFontAiFiles").value = "";
         document.getElementById("assetAiFiles").value = "";
         await loadTemplates(registeredTemplateId);
-        if (!scan.scan_ok) {
-          throw new Error("AI 扫描失败，模板保持草稿：" + (scan.scan_error || "未知错误"));
-        }
         if (uploadStatus) uploadStatus.textContent = "扫描完成，请核对规则";
         setMessage("templateSaveMessage", "扫描草稿已生成，请核对并修改规则后点击“检查并保存规则”", "ok");
       } catch (error) {
@@ -3345,7 +3319,7 @@ INDEX_HTML = """<!doctype html>
             "templateSaveMessage",
             "文件已保存为草稿，但扫描未完成：" +
               String(error.message || error) +
-              "。可点击“重新扫描已保存文件”继续",
+              "。请在本机重新选择 .ai 文件后再次上传扫描",
             "error"
           );
         } else {
@@ -3513,7 +3487,7 @@ INDEX_HTML = """<!doctype html>
       setTaskRunning(dryRun);
       showProgress(dryRun ? "dryRun" : "render");
       try {
-        const result = await postForm("/api/render", payload);
+        const result = await postForm("/local/render", payload);
         completeProgress(result.status === "completed");
         renderTaskResult(result);
         await loadJobs();
@@ -3696,9 +3670,9 @@ INDEX_HTML = """<!doctype html>
 
     function renderTaskResult(result) {
       if (result.status === "completed" && result.outputs && result.outputs.output_ai) {
-        window.location.href = `/api/jobs/${encodeURIComponent(result.job_id)}/download/output_ai`;
+        window.location.href = `/local/jobs/${encodeURIComponent(result.job_id)}/output`;
       } else if (result.status === "completed" && result.outputs && result.outputs.render_task) {
-        window.location.href = `/api/jobs/${encodeURIComponent(result.job_id)}/download/render_task`;
+        window.location.href = `/local/jobs/${encodeURIComponent(result.job_id)}/output`;
       } else if (result.status === "failed") {
         showRenderError(result.error || "渲染失败");
       } else {

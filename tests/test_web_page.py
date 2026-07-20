@@ -1,6 +1,13 @@
 from src.service.web_page import INDEX_HTML
 
 
+def test_page_uses_drawflow_branding():
+    assert "<title>DrawFlow</title>" in INDEX_HTML
+    assert "<h1>DrawFlow</h1>" in INDEX_HTML
+    assert "订单效果图与模板管理" in INDEX_HTML
+    assert "制图渲染工作台" not in INDEX_HTML
+
+
 def test_render_page_exposes_single_render_action():
     assert 'id="dryRunBtn"' not in INDEX_HTML
     assert 'id="resetTaskBtn"' not in INDEX_HTML
@@ -14,7 +21,8 @@ def test_render_page_exposes_single_render_action():
     assert 'id="recentJobs"' not in INDEX_HTML
     assert 'id="refreshJobsBtn"' not in INDEX_HTML
     assert "生成效果图" in INDEX_HTML
-    assert "/download/render_task" in INDEX_HTML
+    assert "/local/render" in INDEX_HTML
+    assert "/local/jobs/" in INDEX_HTML
     assert "render-task-panel" in INDEX_HTML
     assert "render-layout" in INDEX_HTML
     assert "只解析订单并生成 render task JSON" not in INDEX_HTML
@@ -181,7 +189,8 @@ def test_template_onboarding_requires_scan_check_and_confirmation():
     assert "/rules/confirm" in INDEX_HTML
     assert "/rules/rollback" in INDEX_HTML
     assert "data-rule-rollback" in INDEX_HTML
-    assert "/scan" in INDEX_HTML
+    assert "/local/templates/scan" in INDEX_HTML
+    assert "中央服务不直接调用 Illustrator" in INDEX_HTML
     assert "扫描草稿已生成" in INDEX_HTML
     assert "data-template-disable" not in INDEX_HTML
     assert "function disableTemplate" not in INDEX_HTML

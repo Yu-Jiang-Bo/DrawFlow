@@ -1,152 +1,158 @@
-# Custom Renderer Windows 测试机部署流程
+# DrawFlow 中央服务部署说明
 
-本服务的正式渲染依赖 Adobe Illustrator COM 自动化，因此测试机必须是 Windows，并且已安装 Adobe Illustrator。Linux 服务器不能执行 `.ai` 渲染；旧的 `uvicorn app:app` 部署说明属于另一个 FastAPI 解析服务，不适用于本项目。
+需要按顺序部署中央服务和客户端时，请先阅读 [`DEPLOY-SCHEME2-OPERATIONS.md`](./DEPLOY-SCHEME2-OPERATIONS.md)。本文保留中央服务的专项说明。
 
-## 1. 本机打包
+本文档只描述方案二的中央服务。中央服务负责 Web/API、模板与规则中心、DeepSeek 中转、不可变模板版本、SHA256 manifest、bundle 下载和备份；中央服务不安装 Adobe Illustrator，也不做真实 `.ai` 渲染。
 
-在本机 PowerShell 里执行：
+真实扫描和渲染由用户电脑上的 `DrawFlowClient.exe` 完成，见 `deploy/DEPLOY-DESKTOP-AGENT.md`。
+
+## 1. 构建中央发布包
+
+在开发机仓库根目录运行：
 
 ```powershell
-cd <本机项目目录>\custom-renderer
 powershell -ExecutionPolicy Bypass -File .\deploy\package-release.ps1
 ```
 
-生成结果在：
+产物：
+
+- `release\drawflow-central-YYYYMMDD-HHMM\`
+- `release\drawflow-central-YYYYMMDD-HHMM.zip`
+
+发布包不应包含 DeepSeek API Key、测试机密码或开发机个人路径。
+
+## 2. 解压目录
+
+建议解压到：
 
 ```text
-custom-renderer\release\custom-renderer-windows-YYYYMMDD-HHMM\
-custom-renderer\release\custom-renderer-windows-YYYYMMDD-HHMM.zip
+C:\DrawFlowCentral
 ```
 
-部署包只包含运行所需代码、模板、规则和必要模板配置，不包含 `.git`、本地任务历史、上传过的订单表格、测试缓存或虚拟环境。
-
-## 2. 拷贝到 Windows 测试机
-
-把生成的 zip 复制到测试机，例如解压到：
+模板运行数据建议使用：
 
 ```text
-D:\custom-renderer
+C:\DrawFlowData
 ```
 
-建议保持目录不要带中文和空格，减少 Illustrator/PowerShell 路径兼容问题。
+目录结构：
+
+```text
+C:\DrawFlowCentral
+├── src\
+├── config\
+├── templates\
+├── deploy\
+├── output\
+└── requirements.txt
+
+C:\DrawFlowData
+└── templates\<template_id>\versions\vNNNN\
+    ├── manifest.json
+    ├── template.ai
+    ├── rules.json
+    └── assets\
+```
+
+`active.json` 指向当前活动版本。客户端只按需下载所选模板的活动版本 bundle。
 
 ## 3. 安装依赖
 
-测试机需要先安装 Python 3，并确保 PowerShell 里能执行：
-
 ```powershell
-python --version
-```
-
-在测试机 PowerShell 里执行：
-
-```powershell
-cd D:\custom-renderer
+cd C:\DrawFlowCentral
 powershell -ExecutionPolicy Bypass -File .\deploy\windows\install.ps1
 ```
 
-依赖包括：
+测试机需要 Python 3。中央服务不需要 Illustrator，也不需要模板字体。
 
-```text
-pywin32
-openpyxl
-pytest
-```
+## 4. 配置 DeepSeek
 
-如果测试机不能联网，需要先准备离线 wheel 包，或临时开放 pip 安装所需网络。
-
-## 4. 启动服务
-
-前台启动，适合首次验证：
+中央服务是唯一保存 DeepSeek 访问配置的位置：
 
 ```powershell
-cd D:\custom-renderer
+powershell -ExecutionPolicy Bypass -File .\deploy\windows\configure-llm.ps1
+```
+
+脚本把以下变量写入当前 Windows 用户环境：
+
+- `DRAWFLOW_LLM_BASE_URL`
+- `DRAWFLOW_LLM_API_KEY`
+- `DRAWFLOW_LLM_MODEL`
+
+不要把 API Key 写入文档、发布包或脚本。
+
+## 5. 启动中央服务
+
+前台启动：
+
+```powershell
+setx DRAWFLOW_DATA_DIR C:\DrawFlowData
+setx DRAWFLOW_HOST 0.0.0.0
+setx DRAWFLOW_PORT 8765
 .\deploy\windows\start-service.bat
 ```
 
-后台启动，适合测试机常驻：
+后台启动：
 
 ```powershell
-cd D:\custom-renderer
+$env:DRAWFLOW_DATA_DIR = "C:\DrawFlowData"
 powershell -ExecutionPolicy Bypass -File .\deploy\windows\start-background.ps1
 ```
 
-默认监听：
+服务命令会显式使用：
 
 ```text
-http://0.0.0.0:8765
+python -m src.service.http_server --role central
 ```
 
-局域网访问地址是：
-
-```text
-http://测试机IP:8765/
-```
-
-如果要改端口，启动前设置环境变量：
-
-```powershell
-$env:CUSTOM_RENDERER_PORT="8000"
-powershell -ExecutionPolicy Bypass -File .\deploy\windows\start-background.ps1
-```
-
-## 5. 开放防火墙
-
-如果其他电脑访问不了，在测试机用管理员 PowerShell 执行：
-
-```powershell
-New-NetFirewallRule -DisplayName "Custom Renderer 8765" -Direction Inbound -Protocol TCP -LocalPort 8765 -Action Allow
-```
-
-如果改成 8000，就把命令里的 `8765` 改成 `8000`。
-
-## 6. 验证
-
-在测试机执行：
+## 6. 健康检查
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\deploy\windows\health-check.ps1
 ```
 
-浏览器打开：
+也可以直接访问：
 
 ```text
-http://127.0.0.1:8765/
+http://<central-host>:8765/api/health
 ```
 
-确认能看到模板列表，并用一个小订单表格跑一次渲染。首次启动 Illustrator 可能会弹许可、字体或文件安全提示；测试机需要先人工打开 Illustrator 处理这些弹窗。
+期望响应：
 
-## 7. 停止与日志
-
-停止服务：
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\deploy\windows\stop-service.ps1
+```json
+{
+  "ok": true,
+  "role": "central",
+  "illustrator": "not_required"
+}
 ```
 
-后台启动不会显示控制台日志。需要看启动错误时，先停止后台进程，再使用前台启动：
+中央服务的 `/api/render` 会拒绝真实渲染，并提示必须通过 DrawFlowClient 本地网关出图。
 
-```powershell
-.\deploy\windows\start-service.bat
-```
+## 7. 中央接口
 
-渲染任务和上传文件会生成到：
+- `GET /api/health`
+- `GET /api/runtime/templates/{id}/manifest`
+- `GET /api/runtime/templates/{id}/bundle/{version}`
+- `POST /api/runtime/templates/{id}/publish`
+- `POST /api/templates/import-scan`
+- 模板管理、规则解析和发布接口
 
-```text
-output\service-jobs\
-output\service-uploads\
-```
+`manifest` 是只读接口。模板必须先由发布接口生成不可变版本并写入 `active.json`，客户端才能按活动版本同步。
 
-这些是运行时数据，更新代码时不要覆盖或删除，除非确认不需要历史任务。
+## 8. 防火墙
 
-## 8. 更新部署
+如果需要让局域网客户端访问中央服务，只开放 `8765` 给可信网络。不要开放客户端本地端口 `8766`，该端口只允许用户电脑 loopback 使用。
 
-本机重新生成 zip 后，在测试机：
+## 9. 验收
 
-1. 先停止服务。
-2. 备份测试机当前 `output\` 和按需备份 `config\templates.json`、`templates\`。
-3. 用新包覆盖代码目录。
-4. 重新执行 `install.ps1`。
-5. 启动服务并跑 `health-check.ps1`。
+中央服务验收项：
 
-更新时尽量避开正在渲染的任务，因为停止服务会中断内存中的当前请求。
+- `/api/health` 返回 `role=central`。
+- 打开 `http://<central-host>:8765/` 能看到 DrawFlow 页面。
+- 不安装 Illustrator 时中央服务仍可启动。
+- `/api/runtime/templates/{id}/manifest` 返回活动版本和文件 SHA256。
+- `/api/runtime/templates/{id}/bundle/{version}` 能下载 zip。
+- 日志和发布包不包含 DeepSeek API Key、密码或个人绝对路径。
+
+真实 `.ai` 渲染验收必须在安装 Illustrator 的用户电脑上通过 `DrawFlowClient.exe` 完成。

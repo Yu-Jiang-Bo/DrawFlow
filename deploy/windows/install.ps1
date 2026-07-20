@@ -3,7 +3,7 @@ $ErrorActionPreference = "Stop"
 $ProjectRoot = Resolve-Path (Join-Path $PSScriptRoot "..\..")
 $VenvDir = Join-Path $ProjectRoot ".venv"
 $Python = Join-Path $VenvDir "Scripts\python.exe"
-$InstallMarker = Join-Path $VenvDir ".custom-renderer-installed"
+$InstallMarker = Join-Path $VenvDir ".drawflow-installed"
 
 Set-Location $ProjectRoot
 
@@ -34,4 +34,4 @@ New-Item -ItemType Directory -Force -Path (Join-Path $ProjectRoot "output\servic
 New-Item -ItemType Directory -Force -Path (Join-Path $ProjectRoot "output\service-uploads") | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $ProjectRoot "output\logs") | Out-Null
 
-Write-Host "Install complete: $ProjectRoot"
+Write-Host "DrawFlow install complete: $ProjectRoot"

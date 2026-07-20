@@ -7,7 +7,7 @@ $ErrorActionPreference = "Stop"
 
 $ProjectRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 if (-not $ReleaseName) {
-    $ReleaseName = "custom-renderer-windows-{0}" -f (Get-Date -Format "yyyyMMdd-HHmm")
+    $ReleaseName = "drawflow-central-{0}" -f (Get-Date -Format "yyyyMMdd-HHmm")
 }
 
 $ReleaseBase = Join-Path $ProjectRoot "release"
@@ -50,37 +50,14 @@ function Copy-Tree {
     $global:LASTEXITCODE = 0
 }
 
-Copy-Tree "src"
+Copy-Tree "src" -ExcludeFiles @("*.pyc", "local_client.py", "local_gateway.py")
 Copy-Tree "config"
 Copy-Tree "templates" -ExcludeDirs @("__pycache__", "onboarding")
-Copy-Tree "deploy"
+Copy-Tree "deploy" -ExcludeDirs @("__pycache__", "client") -ExcludeFiles @("*.pyc", "package-client.ps1")
 
 Copy-Item (Join-Path $ProjectRoot "requirements.txt") (Join-Path $ReleaseRoot "requirements.txt")
 if (Test-Path (Join-Path $ProjectRoot "pytest.ini")) {
     Copy-Item (Join-Path $ProjectRoot "pytest.ini") (Join-Path $ReleaseRoot "pytest.ini")
-}
-
-$RuntimeIllustratorScripts = @(
-    "export_202508_config.jsx",
-    "export_template_config.jsx",
-    "inspect_rule_pack.jsx",
-    "render_202508_grouped.jsx",
-    "render_202509_curved.jsx",
-    "render_config_grouped_text_sheet.jsx",
-    "render_generic_rule_pack.jsx",
-    "render_template_text.jsx",
-    "render_template_text_sheet.jsx",
-    "render_text.jsx",
-    "report_ai_sizes.jsx"
-)
-$ScriptTarget = Join-Path $ReleaseRoot "scripts\illustrator"
-New-Item -ItemType Directory -Force -Path $ScriptTarget | Out-Null
-foreach ($ScriptName in $RuntimeIllustratorScripts) {
-    $Source = Join-Path $ProjectRoot "scripts\illustrator\$ScriptName"
-    if (-not (Test-Path $Source)) {
-        throw "Missing Illustrator runtime script: $Source"
-    }
-    Copy-Item $Source (Join-Path $ScriptTarget $ScriptName)
 }
 
 $RequiredOutputFiles = @(
@@ -119,20 +96,59 @@ function Sanitize-ReleaseJson {
 }
 
 function Assert-CleanRelease {
-    $Patterns = @(
+    $ForbiddenPaths = @(
+        "deploy\client",
+        "deploy\package-client.ps1",
+        "scripts",
+        "src\service\local_client.py",
+        "src\service\local_gateway.py"
+    )
+    foreach ($RelativePath in $ForbiddenPaths) {
+        $Path = Join-Path $ReleaseRoot $RelativePath
+        if (Test-Path $Path) {
+            throw "Central release boundary check failed: $RelativePath must not be included."
+        }
+    }
+
+    $TextExtensions = @(".bat", ".css", ".html", ".ini", ".js", ".json", ".jsx", ".md", ".ps1", ".py", ".txt")
+    $TextFiles = Get-ChildItem -Path $ReleaseRoot -Recurse -File |
+        Where-Object { $TextExtensions -contains $_.Extension.ToLowerInvariant() }
+
+    $SimplePatterns = @(
         ("C:" + "\" + "\" + "Users"),
         ("C:" + "/" + "Users"),
         ("/" + "Users" + "/"),
         ("root" + "@"),
-        ("162" + ".14" + ".120" + ".240")
+        ("162" + ".14" + ".120" + ".240"),
+        ("43" + ".139" + ".43" + ".11")
     )
-    foreach ($Pattern in $Patterns) {
-        $Matches = Get-ChildItem -Path $ReleaseRoot -Recurse -File |
-            Select-String -Pattern $Pattern -SimpleMatch -ErrorAction SilentlyContinue
+    foreach ($Pattern in $SimplePatterns) {
+        $Matches = $TextFiles | Select-String -Pattern $Pattern -SimpleMatch -ErrorAction SilentlyContinue
         if ($Matches) {
             $First = $Matches | Select-Object -First 1
             throw "Release privacy check failed: pattern '$Pattern' found in $($First.Path):$($First.LineNumber)"
         }
+    }
+
+    $RegexPatterns = @(
+        ("-----BEGIN " + "(?:RSA |EC |OPENSSH )?PRIVATE KEY-----"),
+        ("\b" + "s" + "k-" + "[A-Za-z0-9_-]{16,}\b"),
+        '(?im)^\s*(?:setx?\s+|\$env:)?(?:DRAWFLOW|CUSTOM_RENDERER)_LLM_API_KEY\s*(?:=|\s)\s*["'']?(?!\$|<|YOUR_|REPLACE_)[A-Za-z0-9+/.=_\-!@#%^&*()]{12,}["'']?\s*$',
+        '(?im)^\s*(?:password|passwd|pwd|secret|access_token|refresh_token)\s*[:=]\s*["'']?(?!\$|<|YOUR_|REPLACE_)[^\s"'']{12,}'
+    )
+    foreach ($Pattern in $RegexPatterns) {
+        $Matches = $TextFiles | Select-String -Pattern $Pattern -ErrorAction SilentlyContinue
+        if ($Matches) {
+            $First = $Matches | Select-Object -First 1
+            throw "Release secret scan failed in $($First.Path):$($First.LineNumber)"
+        }
+    }
+
+    $SensitiveFiles = Get-ChildItem -Path $ReleaseRoot -Recurse -File |
+        Where-Object { $_.Name -match '(?i)(^\.env(?:\.|$)|\.(?:pem|pfx|p12|key)$|credentials?|secrets?)' }
+    if ($SensitiveFiles) {
+        $First = $SensitiveFiles | Select-Object -First 1
+        throw "Release secret filename check failed: $($First.FullName)"
     }
 }
 

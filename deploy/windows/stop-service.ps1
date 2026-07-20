@@ -1,10 +1,10 @@
 $ErrorActionPreference = "Stop"
 
-$Port = if ($env:CUSTOM_RENDERER_PORT) { [int]$env:CUSTOM_RENDERER_PORT } else { 8765 }
+$Port = if ($env:DRAWFLOW_PORT) { [int]$env:DRAWFLOW_PORT } elseif ($env:CUSTOM_RENDERER_PORT) { [int]$env:CUSTOM_RENDERER_PORT } else { 8765 }
 $Listeners = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
 
 if (-not $Listeners) {
-    Write-Host "No Custom Renderer listener found on port $Port"
+    Write-Host "No DrawFlow listener found on port $Port"
     exit 0
 }
 
@@ -14,14 +14,14 @@ foreach ($PidValue in $Pids) {
     $ProcessInfo = Get-CimInstance Win32_Process -Filter "ProcessId = $PidValue" -ErrorAction SilentlyContinue
     $CommandLine = if ($ProcessInfo) { [string]$ProcessInfo.CommandLine } else { "" }
     if ($CommandLine -notmatch "src\.service\.http_server") {
-        Write-Host "Port $Port is used by PID $PidValue, but it is not Custom Renderer. Skipping."
+        Write-Host "Port $Port is used by PID $PidValue, but it is not DrawFlow. Skipping."
         continue
     }
     $RendererPids += $PidValue
 }
 
 if (-not $RendererPids) {
-    throw "No Custom Renderer process found on port $Port; refusing to stop unrelated process."
+    throw "No DrawFlow process found on port $Port; refusing to stop unrelated process."
 }
 
 foreach ($PidValue in $RendererPids) {

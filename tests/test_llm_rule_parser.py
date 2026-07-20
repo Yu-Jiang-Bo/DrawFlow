@@ -5,6 +5,22 @@ import pytest
 from src.service.llm_rule_parser import LlmRuleParser, extract_json_object
 
 
+def test_drawflow_environment_takes_priority_over_legacy_names(monkeypatch):
+    monkeypatch.setenv("DRAWFLOW_LLM_API_KEY", "drawflow-key")
+    monkeypatch.setenv("DRAWFLOW_LLM_BASE_URL", "https://drawflow.example/v1")
+    monkeypatch.setenv("DRAWFLOW_LLM_MODEL", "drawflow-model")
+    monkeypatch.setenv("DRAWFLOW_LLM_TIMEOUT_SECONDS", "12")
+    monkeypatch.setenv("CUSTOM_RENDERER_LLM_API_KEY", "legacy-key")
+    monkeypatch.setenv("CUSTOM_RENDERER_LLM_BASE_URL", "https://legacy.example/v1")
+
+    parser = LlmRuleParser()
+
+    assert parser.api_key == "drawflow-key"
+    assert parser.base_url == "https://drawflow.example/v1"
+    assert parser.model == "drawflow-model"
+    assert parser.timeout_seconds == 12
+
+
 def test_llm_parser_uses_local_fallback_when_unconfigured():
     parser = LlmRuleParser(api_key="", base_url="")
     fallback = {"template_id": "JJMB1", "status": "draft", "font_options": ["F1"]}

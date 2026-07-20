@@ -1,8 +1,14 @@
 __pycache__/
 *.py[cod]
 .pytest_cache/
+.pytest-*/
+.pytest_*/
+.runtime-*/
 .tmp/
 output/
 release/
 render-tasks/
 *.log
+templates/
+deploy/client/drawflow-client.json
+deploy/linux/drawflow.env

@@ -1,0 +1,281 @@
+"""Loopback-only DrawFlow local gateway."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+import threading
+import uuid
+import webbrowser
+from email import policy
+from email.parser import BytesParser
+from http import HTTPStatus
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from urllib.parse import unquote, urlparse
+
+from .local_client import HttpCentralClient, LocalClientError, LocalDrawFlowClient
+from .paths import LOCAL_DRAWFLOW_DIR
+from .web_page import INDEX_HTML as FALLBACK_HTML
+
+
+LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
+
+
+class LocalGatewayRequestHandler(BaseHTTPRequestHandler):
+    client: LocalDrawFlowClient | None = None
+    render_lock = threading.Lock()
+
+    def do_GET(self) -> None:
+        path = urlparse(self.path).path
+        if path in {"/health", "/local/health"}:
+            self._send_json(self.drawflow_client.health())
+            return
+        if path == "/":
+            self._send_central_or_fallback("/")
+            return
+        if path.startswith("/local/jobs/"):
+            self._handle_local_job(path)
+            return
+        if path.startswith("/api/"):
+            self._proxy("GET")
+            return
+        self._send_error(HTTPStatus.NOT_FOUND, "not found")
+
+    def do_POST(self) -> None:
+        path = urlparse(self.path).path
+        if path in {"/local/render", "/api/render"}:
+            self._handle_local_render()
+            return
+        if path == "/local/templates/scan":
+            self._handle_local_scan()
+            return
+        if path.startswith("/api/"):
+            self._proxy("POST")
+            return
+        self._send_error(HTTPStatus.NOT_FOUND, "not found")
+
+    def do_DELETE(self) -> None:
+        if urlparse(self.path).path.startswith("/api/"):
+            self._proxy("DELETE")
+            return
+        self._send_error(HTTPStatus.NOT_FOUND, "not found")
+
+    def _handle_local_render(self) -> None:
+        if not self.render_lock.acquire(blocking=False):
+            self._send_error(HTTPStatus.CONFLICT, "本机 DrawFlow 正在渲染另一项任务，请稍后再试")
+            return
+        try:
+            payload = self._read_render_payload()
+            self._send_json(self.drawflow_client.render(payload))
+        except Exception as exc:
+            self._send_error(HTTPStatus.BAD_REQUEST, str(exc))
+        finally:
+            self.render_lock.release()
+
+    def _handle_local_scan(self) -> None:
+        try:
+            fields, files = self._read_multipart_request()
+            uploads = [
+                {"filename": str(item.get("filename") or ""), "content": item.get("content", b"")}
+                for values in files.values()
+                for item in values
+            ]
+            self._send_json(self.drawflow_client.scan_and_import(fields, uploads))
+        except Exception as exc:
+            self._send_error(HTTPStatus.BAD_REQUEST, str(exc))
+
+    def _handle_local_job(self, path: str) -> None:
+        parts = path.strip("/").split("/")
+        if len(parts) == 3:
+            try:
+                self._send_json(self.drawflow_client.jobs.load(parts[2]))
+            except KeyError as exc:
+                self._send_error(HTTPStatus.NOT_FOUND, str(exc))
+            return
+        if len(parts) == 4 and parts[3] == "output":
+            self._send_job_output(parts[2], "output_ai")
+            return
+        self._send_error(HTTPStatus.NOT_FOUND, "not found")
+
+    def _read_render_payload(self) -> dict[str, object]:
+        content_type = self.headers.get("Content-Type", "")
+        if not content_type.startswith("multipart/form-data"):
+            return self._read_json()
+        fields, files = self._read_multipart_request()
+        upload = (files.get("order_file") or [None])[0]
+        if not upload or not upload.get("content"):
+            raise LocalClientError("请上传订单表格")
+        order_path = self._save_upload(str(upload.get("filename") or ""), upload["content"])  # type: ignore[arg-type]
+        return {**fields, "order_file": str(order_path)}
+
+    def _send_job_output(self, job_id: str, key: str) -> None:
+        try:
+            record = self.drawflow_client.jobs.load(job_id)
+        except KeyError as exc:
+            self._send_error(HTTPStatus.NOT_FOUND, str(exc))
+            return
+        output_path = Path(str(record.get("outputs", {}).get(key, "")))
+        if not output_path.exists():
+            self._send_error(HTTPStatus.NOT_FOUND, "输出文件不存在")
+            return
+        self._send_bytes(output_path.read_bytes(), "application/octet-stream", _safe_download_name(output_path.name))
+
+    def _send_central_or_fallback(self, path: str) -> None:
+        try:
+            status, headers, body = self.drawflow_client.central.proxy("GET", path)
+            self._send_proxy_response(status, headers, body)
+        except Exception:
+            self._send_html(FALLBACK_HTML)
+
+    def _proxy(self, method: str) -> None:
+        body = self._read_raw_body()
+        headers = {key: value for key, value in self.headers.items()}
+        status, response_headers, response_body = self.drawflow_client.central.proxy(
+            method,
+            self.path,
+            data=body if body else None,
+            headers=headers,
+        )
+        self._send_proxy_response(status, response_headers, response_body)
+
+    def _send_proxy_response(self, status: int, headers: dict[str, str], body: bytes) -> None:
+        self.send_response(status)
+        blocked = {"connection", "transfer-encoding", "content-encoding", "content-length"}
+        for key, value in headers.items():
+            if key.lower() not in blocked:
+                self.send_header(key, value)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _read_json(self) -> dict[str, object]:
+        body = self._read_raw_body()
+        return json.loads(body.decode("utf-8") if body else "{}")
+
+    def _read_raw_body(self) -> bytes:
+        length = int(self.headers.get("Content-Length", "0") or "0")
+        return self.rfile.read(length) if length else b""
+
+    def _read_multipart_request(self) -> tuple[dict[str, str], dict[str, list[dict[str, object]]]]:
+        content_type = self.headers.get("Content-Type", "")
+        if not content_type.startswith("multipart/form-data"):
+            raise LocalClientError("请求必须使用 multipart/form-data")
+        body = self._read_raw_body()
+        header = f"Content-Type: {content_type}\r\nMIME-Version: 1.0\r\n\r\n".encode("utf-8")
+        message = BytesParser(policy=policy.default).parsebytes(header + body)
+        fields: dict[str, str] = {}
+        files: dict[str, list[dict[str, object]]] = {}
+        for part in message.iter_parts():
+            name = part.get_param("name", header="content-disposition")
+            if not name:
+                continue
+            data = part.get_payload(decode=True) or b""
+            filename = part.get_filename()
+            if filename:
+                files.setdefault(name, []).append({"filename": filename, "content": data})
+            else:
+                fields[name] = data.decode(part.get_content_charset() or "utf-8", errors="replace")
+        return fields, files
+
+    def _save_upload(self, filename: str, content: bytes) -> Path:
+        extension = Path(filename).suffix.lower()
+        if extension not in {".xlsx", ".xls", ".csv"}:
+            raise LocalClientError("订单表格只支持 .xlsx、.xls、.csv")
+        upload_dir = Path(self.drawflow_client.data_dir) / "uploads"
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        target = upload_dir / f"{uuid.uuid4().hex[:12]}-{_safe_download_name(filename)}"
+        target.write_bytes(content)
+        return target
+
+    def _send_json(self, payload: object, status: HTTPStatus = HTTPStatus.OK) -> None:
+        data = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
+        self._send_bytes(data, "application/json; charset=utf-8", status=status)
+
+    def _send_html(self, text: str) -> None:
+        self._send_bytes(text.encode("utf-8"), "text/html; charset=utf-8")
+
+    def _send_bytes(
+        self,
+        data: bytes,
+        content_type: str,
+        download_name: str | None = None,
+        status: HTTPStatus = HTTPStatus.OK,
+    ) -> None:
+        self.send_response(status)
+        self.send_header("Content-Type", content_type)
+        if download_name:
+            self.send_header("Content-Disposition", f'attachment; filename="{download_name}"')
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def _send_error(self, status: HTTPStatus, message: str) -> None:
+        self._send_json({"error": message}, status)
+
+    @property
+    def drawflow_client(self) -> LocalDrawFlowClient:
+        if self.__class__.client is None:
+            self.__class__.client = LocalDrawFlowClient(HttpCentralClient(default_central_url()), LOCAL_DRAWFLOW_DIR)
+        return self.__class__.client
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="启动 DrawFlow 本地渲染网关")
+    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--port", type=int, default=8766)
+    parser.add_argument("--central-url", default=default_central_url())
+    parser.add_argument("--no-open", action="store_true")
+    return parser.parse_args()
+
+
+def main() -> int:
+    args = parse_args()
+    if args.host not in LOOPBACK_HOSTS:
+        raise SystemExit("DrawFlow local gateway must bind to 127.0.0.1, localhost, or ::1.")
+    handler = type(
+        "ConfiguredLocalGatewayRequestHandler",
+        (LocalGatewayRequestHandler,),
+        {"client": LocalDrawFlowClient(HttpCentralClient(args.central_url), LOCAL_DRAWFLOW_DIR)},
+    )
+    server = ThreadingHTTPServer((args.host, args.port), handler)
+    url = f"http://{args.host}:{args.port}/"
+    print(f"DrawFlow local gateway listening on {url}")
+    if not args.no_open:
+        webbrowser.open(url)
+    server.serve_forever()
+    return 0
+
+
+def _safe_download_name(value: str) -> str:
+    chars = [char if char.isalnum() or char in {"-", "_", "."} else "_" for char in Path(value).name]
+    return "".join(chars).strip("._") or "file"
+
+
+def default_central_url() -> str:
+    configured = os.environ.get("DRAWFLOW_CENTRAL_URL", "").strip()
+    if configured:
+        return configured
+    for path in _client_config_candidates():
+        try:
+            if path.exists():
+                data = json.loads(path.read_text(encoding="utf-8"))
+                central_url = str(data.get("central_url") or "").strip()
+                if central_url:
+                    return central_url
+        except Exception:
+            continue
+    return "http://127.0.0.1:8765"
+
+
+def _client_config_candidates() -> list[Path]:
+    candidates = [Path.cwd() / "drawflow-client.json"]
+    if getattr(sys, "frozen", False):
+        candidates.insert(0, Path(sys.executable).resolve().with_name("drawflow-client.json"))
+    return candidates
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
