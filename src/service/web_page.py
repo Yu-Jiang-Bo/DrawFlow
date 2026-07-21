@@ -3494,6 +3494,7 @@ INDEX_HTML = """<!doctype html>
       } catch (error) {
         failProgress();
         showRenderError(error);
+        await loadJobs().catch(() => {});
       } finally {
         setRenderButtonsDisabled(false);
       }
@@ -3639,6 +3640,14 @@ INDEX_HTML = """<!doctype html>
     function explainRenderError(error) {
       const raw = String(error && error.message ? error.message : error || "").trim();
       const text = raw.toLowerCase();
+      const code = String(error && error.code ? error.code : "").trim().toLowerCase();
+      if (code === "template_not_published") return cleanErrorText(raw);
+      if (code === "template_bundle_unavailable") return cleanErrorText(raw);
+      if (code === "central_unreachable" || code.startsWith("central_http_")) return cleanErrorText(raw);
+      if (code === "local_render_unexpected") return cleanErrorText(raw);
+      if (/failed to fetch|networkerror|load failed/.test(text)) {
+        return "无法连接本地 DrawFlow 客户端（127.0.0.1:8766）。请确认 DrawFlowClient.exe 仍在运行后再试。";
+      }
       if (raw) return cleanErrorText(raw);
       if (!raw) {
         return "生成效果图失败。请检查模板、订单表格和规则配置后再试一次。";
@@ -3973,14 +3982,14 @@ INDEX_HTML = """<!doctype html>
     async function getJson(url) {
       const response = await fetch(url);
       const text = await response.text();
-      if (!response.ok) throw new Error(extractError(text));
+      if (!response.ok) throw requestErrorFromText(text);
       return text ? JSON.parse(text) : {};
     }
 
     async function postForm(url, body) {
       const response = await fetch(url, { method: "POST", body });
       const text = await response.text();
-      if (!response.ok) throw new Error(extractError(text));
+      if (!response.ok) throw requestErrorFromText(text);
       return text ? JSON.parse(text) : {};
     }
 
@@ -3991,7 +4000,7 @@ INDEX_HTML = """<!doctype html>
         body: JSON.stringify(body)
       });
       const text = await response.text();
-      if (!response.ok) throw new Error(extractError(text));
+      if (!response.ok) throw requestErrorFromText(text);
       return text ? JSON.parse(text) : {};
     }
 
@@ -4003,16 +4012,22 @@ INDEX_HTML = """<!doctype html>
       }
       const response = await fetch(url, options);
       const text = await response.text();
-      if (!response.ok) throw new Error(extractError(text));
+      if (!response.ok) throw requestErrorFromText(text);
       return text ? JSON.parse(text) : {};
     }
 
-    function extractError(text) {
+    function requestErrorFromText(text) {
       try {
         const payload = JSON.parse(text);
-        return payload.error || text;
+        const failure = payload && payload.error;
+        if (failure && typeof failure === "object") {
+          const error = new Error(String(failure.message || failure.code || "请求失败"));
+          error.code = String(failure.code || "");
+          return error;
+        }
+        return new Error(String(failure || text || "请求失败"));
       } catch (error) {
-        return text || "请求失败";
+        return new Error(text || "请求失败");
       }
     }
 

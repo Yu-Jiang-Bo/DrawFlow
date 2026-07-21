@@ -6,6 +6,7 @@
 2. 确认本机已安装并激活 Adobe Illustrator，模板需要的字体也已安装。
 3. 双击 `DrawFlowClient.exe`。程序直接使用包内正式中央地址，只监听 `127.0.0.1:8766`，并自动打开 `http://127.0.0.1:8766/`。
 4. 仅在中央服务器地址变化时编辑同级 `drawflow-client.json`，不需要重新打包 exe。
+5. 若页面提示生成失败，先保留页面上的完整错误文字；同时可查看 `%LOCALAPPDATA%\\DrawFlow\\logs\\drawflow-client.log` 的最后几行，二者一起用于定位问题。
 
 ## 本地职责
 

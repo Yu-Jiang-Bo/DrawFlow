@@ -43,6 +43,10 @@ GENERIC_RULE_COM_RETRY_DELAY_SECONDS = 3.0
 class RenderServiceError(RuntimeError):
     """Raised when a backend render request cannot be completed."""
 
+    def __init__(self, message: str, *, code: str = "render_failed") -> None:
+        super().__init__(message)
+        self.code = code
+
 
 class RenderService:
     def __init__(
@@ -62,7 +66,7 @@ class RenderService:
             rule_check = check_template_definition(template)
             if not rule_check["renderable"]:
                 missing = "；".join(item["message"] for item in rule_check["missing"])
-                raise RenderServiceError(f"模板规则不完整，无法渲染：{missing}")
+                raise RenderServiceError(f"模板规则不完整，无法渲染：{missing}", code="template_rules_invalid")
             pipeline = _effective_pipeline(template)
             if pipeline == "jjmb_202508":
                 result = self._run_202508(record, template)
@@ -73,29 +77,32 @@ class RenderService:
             elif pipeline == "generic_rules_only":
                 result = self._run_generic_rules(record, template)
             else:
-                raise RenderServiceError(f"不支持的渲染 pipeline: {template.pipeline}")
+                raise RenderServiceError(f"不支持的渲染 pipeline: {template.pipeline}", code="template_pipeline_invalid")
             record["outputs"] = result["outputs"]
             record["stats"] = result["stats"]
             self.jobs.update(record, status="completed")
         except Exception as exc:
-            self.jobs.update(record, status="failed", error=str(exc))
+            self.jobs.update(record, status="failed", error=str(exc), error_code=render_error_code(exc))
         return record
 
     def _normalize_request(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         template_id = str(payload.get("template_id", "")).strip()
         order_file_value = str(payload.get("order_file", "")).strip()
         if not template_id:
-            raise RenderServiceError("缺少 template_id")
+            raise RenderServiceError("缺少 template_id", code="missing_template_id")
         if not order_file_value:
-            raise RenderServiceError("缺少 order_file")
+            raise RenderServiceError("缺少订单表格，请重新选择 Excel 文件后再试", code="missing_order_file")
         order_file = Path(order_file_value)
         if not order_file.exists():
-            raise RenderServiceError(f"订单文件不存在: {order_file}")
-        template = self.registry.get_template(template_id)
+            raise RenderServiceError(f"订单文件不存在: {order_file}", code="order_file_missing")
+        try:
+            template = self.registry.get_template(template_id)
+        except KeyError as exc:
+            raise RenderServiceError(f"模板不存在或尚未同步到本机：{template_id}", code="template_not_available") from exc
         if template.status != "active":
-            raise RenderServiceError(f"Template is not active: {template_id}")
+            raise RenderServiceError(f"模板未启用：{template_id}", code="template_not_active")
         if template.pipeline not in SUPPORTED_RENDER_PIPELINES:
-            raise RenderServiceError(f"Template pipeline is not executable: {template.pipeline}")
+            raise RenderServiceError(f"模板渲染管线不可执行：{template.pipeline}", code="template_pipeline_invalid")
         return {
             "template_id": template_id,
             "order_file": str(order_file.resolve()),
@@ -166,7 +173,7 @@ class RenderService:
 
         if not request["dry_run"]:
             if not template.template_ai:
-                raise RenderServiceError("模板缺少可用的 .ai 模板文件")
+                raise RenderServiceError("模板缺少可用的 .ai 模板文件", code="template_bundle_invalid")
             export_202508_config(template.template_ai, template_config, request["visible"])
 
         template_rules = read_template_rule_config(template.template_rules_config)
@@ -228,7 +235,7 @@ class RenderService:
 
         if not template_config.exists():
             if request["dry_run"]:
-                raise RenderServiceError(f"模板配置不存在，无法 dry-run: {template_config}")
+                raise RenderServiceError(f"模板配置不存在，无法 dry-run: {template_config}", code="template_config_missing")
             self._export_generic_template_config(template.template_ai, template.template_id, template_config, request["visible"])
 
         template_rules = read_template_rule_config(template.template_rules_config)
@@ -278,7 +285,7 @@ class RenderService:
         output_ai = self._output_ai_path(job_dir, request, template)
         font_report = template.template_config
         if not font_report or not font_report.exists():
-            raise RenderServiceError(f"曲线标题字体报告不存在: {font_report}")
+            raise RenderServiceError(f"曲线标题字体报告不存在: {font_report}", code="template_font_config_missing")
 
         rows = read_202509_curved_rows(order_file, sheet_name=request["sheet_name"] or None)
         items = parse_202509_curved_items(rows)
@@ -362,7 +369,8 @@ class RenderService:
             raise RenderServiceError(
                 "模板字体配置缺失，无法渲染："
                 f"{joined}。请确认尺寸/作图区模板包含字体区，"
-                "或上传包含 F1-F10 字体样本的原始参考模板。"
+                "或上传包含 F1-F10 字体样本的原始参考模板。",
+                code="template_font_config_missing",
             )
 
     def _write_json(self, path: Path, payload: Any) -> None:
@@ -421,6 +429,16 @@ def _render_generic_chunk(bridge: IllustratorBridge, script: Path, task_file: Pa
                 raise
             bridge.reset()
             time.sleep(GENERIC_RULE_COM_RETRY_DELAY_SECONDS)
+
+
+def render_error_code(exc: Exception) -> str:
+    if isinstance(exc, IllustratorBridgeError):
+        return "illustrator_render_failed"
+    if isinstance(exc, RenderServiceError):
+        return exc.code
+    if isinstance(exc, (KeyError, IndexError, UnicodeDecodeError, ValueError)):
+        return "order_parse_failed"
+    return "render_failed"
 
 
 def _is_retryable_com_failure(exc: IllustratorBridgeError) -> bool:

@@ -378,9 +378,10 @@ def test_service_rejects_draft_template_before_creating_job(tmp_path):
         jobs=JobStore(tmp_path / "jobs"),
     )
 
-    with pytest.raises(RenderServiceError, match="not active"):
+    with pytest.raises(RenderServiceError, match="模板未启用") as exc_info:
         service.submit({"template_id": "JJMB202508261001394920", "order_file": str(order_path)})
 
+    assert exc_info.value.code == "template_not_active"
     assert service.jobs.list_recent() == []
 
 
@@ -1022,7 +1023,8 @@ def test_service_rejects_missing_order_file(tmp_path):
     try:
         service.submit({"template_id": "JJMB202508261001394920", "order_file": ""})
     except Exception as exc:
-        assert "缺少 order_file" in str(exc)
+        assert "缺少订单表格" in str(exc)
+        assert getattr(exc, "code", "") == "missing_order_file"
     else:
         raise AssertionError("missing order_file should fail")
 

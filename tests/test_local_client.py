@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 from openpyxl import Workbook
 
+from src.service import local_client
 from src.service.local_client import LocalClientError, LocalDrawFlowClient, LocalTemplateCache
 from src.service.runtime_templates import sha256_file
 
@@ -57,7 +58,7 @@ def make_bundle(
         names.insert(1, "template.config.json")
     for name in names:
         path = source / name
-        files.append({"path": name, "sha256": "bad" if bad_hash and name == "template.ai" else sha256_file(path)})
+        files.append({"path": name, "sha256": "0" * 64 if bad_hash and name == "template.ai" else sha256_file(path)})
     manifest = {
         "template_id": "DEMO001",
         "version": version,
@@ -126,8 +127,22 @@ def test_local_cache_registers_template_config_for_structured_renderers(tmp_path
 def test_local_cache_rejects_hash_mismatch(tmp_path):
     manifest, bundle = make_bundle(tmp_path, bad_hash=True)
 
-    with pytest.raises(LocalClientError, match="SHA256"):
+    with pytest.raises(LocalClientError, match="SHA256") as exc_info:
         LocalTemplateCache(FakeCentral(manifest, bundle), tmp_path / "local").ensure_template("DEMO001")
+
+    assert exc_info.value.code == "template_hash_mismatch"
+
+
+def test_local_cache_marks_missing_manifest_as_an_unpublished_template(tmp_path):
+    class MissingManifestCentral:
+        def get_manifest(self, template_id):
+            raise LocalClientError("central returned HTTP 404", code="central_http_404")
+
+    with pytest.raises(LocalClientError) as exc_info:
+        LocalTemplateCache(MissingManifestCentral(), tmp_path / "local").ensure_template("DEMO001")
+
+    assert exc_info.value.code == "template_not_published"
+    assert "DEMO001" in str(exc_info.value)
 
 
 def test_local_cache_rejects_unsafe_zip_member(tmp_path):
@@ -185,8 +200,35 @@ def test_local_render_reports_missing_fonts_before_illustrator(tmp_path):
     write_order(order)
     client = LocalDrawFlowClient(FakeCentral(manifest, bundle), tmp_path / "local", font_dirs=[])
 
-    with pytest.raises(LocalClientError, match="本机缺少模板字体"):
+    with pytest.raises(LocalClientError, match="本机缺少模板字体") as exc_info:
         client.render({"template_id": "DEMO001", "order_file": str(order), "dry_run": True})
+
+    assert exc_info.value.code == "missing_required_fonts"
+
+
+def test_local_render_returns_persisted_render_failures_as_structured_client_errors(tmp_path, monkeypatch):
+    manifest, bundle = make_bundle(tmp_path)
+    order = tmp_path / "orders.xlsx"
+    write_order(order)
+
+    class FailedRenderService:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def submit(self, payload):
+            return {
+                "status": "failed",
+                "error": "Illustrator JSX failed: test failure",
+                "error_code": "illustrator_render_failed",
+            }
+
+    monkeypatch.setattr(local_client, "RenderService", FailedRenderService)
+    client = LocalDrawFlowClient(FakeCentral(manifest, bundle), tmp_path / "local", font_dirs=[])
+
+    with pytest.raises(LocalClientError, match="Illustrator JSX failed") as exc_info:
+        client.render({"template_id": "DEMO001", "order_file": str(order), "dry_run": False})
+
+    assert exc_info.value.code == "illustrator_render_failed"
 
 
 def test_local_scan_uploads_scan_json_and_files_to_central(tmp_path):

@@ -1,6 +1,7 @@
 import argparse
 import json
 import threading
+import urllib.error
 import urllib.request
 from http.server import ThreadingHTTPServer
 from pathlib import Path
@@ -9,6 +10,7 @@ import pytest
 
 from src.service import local_gateway
 from src.service.job_store import JobStore
+from src.service.local_client import LocalClientError
 
 
 def test_local_gateway_rejects_non_loopback_host(monkeypatch):
@@ -103,6 +105,56 @@ def test_local_gateway_reads_jobs_and_downloads_from_the_client_not_central(tmp_
     assert details["stats"] == {"items": 3}
     assert downloaded_ai == b"ai-output"
     assert downloaded_task == b'{"task": true}'
+
+
+def test_local_gateway_returns_structured_error_for_render_sync_failures(tmp_path):
+    class FakeClient:
+        def __init__(self):
+            self.jobs = JobStore(tmp_path / "jobs")
+            self.data_dir = tmp_path
+
+        def render(self, payload):
+            raise LocalClientError("template MISSING001 has no published version", code="template_not_published")
+
+    handler = type(
+        "TestRenderFailureGatewayRequestHandler",
+        (local_gateway.LocalGatewayRequestHandler,),
+        {"client": FakeClient()},
+    )
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    worker = threading.Thread(target=server.serve_forever, daemon=True)
+    worker.start()
+    try:
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{server.server_address[1]}/local/render",
+            data=b"{}",
+            method="POST",
+            headers={"Content-Type": "application/json"},
+        )
+        with pytest.raises(urllib.error.HTTPError) as exc_info:
+            urllib.request.urlopen(request)
+        payload = json.loads(exc_info.value.read().decode("utf-8"))
+    finally:
+        server.shutdown()
+        server.server_close()
+        worker.join(timeout=2)
+
+    assert exc_info.value.code == 400
+    assert payload == {
+        "error": {
+            "code": "template_not_published",
+            "message": "template MISSING001 has no published version",
+        }
+    }
+
+
+def test_configure_local_logging_writes_gateway_errors_to_the_client_log(tmp_path):
+    local_gateway.configure_local_logging(tmp_path)
+    local_gateway.LOGGER.warning("diagnostic event for test")
+
+    log_path = tmp_path / "logs" / "drawflow-client.log"
+    assert log_path.is_file()
+    assert "diagnostic event for test" in log_path.read_text(encoding="utf-8")
 
 
 def _http_get_json(url: str) -> dict[str, object]:

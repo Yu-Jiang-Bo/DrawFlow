@@ -41,6 +41,17 @@ def test_render_page_uses_business_error_dialog():
     assert "模板缺少本次订单需要的字体样本或字体规则" in INDEX_HTML
 
 
+def test_render_page_preserves_gateway_error_codes_and_explains_browser_fetch_failures():
+    assert "function requestErrorFromText(text)" in INDEX_HTML
+    assert "failure.message || failure.code" in INDEX_HTML
+    assert "error.code = String(failure.code || \"\")" in INDEX_HTML
+    assert 'code === "template_not_published"' in INDEX_HTML
+    assert 'code === "central_unreachable"' in INDEX_HTML
+    assert "failed to fetch" in INDEX_HTML
+    assert "127.0.0.1:8766" in INDEX_HTML
+    assert "await loadJobs().catch(() => {})" in INDEX_HTML
+
+
 def test_render_page_has_progress_overlay():
     assert 'id="renderProgressOverlay"' in INDEX_HTML
     assert 'id="progressBar"' in INDEX_HTML

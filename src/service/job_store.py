@@ -34,6 +34,7 @@ class JobStore:
             "outputs": {},
             "stats": {},
             "error": "",
+            "error_code": "",
         }
         self.save(record)
         return record

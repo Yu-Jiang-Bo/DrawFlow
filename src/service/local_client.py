@@ -15,7 +15,7 @@ from typing import Any, Mapping
 
 from .job_store import JobStore
 from .paths import LOCAL_DRAWFLOW_DIR
-from .render_service import RenderService
+from .render_service import RenderService, RenderServiceError
 from .runtime_templates import sha256_file
 from .template_inspector import TemplateInspector
 from .template_onboarding import TemplateOnboardingStore
@@ -24,6 +24,10 @@ from .template_registry import TemplateRegistry
 
 class LocalClientError(RuntimeError):
     """Raised when the local client cannot complete a request."""
+
+    def __init__(self, message: str, *, code: str = "local_client_error") -> None:
+        super().__init__(message)
+        self.code = code
 
 
 @dataclass(frozen=True)
@@ -67,6 +71,11 @@ class HttpCentralClient:
                 return response.status, dict(response.headers.items()), response.read()
         except urllib.error.HTTPError as exc:
             return exc.code, dict(exc.headers.items()), exc.read()
+        except OSError as exc:
+            raise LocalClientError(
+                f"无法连接中央服务：{self.base_url}",
+                code="central_unreachable",
+            ) from exc
 
     def _get_json(self, path: str) -> dict[str, Any]:
         return json.loads(self._request("GET", path).decode("utf-8"))
@@ -85,9 +94,15 @@ class HttpCentralClient:
                 return response.read()
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")
-            raise LocalClientError(detail or f"Central API failed with HTTP {exc.code}") from exc
+            raise LocalClientError(
+                f"中央服务请求失败（HTTP {exc.code}）：{central_error_detail(detail)}",
+                code=f"central_http_{exc.code}",
+            ) from exc
         except OSError as exc:
-            raise LocalClientError(f"中央服务不可达：{exc}") from exc
+            raise LocalClientError(
+                f"无法连接中央服务：{self.base_url}",
+                code="central_unreachable",
+            ) from exc
 
 
 class LocalTemplateCache:
@@ -98,7 +113,10 @@ class LocalTemplateCache:
         self.registry_path = self.data_dir / "config" / "templates.json"
 
     def ensure_template(self, template_id: str) -> CachedTemplate:
-        manifest = self.central.get_manifest(template_id)
+        try:
+            manifest = self.central.get_manifest(template_id)
+        except LocalClientError as exc:
+            raise template_sync_error(template_id, "manifest", exc) from exc
         version = str(manifest.get("version") or "").strip()
         if not version:
             raise LocalClientError("中央 manifest 缺少版本号")
@@ -106,7 +124,10 @@ class LocalTemplateCache:
         self._validate_manifest_paths(target, manifest)
         if self._is_cache_valid(target, manifest):
             return CachedTemplate(template_id, version, target, manifest, True)
-        bundle = self.central.download_bundle(template_id, version)
+        try:
+            bundle = self.central.download_bundle(template_id, version)
+        except LocalClientError as exc:
+            raise template_sync_error(template_id, "bundle", exc) from exc
         staging = target.with_name(target.name + ".download")
         if staging.exists():
             shutil.rmtree(staging)
@@ -149,7 +170,7 @@ class LocalTemplateCache:
                 raise LocalClientError(f"模板包缺少文件：{rel_path}")
             actual = sha256_file(path)
             if actual != expected:
-                raise LocalClientError(f"模板包 SHA256 校验失败：{rel_path}")
+                raise LocalClientError(f"模板包 SHA256 校验失败：{rel_path}", code="template_hash_mismatch")
 
     def _validate_manifest_paths(self, directory: Path, manifest: Mapping[str, Any]) -> None:
         files = manifest.get("files")
@@ -269,17 +290,25 @@ class LocalDrawFlowClient:
     def render(self, payload: dict[str, Any]) -> dict[str, Any]:
         template_id = str(payload.get("template_id") or "").strip()
         if not template_id:
-            raise LocalClientError("缺少 template_id")
+            raise LocalClientError("缺少 template_id", code="missing_template_id")
         cached = self.cache.ensure_template(template_id)
         missing_fonts = missing_required_fonts(cached.manifest.get("required_fonts", []), self.font_dirs)
         if missing_fonts:
-            raise LocalClientError("本机缺少模板字体：" + "、".join(missing_fonts))
-        record = RenderService(registry=self.cache.registry(), jobs=self.jobs).submit({
-            **payload,
-            "template_id": template_id,
-            "template_version": cached.version,
-            "template_sha256": template_sha256(cached.manifest),
-        })
+            raise LocalClientError("本机缺少模板字体：" + "、".join(missing_fonts), code="missing_required_fonts")
+        try:
+            record = RenderService(registry=self.cache.registry(), jobs=self.jobs).submit({
+                **payload,
+                "template_id": template_id,
+                "template_version": cached.version,
+                "template_sha256": template_sha256(cached.manifest),
+            })
+        except RenderServiceError as exc:
+            raise LocalClientError(str(exc), code=exc.code) from exc
+        if record.get("status") == "failed":
+            raise LocalClientError(
+                str(record.get("error") or "渲染失败"),
+                code=str(record.get("error_code") or "render_failed"),
+            )
         record["template_cache"] = {
             "version": cached.version,
             "cache_hit": cached.cache_hit,
@@ -362,3 +391,37 @@ def quote_segment(value: str) -> str:
     from urllib.parse import quote
 
     return quote(value, safe="")
+
+
+def central_error_detail(value: str) -> str:
+    try:
+        payload = json.loads(value)
+    except (TypeError, ValueError):
+        return "中央服务未提供可读的错误说明"
+    error = payload.get("error") if isinstance(payload, Mapping) else None
+    if isinstance(error, Mapping):
+        error = error.get("message") or error.get("code")
+    detail = str(error or "").strip()
+    return detail[:180] if detail else "中央服务未提供可读的错误说明"
+
+
+def template_sync_error(template_id: str, phase: str, cause: LocalClientError) -> LocalClientError:
+    if cause.code == "central_unreachable":
+        return LocalClientError(
+            f"无法连接中央服务，模板 {template_id} 未能同步：{cause}",
+            code="central_unreachable",
+        )
+    if phase == "manifest" and cause.code == "central_http_404":
+        return LocalClientError(
+            f"模板 {template_id} 尚未在中央服务发布可用版本，请管理员发布该模板后再试",
+            code="template_not_published",
+        )
+    if phase == "bundle" and cause.code == "central_http_404":
+        return LocalClientError(
+            f"模板 {template_id} 的中央运行包不可用，请管理员重新发布该模板后再试",
+            code="template_bundle_unavailable",
+        )
+    return LocalClientError(
+        f"模板 {template_id} 同步 {phase} 失败：{cause}",
+        code=f"template_{phase}_failed",
+    )

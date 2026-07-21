@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import os
 import sys
 import threading
@@ -22,6 +23,7 @@ from .web_page import INDEX_HTML as FALLBACK_HTML
 
 
 LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
+LOGGER = logging.getLogger("drawflow.local_gateway")
 
 
 class LocalGatewayRequestHandler(BaseHTTPRequestHandler):
@@ -75,9 +77,31 @@ class LocalGatewayRequestHandler(BaseHTTPRequestHandler):
             return
         try:
             payload = self._read_render_payload()
-            self._send_json(self.drawflow_client.render(payload))
+            template_id = str(payload.get("template_id") or "").strip()
+            LOGGER.info("local render request received: template_id=%s", template_id or "<missing>")
+            record = self.drawflow_client.render(payload)
+            status = str(record.get("status") or "")
+            if status == "failed":
+                LOGGER.warning(
+                    "local render completed as failed: template_id=%s error=%s",
+                    template_id or "<missing>",
+                    record.get("error") or "<missing>",
+                )
+            else:
+                LOGGER.info("local render completed: template_id=%s status=%s", template_id or "<missing>", status)
+            self._send_json(record)
+        except LocalClientError as exc:
+            LOGGER.warning("local render rejected: code=%s message=%s", exc.code, exc)
+            self._send_client_error(HTTPStatus.BAD_REQUEST, exc)
         except Exception as exc:
-            self._send_error(HTTPStatus.BAD_REQUEST, str(exc))
+            LOGGER.exception("local render failed")
+            self._send_client_error(
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+                LocalClientError(
+                    "本地客户端处理渲染请求时发生异常，请重新启动 DrawFlowClient.exe 后重试",
+                    code="local_render_unexpected",
+                ),
+            )
         finally:
             self.render_lock.release()
 
@@ -153,15 +177,19 @@ class LocalGatewayRequestHandler(BaseHTTPRequestHandler):
             self._send_html(FALLBACK_HTML)
 
     def _proxy(self, method: str) -> None:
-        body = self._read_raw_body()
-        headers = {key: value for key, value in self.headers.items()}
-        status, response_headers, response_body = self.drawflow_client.central.proxy(
-            method,
-            self.path,
-            data=body if body else None,
-            headers=headers,
-        )
-        self._send_proxy_response(status, response_headers, response_body)
+        try:
+            body = self._read_raw_body()
+            headers = {key: value for key, value in self.headers.items()}
+            status, response_headers, response_body = self.drawflow_client.central.proxy(
+                method,
+                self.path,
+                data=body if body else None,
+                headers=headers,
+            )
+            self._send_proxy_response(status, response_headers, response_body)
+        except LocalClientError as exc:
+            LOGGER.warning("central proxy failed: code=%s message=%s", exc.code, exc)
+            self._send_client_error(HTTPStatus.SERVICE_UNAVAILABLE, exc)
 
     def _send_proxy_response(self, status: int, headers: dict[str, str], body: bytes) -> None:
         self.send_response(status)
@@ -237,6 +265,9 @@ class LocalGatewayRequestHandler(BaseHTTPRequestHandler):
     def _send_error(self, status: HTTPStatus, message: str) -> None:
         self._send_json({"error": message}, status)
 
+    def _send_client_error(self, status: HTTPStatus, error: LocalClientError) -> None:
+        self._send_json({"error": {"code": error.code, "message": str(error)}}, status)
+
     @property
     def drawflow_client(self) -> LocalDrawFlowClient:
         if self.__class__.client is None:
@@ -257,10 +288,12 @@ def main() -> int:
     args = parse_args()
     if args.host not in LOOPBACK_HOSTS:
         raise SystemExit("DrawFlow local gateway must bind to 127.0.0.1, localhost, or ::1.")
+    client = LocalDrawFlowClient(HttpCentralClient(args.central_url), LOCAL_DRAWFLOW_DIR)
+    configure_local_logging(client.data_dir)
     handler = type(
         "ConfiguredLocalGatewayRequestHandler",
         (LocalGatewayRequestHandler,),
-        {"client": LocalDrawFlowClient(HttpCentralClient(args.central_url), LOCAL_DRAWFLOW_DIR)},
+        {"client": client},
     )
     server = ThreadingHTTPServer((args.host, args.port), handler)
     url = f"http://{args.host}:{args.port}/"
@@ -297,6 +330,18 @@ def _client_config_candidates() -> list[Path]:
     if getattr(sys, "frozen", False):
         candidates.insert(0, Path(sys.executable).resolve().with_name("drawflow-client.json"))
     return candidates
+
+
+def configure_local_logging(data_dir: Path) -> None:
+    log_path = data_dir / "logs" / "drawflow-client.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    if any(getattr(handler, "baseFilename", "") == str(log_path) for handler in LOGGER.handlers):
+        return
+    handler = logging.FileHandler(log_path, encoding="utf-8")
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+    LOGGER.addHandler(handler)
+    LOGGER.setLevel(logging.INFO)
+    LOGGER.propagate = False
 
 
 if __name__ == "__main__":
