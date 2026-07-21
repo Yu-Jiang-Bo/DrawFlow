@@ -3638,9 +3638,10 @@ INDEX_HTML = """<!doctype html>
     }
 
     function explainRenderError(error) {
-      const raw = String(error && error.message ? error.message : error || "").trim();
+      const details = normalizeRenderError(error);
+      const raw = details.message;
       const text = raw.toLowerCase();
-      const code = String(error && error.code ? error.code : "").trim().toLowerCase();
+      const code = details.code.toLowerCase();
       if (code === "template_not_published") return cleanErrorText(raw);
       if (code === "template_bundle_unavailable") return cleanErrorText(raw);
       if (code === "central_unreachable" || code.startsWith("central_http_")) return cleanErrorText(raw);
@@ -3668,6 +3669,30 @@ INDEX_HTML = """<!doctype html>
         return "Illustrator 没有成功生成效果图。请确认 Illustrator 可以正常打开，模板文件没有被占用，然后再试一次。";
       }
       return `生成效果图失败。${cleanErrorText(raw)}`;
+    }
+
+    function normalizeRenderError(error) {
+      let value = error;
+      let code = "";
+      for (let depth = 0; depth < 4 && value && typeof value === "object"; depth += 1) {
+        if (!code && value.code !== undefined && value.code !== null) {
+          code = String(value.code).trim();
+        }
+        if (typeof value.message === "string" && value.message.trim()) {
+          return { message: value.message.trim(), code };
+        }
+        if (typeof value.error === "string" && value.error.trim()) {
+          return { message: value.error.trim(), code };
+        }
+        if (typeof value.detail === "string" && value.detail.trim()) {
+          return { message: value.detail.trim(), code };
+        }
+        value = value.message || value.error || value.detail || null;
+      }
+      if (typeof value === "string" && value.trim()) {
+        return { message: value.trim(), code };
+      }
+      return { message: code ? "生成效果图失败（" + code + "）" : "", code };
     }
 
     function cleanErrorText(value) {

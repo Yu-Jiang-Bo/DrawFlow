@@ -43,6 +43,9 @@ def test_render_page_uses_business_error_dialog():
 
 def test_render_page_preserves_gateway_error_codes_and_explains_browser_fetch_failures():
     assert "function requestErrorFromText(text)" in INDEX_HTML
+    assert "function normalizeRenderError(error)" in INDEX_HTML
+    assert "value = value.message || value.error || value.detail || null" in INDEX_HTML
+    assert 'typeof value.message === "string"' in INDEX_HTML
     assert "failure.message || failure.code" in INDEX_HTML
     assert "error.code = String(failure.code || \"\")" in INDEX_HTML
     assert 'code === "template_not_published"' in INDEX_HTML
@@ -50,6 +53,7 @@ def test_render_page_preserves_gateway_error_codes_and_explains_browser_fetch_fa
     assert "failed to fetch" in INDEX_HTML
     assert "127.0.0.1:8766" in INDEX_HTML
     assert "await loadJobs().catch(() => {})" in INDEX_HTML
+    assert "String(error && error.message ? error.message : error || \"\")" not in INDEX_HTML
 
 
 def test_render_page_has_progress_overlay():
