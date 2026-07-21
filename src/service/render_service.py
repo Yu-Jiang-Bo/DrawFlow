@@ -22,7 +22,7 @@ from ..jjmb_202509_curved_main import (
     read_xlsx_rows as read_202509_curved_rows,
 )
 from ..jjmb_config_grouped_main import build_grouped_task
-from ..renderer.illustrator_bridge import IllustratorBridge, IllustratorBridgeError
+from ..renderer.illustrator_bridge import IllustratorBridge, IllustratorBridgeError, format_com_recovery_message
 from .job_store import JobStore
 from .font_style_rules import font_style_by_option
 from .generic_rule_renderer import build_generic_render_task
@@ -426,6 +426,8 @@ def _render_generic_chunk(bridge: IllustratorBridge, script: Path, task_file: Pa
             return
         except IllustratorBridgeError as exc:
             if attempt + 1 >= GENERIC_RULE_COM_RETRY_ATTEMPTS or not _is_retryable_com_failure(exc):
+                if _is_retryable_com_failure(exc):
+                    raise IllustratorBridgeError(format_com_recovery_message(exc, retries=attempt)) from exc
                 raise
             bridge.reset()
             time.sleep(GENERIC_RULE_COM_RETRY_DELAY_SECONDS)
@@ -442,7 +444,7 @@ def render_error_code(exc: Exception) -> str:
 
 
 def _is_retryable_com_failure(exc: IllustratorBridgeError) -> bool:
-    return "-2147417851" in str(exc)
+    return "-2147417851" in str(exc) or "-2147023170" in str(exc)
 
 
 def _configured_font_options(*configs: Dict[str, Any]) -> List[str] | None:
