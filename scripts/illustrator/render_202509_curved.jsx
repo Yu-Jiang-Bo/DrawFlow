@@ -25,6 +25,7 @@
     var keepTitleFrames = layout.keep_title_frames === true;
     var keepNameFrames = layout.keep_name_frames === true;
     var pathfinderMerge = outputConfig.pathfinder_merge !== false;
+    var cleanupStats = { attempted: 0, failed: 0 };
     var minFontSize = Number(fit.min_font_size_pt || 4);
     var maxFontSize = Number(fit.max_font_size_pt || 80);
     var padding = mmToPt(Number(fit.padding_mm || 0.2));
@@ -87,22 +88,6 @@
         }
     }
 
-    writeDebug(task, {
-        groups: groups.length,
-        columns: columns,
-        docWidth: docWidth,
-        docHeight: docHeight,
-        columnWidth: columnWidth,
-        nameWidth: nameWidth,
-        nameHeight: nameHeight,
-        titleWidth: titleWidth,
-        titleHeight: titleHeight,
-        colorMode: colorMode,
-        keepNameFrames: keepNameFrames,
-        keepTitleFrames: keepTitleFrames,
-        pathfinderMerge: pathfinderMerge
-    });
-
     if (outputConfig.outline_text) {
         outlineText(textItems);
         removeItems(pathItems);
@@ -111,10 +96,36 @@
     if (!keepTitleFrames) removeItems(titleFrameItems);
 
     var output = File(String(task.output_ai));
-    ensureFolder(output.parent);
-    if (output.exists) output.remove();
-    saveAsAI8(doc, output);
-    doc.close(SaveOptions.DONOTSAVECHANGES);
+    try {
+        ensureFolder(output.parent);
+        if (output.exists) output.remove();
+        saveAsAI8(doc, output);
+        doc.close(SaveOptions.DONOTSAVECHANGES);
+        doc = null;
+
+        var previewPath = String(outputConfig.preview_png_path || "");
+        if (previewPath) {
+            var preview = File(previewPath);
+            ensureFolder(preview.parent);
+            if (preview.exists) preview.remove();
+            // Illustrator appends .png for ExportType.PNG24. Supply an
+            // extension-free target so the report path remains candidate-N.png.
+            var previewExport = File(previewPath.replace(/\.png$/i, ""));
+            var savedDoc = null;
+            try {
+                savedDoc = app.open(output);
+                exportPreviewPNG(savedDoc, previewExport, Number(outputConfig.preview_dpi || 300));
+            } finally {
+                if (savedDoc) {
+                    try { savedDoc.close(SaveOptions.DONOTSAVECHANGES); } catch (e0) {}
+                }
+            }
+            if (!preview.exists) throw new Error("质量预览 PNG 未生成：" + preview.fsName);
+        }
+        writeRenderDebug("completed", "", 0);
+    } catch (e1) {
+        failRender("AI 成品或质量预览导出失败：" + String(e1), 0);
+    }
     return output.fsName;
 
     function itemHeight(item) {
@@ -404,19 +415,51 @@
     }
 
     function outlineText(items) {
-        var outlines = [];
         for (var i = 0; i < items.length; i++) {
+            var entry = items[i];
+            var source = entry.item || entry;
+            if (!source) failRender("文字转曲失败：找不到第 " + (i + 1) + " 个文字对象", i + 1);
             try {
-                var entry = items[i];
-                var source = entry.item || entry;
+                settleIllustrator();
                 var outline = source.createOutline();
+                if (!outline) throw new Error("createOutline returned nothing");
+                settleIllustrator();
                 if (entry.exactFit && entry.rect) {
                     fitPageItemToRect(outline, entry.rect);
                 }
-                outlines.push(outline);
-            } catch (e0) {}
+                if (pathfinderMerge) cleanupOutline(outline);
+            } catch (e0) {
+                failRender("文字转曲失败（第 " + (i + 1) + " 个对象）：" + String(e0), i + 1);
+            }
         }
-        if (pathfinderMerge) cleanupOutlines(outlines);
+    }
+
+    function failRender(message, itemIndex) {
+        writeRenderDebug("failed", message, itemIndex);
+        try { if (doc) doc.close(SaveOptions.DONOTSAVECHANGES); } catch (e0) {}
+        throw new Error(message);
+    }
+
+    function writeRenderDebug(status, errorMessage, failedItemIndex) {
+        writeDebug(task, {
+            groups: groups.length,
+            columns: columns,
+            docWidth: docWidth,
+            docHeight: docHeight,
+            columnWidth: columnWidth,
+            nameWidth: nameWidth,
+            nameHeight: nameHeight,
+            titleWidth: titleWidth,
+            titleHeight: titleHeight,
+            colorMode: colorMode,
+            keepNameFrames: keepNameFrames,
+            keepTitleFrames: keepTitleFrames,
+            pathfinderMerge: pathfinderMerge,
+            cleanupStats: cleanupStats,
+            status: status,
+            failedItemIndex: failedItemIndex,
+            error: errorMessage
+        });
     }
 
     function fitPageItemToRect(item, rect) {
@@ -443,17 +486,29 @@
         item.translate(rect[0] - b[0], rect[1] - b[1]);
     }
 
-    function cleanupOutlines(items) {
-        if (!items || items.length === 0) return;
+    function cleanupOutline(item) {
+        cleanupStats.attempted += 1;
         try { app.executeMenuCommand("deselectall"); } catch (e0) {}
         try {
-            for (var i = 0; i < items.length; i++) {
-                try { items[i].selected = true; } catch (e1) {}
-            }
+            settleIllustrator();
+            item.selected = true;
+            settleIllustrator();
             app.executeMenuCommand("Live Pathfinder Add");
+            settleIllustrator();
             app.executeMenuCommand("expandStyle");
-        } catch (e2) {}
-        try { app.executeMenuCommand("deselectall"); } catch (e3) {}
+            settleIllustrator();
+        } catch (e1) {
+            cleanupStats.failed += 1;
+            throw e1;
+        } finally {
+            try { app.executeMenuCommand("deselectall"); } catch (e2) {}
+        }
+    }
+
+    function settleIllustrator() {
+        try { app.redraw(); } catch (e0) {}
+        try { $.sleep(40); } catch (e1) {}
+        try { app.redraw(); } catch (e2) {}
     }
 
     function removeItems(items) {
@@ -506,6 +561,17 @@
         opts.pdfCompatible = false;
         opts.compressed = false;
         doc.saveAs(file, opts);
+    }
+
+    function exportPreviewPNG(doc, file, dpi) {
+        var opts = new ExportOptionsPNG24();
+        var scale = Math.max(1, Number(dpi || 300) / 72 * 100);
+        opts.antiAliasing = true;
+        opts.artBoardClipping = true;
+        opts.transparency = false;
+        opts.horizontalScale = scale;
+        opts.verticalScale = scale;
+        doc.exportFile(file, ExportType.PNG24, opts);
     }
 
     function ensureFolder(folder) {

@@ -9,11 +9,12 @@ import re
 from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterable, List, Mapping
+from typing import Callable, Dict, Iterable, List, Mapping
 
 from openpyxl import load_workbook
 
 from .renderer.illustrator_bridge import IllustratorBridge, IllustratorBridgeError
+from .service.render_integrity import RenderIntegrityError, compare_png_previews
 
 
 TEMPLATE_ID = "JJMB202509231236046265"
@@ -240,6 +241,8 @@ def build_task(
     keep_name_frames: bool = False,
     layout_overrides: Mapping[str, object] | None = None,
     color_mode: str = "CMYK",
+    preview_png: Path | None = None,
+    preview_dpi: int = 300,
 ) -> Dict[str, object]:
     if not groups:
         raise ValueError("No renderable orders")
@@ -278,6 +281,8 @@ def build_task(
             "color_mode": _normalize_color_mode(color_mode),
             "outline_text": True,
             "pathfinder_merge": True,
+            "preview_png_path": str(preview_png) if preview_png else "",
+            "preview_dpi": max(int(preview_dpi), 1) if preview_png else 0,
         },
         "debug": {
             "report_path": str(output_ai.with_suffix(".debug.json")),
@@ -288,6 +293,129 @@ def build_task(
 def write_json(path: Path, payload: Dict[str, object]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+class CurvedRenderIntegrityError(RuntimeError):
+    def __init__(self, message: str, *, code: str):
+        super().__init__(message)
+        self.code = code
+
+
+def render_with_integrity_gate(
+    *,
+    output_ai: Path,
+    task_options: Mapping[str, object],
+    task_dir: Path,
+    quality_dir: Path,
+    quality_report: Path,
+    visible: bool,
+    bridge_factory: Callable[..., object] = IllustratorBridge,
+) -> Path:
+    """Render candidates until two saved-AI previews have identical pixels."""
+
+    script = Path(__file__).resolve().parents[1] / "scripts" / "illustrator" / "render_202509_curved.jsx"
+    candidates: List[Dict[str, object]] = []
+    attempts: List[Dict[str, object]] = []
+    accepted: Dict[str, object] | None = None
+
+    for attempt in range(1, 4):
+        candidate_ai = quality_dir / f"candidate-{attempt}.ai"
+        candidate_preview = quality_dir / f"candidate-{attempt}.png"
+        candidate_task = task_dir / f"render-task-quality-{attempt}.json"
+        task = build_task(
+            output_ai=candidate_ai,
+            preview_png=candidate_preview,
+            **task_options,
+        )
+        write_json(candidate_task, task)
+        candidate: Dict[str, object] = {
+            "attempt": attempt,
+            "ai": candidate_ai,
+            "preview": candidate_preview,
+            "task": candidate_task,
+        }
+        candidates.append(candidate)
+        try:
+            bridge = bridge_factory(visible=visible)
+            bridge.render(script, candidate_task)
+        except Exception as exc:
+            attempts.append(
+                {
+                    "attempt": attempt,
+                    "error": str(exc),
+                    "stage": "candidate_render",
+                }
+            )
+            write_json(
+                quality_report,
+                {
+                    "status": "failed",
+                    "attempts": attempts,
+                    "candidates": _integrity_candidate_report(candidates),
+                },
+            )
+            raise
+        for previous in candidates[:-1]:
+            try:
+                comparison = compare_png_previews(Path(previous["preview"]), candidate_preview)
+            except RenderIntegrityError as exc:
+                attempts.append(
+                    {
+                        "left_attempt": int(previous["attempt"]),
+                        "right_attempt": attempt,
+                        "error": str(exc),
+                    }
+                )
+                write_json(
+                    quality_report,
+                    {
+                        "status": "failed",
+                        "attempts": attempts,
+                        "candidates": _integrity_candidate_report(candidates),
+                    },
+                )
+                raise CurvedRenderIntegrityError(str(exc), code="render_integrity_preview_invalid") from exc
+            attempts.append(
+                {
+                    "left_attempt": int(previous["attempt"]),
+                    "right_attempt": attempt,
+                    **comparison.to_json_dict(),
+                }
+            )
+            if comparison.equal:
+                accepted = candidate
+                break
+        if accepted:
+            break
+
+    write_json(
+        quality_report,
+        {
+            "status": "passed" if accepted else "failed",
+            "attempts": attempts,
+            "candidates": _integrity_candidate_report(candidates),
+            "accepted_output": str(output_ai) if accepted else "",
+        },
+    )
+    if not accepted:
+        raise CurvedRenderIntegrityError(
+            "渲染完整性校验失败：连续三次生成的 AI 预览不一致，已保留候选文件供人工复核。",
+            code="render_integrity_mismatch",
+        )
+    Path(accepted["ai"]).replace(output_ai)
+    return Path(accepted["task"])
+
+
+def _integrity_candidate_report(candidates: Iterable[Mapping[str, object]]) -> List[Dict[str, object]]:
+    return [
+        {
+            "attempt": int(candidate["attempt"]),
+            "ai": str(candidate["ai"]),
+            "preview": str(candidate["preview"]),
+            "task": str(candidate["task"]),
+        }
+        for candidate in candidates
+    ]
 
 
 def _positive_number(value: object) -> float:
@@ -325,24 +453,30 @@ def main() -> int:
         rows = read_xlsx_rows(Path(args.xlsx).resolve())
         items = parse_items(rows)
         groups = group_items(items)
-        task = build_task(
-            font_report=Path(args.font_report).resolve(),
-            output_ai=output_ai,
-            groups=groups,
-            columns=args.columns,
-            keep_title_frames=args.keep_title_frames,
-            keep_name_frames=args.keep_name_frames,
-            color_mode=args.color_mode,
-        )
         task_file = output_ai.parent / "render-tasks" / "jjmb-202509-curved-render-task.json"
-        write_json(task_file, task)
+        task_options = {
+            "font_report": Path(args.font_report).resolve(),
+            "groups": groups,
+            "columns": args.columns,
+            "keep_title_frames": args.keep_title_frames,
+            "keep_name_frames": args.keep_name_frames,
+            "color_mode": args.color_mode,
+        }
         print(f"render task: groups={len(groups)}, items={len(items)}")
-        print(task_file)
         if args.dry_run:
+            write_json(task_file, build_task(output_ai=output_ai, **task_options))
+            print(task_file)
             return 0
-        script = Path(__file__).resolve().parents[1] / "scripts" / "illustrator" / "render_202509_curved.jsx"
-        IllustratorBridge(visible=args.visible).render(script, task_file)
-    except (IllustratorBridgeError, ValueError) as exc:
+        task_file = render_with_integrity_gate(
+            output_ai=output_ai,
+            task_options=task_options,
+            task_dir=task_file.parent,
+            quality_dir=output_ai.parent / "render-integrity",
+            quality_report=output_ai.with_suffix(".render-integrity.json"),
+            visible=args.visible,
+        )
+        print(task_file)
+    except (CurvedRenderIntegrityError, IllustratorBridgeError, ValueError) as exc:
         print(f"render failed: {exc}")
         return 2
     print(f"rendered: {output_ai}")
