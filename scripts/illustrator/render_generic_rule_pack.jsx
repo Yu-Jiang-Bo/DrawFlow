@@ -1,6 +1,7 @@
 #target illustrator
 
 (function () {
+    var EXACT_BOX_MAX_DELTA_PT = 0.01;
     var taskPath = $.getenv("CUSTOM_RENDER_TASK");
     if (!taskPath) throw new Error("CUSTOM_RENDER_TASK missing");
     var task = readJSON(taskPath);
@@ -355,10 +356,32 @@
                 applyNonColorActions(footerFrame, footerVariable.actions || []);
                 if (!footerVariable.actions || !footerVariable.actions.length) applyFontBoldness(footerFrame, footerVariable.font_style);
                 var footerDimension = configuredDimension(dimensions, footerTarget, "footer");
-                fitTextStrict(footerFrame, footerDimension.width_mm, footerDimension.height_mm, footerTarget);
-                centerLayoutTextInBox(footerFrame, left + width / 2, cardBottom + margin + footerHeight, footerHeight);
                 var footerAuditName = footerTarget + "Box_" + String(members[0].row_index || "row");
-                recordLayoutAudit("year", footerAuditName, footerFrame);
+                var footerDiagnosticTarget = footerTarget + " row " + String(members[0].row_index || "unknown");
+                if (footerBox.fill_box_exactly === true) {
+                    fitTextToExactBox(footerFrame, footerDimension.width_mm, footerDimension.height_mm, footerDiagnosticTarget);
+                    var footerWidth = mmToPt(footerDimension.width_mm);
+                    var footerHeightExact = mmToPt(footerDimension.height_mm);
+                    var footerBoxTop = cardBottom + margin + footerHeight / 2 + footerHeightExact / 2;
+                    alignTextToExactBox(
+                        footerFrame,
+                        left + width / 2 - footerWidth / 2,
+                        footerBoxTop,
+                        footerWidth,
+                        footerHeightExact,
+                        footerDiagnosticTarget
+                    );
+                    recordLayoutAudit("year", footerAuditName, footerFrame, {
+                        left: left + width / 2 - footerWidth / 2,
+                        top: footerBoxTop,
+                        right: left + width / 2 + footerWidth / 2,
+                        bottom: footerBoxTop - footerHeightExact
+                    });
+                } else {
+                    fitTextStrict(footerFrame, footerDimension.width_mm, footerDimension.height_mm, footerDiagnosticTarget);
+                    centerLayoutTextInBox(footerFrame, left + width / 2, cardBottom + margin + footerHeight, footerHeight);
+                    recordLayoutAudit("year", footerAuditName, footerFrame);
+                }
                 wrapGeneratedText(footerFrame, footerAuditName);
             }
         }
@@ -406,10 +429,27 @@
         }
         applyNonColorActions(frame, variable.actions || []);
         if (!variable.actions || !variable.actions.length) applyFontBoldness(frame, variable.font_style);
-        fitTextStrict(frame, box.width_mm, box.height_mm, box.target);
-        centerLayoutTextInBox(frame, x, top, height);
+        var boxWidth = mmToPt(box.width_mm);
+        var boxHeight = mmToPt(box.height_mm);
+        if (box.fill_box_exactly === true) {
+            fitTextToExactBox(frame, box.width_mm, box.height_mm, box.target);
+            alignTextToExactBox(frame, x - boxWidth / 2, top, boxWidth, boxHeight, box.target);
+        } else {
+            fitTextStrict(frame, box.width_mm, box.height_mm, box.target);
+            centerLayoutTextInBox(frame, x, top, height);
+        }
         var auditName = box.target + "Box_" + String(member.row_index || "row") + "_" + String(index + 1);
-        recordLayoutAudit("name", auditName, frame);
+        recordLayoutAudit(
+            "name",
+            auditName,
+            frame,
+            box.fill_box_exactly === true ? {
+                left: x - boxWidth / 2,
+                top: top,
+                right: x + boxWidth / 2,
+                bottom: top - boxHeight
+            } : null
+        );
         wrapGeneratedText(frame, auditName);
         return frame;
     }
@@ -546,10 +586,10 @@
 
     function createLayoutAudit(task) {
         var path = String(task.layout_audit_file || "");
-        return path ? {file: File(path), lines: ["kind\tname\tleft_pt\ttop_pt\tright_pt\tbottom_pt\twidth_mm\theight_mm\tfill"]} : null;
+        return path ? {file: File(path), lines: ["kind\tname\tleft_pt\ttop_pt\tright_pt\tbottom_pt\twidth_mm\theight_mm\tfill\texpected_left_pt\texpected_top_pt\texpected_right_pt\texpected_bottom_pt\tleft_delta_pt\ttop_delta_pt\tright_delta_pt\tbottom_delta_pt"]} : null;
     }
 
-    function recordLayoutAudit(kind, name, frame) {
+    function recordLayoutAudit(kind, name, frame, expected) {
         if (!layoutAudit) return;
         try {
             var bounds = frame.visibleBounds;
@@ -566,7 +606,15 @@
                 bottom,
                 Math.abs(right - left) * 25.4 / 72,
                 Math.abs(top - bottom) * 25.4 / 72,
-                auditFillColor(frame)
+                auditFillColor(frame),
+                expected ? expected.left : "",
+                expected ? expected.top : "",
+                expected ? expected.right : "",
+                expected ? expected.bottom : "",
+                expected ? left - expected.left : "",
+                expected ? top - expected.top : "",
+                expected ? right - expected.right : "",
+                expected ? bottom - expected.bottom : ""
             ].join("\t"));
         } catch (e1) {
             throw new Error("Cannot audit layout text: " + name);
@@ -668,7 +716,10 @@
     function configuredNameSegmentBox(layout, dimensions) {
         var name = layout.name || {};
         var target = String(name.segment_box_target || "");
-        return target ? configuredDimension(dimensions, target, "name segment") : null;
+        if (!target) return null;
+        var box = configuredDimension(dimensions, target, "name segment");
+        box.fill_box_exactly = name.fill_box_exactly === true;
+        return box;
     }
 
     function configuredDimension(dimensions, target, label) {
@@ -871,6 +922,71 @@
         if (finalWidth > maxW || finalHeight > maxH) {
             throw new Error("Text cannot fit the configured dimension: " + target);
         }
+    }
+
+    function fitTextToExactBox(frame, widthMm, heightMm, target) {
+        if (widthMm <= 0 || heightMm <= 0) throw new Error("Invalid exact text dimensions: " + target);
+        var targetWidth = mmToPt(widthMm);
+        var targetHeight = mmToPt(heightMm);
+        for (var index = 0; index < 12; index++) {
+            var bounds = frame.visibleBounds;
+            var width = Math.abs(Number(bounds[2]) - Number(bounds[0]));
+            var height = Math.abs(Number(bounds[1]) - Number(bounds[3]));
+            if (!width || !height) throw new Error("Text has no visible bounds for exact box: " + target);
+            if (boxDimensionsMatch(width, height, targetWidth, targetHeight)) return;
+            resizeTextToBounds(frame, targetWidth / width * 100, targetHeight / height * 100);
+        }
+        var finalBounds = frame.visibleBounds;
+        var finalWidth = Math.abs(Number(finalBounds[2]) - Number(finalBounds[0]));
+        var finalHeight = Math.abs(Number(finalBounds[1]) - Number(finalBounds[3]));
+        if (!boxDimensionsMatch(finalWidth, finalHeight, targetWidth, targetHeight)) {
+            throw new Error(
+                "Text cannot exactly fill the configured dimension: " + target +
+                " (actual=" + finalWidth + "x" + finalHeight + ", target=" + targetWidth + "x" + targetHeight + ")"
+            );
+        }
+    }
+
+    function resizeTextToBounds(frame, horizontalPercent, verticalPercent) {
+        try {
+            frame.resize(horizontalPercent, verticalPercent, true, true, true, true, 100, Transformation.CENTER);
+            return;
+        } catch (e1) {}
+        try {
+            frame.resize(horizontalPercent, verticalPercent, true, true, true, true, 100);
+            return;
+        } catch (e2) {}
+        throw new Error("Cannot independently scale text to exact bounds");
+    }
+
+    function alignTextToExactBox(frame, left, top, width, height, target) {
+        var bounds = frame.visibleBounds;
+        frame.translate(left - Number(bounds[0]), top - Number(bounds[1]));
+        var finalBounds = frame.visibleBounds;
+        var finalLeft = Number(finalBounds[0]);
+        var finalTop = Number(finalBounds[1]);
+        var finalRight = Number(finalBounds[2]);
+        var finalBottom = Number(finalBounds[3]);
+        if (
+            !boxCoordinatesMatch(finalLeft, left) ||
+            !boxCoordinatesMatch(finalTop, top) ||
+            !boxCoordinatesMatch(finalRight, left + width) ||
+            !boxCoordinatesMatch(finalBottom, top - height)
+        ) {
+            throw new Error(
+                "Text cannot align to the configured dimension corners: " + target +
+                " (actual=" + finalLeft + "," + finalTop + "," + finalRight + "," + finalBottom +
+                "; expected=" + left + "," + top + "," + (left + width) + "," + (top - height) + ")"
+            );
+        }
+    }
+
+    function boxDimensionsMatch(width, height, targetWidth, targetHeight) {
+        return boxCoordinatesMatch(width, targetWidth) && boxCoordinatesMatch(height, targetHeight);
+    }
+
+    function boxCoordinatesMatch(actual, expected) {
+        return Math.abs(Number(actual) - Number(expected)) <= EXACT_BOX_MAX_DELTA_PT;
     }
 
     function applyTextColor(frame, name) {

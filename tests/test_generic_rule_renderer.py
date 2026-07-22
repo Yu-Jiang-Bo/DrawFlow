@@ -514,6 +514,19 @@ def test_boxed_name_columns_keep_optional_year_for_t_department_override(tmp_pat
     assert {variable["target"] for variable in task["orders"][0]["variables"]} == {"Name", "Year"}
 
 
+def test_confirmed_jjmb_202510_template_enables_exact_box_fill_only_for_its_layout():
+    rule_path = Path("templates/JJMB202510241154389614/template.rules.json")
+    rules = json.loads(rule_path.read_text(encoding="utf-8"))["rules"]
+
+    assert rules["render_layout"]["name"]["segment_box_target"] == "Name"
+    assert rules["render_layout"]["name"]["fill_box_exactly"] is True
+    assert rules["render_layout"]["footer"] == {
+        "box_target": "Year",
+        "optional": True,
+        "fill_box_exactly": True,
+    }
+
+
 def test_passes_selected_font_boldness_to_every_text_variable(tmp_path):
     _, template = make_template(tmp_path)
     order_path = tmp_path / "orders.xlsx"
