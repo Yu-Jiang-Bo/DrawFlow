@@ -411,3 +411,12 @@ def test_template_asset_list_has_download_and_delete_actions():
     assert "尺寸/作图区模板" in INDEX_HTML
     assert "独立设计资源" in INDEX_HTML
     assert "displayTemplateAiRole" in INDEX_HTML
+
+
+def test_template_rule_exposes_multi_name_customization_switch():
+    assert 'id="multiNameCustomization"' in INDEX_HTML
+    assert "支持多姓名定制" in INDEX_HTML
+    assert 'id="quantitySourceColumn"' in INDEX_HTML
+    assert "function syncMultiNameCustomization" in INDEX_HTML
+    assert "multi_name_customization: { enabled: textRule.multi_name_enabled }" in INDEX_HTML
+    assert "displayMultiNameCustomization" in INDEX_HTML

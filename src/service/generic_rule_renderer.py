@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Dict, Iterable, Mapping
 
@@ -40,6 +41,7 @@ IMPLICIT_ORDER_BINDINGS = {
     "style": ("style", "style option", "\u5c3a\u5bf8", "\u6b3e\u5f0f"),
     "color": ("color", "color option", "\u989c\u8272", "\u5b57\u4f53\u989c\u8272"),
     "department": ("department", "production department", "\u751f\u4ea7\u90e8\u95e8", "\u90e8\u95e8"),
+    "quantity": ("quantity", "qty", "\u8d2d\u4e70\u6570\u91cf", "\u6570\u91cf"),
     "text": (
         "text",
         "name",
@@ -69,16 +71,27 @@ def build_generic_render_task(
     if not isinstance(bindings, Mapping) or not bindings:
         raise GenericRuleRenderError("Confirmed rules do not define order_bindings.")
     rows = _read_rows(order_file, sheet_name=sheet_name)
+    multi_name_customization = _multi_name_customization(rules)
+    _require_quantity_column_if_enabled(rows, bindings, enabled=multi_name_customization)
     _require_columns(rows, bindings.values())
     rows = _filter_rows_for_template(rows, template.template_id)
     assets = _asset_catalog(template.assets)
     orders = [
-        _build_order(index, row, rules, bindings, assets)
+        _build_order(
+            index,
+            row,
+            rules,
+            bindings,
+            assets,
+            include_implicit_quantity=multi_name_customization,
+        )
         for index, row in enumerate(rows, start=1)
         if any(value not in (None, "") for value in row.values())
     ]
     if not orders:
         raise GenericRuleRenderError("Order sheet contains no data rows.")
+    if multi_name_customization:
+        orders = _expand_orders_by_quantity(orders)
     render_layout = _mapping(rules.get("render_layout"))
     if render_layout:
         orders = _build_layout_orders(orders, render_layout)
@@ -159,8 +172,10 @@ def _build_order(
     rules: Mapping[str, Any],
     bindings: Mapping[str, Any],
     assets: Mapping[str, str],
+    *,
+    include_implicit_quantity: bool = False,
 ) -> Dict[str, Any]:
-    values = _bound_values(row, bindings)
+    values = _bound_values(row, bindings, include_implicit_quantity=include_implicit_quantity)
     selections = {
         key: ("" if values.get(key) is None else str(values.get(key))).strip()
         for key in ("font", "design", "style", "color")
@@ -294,17 +309,76 @@ def _filter_rows_for_template(rows: list[Dict[str, Any]], template_id: str) -> l
     ]
 
 
-def _bound_values(row: Mapping[str, Any], bindings: Mapping[str, Any]) -> Dict[str, Any]:
+def _bound_values(
+    row: Mapping[str, Any],
+    bindings: Mapping[str, Any],
+    *,
+    include_implicit_quantity: bool = False,
+) -> Dict[str, Any]:
     values: Dict[str, Any] = {}
     for field, column in bindings.items():
         values[str(field)] = _column_value(row, str(column))
     for field, aliases in IMPLICIT_ORDER_BINDINGS.items():
+        if field == "quantity" and not include_implicit_quantity:
+            continue
         if values.get(field) not in (None, ""):
             continue
         value = _first_column_value(row, aliases)
         if value is not _MISSING:
             values[field] = value
     return values
+
+
+def _multi_name_customization(rules: Mapping[str, Any]) -> bool:
+    policy = rules.get("multi_name_customization", {})
+    return bool(policy.get("enabled", False)) if isinstance(policy, Mapping) else False
+
+
+def _require_quantity_column_if_enabled(
+    rows: list[Mapping[str, Any]],
+    bindings: Any,
+    *,
+    enabled: bool,
+) -> None:
+    if not enabled or not rows:
+        return
+    quantity_column = ""
+    if isinstance(bindings, Mapping):
+        quantity_column = str(bindings.get("quantity") or "").strip()
+    available = _column_lookup(rows[0])
+    if quantity_column:
+        if _normalize_column(quantity_column) in available:
+            return
+        raise GenericRuleRenderError(f"支持多姓名定制要求订单表包含数量列：{quantity_column}")
+    if any(_normalize_column(alias) in available for alias in IMPLICIT_ORDER_BINDINGS["quantity"]):
+        return
+    raise GenericRuleRenderError(
+        "支持多姓名定制要求订单表包含数量列（购买数量、数量、Quantity 或 Qty）。"
+    )
+
+
+def _expand_orders_by_quantity(orders: Iterable[Mapping[str, Any]]) -> list[Dict[str, Any]]:
+    expanded: list[Dict[str, Any]] = []
+    for order in orders:
+        quantity = _parse_positive_quantity(_mapping(order.get("values")).get("quantity"))
+        for quantity_index in range(1, quantity + 1):
+            copy = dict(order)
+            copy["quantity_index"] = quantity_index
+            copy["quantity"] = quantity
+            expanded.append(copy)
+    return expanded
+
+
+def _parse_positive_quantity(value: Any) -> int:
+    if value is None or isinstance(value, bool) or not str(value).strip():
+        raise GenericRuleRenderError("支持多姓名定制的订单数量不能为空，且必须是正整数。")
+    try:
+        number = Decimal(str(value).strip())
+    except (InvalidOperation, ValueError):
+        raise GenericRuleRenderError("支持多姓名定制的订单数量必须是正整数。") from None
+    if not number.is_finite() or number != number.to_integral_value() or number < 1:
+        raise GenericRuleRenderError("支持多姓名定制的订单数量必须是正整数。")
+    return int(number)
 
 
 def _first_column_value(row: Mapping[str, Any], aliases: Iterable[Any]) -> Any:

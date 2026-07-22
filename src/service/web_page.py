@@ -1130,6 +1130,14 @@ INDEX_HTML = """<!doctype html>
                     <div><label for="textSourceColumn">订单内容列名</label><input id="textSourceColumn" placeholder="例如：定制信息 或 names" /></div>
                     <div><label for="textTargetName">模板文字对象</label><input id="textTargetName" placeholder="例如：Name" /></div>
                     <div><label for="textFitPolicy">文字适配方式</label><select id="textFitPolicy"><option value="scale_to_box">自动缩放适配</option><option value="text_fit_box">适配文字框</option><option value="none">不自动缩放</option></select></div>
+                    <div class="field-full">
+                      <label><input id="multiNameCustomization" type="checkbox" /> 支持多姓名定制</label>
+                      <p class="rule-section-note">开启后，同一订单行会按数量复制完整定制内容；关闭则保持现有每项定制内容各渲染一次的逻辑。</p>
+                    </div>
+                    <div class="field-full" id="quantitySourceColumnField" hidden>
+                      <label for="quantitySourceColumn">订单数量列（可选）</label>
+                      <input id="quantitySourceColumn" placeholder="留空自动识别购买数量、数量、Quantity 或 Qty" />
+                    </div>
                   </div>
                 </div>
 
@@ -1526,6 +1534,7 @@ INDEX_HTML = """<!doctype html>
         "#textSourceColumn",
         "#textTargetName",
         "#textFitPolicy",
+        "#quantitySourceColumn",
         "#templateProfile",
         "#orderBindingsJson",
         "#assetMappingsJson",
@@ -1535,6 +1544,10 @@ INDEX_HTML = """<!doctype html>
       document.querySelectorAll(selectors.join(",")).forEach(element => {
         element.addEventListener("input", renderTemplateRulePreview);
         element.addEventListener("change", renderTemplateRulePreview);
+      });
+      document.getElementById("multiNameCustomization").addEventListener("change", () => {
+        syncMultiNameCustomization();
+        renderTemplateRulePreview();
       });
       document.getElementById("optionGroupRows").addEventListener("click", event => {
         const button = event.target.closest("[data-remove-option-group]");
@@ -2305,6 +2318,7 @@ INDEX_HTML = """<!doctype html>
         option_group_names: "请补充选项组角色，例如字体组、设计组或尺寸/版式组",
         order_bindings: "请在“文字内容设置”里填写订单内容列名",
         text_policies: "请填写文字变量规则，系统会自动生成基础文字适配策略",
+        multi_name_customization: "支持多姓名定制只能用于一个直接文字替换位置，且不能同时配置多个文字位置或设计素材映射",
         validation_sample: "请检查验证样例；未配置多区域拆分时可以留空",
         rule_ast: "请检查“模板特殊规则”的编译结果；说明修改后必须重新编译",
         exceptions: "当前模板仍有无法执行的旧规则，请将其改为页面中的固定规则后再保存",
@@ -2326,6 +2340,10 @@ INDEX_HTML = """<!doctype html>
       delete savedBaseConfig.name_color_cycle;
       delete savedBaseConfig.font_style_rules;
       const textRule = collectTextContentRule(baseConfig);
+      const orderBindings = textRule.source_column ? { text: textRule.source_column } : {};
+      if (textRule.multi_name_enabled && textRule.quantity_column) {
+        orderBindings.quantity = textRule.quantity_column;
+      }
       const specialRulesText = document.getElementById("templateSpecialRules").value.trim();
       const optionGroups = collectOptionGroups();
       const dimensionMode = document.getElementById("dimensionMode").value;
@@ -2395,8 +2413,9 @@ INDEX_HTML = """<!doctype html>
         slots,
         text_sequences: textSequences,
         slot_mappings: slotMappings,
-        order_bindings: textRule.source_column ? { text: textRule.source_column } : {},
+        order_bindings: orderBindings,
         text_policies: { fit: textRule.fit },
+        multi_name_customization: { enabled: textRule.multi_name_enabled },
         special_rules_text: specialRulesText,
         rule_ast: state.compiledRuleAst || undefined,
         defaults,
@@ -2437,8 +2456,15 @@ INDEX_HTML = """<!doctype html>
       return {
         source_column: sourceColumn,
         target,
-        fit: document.getElementById("textFitPolicy").value || "scale_to_box"
+        fit: document.getElementById("textFitPolicy").value || "scale_to_box",
+        multi_name_enabled: document.getElementById("multiNameCustomization").checked,
+        quantity_column: document.getElementById("quantitySourceColumn").value.trim()
       };
+    }
+
+    function syncMultiNameCustomization() {
+      const enabled = document.getElementById("multiNameCustomization").checked;
+      document.getElementById("quantitySourceColumnField").hidden = !enabled;
     }
 
     function mergeDesignOptions(existing, optionValues) {
@@ -2755,6 +2781,7 @@ INDEX_HTML = """<!doctype html>
           <div class="preview-chip"><span>尺寸/版式组</span><strong>${escapeHtml(displayOptions(draft.style_options))}</strong></div>
           <div class="preview-chip"><span>尺寸对象</span><strong>${escapeHtml(displayDimensionTargets(draft.dimensions || {}, draft.dimension_mode))}</strong></div>
           <div class="preview-chip"><span>文字内容</span><strong>${escapeHtml(displayTextContent(draft))}</strong></div>
+          <div class="preview-chip"><span>多姓名定制</span><strong>${escapeHtml(displayMultiNameCustomization(draft))}</strong></div>
           <div class="preview-chip"><span>模板特殊规则</span><strong>${escapeHtml(displaySpecialRules(draft))}</strong></div>
           <div class="preview-chip"><span>多个文字位置</span><strong>${escapeHtml(displayTextSequences(draft.text_sequences || []))}</strong></div>
           <div class="preview-chip"><span>默认值</span><strong>${escapeHtml(describeDefaults(draft.defaults || {}))}</strong></div>
@@ -2790,6 +2817,14 @@ INDEX_HTML = """<!doctype html>
       const source = String(bindings.text || "").trim();
       const target = String(mapping.slot || mapping.name || "").trim();
       return source && target ? `${source} -> ${target}` : "未填写";
+    }
+
+    function displayMultiNameCustomization(draft) {
+      const policy = isPlainObject(draft.multi_name_customization) ? draft.multi_name_customization : {};
+      if (policy.enabled !== true) return "关闭";
+      const bindings = isPlainObject(draft.order_bindings) ? draft.order_bindings : {};
+      const quantityColumn = String(bindings.quantity || "").trim();
+      return quantityColumn ? `开启（数量列：${quantityColumn}）` : "开启（自动识别数量列）";
     }
 
     function displaySpecialRules(draft) {
@@ -2828,6 +2863,9 @@ INDEX_HTML = """<!doctype html>
       document.getElementById("textSourceColumn").value = "";
       document.getElementById("textTargetName").value = "";
       document.getElementById("textFitPolicy").value = "scale_to_box";
+      document.getElementById("multiNameCustomization").checked = false;
+      document.getElementById("quantitySourceColumn").value = "";
+      syncMultiNameCustomization();
       document.getElementById("templateSpecialRules").value = "";
       state.compiledRuleAst = null;
       state.specialRuleCompileResult = null;
@@ -3132,6 +3170,11 @@ INDEX_HTML = """<!doctype html>
       document.getElementById("textSourceColumn").value = bindings.text || (legacyField && bindings[legacyField]) || "";
       document.getElementById("textTargetName").value = firstMapping.slot || firstMapping.name || "";
       document.getElementById("textFitPolicy").value = (config.text_policies && config.text_policies.fit) || "scale_to_box";
+      document.getElementById("multiNameCustomization").checked = Boolean(
+        config.multi_name_customization && config.multi_name_customization.enabled === true
+      );
+      document.getElementById("quantitySourceColumn").value = bindings.quantity || "";
+      syncMultiNameCustomization();
       document.getElementById("templateSpecialRules").value = String(config.special_rules_text || "");
       state.compiledRuleAst = isPlainObject(config.rule_ast) ? config.rule_ast : null;
       state.specialRuleCompileResult = null;

@@ -76,6 +76,36 @@ def test_check_allows_missing_validation_sample_for_single_text_rendering():
     assert not any(item["code"] == "validation_sample" for item in result["errors"])
 
 
+def test_check_allows_multi_name_customization_for_one_direct_text_mapping():
+    pack = ready_pack()
+    pack["rules"]["slot_mappings"] = [{"field": "text", "slot": "Name1"}]
+    pack["rules"]["text_sequences"] = []
+    pack["rules"]["multi_name_customization"] = {"enabled": True}
+
+    result = check_rule_pack(pack, template_id="DEMO001")
+
+    assert result["ok"] is True
+    assert result["pack"]["rules"]["multi_name_customization"] == {"enabled": True}
+
+
+def test_check_rejects_multi_name_customization_for_split_text_slots():
+    pack = ready_pack()
+    pack["rules"]["slot_mappings"] = [
+        {"field": "text", "slot": "Name1", "delimiter": "|", "sequence_index": 1},
+        {"field": "text", "slot": "Name2", "delimiter": "|", "sequence_index": 2},
+    ]
+    pack["rules"]["text_policies"] = {
+        "fit": "scale_to_box",
+        "split": {"delimiter": "|", "max_parts": 2, "overflow": "reject", "trim": True},
+    }
+    pack["rules"]["multi_name_customization"] = {"enabled": True}
+
+    result = check_rule_pack(pack, template_id="DEMO001")
+
+    assert result["ok"] is False
+    assert any(item["code"] == "multi_name_customization" for item in result["errors"])
+
+
 def test_check_ignores_legacy_auto_validation_sample():
     pack = ready_pack()
     pack["validation"].pop("sample_source", None)

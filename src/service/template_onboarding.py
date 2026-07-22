@@ -33,7 +33,7 @@ DEFAULT_SUPPORTED_CAPABILITIES = {
     "text_on_curve",
 }
 _STORE_LOCK = TEMPLATE_STATE_LOCK
-ORDER_FIELDS = {"color", "design", "font", "order_no", "product_name", "style", "text", "title"}
+ORDER_FIELDS = {"color", "design", "font", "order_no", "product_name", "quantity", "style", "text", "title"}
 TEXT_FIT_POLICIES = {"none", "scale_to_box", "text_fit_box", "truncate"}
 TEXT_SPLIT_OVERFLOW = {"empty", "reject", "truncate"}
 
@@ -377,6 +377,7 @@ def _validate_editable_sections(
         "order_bindings": Mapping,
         "asset_mappings": list,
         "text_policies": Mapping,
+        "multi_name_customization": Mapping,
         "transforms": Mapping,
         "rule_ast": Mapping,
         "special_rules_text": str,
@@ -459,6 +460,52 @@ def _validate_editable_sections(
             _validate_split_policy(split_policy, errors)
         if not fit_policy and not split_policy:
             errors.append(_issue("text_policies", "Text policy requires fit or split."))
+
+    multi_name_customization = rules.get("multi_name_customization", {})
+    if isinstance(multi_name_customization, Mapping):
+        allowed_multi_name_settings = {"enabled"}
+        unknown_multi_name_settings = sorted(
+            set(multi_name_customization) - allowed_multi_name_settings
+        )
+        if unknown_multi_name_settings:
+            errors.append(
+                _issue(
+                    "multi_name_customization",
+                    "Unsupported multi-name customization settings: "
+                    + ", ".join(unknown_multi_name_settings),
+                )
+            )
+        enabled = multi_name_customization.get("enabled", False)
+        if not isinstance(enabled, bool):
+            errors.append(
+                _issue(
+                    "multi_name_customization",
+                    "Multi-name customization enabled must be true or false.",
+                )
+            )
+        elif enabled:
+            direct_text_mappings = [
+                item
+                for item in slot_mapping_items
+                if str(item.get("field") or item.get("source") or "").strip() == "text"
+                and str(item.get("slot") or item.get("name") or "").strip()
+                and not str(item.get("delimiter") or "").strip()
+                and item.get("sequence_index") is None
+            ]
+            if len(slot_mapping_items) != 1 or len(direct_text_mappings) != 1:
+                errors.append(
+                    _issue(
+                        "multi_name_customization",
+                        "支持多姓名定制只能用于一个已确认的直接文字替换位置。",
+                    )
+                )
+            if rules.get("text_sequences") or rules.get("asset_mappings"):
+                errors.append(
+                    _issue(
+                        "multi_name_customization",
+                        "支持多姓名定制不能与多个文字位置或设计素材映射同时启用。",
+                    )
+                )
 
     sample = raw_validation.get("sample") if isinstance(raw_validation, Mapping) else None
     if sample in (None, {}, ""):

@@ -32,11 +32,16 @@ def make_template(tmp_path, assets=None):
     )
 
 
-def make_orders(path: Path, custom="Alice | Bob"):
+def make_orders(path: Path, custom="Alice | Bob", quantity=None, quantity_header="Quantity"):
     workbook = Workbook()
     sheet = workbook.active
-    sheet.append(["Order", "Custom", "Font", "Design", "Style", "Color"])
-    sheet.append(["A-1", custom, "F2", "Design1", "Style3", "Gold"])
+    headers = ["Order", "Custom", "Font", "Design", "Style", "Color"]
+    row = ["A-1", custom, "F2", "Design1", "Style3", "Gold"]
+    if quantity is not None:
+        headers.append(quantity_header)
+        row.append(quantity)
+    sheet.append(headers)
+    sheet.append(row)
     workbook.save(path)
 
 
@@ -90,6 +95,105 @@ def test_builds_generic_task_from_bindings_and_split_variables(tmp_path):
     ]
     assert task["dimensions"]["Name1"]["width_mm"] == 20
     assert task["output"]["color_mode"] == "CMYK"
+
+
+def test_multi_name_customization_copies_the_full_text_by_quantity(tmp_path):
+    _, template = make_template(tmp_path)
+    order_path = tmp_path / "orders.xlsx"
+    make_orders(order_path, custom="Alice | Bob", quantity=3)
+    rules = base_rules()
+    rules["slot_mappings"] = [{"field": "text", "slot": "Name"}]
+    rules["multi_name_customization"] = {"enabled": True}
+
+    task = build_generic_render_task(template, rules, order_path, tmp_path / "output.ai")
+
+    assert len(task["orders"]) == 3
+    assert [order["quantity_index"] for order in task["orders"]] == [1, 2, 3]
+    assert [order["quantity"] for order in task["orders"]] == [3, 3, 3]
+    assert [order["variables"] for order in task["orders"]] == [
+        [{"target": "Name", "field": "text", "value": "Alice | Bob"}],
+        [{"target": "Name", "field": "text", "value": "Alice | Bob"}],
+        [{"target": "Name", "field": "text", "value": "Alice | Bob"}],
+    ]
+
+
+def test_multi_name_customization_keeps_one_copy_for_quantity_one(tmp_path):
+    _, template = make_template(tmp_path)
+    order_path = tmp_path / "orders.xlsx"
+    make_orders(order_path, custom="Alice | Bob", quantity=1)
+    rules = base_rules()
+    rules["slot_mappings"] = [{"field": "text", "slot": "Name"}]
+    rules["multi_name_customization"] = {"enabled": True}
+
+    task = build_generic_render_task(template, rules, order_path, tmp_path / "output.ai")
+
+    assert len(task["orders"]) == 1
+    assert task["orders"][0]["quantity_index"] == 1
+    assert task["orders"][0]["variables"] == [
+        {"target": "Name", "field": "text", "value": "Alice | Bob"}
+    ]
+
+
+def test_quantity_does_not_copy_single_content_template_when_switch_is_off(tmp_path):
+    _, template = make_template(tmp_path)
+    order_path = tmp_path / "orders.xlsx"
+    make_orders(order_path, custom="Alice | Bob", quantity=3)
+
+    rules = base_rules()
+    rules["text_policies"]["split"] = {
+        "delimiter": "|",
+        "max_parts": 2,
+        "overflow": "reject",
+        "trim": True,
+    }
+
+    task = build_generic_render_task(template, rules, order_path, tmp_path / "output.ai")
+
+    assert len(task["orders"]) == 1
+    assert task["orders"][0]["variables"] == [
+        {"target": "Name1", "field": "text", "value": "Alice"},
+        {"target": "Name2", "field": "text", "value": "Bob"},
+    ]
+
+
+def test_multi_name_customization_honors_a_configured_quantity_column(tmp_path):
+    _, template = make_template(tmp_path)
+    order_path = tmp_path / "orders.xlsx"
+    make_orders(order_path, quantity=2, quantity_header="Pieces")
+    rules = base_rules()
+    rules["order_bindings"]["quantity"] = "Pieces"
+    rules["slot_mappings"] = [{"field": "text", "slot": "Name"}]
+    rules["multi_name_customization"] = {"enabled": True}
+
+    task = build_generic_render_task(template, rules, order_path, tmp_path / "output.ai")
+
+    assert len(task["orders"]) == 2
+    assert [order["quantity_index"] for order in task["orders"]] == [1, 2]
+
+
+@pytest.mark.parametrize("quantity", ["", 0, -1, "1.5", "three"])
+def test_multi_name_customization_rejects_invalid_quantity(tmp_path, quantity):
+    _, template = make_template(tmp_path)
+    order_path = tmp_path / "orders.xlsx"
+    make_orders(order_path, quantity=quantity)
+    rules = base_rules()
+    rules["slot_mappings"] = [{"field": "text", "slot": "Name"}]
+    rules["multi_name_customization"] = {"enabled": True}
+
+    with pytest.raises(GenericRuleRenderError, match="订单数量"):
+        build_generic_render_task(template, rules, order_path, tmp_path / "output.ai")
+
+
+def test_multi_name_customization_requires_a_quantity_column(tmp_path):
+    _, template = make_template(tmp_path)
+    order_path = tmp_path / "orders.xlsx"
+    make_orders(order_path)
+    rules = base_rules()
+    rules["slot_mappings"] = [{"field": "text", "slot": "Name"}]
+    rules["multi_name_customization"] = {"enabled": True}
+
+    with pytest.raises(GenericRuleRenderError, match="数量列"):
+        build_generic_render_task(template, rules, order_path, tmp_path / "output.ai")
 
 
 def test_passes_declared_font_option_styles_to_generic_task(tmp_path):
