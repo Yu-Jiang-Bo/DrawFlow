@@ -255,7 +255,14 @@
         "delimiter": "|",
         "font_size_pt": 72,
         "line_gap_mm": 8,
-        "column_gap_mm": 12
+        "column_gap_mm": 12,
+        "segment_box_target": "Name",
+        "min_parts": 1,
+        "max_parts": 7
+      },
+      "footer": {
+        "box_target": "Year",
+        "optional": true
       },
       "default": {
         "group_by": ["row"],
@@ -265,8 +272,7 @@
       "department_overrides": {
         "T": {
           "group_by": ["order_no", "color"],
-          "header_fields": ["order_no", "color"],
-          "footer_field": ""
+          "header_fields": ["order_no", "color"]
         }
       }
     },
@@ -275,11 +281,17 @@
       {
         "field": "text",
         "slot": "Name"
+      },
+      {
+        "field": "year",
+        "slot": "Year",
+        "optional": true
       }
     ],
     "order_bindings": {
       "text": "name",
-      "quantity": "购买数量"
+      "quantity": "购买数量",
+      "year": "Year"
     },
     "asset_mappings": [],
     "defaults": {

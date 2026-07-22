@@ -380,6 +380,140 @@ def test_name_columns_layout_groups_t_department_by_order_and_color(tmp_path):
     assert task["orders"][0]["layout_mode"]["header_fields"] == ["order_no", "color"]
 
 
+def test_boxed_name_columns_validate_one_to_seven_names_and_keep_year_optional(tmp_path):
+    _, template = make_template(tmp_path)
+    order_path = tmp_path / "orders-with-year.xlsx"
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["Order", "Custom", "Year"])
+    sheet.append(["A-1", "One|Two|Three|Four|Five|Six|Seven", "2026"])
+    workbook.save(order_path)
+    rules = {
+        "order_bindings": {"order_no": "Order", "text": "Custom", "year": "Year"},
+        "slot_mappings": [
+            {"field": "text", "slot": "Name"},
+            {"field": "year", "slot": "Year", "optional": True},
+        ],
+        "dimensions": {
+            "Name": {"width_mm": 17, "height_mm": 10},
+            "Year": {"width_mm": 11, "height_mm": 5},
+        },
+        "text_policies": {"fit": "scale_to_box"},
+        "render_layout": {
+            "type": "name_columns",
+            "name": {"delimiter": "|", "segment_box_target": "Name", "min_parts": 1, "max_parts": 7},
+            "footer": {"box_target": "Year", "optional": True},
+            "default": {"group_by": ["row"], "footer_field": "year"},
+        },
+    }
+
+    task = build_generic_render_task(template, rules, order_path, tmp_path / "output.ai")
+
+    assert task["orders"][0]["variables"] == [
+        {"target": "Name", "field": "text", "value": "One|Two|Three|Four|Five|Six|Seven"},
+        {"target": "Year", "field": "year", "value": "2026"},
+    ]
+
+    no_year_path = tmp_path / "orders-without-year.xlsx"
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["Order", "Custom"])
+    sheet.append(["B-1", "OnlyName"])
+    workbook.save(no_year_path)
+    no_year_task = build_generic_render_task(template, rules, no_year_path, tmp_path / "without-year.ai")
+
+    assert no_year_task["orders"][0]["variables"] == [
+        {"target": "Name", "field": "text", "value": "OnlyName"}
+    ]
+
+
+@pytest.mark.parametrize(
+    ("custom", "message"),
+    [
+        ("One||Three", "空姓名段"),
+        ("One|Two|Three|Four|Five|Six|Seven|Eight", "1 至 7"),
+    ],
+)
+def test_boxed_name_columns_reject_invalid_name_segments(tmp_path, custom, message):
+    _, template = make_template(tmp_path)
+    order_path = tmp_path / "orders.xlsx"
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["Custom"])
+    sheet.append([custom])
+    workbook.save(order_path)
+    rules = {
+        "order_bindings": {"text": "Custom"},
+        "slot_mappings": [{"field": "text", "slot": "Name"}],
+        "text_policies": {"fit": "scale_to_box"},
+        "render_layout": {
+            "type": "name_columns",
+            "name": {"delimiter": "|", "segment_box_target": "Name", "min_parts": 1, "max_parts": 7},
+        },
+    }
+
+    with pytest.raises(GenericRuleRenderError, match=message):
+        build_generic_render_task(template, rules, order_path, tmp_path / "output.ai")
+
+
+def test_unconfigured_name_columns_keep_existing_segment_validation_behavior(tmp_path):
+    _, template = make_template(tmp_path)
+    order_path = tmp_path / "orders.xlsx"
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["Custom"])
+    sheet.append(["One||Three|Four|Five|Six|Seven|Eight"])
+    workbook.save(order_path)
+    rules = {
+        "order_bindings": {"text": "Custom"},
+        "slot_mappings": [{"field": "text", "slot": "Name"}],
+        "text_policies": {"fit": "scale_to_box"},
+        "render_layout": {"type": "name_columns", "name": {"delimiter": "|"}},
+    }
+
+    task = build_generic_render_task(template, rules, order_path, tmp_path / "output.ai")
+
+    assert task["orders"][0]["variables"][0]["value"] == "One||Three|Four|Five|Six|Seven|Eight"
+
+
+def test_boxed_name_columns_keep_optional_year_for_t_department_override(tmp_path):
+    _, template = make_template(tmp_path)
+    order_path = tmp_path / "orders.xlsx"
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["Order", "Custom", "Year", "Department", "Color"])
+    sheet.append(["T-1", "One|Two", "2026", "T", "Black"])
+    workbook.save(order_path)
+    rules = {
+        "order_bindings": {
+            "order_no": "Order",
+            "text": "Custom",
+            "year": "Year",
+            "department": "Department",
+            "color": "Color",
+        },
+        "slot_mappings": [
+            {"field": "text", "slot": "Name"},
+            {"field": "year", "slot": "Year", "optional": True},
+        ],
+        "text_policies": {"fit": "scale_to_box"},
+        "render_layout": {
+            "type": "name_columns",
+            "name": {"delimiter": "|", "segment_box_target": "Name", "min_parts": 1, "max_parts": 7},
+            "footer": {"box_target": "Year", "optional": True},
+            "default": {"group_by": ["row"], "footer_field": "year"},
+            "department_overrides": {
+                "T": {"group_by": ["order_no", "color"], "header_fields": ["order_no", "color"]}
+            },
+        },
+    }
+
+    task = build_generic_render_task(template, rules, order_path, tmp_path / "output.ai")
+
+    assert task["orders"][0]["layout_mode"]["footer_field"] == "year"
+    assert {variable["target"] for variable in task["orders"][0]["variables"]} == {"Name", "Year"}
+
+
 def test_passes_selected_font_boldness_to_every_text_variable(tmp_path):
     _, template = make_template(tmp_path)
     order_path = tmp_path / "orders.xlsx"
