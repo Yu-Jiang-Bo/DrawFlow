@@ -229,6 +229,9 @@
     "text_policies": {
       "fit": "scale_to_box"
     },
+    "multi_name_customization": {
+      "enabled": true
+    },
     "render_layout": {
       "type": "name_columns",
       "output_mode": "single_file",
@@ -275,7 +278,8 @@
       }
     ],
     "order_bindings": {
-      "text": "name"
+      "text": "name",
+      "quantity": "购买数量"
     },
     "asset_mappings": [],
     "defaults": {

@@ -290,9 +290,17 @@ class RenderService:
             raise RenderServiceError(f"曲线标题字体报告不存在: {font_report}", code="template_font_config_missing")
 
         rows = read_202509_curved_rows(order_file, sheet_name=request["sheet_name"] or None)
-        items = parse_202509_curved_items(rows)
-        groups = group_202509_curved_items(items)
         template_rules = read_template_rule_config(template.template_rules_config)
+        multi_name_policy = template_rules.get("multi_name_customization", {})
+        items = parse_202509_curved_items(
+            rows,
+            multi_name_customization=(
+                bool(multi_name_policy.get("enabled", False))
+                if isinstance(multi_name_policy, Mapping)
+                else False
+            ),
+        )
+        groups = group_202509_curved_items(items)
         task_options = {
             "font_report": font_report,
             "groups": groups,

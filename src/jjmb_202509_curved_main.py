@@ -8,6 +8,7 @@ import json
 import re
 from collections import OrderedDict
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Mapping
 
@@ -21,6 +22,7 @@ TEMPLATE_ID = "JJMB202509231236046265"
 DEFAULT_FONT_OPTION = "F1"
 DEFAULT_DEPARTMENT = "ZW"
 DEFAULT_TITLE = "Merry Christmas"
+QUANTITY_FIELDS = ("购买数量", "数量", "Quantity", "Qty")
 
 
 @dataclass(frozen=True)
@@ -32,6 +34,7 @@ class CurvedOrderItem:
     text: str
     text_type: str
     quantity_index: int
+    copy_index: int = 1
 
     def to_json_dict(self) -> Dict[str, object]:
         return {
@@ -42,6 +45,7 @@ class CurvedOrderItem:
             "text": self.text,
             "text_type": self.text_type,
             "quantity_index": self.quantity_index,
+            "copy_index": self.copy_index,
         }
 
 
@@ -163,7 +167,11 @@ def clean_text(value: str) -> str:
     return re.sub(r"\s+", " ", text).strip(" ,;")
 
 
-def parse_items(rows: Iterable[Dict[str, str]]) -> List[CurvedOrderItem]:
+def parse_items(
+    rows: Iterable[Dict[str, str]],
+    *,
+    multi_name_customization: bool = False,
+) -> List[CurvedOrderItem]:
     items: List[CurvedOrderItem] = []
     for row in rows:
         if get_field(row, "模板") != TEMPLATE_ID:
@@ -173,40 +181,45 @@ def parse_items(rows: Iterable[Dict[str, str]]) -> List[CurvedOrderItem]:
         order_no = get_field(row, "内部订单号", "订单号")
         detail_id = get_field(row, "订单明细id", "订单明细ID")
         department = get_field(row, "生产部门") or DEFAULT_DEPARTMENT
-        index = 1
-        for name in split_names(custom["names"]):
-            items.append(
-                CurvedOrderItem(
-                    order_no=order_no,
-                    detail_id=detail_id,
-                    department=department,
-                    font_option=font_option,
-                    text=name,
-                    text_type="name",
-                    quantity_index=index,
-                )
-            )
-            index += 1
+        copy_count = _row_quantity(row) if multi_name_customization else 1
+        names = split_names(custom["names"])
         title = clean_text(custom["title"]) or DEFAULT_TITLE
-        if title:
-            items.append(
-                CurvedOrderItem(
-                    order_no=order_no,
-                    detail_id=detail_id,
-                    department=department,
-                    font_option=font_option,
-                    text=title,
-                    text_type="title",
-                    quantity_index=index,
+        for copy_index in range(1, copy_count + 1):
+            index = 1
+            for name in names:
+                items.append(
+                    CurvedOrderItem(
+                        order_no=order_no,
+                        detail_id=detail_id,
+                        department=department,
+                        font_option=font_option,
+                        text=name,
+                        text_type="name",
+                        quantity_index=index,
+                        copy_index=copy_index,
+                    )
                 )
-            )
+                index += 1
+            if title:
+                items.append(
+                    CurvedOrderItem(
+                        order_no=order_no,
+                        detail_id=detail_id,
+                        department=department,
+                        font_option=font_option,
+                        text=title,
+                        text_type="title",
+                        quantity_index=index,
+                        copy_index=copy_index,
+                    )
+                )
     return items
 
 
 def group_items(items: Iterable[CurvedOrderItem]) -> List[CurvedOrderGroup]:
     grouped: "OrderedDict[str, List[CurvedOrderItem]]" = OrderedDict()
     for item in items:
-        key = item.order_no + "\u001f" + item.detail_id
+        key = item.order_no + "\u001f" + item.detail_id + "\u001f" + str(item.copy_index)
         grouped.setdefault(key, []).append(item)
     return [
         CurvedOrderGroup(order_no=items[0].order_no, items=items, group_key=group_key)
@@ -416,6 +429,19 @@ def _integrity_candidate_report(candidates: Iterable[Mapping[str, object]]) -> L
         }
         for candidate in candidates
     ]
+
+
+def _row_quantity(row: Mapping[str, str]) -> int:
+    value = get_field(dict(row), *QUANTITY_FIELDS)
+    if not value:
+        raise ValueError("支持多姓名定制的订单数量不能为空，且必须是正整数。")
+    try:
+        number = Decimal(value)
+    except (InvalidOperation, ValueError):
+        raise ValueError("支持多姓名定制的订单数量必须是正整数。") from None
+    if not number.is_finite() or number != number.to_integral_value() or number < 1:
+        raise ValueError("支持多姓名定制的订单数量必须是正整数。")
+    return int(number)
 
 
 def _positive_number(value: object) -> float:

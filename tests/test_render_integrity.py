@@ -114,6 +114,61 @@ def test_curved_service_retries_until_two_candidate_previews_match(tmp_path, mon
     assert '"status": "passed"' in Path(result["outputs"]["render_integrity"]).read_text(encoding="utf-8")
 
 
+def test_curved_service_uses_template_multi_name_policy_for_quantity_expansion(tmp_path, monkeypatch):
+    report = tmp_path / "font-report.json"
+    report.write_text(
+        '{"entries":[{"status":"ok","font_option":"F1","font_name":"TestFont","baseline_ratio":{},"bounds_shape_ratio":{}}]}',
+        encoding="utf-8",
+    )
+    rules = tmp_path / "template-rules.json"
+    rules.write_text('{"multi_name_customization":{"enabled":true}}', encoding="utf-8")
+    template = TemplateDefinition(
+        template_id="CURVED",
+        name="曲线标题",
+        template_type="curved_title_text",
+        pipeline="jjmb_202509_curved",
+        status="active",
+        template_ai=None,
+        template_config=report,
+        template_rules_config=rules,
+    )
+    rows = [
+        {
+            "模板": "JJMB202509231236046265",
+            "内部订单号": "ORDER1",
+            "订单明细id": "1",
+            "生产部门": "ZW",
+            "数量": "2",
+            "定制信息": "Font Options:F1\nTitle:Family\nName:Kai",
+        }
+    ]
+    monkeypatch.setattr(render_service_module, "read_202509_curved_rows", lambda *args, **kwargs: rows)
+    service = RenderService(registry=TemplateRegistry(tmp_path / "templates.json", tmp_path / "templates"), jobs=JobStore(tmp_path / "jobs"))
+    record = {
+        "job_dir": str(tmp_path / "job"),
+        "request": {
+            "order_file": str(tmp_path / "orders.xlsx"),
+            "sheet_name": "",
+            "columns": 1,
+            "visible": False,
+            "dry_run": True,
+            "hide_boxes": True,
+            "output_name": "result.ai",
+        },
+    }
+
+    result = service._run_202509_curved(record, template)
+    task = __import__("json").loads(Path(result["outputs"]["render_task"]).read_text(encoding="utf-8"))
+
+    assert len(task["groups"]) == 2
+    assert [[item["text"] for item in group["items"]] for group in task["groups"]] == [
+        ["Kai", "Family"],
+        ["Kai", "Family"],
+    ]
+    assert result["stats"]["groups"] == 2
+    assert result["stats"]["items"] == 4
+
+
 def test_integrity_gate_rejects_three_different_saved_candidates(tmp_path):
     report = tmp_path / "font-report.json"
     report.write_text(

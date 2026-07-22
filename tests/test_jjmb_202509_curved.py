@@ -63,6 +63,48 @@ def test_parse_items_adds_default_title_when_title_missing():
     ]
 
 
+def test_parse_items_repeats_each_complete_name_and_title_group_by_quantity():
+    rows = [
+        {
+            "模板": "JJMB202509231236046265",
+            "内部订单号": "ORDER1",
+            "订单明细id": "1",
+            "生产部门": "ZW",
+            "购买数量": "3",
+            "定制信息": "Font Options:F3\nTitle:Family\nName:1. Kai\n2. Jc",
+        }
+    ]
+
+    groups = group_items(parse_items(rows, multi_name_customization=True))
+
+    assert len(groups) == 3
+    assert [group.order_no for group in groups] == ["ORDER1", "ORDER1", "ORDER1"]
+    assert [[(item.text_type, item.text) for item in group.items] for group in groups] == [
+        [("name", "Kai"), ("name", "Jc"), ("title", "Family")],
+        [("name", "Kai"), ("name", "Jc"), ("title", "Family")],
+        [("name", "Kai"), ("name", "Jc"), ("title", "Family")],
+    ]
+
+
+def test_parse_items_rejects_invalid_quantity_when_multi_name_customization_enabled():
+    rows = [
+        {
+            "模板": "JJMB202509231236046265",
+            "内部订单号": "ORDER1",
+            "订单明细id": "1",
+            "购买数量": "1.5",
+            "定制信息": "Name:Kai",
+        }
+    ]
+
+    try:
+        parse_items(rows, multi_name_customization=True)
+    except ValueError as exc:
+        assert str(exc) == "支持多姓名定制的订单数量必须是正整数。"
+    else:
+        raise AssertionError("invalid quantity should stop the curved render task")
+
+
 def test_group_items_keeps_different_detail_rows_separate():
     rows = [
         {
