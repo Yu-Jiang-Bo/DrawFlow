@@ -128,7 +128,7 @@
                     try { savedDoc.close(SaveOptions.DONOTSAVECHANGES); } catch (e0) {}
                 }
             }
-            if (!preview.exists) throw new Error("Preview PNG was not generated: " + preview.fsName);
+            if (!preview.exists) throw new Error("Preview PNG was not generated.");
         }
         renderProgress.stage = "completed";
         writeRenderDebug("completed", "", 0);
@@ -535,7 +535,7 @@
 
     function readJSON(file) {
         file.encoding = "UTF-8";
-        if (!file.open("r")) throw new Error("Cannot open JSON: " + file.fsName);
+        if (!file.open("r")) throw new Error("Cannot open render task JSON.");
         var text = file.read();
         file.close();
         if (typeof JSON !== "undefined" && JSON.parse) return JSON.parse(text);

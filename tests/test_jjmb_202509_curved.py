@@ -241,6 +241,10 @@ def test_curved_renderer_outlines_and_merges_each_text_item_independently():
     assert "function exportPreviewPNG(doc, file, dpi)" in source
     assert 'failRender("Failed to save AI or export preview: "' in source
     assert 'previewPath.replace(/\\.png$/i, "")' in source
+    assert "Preview PNG was not generated." in source
+    assert "preview.fsName" not in source
+    assert "Cannot open render task JSON." in source
+    assert '"Cannot open JSON: " + file.fsName' not in source
     assert source.index("saveAsAI8(doc, output);") < source.index("savedDoc = app.open(output);")
     assert source.index("savedDoc = app.open(output);") < source.index("exportPreviewPNG(savedDoc")
     assert "if (doc) doc.close(SaveOptions.DONOTSAVECHANGES);" in source
