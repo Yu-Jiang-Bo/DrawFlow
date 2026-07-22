@@ -1,0 +1,44 @@
+{
+  "version": 1,
+  "template_id": "JJMB202508261001394920",
+  "mode": "pure_text",
+  "status": "draft",
+  "rule_source": "natural_language",
+  "raw_text": "纯文字颜色设计模板，字体 F1 至 F10，设计位 D1 至 D3。",
+  "capabilities": [
+    "export_ai8",
+    "outline_dedupe",
+    "text_fit_box"
+  ],
+  "font_options": ["F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10"],
+  "style_options": [],
+  "design_options": ["D1", "D2", "D3"],
+  "defaults": {
+    "color": "Gold",
+    "design": "D2",
+    "font": "",
+    "title": ""
+  },
+  "multi_name_customization": {
+    "enabled": false
+  },
+  "dimensions": {},
+  "output": {
+    "color_mode": "CMYK"
+  },
+  "slots": [
+    {
+      "name": "Name",
+      "type": "text_fit_box",
+      "source": "names"
+    }
+  ],
+  "assets": {
+    "mode": "inline",
+    "count": 0
+  },
+  "parser": {
+    "source": "local",
+    "llm_configured": false
+  }
+}

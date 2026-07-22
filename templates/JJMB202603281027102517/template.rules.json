@@ -1,0 +1,70 @@
+{
+  "version": "1.0.0",
+  "template_id": "JJMB202603281027102517",
+  "mode": "asset_split",
+  "status": "draft",
+  "rule_source": "natural_text",
+  "raw_text": "F1 至 F9 渲染普通文字，F10 至 F12 使用独立设计模板，内容以 | 分隔。",
+  "capabilities": [
+    "export_ai8",
+    "outline_dedupe",
+    "place_ai_asset",
+    "replace_text",
+    "scale_to_box"
+  ],
+  "font_options": ["F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12"],
+  "style_options": ["Style1", "Style2", "Style3", "Style4", "Style5"],
+  "design_options": {
+    "design_font_options": ["F10", "F11", "F12"],
+    "delimiter": "|",
+    "text_slots_mapping": {
+      "F10": {"asset_group": "F10", "text1": "Text1", "text2": "Text2"},
+      "F11": {"asset_group": "F11", "text1": "Text1", "text2": "Text2"},
+      "F12": {"asset_group": "F12", "text1": "Text1", "text2": "Text2"}
+    }
+  },
+  "design_font_options": ["F10", "F11", "F12"],
+  "defaults": {
+    "bold_fonts": ["F3", "F6"]
+  },
+  "multi_name_customization": {
+    "enabled": false
+  },
+  "transforms": ["scale_to_box", "outline", "deduplicate"],
+  "dimensions": {
+    "boxes": [],
+    "units": ""
+  },
+  "output": {
+    "color_mode": "CMYK",
+    "format": "ai",
+    "outline": true,
+    "deduplicate": true
+  },
+  "slots": [
+    {
+      "name": "text1",
+      "type": "replace_text",
+      "description": "Personalization 文本第一部分（普通字体时为完整内容，设计字体时为第一个值）"
+    },
+    {
+      "name": "text2",
+      "type": "replace_text",
+      "description": "Personalization 文本第二部分，仅用于设计字体 F10/F11/F12"
+    }
+  ],
+  "assets": [
+    {
+      "file_name": "JJMB202603281027102517F10-12.ai",
+      "stored_path": "templates/JJMB202603281027102517/assets/JJMB202603281027102517F10-12.ai",
+      "asset_type": "ai_template",
+      "role": "独立设计模板",
+      "status": "uploaded",
+      "size_bytes": 1252834
+    }
+  ],
+  "parser": {
+    "source": "llm",
+    "llm_configured": true
+  }
+}

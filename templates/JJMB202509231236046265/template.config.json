@@ -1,0 +1,59 @@
+{
+  "version": 1,
+  "template_id": "JJMB202509231236046265",
+  "mode": "annotated_ai",
+  "status": "draft",
+  "rule_source": "natural_language",
+  "raw_text": "曲线标题文字模板：Name 按订单定制信息渲染，Title 缺省为 Merry Christmas。",
+  "capabilities": [
+    "export_ai8",
+    "outline_dedupe",
+    "text_fit_box",
+    "text_on_curve"
+  ],
+  "font_options": [],
+  "style_options": [],
+  "design_options": [],
+  "defaults": {
+    "color": "",
+    "design": "",
+    "font": "",
+    "title": "Merry Christmas"
+  },
+  "multi_name_customization": {
+    "enabled": true
+  },
+  "dimensions": {
+    "title": {
+      "width_mm": 40.0,
+      "height_mm": 7.0,
+      "source": "标题尺寸是4*0.7cm"
+    },
+    "name": {
+      "width_mm": 16.0,
+      "height_mm": 5.0,
+      "source": "名字的尺寸是1.6*0.5cm"
+    }
+  },
+  "slots": [
+    {
+      "name": "Name",
+      "type": "text_fit_box",
+      "source": "names"
+    },
+    {
+      "name": "Title",
+      "type": "text_on_curve",
+      "source": "title",
+      "default": "Merry Christmas"
+    }
+  ],
+  "assets": {
+    "mode": "inline",
+    "count": 0
+  },
+  "parser": {
+    "source": "local",
+    "llm_configured": false
+  }
+}

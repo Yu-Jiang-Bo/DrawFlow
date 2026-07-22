@@ -1,5 +1,9 @@
+import json
+from pathlib import Path
+
 import pytest
 
+from src.service.rule_center import read_template_rule_config
 from src.service.template_rule_pack import (
     PROFILE_BUNDLE,
     PROFILE_COMPOSITE,
@@ -51,6 +55,23 @@ def test_preserves_multi_name_customization_rule():
     )
 
     assert pack["rules"]["multi_name_customization"] == {"enabled": True}
+
+
+def test_active_templates_declare_their_multi_name_policy_in_versioned_rules():
+    repository = Path(__file__).resolve().parents[1]
+    templates = json.loads((repository / "config" / "templates.json").read_text(encoding="utf-8"))["templates"]
+    expected = {
+        "JJMB202509231236046265": True,
+        "JJMB202510241154389614": True,
+        "JJMB202508261001394920": False,
+        "JJMB202603281027102517": False,
+    }
+
+    configured = {item["template_id"]: item["template_rules_config"] for item in templates}
+    for template_id, enabled in expected.items():
+        rule_path = repository / configured[template_id]
+        assert rule_path.exists(), f"{template_id} must ship its rule configuration"
+        assert read_template_rule_config(rule_path)["multi_name_customization"] == {"enabled": enabled}
 
 
 def test_preserves_complex_design_and_asset_shapes():
