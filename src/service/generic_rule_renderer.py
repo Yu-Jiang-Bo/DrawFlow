@@ -73,7 +73,15 @@ def build_generic_render_task(
     rows = _read_rows(order_file, sheet_name=sheet_name)
     multi_name_customization = _multi_name_customization(rules)
     _require_quantity_column_if_enabled(rows, bindings, enabled=multi_name_customization)
-    _require_columns(rows, bindings.values())
+    optional_binding_fields = _optional_order_binding_fields(rules)
+    _require_columns(
+        rows,
+        (
+            column
+            for field, column in bindings.items()
+            if _normalize_column(field) not in optional_binding_fields
+        ),
+    )
     rows = _filter_rows_for_template(rows, template.template_id)
     assets = _asset_catalog(template.assets)
     orders = [
@@ -135,6 +143,14 @@ def _build_layout_orders(orders: list[Dict[str, Any]], layout: Mapping[str, Any]
         if not isinstance(group_by, list) or not group_by:
             group_by = ["row"]
         key = tuple(_layout_group_value(order, field) for field in group_by)
+        if "quantity_index" in order:
+            # A quantity-expanded order represents one complete, independently
+            # rendered effect card. It must never collapse back into the source
+            # row's shared name-columns card through a configured group_by key.
+            key += (
+                "__quantity_row__=" + str(order.get("row_index") or ""),
+                "__quantity_copy__=" + str(order.get("quantity_index") or ""),
+            )
         bucket = groups.setdefault(key, {"mode": mode, "members": []})
         bucket["members"].append(order)
 
@@ -332,6 +348,19 @@ def _bound_values(
 def _multi_name_customization(rules: Mapping[str, Any]) -> bool:
     policy = rules.get("multi_name_customization", {})
     return bool(policy.get("enabled", False)) if isinstance(policy, Mapping) else False
+
+
+def _optional_order_binding_fields(rules: Mapping[str, Any]) -> set[str]:
+    """Footer-only values are display labels, not mandatory order inputs."""
+
+    layout = _mapping(rules.get("render_layout"))
+    modes = [_mapping(layout.get("default"))]
+    modes.extend(_mapping(mode) for mode in _mapping(layout.get("department_overrides")).values())
+    return {
+        _normalize_column(mode.get("footer_field"))
+        for mode in modes
+        if _normalize_column(mode.get("footer_field"))
+    }
 
 
 def _require_quantity_column_if_enabled(

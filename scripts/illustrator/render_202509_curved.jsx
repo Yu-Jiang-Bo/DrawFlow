@@ -128,12 +128,12 @@
                     try { savedDoc.close(SaveOptions.DONOTSAVECHANGES); } catch (e0) {}
                 }
             }
-            if (!preview.exists) throw new Error("质量预览 PNG 未生成：" + preview.fsName);
+            if (!preview.exists) throw new Error("Preview PNG was not generated: " + preview.fsName);
         }
         renderProgress.stage = "completed";
         writeRenderDebug("completed", "", 0);
     } catch (e1) {
-        failRender("AI 成品或质量预览导出失败：" + String(e1), 0);
+        failRender("Failed to save AI or export preview: " + String(e1), 0);
     }
     return output.fsName;
 
@@ -429,7 +429,7 @@
         for (var i = 0; i < items.length; i++) {
             var entry = items[i];
             var source = entry.item || entry;
-            if (!source) failRender("文字转曲失败：找不到第 " + (i + 1) + " 个文字对象", i + 1);
+            if (!source) failRender("Text outline failed: missing item " + (i + 1), i + 1);
             try {
                 var outline = source.createOutline();
                 if (!outline) throw new Error("createOutline returned nothing");
@@ -443,7 +443,7 @@
                     writeRenderDebug("outlining", "", 0);
                 }
             } catch (e0) {
-                failRender("文字转曲失败（第 " + (i + 1) + " 个对象）：" + String(e0), i + 1);
+                failRender("Text outline failed at item " + (i + 1) + ": " + String(e0), i + 1);
             }
         }
     }

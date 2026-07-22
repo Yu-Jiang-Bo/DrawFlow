@@ -279,6 +279,7 @@
     ],
     "order_bindings": {
       "text": "name",
+      "year": "Year",
       "quantity": "购买数量"
     },
     "asset_mappings": [],

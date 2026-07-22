@@ -31,6 +31,10 @@ def test_generic_renderer_cycles_configured_name_colors_only():
     assert "function planNameColumnsMasonryUnbounded(orders, layout, columns)" in source
     assert "function drawCardBackground(doc, left, top, width, height, color)" in source
     assert "drawCardBackground(doc, left, cardTop, width, height, cardBackground)" in source
+    assert "function hasLayoutTextValue(value)" in source
+    assert "var hasFooter = hasLayoutTextValue(footerValue);" in source
+    assert "var nameBottom = cardBottom + margin + (hasFooter ? footerHeight : 0);" in source
+    assert "if (hasFooter) {" in source
     assert "function addNameBlockText(doc, parts, x, y, size, lineGap, actions, legacyCycle, fontSource)" in source
     assert 'parts.join("\\r")' in source
     assert "function applyNameBlockColors(frame, parts, actions, legacyCycle)" in source
@@ -150,6 +154,39 @@ console.log(JSON.stringify({{ pages: plan.pages, columns: plan.columns, items: p
 
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout) == {"pages": 1, "columns": 5, "items": 144}
+
+
+def test_name_columns_footer_height_requires_a_nonblank_value():
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node.js is unavailable")
+    script_path = SCRIPT.resolve()
+    harness = f"""
+const fs = require('fs');
+let source = fs.readFileSync({json.dumps(str(script_path))}, 'utf8').replace(/^#target.*\\r?\\n/, '');
+source = source.replace(
+  '(function () {{',
+  '(function () {{ global.__height = nameColumnsBlockHeight; return;'
+);
+new Function(source)();
+const layout = {{
+  margin_mm: 10,
+  header_height_mm: 24,
+  footer_height_mm: 12,
+  default: {{ header_fields: ['order_no'], footer_field: 'year' }},
+  name: {{ delimiter: '|', font_size_pt: 72, line_gap_mm: 8 }}
+}};
+const base = {{ order_no: 'A-1', variables: [{{ target: 'Name', value: 'A|B' }}] }};
+const withYear = Object.assign({{}}, base, {{ values: {{ year: '2025' }} }});
+const withoutYear = Object.assign({{}}, base, {{ values: {{ year: '   ' }} }});
+console.log(JSON.stringify({{ withYear: global.__height(withYear, layout), withoutYear: global.__height(withoutYear, layout) }}));
+"""
+
+    result = subprocess.run([node, "-e", harness], capture_output=True, text=True, check=False)
+
+    assert result.returncode == 0, result.stderr
+    heights = json.loads(result.stdout)
+    assert heights["withYear"] > heights["withoutYear"]
 
 
 def test_grouped_renderer_applies_each_task_font_style_before_outlining():

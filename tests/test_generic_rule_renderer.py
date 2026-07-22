@@ -117,6 +117,82 @@ def test_multi_name_customization_copies_the_full_text_by_quantity(tmp_path):
     ]
 
 
+def test_multi_name_quantity_creates_independent_name_columns_cards(tmp_path):
+    _, template = make_template(tmp_path)
+    order_path = tmp_path / "orders.xlsx"
+    make_orders(order_path, custom="Alice | Bob", quantity=3)
+    rules = base_rules()
+    rules["slot_mappings"] = [{"field": "text", "slot": "Name"}]
+    rules["multi_name_customization"] = {"enabled": True}
+    rules["render_layout"] = {
+        "type": "name_columns",
+        "output_mode": "single_file",
+        "packing": "masonry",
+        "default": {"group_by": ["order_no"], "header_fields": ["order_no"]},
+    }
+
+    task = build_generic_render_task(template, rules, order_path, tmp_path / "output.ai")
+
+    assert len(task["orders"]) == 3
+    assert [len(order["layout_members"]) for order in task["orders"]] == [1, 1, 1]
+    assert [order["layout_members"][0]["quantity_index"] for order in task["orders"]] == [1, 2, 3]
+    assert [order["layout_members"][0]["order_no"] for order in task["orders"]] == ["A-1", "A-1", "A-1"]
+
+
+def test_multi_name_cards_keep_bound_year_in_every_copy(tmp_path):
+    _, template = make_template(tmp_path)
+    order_path = tmp_path / "orders.xlsx"
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["Order", "Custom", "Font", "Design", "Style", "Color", "Quantity", "Year"])
+    sheet.append(["A-1", "Alice | Bob", "F2", "Design1", "Style3", "Gold", 3, 2025])
+    workbook.save(order_path)
+    rules = base_rules()
+    rules["order_bindings"].update({"quantity": "Quantity", "year": "Year"})
+    rules["slot_mappings"] = [{"field": "text", "slot": "Name"}]
+    rules["multi_name_customization"] = {"enabled": True}
+    rules["render_layout"] = {
+        "type": "name_columns",
+        "output_mode": "single_file",
+        "default": {"group_by": ["row"], "footer_field": "year"},
+    }
+
+    task = build_generic_render_task(template, rules, order_path, tmp_path / "output.ai")
+
+    assert [order["layout_members"][0]["values"]["year"] for order in task["orders"]] == [2025, 2025, 2025]
+
+
+def test_multi_name_cards_allow_missing_optional_year_column(tmp_path):
+    _, template = make_template(tmp_path)
+    order_path = tmp_path / "orders.xlsx"
+    make_orders(order_path, custom="Alice | Bob", quantity=2)
+    rules = base_rules()
+    rules["order_bindings"].update({"quantity": "Quantity", "year": "Year"})
+    rules["slot_mappings"] = [{"field": "text", "slot": "Name"}]
+    rules["multi_name_customization"] = {"enabled": True}
+    rules["render_layout"] = {
+        "type": "name_columns",
+        "output_mode": "single_file",
+        "default": {"group_by": ["row"], "footer_field": "year"},
+    }
+
+    task = build_generic_render_task(template, rules, order_path, tmp_path / "output.ai")
+
+    assert len(task["orders"]) == 2
+    assert [order["layout_members"][0]["values"]["year"] for order in task["orders"]] == [None, None]
+
+
+def test_year_binding_is_required_when_not_used_as_an_optional_footer(tmp_path):
+    _, template = make_template(tmp_path)
+    order_path = tmp_path / "orders.xlsx"
+    make_orders(order_path)
+    rules = base_rules()
+    rules["order_bindings"]["year"] = "Year"
+
+    with pytest.raises(GenericRuleRenderError, match="Year"):
+        build_generic_render_task(template, rules, order_path, tmp_path / "output.ai")
+
+
 def test_multi_name_customization_keeps_one_copy_for_quantity_one(tmp_path):
     _, template = make_template(tmp_path)
     order_path = tmp_path / "orders.xlsx"

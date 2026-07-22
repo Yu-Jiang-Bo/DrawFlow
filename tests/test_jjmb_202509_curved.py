@@ -227,7 +227,7 @@ def test_curved_renderer_outlines_and_merges_each_text_item_independently():
 
     assert "cleanupOutline(outline);" in source
     assert "function cleanupOutlines(items)" not in source
-    assert 'failRender("文字转曲失败（第 " + (i + 1)' in source
+    assert 'failRender("Text outline failed at item " + (i + 1)' in source
     assert "cleanupStats.failed += 1;" in source
     assert "var OUTLINE_BATCH_SIZE = 25;" in source
     assert "function shouldSettleOutlineBatch(processed, total)" in source
@@ -239,7 +239,7 @@ def test_curved_renderer_outlines_and_merges_each_text_item_independently():
     assert 'writeRenderDebug("failed", message, itemIndex);' in source
     assert "doc.close(SaveOptions.DONOTSAVECHANGES);" in source
     assert "function exportPreviewPNG(doc, file, dpi)" in source
-    assert 'failRender("AI 成品或质量预览导出失败："' in source
+    assert 'failRender("Failed to save AI or export preview: "' in source
     assert 'previewPath.replace(/\\.png$/i, "")' in source
     assert source.index("saveAsAI8(doc, output);") < source.index("savedDoc = app.open(output);")
     assert source.index("savedDoc = app.open(output);") < source.index("exportPreviewPNG(savedDoc")

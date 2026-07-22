@@ -218,7 +218,9 @@
             if (variable) maxLines = Math.max(maxLines, splitNameParts(variable.value, String(name.delimiter || "|")).length);
         }
         var header = mode.header_fields && mode.header_fields.length ? mmToPt(Number(layout.header_height_mm || 24)) : 0;
-        var footer = String(mode.footer_field || "") ? mmToPt(Number(layout.footer_height_mm || 12)) : 0;
+        var footerField = String(mode.footer_field || "");
+        var footerValue = footerField ? fieldValue(members[0], footerField) : "";
+        var footer = hasLayoutTextValue(footerValue) ? mmToPt(Number(layout.footer_height_mm || 12)) : 0;
         var margin = mmToPt(Number(layout.margin_mm || 10));
         return margin * 2 + header + footer + maxLines * nameSize + Math.max(0, maxLines - 1) * lineGap;
     }
@@ -290,8 +292,10 @@
         var availableWidth = width - margin * 2;
         var columnWidth = (availableWidth - Math.max(0, members.length - 1) * columnGap) / Math.max(1, members.length);
         var footerField = String(mode.footer_field || "");
+        var footerValue = footerField ? fieldValue(members[0], footerField) : "";
+        var hasFooter = hasLayoutTextValue(footerValue);
         var nameTop = innerTop - (headerFields.length ? headerHeight : 0);
-        var nameBottom = cardBottom + margin + (footerField ? footerHeight : 0);
+        var nameBottom = cardBottom + margin + (hasFooter ? footerHeight : 0);
         var availableHeight = Math.max(nameSize, nameTop - nameBottom);
         var maxNameWidth = columnWidth * Number(name.max_width_ratio || 0.96);
         var minNameSize = Number(name.min_font_size_pt || 18);
@@ -316,8 +320,8 @@
                 fontSource
             );
         }
-        if (footerField) {
-            addLayoutText(doc, fieldValue(members[0], footerField), left + width / 2, cardBottom + margin + footerHeight, Number(layout.footer_font_size_pt || 20), rgbColor(layout.footer_color || "#FFFFFF"), null, true);
+        if (hasFooter) {
+            addLayoutText(doc, footerValue, left + width / 2, cardBottom + margin + footerHeight, Number(layout.footer_font_size_pt || 20), rgbColor(layout.footer_color || "#FFFFFF"), null, true);
         }
     }
 
@@ -545,6 +549,10 @@
         var selections = order.selections || {};
         if (field === "order_no") return String(order.order_no || values.order_no || "");
         return String(values[field] || selections[field] || "");
+    }
+
+    function hasLayoutTextValue(value) {
+        return String(value == null ? "" : value).replace(/^\s+|\s+$/g, "") !== "";
     }
 
     function joinFields(order, fields) {
