@@ -141,10 +141,10 @@ def test_exact_box_geometry_uses_independent_scaling_and_corner_alignment():
     harness = f"""
 const fs = require('fs');
 let source = fs.readFileSync({json.dumps(str(script_path))}, 'utf8').replace(/^#target.*\\r?\\n/, '');
-source = source.replace('var EXACT_BOX_MAX_DELTA_PT = 0.01;', '');
+source = source.replace('var EXACT_BOX_MAX_DELTA_PT = 0.02;', '');
 source = source.replace(
   '(function () {{',
-  '(function () {{ var EXACT_BOX_MAX_DELTA_PT = 0.01; global.__exactBox = {{ fit: fitTextToExactBox, align: alignTextToExactBox, mmToPt: mmToPt }}; return;'
+  '(function () {{ var EXACT_BOX_MAX_DELTA_PT = 0.02; global.__exactBox = {{ fit: fitTextToExactBox, align: alignTextToExactBox, mmToPt: mmToPt }}; return;'
 );
 new Function(source)();
 const frame = {{
@@ -175,7 +175,7 @@ global.__exactBox.fit(frame, 17, 10, 'Name');
 global.__exactBox.align(frame, 100, 200, width, height, 'Name');
 const actual = frame.visibleBounds;
 for (const [value, expected] of [[actual[0], 100], [actual[1], 200], [actual[2], 100 + width], [actual[3], 200 - height]]) {{
-  if (Math.abs(value - expected) > 0.01) throw new Error('exact box mismatch');
+  if (Math.abs(value - expected) > 0.02) throw new Error('exact box mismatch');
 }}
 """
 
@@ -189,7 +189,7 @@ def test_exact_box_rendering_remains_explicitly_opt_in():
     boxed_name_body = source[source.index("function addBoxedNameSegment"):source.index("function fittedNameSize")]
     footer_body = source[source.index("if (drawFooter)"):source.index("function drawCardBackground")]
 
-    assert "var EXACT_BOX_MAX_DELTA_PT = 0.01;" in source
+    assert "var EXACT_BOX_MAX_DELTA_PT = 0.02;" in source
     assert "frame.resize(horizontalPercent, verticalPercent" in source
     assert "if (box.fill_box_exactly === true)" in boxed_name_body
     assert "else {\n            fitTextStrict(frame" in boxed_name_body

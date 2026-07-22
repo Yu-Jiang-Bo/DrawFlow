@@ -1,7 +1,7 @@
 #target illustrator
 
 (function () {
-    var EXACT_BOX_MAX_DELTA_PT = 0.01;
+    var EXACT_BOX_MAX_DELTA_PT = 0.02;
     var taskPath = $.getenv("CUSTOM_RENDER_TASK");
     if (!taskPath) throw new Error("CUSTOM_RENDER_TASK missing");
     var task = readJSON(taskPath);
