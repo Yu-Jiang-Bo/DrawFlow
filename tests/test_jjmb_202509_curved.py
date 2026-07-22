@@ -222,11 +222,19 @@ def test_build_task_can_request_internal_quality_preview(tmp_path):
 
 def test_curved_renderer_outlines_and_merges_each_text_item_independently():
     source = Path("scripts/illustrator/render_202509_curved.jsx").read_text(encoding="utf-8")
+    outline_body = source[source.index("function outlineText(items)"):source.index("function failRender")]
+    fit_body = source[source.index("function fitPageItemToRect"):source.index("function alignPageItemToRect")]
 
     assert "cleanupOutline(outline);" in source
     assert "function cleanupOutlines(items)" not in source
     assert 'failRender("文字转曲失败（第 " + (i + 1)' in source
     assert "cleanupStats.failed += 1;" in source
+    assert "var OUTLINE_BATCH_SIZE = 25;" in source
+    assert "function shouldSettleOutlineBatch(processed, total)" in source
+    assert outline_body.count("settleIllustrator();") == 1
+    assert "writeRenderDebug(\"outlining\", \"\", 0);" in outline_body
+    assert "for (var i = 0; i < FIT_ITERATIONS; i++)" in fit_body
+    assert "app.redraw()" not in fit_body
     assert "function settleIllustrator()" in source
     assert 'writeRenderDebug("failed", message, itemIndex);' in source
     assert "doc.close(SaveOptions.DONOTSAVECHANGES);" in source

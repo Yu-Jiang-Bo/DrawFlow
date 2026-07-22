@@ -324,99 +324,93 @@ def render_with_integrity_gate(
     visible: bool,
     bridge_factory: Callable[..., object] = IllustratorBridge,
 ) -> Path:
-    """Render candidates until two saved-AI previews have identical pixels."""
+    """Publish one saved-and-reopened candidate only after preview validation."""
 
     script = Path(__file__).resolve().parents[1] / "scripts" / "illustrator" / "render_202509_curved.jsx"
-    candidates: List[Dict[str, object]] = []
+    candidate_ai = quality_dir / "candidate.ai"
+    candidate_preview = quality_dir / "candidate.png"
+    candidate_task = task_dir / "render-task-candidate.json"
+    task = build_task(
+        output_ai=candidate_ai,
+        preview_png=candidate_preview,
+        **task_options,
+    )
+    write_json(candidate_task, task)
+    candidate: Dict[str, object] = {
+        "attempt": 1,
+        "ai": candidate_ai,
+        "preview": candidate_preview,
+        "task": candidate_task,
+    }
     attempts: List[Dict[str, object]] = []
-    accepted: Dict[str, object] | None = None
 
-    for attempt in range(1, 4):
-        candidate_ai = quality_dir / f"candidate-{attempt}.ai"
-        candidate_preview = quality_dir / f"candidate-{attempt}.png"
-        candidate_task = task_dir / f"render-task-quality-{attempt}.json"
-        task = build_task(
-            output_ai=candidate_ai,
-            preview_png=candidate_preview,
-            **task_options,
+    try:
+        bridge = bridge_factory(visible=visible)
+        bridge.render(script, candidate_task)
+    except Exception as exc:
+        attempts.append({"attempt": 1, "error": str(exc), "stage": "candidate_render"})
+        write_json(
+            quality_report,
+            {
+                "status": "failed",
+                "attempts": attempts,
+                "candidates": _integrity_candidate_report([candidate]),
+            },
         )
-        write_json(candidate_task, task)
-        candidate: Dict[str, object] = {
-            "attempt": attempt,
-            "ai": candidate_ai,
-            "preview": candidate_preview,
-            "task": candidate_task,
-        }
-        candidates.append(candidate)
-        try:
-            bridge = bridge_factory(visible=visible)
-            bridge.render(script, candidate_task)
-        except Exception as exc:
-            attempts.append(
-                {
-                    "attempt": attempt,
-                    "error": str(exc),
-                    "stage": "candidate_render",
-                }
-            )
-            write_json(
-                quality_report,
-                {
-                    "status": "failed",
-                    "attempts": attempts,
-                    "candidates": _integrity_candidate_report(candidates),
-                },
-            )
-            raise
-        for previous in candidates[:-1]:
-            try:
-                comparison = compare_png_previews(Path(previous["preview"]), candidate_preview)
-            except RenderIntegrityError as exc:
-                attempts.append(
-                    {
-                        "left_attempt": int(previous["attempt"]),
-                        "right_attempt": attempt,
-                        "error": str(exc),
-                    }
-                )
-                write_json(
-                    quality_report,
-                    {
-                        "status": "failed",
-                        "attempts": attempts,
-                        "candidates": _integrity_candidate_report(candidates),
-                    },
-                )
-                raise CurvedRenderIntegrityError(str(exc), code="render_integrity_preview_invalid") from exc
-            attempts.append(
-                {
-                    "left_attempt": int(previous["attempt"]),
-                    "right_attempt": attempt,
-                    **comparison.to_json_dict(),
-                }
-            )
-            if comparison.equal:
-                accepted = candidate
-                break
-        if accepted:
-            break
+        raise
 
+    try:
+        if not candidate_ai.is_file() or candidate_ai.stat().st_size == 0:
+            raise RenderIntegrityError("候选 AI 文件未生成或为空")
+        if not candidate_preview.is_file() or candidate_preview.stat().st_size == 0:
+            raise RenderIntegrityError("候选 AI 的质量预览未生成或为空")
+        preview_validation = compare_png_previews(candidate_preview, candidate_preview).to_json_dict()
+        candidate["ai_bytes"] = candidate_ai.stat().st_size
+        candidate["preview_bytes"] = candidate_preview.stat().st_size
+        candidate["preview_validation"] = preview_validation
+    except (OSError, RenderIntegrityError) as exc:
+        attempts.append({"attempt": 1, "error": str(exc), "stage": "candidate_validation"})
+        write_json(
+            quality_report,
+            {
+                "status": "failed",
+                "attempts": attempts,
+                "candidates": _integrity_candidate_report([candidate]),
+            },
+        )
+        raise CurvedRenderIntegrityError(
+            "渲染完整性校验失败：候选 AI 未完成保存或预览验证，未发布正式成品。",
+            code="render_integrity_candidate_invalid",
+        ) from exc
+
+    try:
+        candidate_ai.replace(output_ai)
+    except OSError as exc:
+        attempts.append({"attempt": 1, "error": str(exc), "stage": "publish_output"})
+        write_json(
+            quality_report,
+            {
+                "status": "failed",
+                "attempts": attempts,
+                "candidates": _integrity_candidate_report([candidate]),
+            },
+        )
+        raise CurvedRenderIntegrityError(
+            "候选成品已验证，但无法发布正式 AI 文件。",
+            code="render_integrity_publish_failed",
+        ) from exc
+
+    attempts.append({"attempt": 1, "stage": "candidate_validation", "status": "passed"})
     write_json(
         quality_report,
         {
-            "status": "passed" if accepted else "failed",
+            "status": "passed",
             "attempts": attempts,
-            "candidates": _integrity_candidate_report(candidates),
-            "accepted_output": str(output_ai) if accepted else "",
+            "candidates": _integrity_candidate_report([candidate]),
+            "accepted_output": str(output_ai),
         },
     )
-    if not accepted:
-        raise CurvedRenderIntegrityError(
-            "渲染完整性校验失败：连续三次生成的 AI 预览不一致，已保留候选文件供人工复核。",
-            code="render_integrity_mismatch",
-        )
-    Path(accepted["ai"]).replace(output_ai)
-    return Path(accepted["task"])
+    return candidate_task
 
 
 def _integrity_candidate_report(candidates: Iterable[Mapping[str, object]]) -> List[Dict[str, object]]:
@@ -426,6 +420,9 @@ def _integrity_candidate_report(candidates: Iterable[Mapping[str, object]]) -> L
             "ai": str(candidate["ai"]),
             "preview": str(candidate["preview"]),
             "task": str(candidate["task"]),
+            "ai_bytes": int(candidate.get("ai_bytes", 0)),
+            "preview_bytes": int(candidate.get("preview_bytes", 0)),
+            "preview_validation": candidate.get("preview_validation", {}),
         }
         for candidate in candidates
     ]

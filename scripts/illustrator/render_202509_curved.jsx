@@ -26,6 +26,9 @@
     var keepNameFrames = layout.keep_name_frames === true;
     var pathfinderMerge = outputConfig.pathfinder_merge !== false;
     var cleanupStats = { attempted: 0, failed: 0 };
+    var OUTLINE_BATCH_SIZE = 25;
+    var FIT_ITERATIONS = 2;
+    var renderProgress = { stage: "layout", totalTextItems: 0, processedTextItems: 0 };
     var minFontSize = Number(fit.min_font_size_pt || 4);
     var maxFontSize = Number(fit.max_font_size_pt || 80);
     var padding = mmToPt(Number(fit.padding_mm || 0.2));
@@ -88,7 +91,10 @@
         }
     }
 
+    renderProgress.totalTextItems = textItems.length;
     if (outputConfig.outline_text) {
+        renderProgress.stage = "outlining";
+        writeRenderDebug("outlining", "", 0);
         outlineText(textItems);
         removeItems(pathItems);
     }
@@ -97,6 +103,8 @@
 
     var output = File(String(task.output_ai));
     try {
+        renderProgress.stage = "saving";
+        writeRenderDebug("saving", "", 0);
         ensureFolder(output.parent);
         if (output.exists) output.remove();
         saveAsAI8(doc, output);
@@ -109,7 +117,7 @@
             ensureFolder(preview.parent);
             if (preview.exists) preview.remove();
             // Illustrator appends .png for ExportType.PNG24. Supply an
-            // extension-free target so the report path remains candidate-N.png.
+            // extension-free target so the report path remains candidate.png.
             var previewExport = File(previewPath.replace(/\.png$/i, ""));
             var savedDoc = null;
             try {
@@ -122,6 +130,7 @@
             }
             if (!preview.exists) throw new Error("质量预览 PNG 未生成：" + preview.fsName);
         }
+        renderProgress.stage = "completed";
         writeRenderDebug("completed", "", 0);
     } catch (e1) {
         failRender("AI 成品或质量预览导出失败：" + String(e1), 0);
@@ -415,23 +424,32 @@
     }
 
     function outlineText(items) {
+        renderProgress.stage = "outlining";
+        renderProgress.totalTextItems = items.length;
         for (var i = 0; i < items.length; i++) {
             var entry = items[i];
             var source = entry.item || entry;
             if (!source) failRender("文字转曲失败：找不到第 " + (i + 1) + " 个文字对象", i + 1);
             try {
-                settleIllustrator();
                 var outline = source.createOutline();
                 if (!outline) throw new Error("createOutline returned nothing");
-                settleIllustrator();
                 if (entry.exactFit && entry.rect) {
                     fitPageItemToRect(outline, entry.rect);
                 }
                 if (pathfinderMerge) cleanupOutline(outline);
+                renderProgress.processedTextItems = i + 1;
+                if (shouldSettleOutlineBatch(i + 1, items.length)) {
+                    settleIllustrator();
+                    writeRenderDebug("outlining", "", 0);
+                }
             } catch (e0) {
                 failRender("文字转曲失败（第 " + (i + 1) + " 个对象）：" + String(e0), i + 1);
             }
         }
+    }
+
+    function shouldSettleOutlineBatch(processed, total) {
+        return processed === total || processed % OUTLINE_BATCH_SIZE === 0;
     }
 
     function failRender(message, itemIndex) {
@@ -456,6 +474,9 @@
             keepTitleFrames: keepTitleFrames,
             pathfinderMerge: pathfinderMerge,
             cleanupStats: cleanupStats,
+            stage: renderProgress.stage,
+            totalTextItems: renderProgress.totalTextItems,
+            processedTextItems: renderProgress.processedTextItems,
             status: status,
             failedItemIndex: failedItemIndex,
             error: errorMessage
@@ -466,12 +487,12 @@
         var left = rect[0], top = rect[1], right = rect[2], bottom = rect[3];
         var targetW = right - left;
         var targetH = top - bottom;
-        for (var i = 0; i < 6; i++) {
-            try { app.redraw(); } catch (e0) {}
+        for (var i = 0; i < FIT_ITERATIONS; i++) {
             var b = item.geometricBounds;
             var w = Math.abs(b[2] - b[0]);
             var h = Math.abs(b[1] - b[3]);
             if (w <= 0 || h <= 0) return;
+            if (Math.abs(targetW - w) < 0.01 && Math.abs(targetH - h) < 0.01) break;
             try {
                 item.resize((targetW / w) * 100, (targetH / h) * 100, true, true, true, true, 100, Transformation.CENTER);
             } catch (e1) {
@@ -490,13 +511,9 @@
         cleanupStats.attempted += 1;
         try { app.executeMenuCommand("deselectall"); } catch (e0) {}
         try {
-            settleIllustrator();
             item.selected = true;
-            settleIllustrator();
             app.executeMenuCommand("Live Pathfinder Add");
-            settleIllustrator();
             app.executeMenuCommand("expandStyle");
-            settleIllustrator();
         } catch (e1) {
             cleanupStats.failed += 1;
             throw e1;
@@ -507,8 +524,7 @@
 
     function settleIllustrator() {
         try { app.redraw(); } catch (e0) {}
-        try { $.sleep(40); } catch (e1) {}
-        try { app.redraw(); } catch (e2) {}
+        try { $.sleep(20); } catch (e1) {}
     }
 
     function removeItems(items) {

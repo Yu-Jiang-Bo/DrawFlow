@@ -52,7 +52,7 @@ def test_compare_png_previews_rejects_non_png_input(tmp_path):
         compare_png_previews(bad, good)
 
 
-def test_curved_service_retries_until_two_candidate_previews_match(tmp_path, monkeypatch):
+def test_curved_service_publishes_one_validated_candidate(tmp_path, monkeypatch):
     report = tmp_path / "font-report.json"
     report.write_text(
         '{"entries":[{"status":"ok","font_option":"F1","font_name":"TestFont","baseline_ratio":{},"bounds_shape_ratio":{}}]}',
@@ -87,8 +87,7 @@ def test_curved_service_retries_until_two_candidate_previews_match(tmp_path, mon
             calls.append(Path(task_path).name)
             Path(task["output_ai"]).parent.mkdir(parents=True, exist_ok=True)
             Path(task["output_ai"]).write_text("candidate", encoding="utf-8")
-            pixels = b"\x01\x02\x03" if len(calls) == 1 else b"\x04\x05\x06"
-            _write_rgb_png(Path(task["output"]["preview_png_path"]), pixels)
+            _write_rgb_png(Path(task["output"]["preview_png_path"]), b"\x01\x02\x03")
 
     monkeypatch.setattr(render_service_module, "IllustratorBridge", Bridge)
     monkeypatch.setattr(render_service_module, "read_202509_curved_rows", lambda *args, **kwargs: rows)
@@ -108,7 +107,7 @@ def test_curved_service_retries_until_two_candidate_previews_match(tmp_path, mon
 
     result = service._run_202509_curved(record, template)
 
-    assert len(calls) == 3
+    assert len(calls) == 1
     assert Path(result["outputs"]["output_ai"]).read_text(encoding="utf-8") == "candidate"
     assert result["stats"]["render_integrity_verified"] is True
     assert '"status": "passed"' in Path(result["outputs"]["render_integrity"]).read_text(encoding="utf-8")
@@ -169,7 +168,7 @@ def test_curved_service_uses_template_multi_name_policy_for_quantity_expansion(t
     assert result["stats"]["items"] == 4
 
 
-def test_integrity_gate_rejects_three_different_saved_candidates(tmp_path):
+def test_integrity_gate_rejects_invalid_saved_candidate_preview(tmp_path):
     report = tmp_path / "font-report.json"
     report.write_text(
         '{"entries":[{"status":"ok","font_option":"F1","font_name":"TestFont","baseline_ratio":{},"bounds_shape_ratio":{}}]}',
@@ -191,7 +190,7 @@ def test_integrity_gate_rejects_three_different_saved_candidates(tmp_path):
             calls.append(task_path)
             Path(task["output_ai"]).parent.mkdir(parents=True, exist_ok=True)
             Path(task["output_ai"]).write_text("candidate", encoding="utf-8")
-            _write_rgb_png(Path(task["output"]["preview_png_path"]), bytes((len(calls), 2, 3)))
+            Path(task["output"]["preview_png_path"]).write_bytes(b"not a png")
 
     output = tmp_path / "result.ai"
     quality_report = tmp_path / "render-integrity.json"
@@ -206,8 +205,8 @@ def test_integrity_gate_rejects_three_different_saved_candidates(tmp_path):
             bridge_factory=Bridge,
         )
 
-    assert raised.value.code == "render_integrity_mismatch"
-    assert len(calls) == 3
+    assert raised.value.code == "render_integrity_candidate_invalid"
+    assert len(calls) == 1
     assert output.exists() is False
     assert '"status": "failed"' in quality_report.read_text(encoding="utf-8")
 
@@ -247,8 +246,8 @@ def test_integrity_gate_writes_report_when_first_candidate_render_fails(tmp_path
     report_payload = quality_report.read_text(encoding="utf-8")
     assert '"status": "failed"' in report_payload
     assert '"stage": "candidate_render"' in report_payload
-    assert "candidate-1.ai" in report_payload
-    assert "render-task-quality-1.json" in report_payload
+    assert "candidate.ai" in report_payload
+    assert "render-task-candidate.json" in report_payload
     assert output.exists() is False
 
 
