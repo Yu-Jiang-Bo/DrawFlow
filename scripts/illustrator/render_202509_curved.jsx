@@ -25,6 +25,10 @@
     var keepTitleFrames = layout.keep_title_frames === true;
     var keepNameFrames = layout.keep_name_frames === true;
     var pathfinderMerge = outputConfig.pathfinder_merge !== false;
+    var cleanupStats = { attempted: 0, failed: 0 };
+    var OUTLINE_BATCH_SIZE = 25;
+    var FIT_ITERATIONS = 2;
+    var renderProgress = { stage: "layout", totalTextItems: 0, processedTextItems: 0 };
     var minFontSize = Number(fit.min_font_size_pt || 4);
     var maxFontSize = Number(fit.max_font_size_pt || 80);
     var padding = mmToPt(Number(fit.padding_mm || 0.2));
@@ -87,23 +91,10 @@
         }
     }
 
-    writeDebug(task, {
-        groups: groups.length,
-        columns: columns,
-        docWidth: docWidth,
-        docHeight: docHeight,
-        columnWidth: columnWidth,
-        nameWidth: nameWidth,
-        nameHeight: nameHeight,
-        titleWidth: titleWidth,
-        titleHeight: titleHeight,
-        colorMode: colorMode,
-        keepNameFrames: keepNameFrames,
-        keepTitleFrames: keepTitleFrames,
-        pathfinderMerge: pathfinderMerge
-    });
-
+    renderProgress.totalTextItems = textItems.length;
     if (outputConfig.outline_text) {
+        renderProgress.stage = "outlining";
+        writeRenderDebug("outlining", "", 0);
         outlineText(textItems);
         removeItems(pathItems);
     }
@@ -111,10 +102,39 @@
     if (!keepTitleFrames) removeItems(titleFrameItems);
 
     var output = File(String(task.output_ai));
-    ensureFolder(output.parent);
-    if (output.exists) output.remove();
-    saveAsAI8(doc, output);
-    doc.close(SaveOptions.DONOTSAVECHANGES);
+    try {
+        renderProgress.stage = "saving";
+        writeRenderDebug("saving", "", 0);
+        ensureFolder(output.parent);
+        if (output.exists) output.remove();
+        saveAsAI8(doc, output);
+        doc.close(SaveOptions.DONOTSAVECHANGES);
+        doc = null;
+
+        var previewPath = String(outputConfig.preview_png_path || "");
+        if (previewPath) {
+            var preview = File(previewPath);
+            ensureFolder(preview.parent);
+            if (preview.exists) preview.remove();
+            // Illustrator appends .png for ExportType.PNG24. Supply an
+            // extension-free target so the report path remains candidate.png.
+            var previewExport = File(previewPath.replace(/\.png$/i, ""));
+            var savedDoc = null;
+            try {
+                savedDoc = app.open(output);
+                exportPreviewPNG(savedDoc, previewExport, Number(outputConfig.preview_dpi || 300));
+            } finally {
+                if (savedDoc) {
+                    try { savedDoc.close(SaveOptions.DONOTSAVECHANGES); } catch (e0) {}
+                }
+            }
+            if (!preview.exists) throw new Error("Preview PNG was not generated: " + preview.fsName);
+        }
+        renderProgress.stage = "completed";
+        writeRenderDebug("completed", "", 0);
+    } catch (e1) {
+        failRender("Failed to save AI or export preview: " + String(e1), 0);
+    }
     return output.fsName;
 
     function itemHeight(item) {
@@ -404,31 +424,75 @@
     }
 
     function outlineText(items) {
-        var outlines = [];
+        renderProgress.stage = "outlining";
+        renderProgress.totalTextItems = items.length;
         for (var i = 0; i < items.length; i++) {
+            var entry = items[i];
+            var source = entry.item || entry;
+            if (!source) failRender("Text outline failed: missing item " + (i + 1), i + 1);
             try {
-                var entry = items[i];
-                var source = entry.item || entry;
                 var outline = source.createOutline();
+                if (!outline) throw new Error("createOutline returned nothing");
                 if (entry.exactFit && entry.rect) {
                     fitPageItemToRect(outline, entry.rect);
                 }
-                outlines.push(outline);
-            } catch (e0) {}
+                if (pathfinderMerge) cleanupOutline(outline);
+                renderProgress.processedTextItems = i + 1;
+                if (shouldSettleOutlineBatch(i + 1, items.length)) {
+                    settleIllustrator();
+                    writeRenderDebug("outlining", "", 0);
+                }
+            } catch (e0) {
+                failRender("Text outline failed at item " + (i + 1) + ": " + String(e0), i + 1);
+            }
         }
-        if (pathfinderMerge) cleanupOutlines(outlines);
+    }
+
+    function shouldSettleOutlineBatch(processed, total) {
+        return processed === total || processed % OUTLINE_BATCH_SIZE === 0;
+    }
+
+    function failRender(message, itemIndex) {
+        writeRenderDebug("failed", message, itemIndex);
+        try { if (doc) doc.close(SaveOptions.DONOTSAVECHANGES); } catch (e0) {}
+        throw new Error(message);
+    }
+
+    function writeRenderDebug(status, errorMessage, failedItemIndex) {
+        writeDebug(task, {
+            groups: groups.length,
+            columns: columns,
+            docWidth: docWidth,
+            docHeight: docHeight,
+            columnWidth: columnWidth,
+            nameWidth: nameWidth,
+            nameHeight: nameHeight,
+            titleWidth: titleWidth,
+            titleHeight: titleHeight,
+            colorMode: colorMode,
+            keepNameFrames: keepNameFrames,
+            keepTitleFrames: keepTitleFrames,
+            pathfinderMerge: pathfinderMerge,
+            cleanupStats: cleanupStats,
+            stage: renderProgress.stage,
+            totalTextItems: renderProgress.totalTextItems,
+            processedTextItems: renderProgress.processedTextItems,
+            status: status,
+            failedItemIndex: failedItemIndex,
+            error: errorMessage
+        });
     }
 
     function fitPageItemToRect(item, rect) {
         var left = rect[0], top = rect[1], right = rect[2], bottom = rect[3];
         var targetW = right - left;
         var targetH = top - bottom;
-        for (var i = 0; i < 6; i++) {
-            try { app.redraw(); } catch (e0) {}
+        for (var i = 0; i < FIT_ITERATIONS; i++) {
             var b = item.geometricBounds;
             var w = Math.abs(b[2] - b[0]);
             var h = Math.abs(b[1] - b[3]);
             if (w <= 0 || h <= 0) return;
+            if (Math.abs(targetW - w) < 0.01 && Math.abs(targetH - h) < 0.01) break;
             try {
                 item.resize((targetW / w) * 100, (targetH / h) * 100, true, true, true, true, 100, Transformation.CENTER);
             } catch (e1) {
@@ -443,17 +507,24 @@
         item.translate(rect[0] - b[0], rect[1] - b[1]);
     }
 
-    function cleanupOutlines(items) {
-        if (!items || items.length === 0) return;
+    function cleanupOutline(item) {
+        cleanupStats.attempted += 1;
         try { app.executeMenuCommand("deselectall"); } catch (e0) {}
         try {
-            for (var i = 0; i < items.length; i++) {
-                try { items[i].selected = true; } catch (e1) {}
-            }
+            item.selected = true;
             app.executeMenuCommand("Live Pathfinder Add");
             app.executeMenuCommand("expandStyle");
-        } catch (e2) {}
-        try { app.executeMenuCommand("deselectall"); } catch (e3) {}
+        } catch (e1) {
+            cleanupStats.failed += 1;
+            throw e1;
+        } finally {
+            try { app.executeMenuCommand("deselectall"); } catch (e2) {}
+        }
+    }
+
+    function settleIllustrator() {
+        try { app.redraw(); } catch (e0) {}
+        try { $.sleep(20); } catch (e1) {}
     }
 
     function removeItems(items) {
@@ -506,6 +577,17 @@
         opts.pdfCompatible = false;
         opts.compressed = false;
         doc.saveAs(file, opts);
+    }
+
+    function exportPreviewPNG(doc, file, dpi) {
+        var opts = new ExportOptionsPNG24();
+        var scale = Math.max(1, Number(dpi || 300) / 72 * 100);
+        opts.antiAliasing = true;
+        opts.artBoardClipping = true;
+        opts.transparency = false;
+        opts.horizontalScale = scale;
+        opts.verticalScale = scale;
+        doc.exportFile(file, ExportType.PNG24, opts);
     }
 
     function ensureFolder(folder) {

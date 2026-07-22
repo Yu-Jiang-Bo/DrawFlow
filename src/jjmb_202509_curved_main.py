@@ -8,18 +8,21 @@ import json
 import re
 from collections import OrderedDict
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import Dict, Iterable, List, Mapping
+from typing import Callable, Dict, Iterable, List, Mapping
 
 from openpyxl import load_workbook
 
 from .renderer.illustrator_bridge import IllustratorBridge, IllustratorBridgeError
+from .service.render_integrity import RenderIntegrityError, compare_png_previews
 
 
 TEMPLATE_ID = "JJMB202509231236046265"
 DEFAULT_FONT_OPTION = "F1"
 DEFAULT_DEPARTMENT = "ZW"
 DEFAULT_TITLE = "Merry Christmas"
+QUANTITY_FIELDS = ("购买数量", "数量", "Quantity", "Qty")
 
 
 @dataclass(frozen=True)
@@ -31,6 +34,7 @@ class CurvedOrderItem:
     text: str
     text_type: str
     quantity_index: int
+    copy_index: int = 1
 
     def to_json_dict(self) -> Dict[str, object]:
         return {
@@ -41,6 +45,7 @@ class CurvedOrderItem:
             "text": self.text,
             "text_type": self.text_type,
             "quantity_index": self.quantity_index,
+            "copy_index": self.copy_index,
         }
 
 
@@ -162,7 +167,11 @@ def clean_text(value: str) -> str:
     return re.sub(r"\s+", " ", text).strip(" ,;")
 
 
-def parse_items(rows: Iterable[Dict[str, str]]) -> List[CurvedOrderItem]:
+def parse_items(
+    rows: Iterable[Dict[str, str]],
+    *,
+    multi_name_customization: bool = False,
+) -> List[CurvedOrderItem]:
     items: List[CurvedOrderItem] = []
     for row in rows:
         if get_field(row, "模板") != TEMPLATE_ID:
@@ -172,40 +181,45 @@ def parse_items(rows: Iterable[Dict[str, str]]) -> List[CurvedOrderItem]:
         order_no = get_field(row, "内部订单号", "订单号")
         detail_id = get_field(row, "订单明细id", "订单明细ID")
         department = get_field(row, "生产部门") or DEFAULT_DEPARTMENT
-        index = 1
-        for name in split_names(custom["names"]):
-            items.append(
-                CurvedOrderItem(
-                    order_no=order_no,
-                    detail_id=detail_id,
-                    department=department,
-                    font_option=font_option,
-                    text=name,
-                    text_type="name",
-                    quantity_index=index,
-                )
-            )
-            index += 1
+        copy_count = _row_quantity(row) if multi_name_customization else 1
+        names = split_names(custom["names"])
         title = clean_text(custom["title"]) or DEFAULT_TITLE
-        if title:
-            items.append(
-                CurvedOrderItem(
-                    order_no=order_no,
-                    detail_id=detail_id,
-                    department=department,
-                    font_option=font_option,
-                    text=title,
-                    text_type="title",
-                    quantity_index=index,
+        for copy_index in range(1, copy_count + 1):
+            index = 1
+            for name in names:
+                items.append(
+                    CurvedOrderItem(
+                        order_no=order_no,
+                        detail_id=detail_id,
+                        department=department,
+                        font_option=font_option,
+                        text=name,
+                        text_type="name",
+                        quantity_index=index,
+                        copy_index=copy_index,
+                    )
                 )
-            )
+                index += 1
+            if title:
+                items.append(
+                    CurvedOrderItem(
+                        order_no=order_no,
+                        detail_id=detail_id,
+                        department=department,
+                        font_option=font_option,
+                        text=title,
+                        text_type="title",
+                        quantity_index=index,
+                        copy_index=copy_index,
+                    )
+                )
     return items
 
 
 def group_items(items: Iterable[CurvedOrderItem]) -> List[CurvedOrderGroup]:
     grouped: "OrderedDict[str, List[CurvedOrderItem]]" = OrderedDict()
     for item in items:
-        key = item.order_no + "\u001f" + item.detail_id
+        key = item.order_no + "\u001f" + item.detail_id + "\u001f" + str(item.copy_index)
         grouped.setdefault(key, []).append(item)
     return [
         CurvedOrderGroup(order_no=items[0].order_no, items=items, group_key=group_key)
@@ -240,6 +254,8 @@ def build_task(
     keep_name_frames: bool = False,
     layout_overrides: Mapping[str, object] | None = None,
     color_mode: str = "CMYK",
+    preview_png: Path | None = None,
+    preview_dpi: int = 300,
 ) -> Dict[str, object]:
     if not groups:
         raise ValueError("No renderable orders")
@@ -278,6 +294,8 @@ def build_task(
             "color_mode": _normalize_color_mode(color_mode),
             "outline_text": True,
             "pathfinder_merge": True,
+            "preview_png_path": str(preview_png) if preview_png else "",
+            "preview_dpi": max(int(preview_dpi), 1) if preview_png else 0,
         },
         "debug": {
             "report_path": str(output_ai.with_suffix(".debug.json")),
@@ -288,6 +306,139 @@ def build_task(
 def write_json(path: Path, payload: Dict[str, object]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+class CurvedRenderIntegrityError(RuntimeError):
+    def __init__(self, message: str, *, code: str):
+        super().__init__(message)
+        self.code = code
+
+
+def render_with_integrity_gate(
+    *,
+    output_ai: Path,
+    task_options: Mapping[str, object],
+    task_dir: Path,
+    quality_dir: Path,
+    quality_report: Path,
+    visible: bool,
+    bridge_factory: Callable[..., object] = IllustratorBridge,
+) -> Path:
+    """Publish one saved-and-reopened candidate only after preview validation."""
+
+    script = Path(__file__).resolve().parents[1] / "scripts" / "illustrator" / "render_202509_curved.jsx"
+    candidate_ai = quality_dir / "candidate.ai"
+    candidate_preview = quality_dir / "candidate.png"
+    candidate_task = task_dir / "render-task-candidate.json"
+    task = build_task(
+        output_ai=candidate_ai,
+        preview_png=candidate_preview,
+        **task_options,
+    )
+    write_json(candidate_task, task)
+    candidate: Dict[str, object] = {
+        "attempt": 1,
+        "ai": candidate_ai,
+        "preview": candidate_preview,
+        "task": candidate_task,
+    }
+    attempts: List[Dict[str, object]] = []
+
+    try:
+        bridge = bridge_factory(visible=visible)
+        bridge.render(script, candidate_task)
+    except Exception as exc:
+        attempts.append({"attempt": 1, "error": str(exc), "stage": "candidate_render"})
+        write_json(
+            quality_report,
+            {
+                "status": "failed",
+                "attempts": attempts,
+                "candidates": _integrity_candidate_report([candidate]),
+            },
+        )
+        raise
+
+    try:
+        if not candidate_ai.is_file() or candidate_ai.stat().st_size == 0:
+            raise RenderIntegrityError("候选 AI 文件未生成或为空")
+        if not candidate_preview.is_file() or candidate_preview.stat().st_size == 0:
+            raise RenderIntegrityError("候选 AI 的质量预览未生成或为空")
+        preview_validation = compare_png_previews(candidate_preview, candidate_preview).to_json_dict()
+        candidate["ai_bytes"] = candidate_ai.stat().st_size
+        candidate["preview_bytes"] = candidate_preview.stat().st_size
+        candidate["preview_validation"] = preview_validation
+    except (OSError, RenderIntegrityError) as exc:
+        attempts.append({"attempt": 1, "error": str(exc), "stage": "candidate_validation"})
+        write_json(
+            quality_report,
+            {
+                "status": "failed",
+                "attempts": attempts,
+                "candidates": _integrity_candidate_report([candidate]),
+            },
+        )
+        raise CurvedRenderIntegrityError(
+            "渲染完整性校验失败：候选 AI 未完成保存或预览验证，未发布正式成品。",
+            code="render_integrity_candidate_invalid",
+        ) from exc
+
+    try:
+        candidate_ai.replace(output_ai)
+    except OSError as exc:
+        attempts.append({"attempt": 1, "error": str(exc), "stage": "publish_output"})
+        write_json(
+            quality_report,
+            {
+                "status": "failed",
+                "attempts": attempts,
+                "candidates": _integrity_candidate_report([candidate]),
+            },
+        )
+        raise CurvedRenderIntegrityError(
+            "候选成品已验证，但无法发布正式 AI 文件。",
+            code="render_integrity_publish_failed",
+        ) from exc
+
+    attempts.append({"attempt": 1, "stage": "candidate_validation", "status": "passed"})
+    write_json(
+        quality_report,
+        {
+            "status": "passed",
+            "attempts": attempts,
+            "candidates": _integrity_candidate_report([candidate]),
+            "accepted_output": str(output_ai),
+        },
+    )
+    return candidate_task
+
+
+def _integrity_candidate_report(candidates: Iterable[Mapping[str, object]]) -> List[Dict[str, object]]:
+    return [
+        {
+            "attempt": int(candidate["attempt"]),
+            "ai": str(candidate["ai"]),
+            "preview": str(candidate["preview"]),
+            "task": str(candidate["task"]),
+            "ai_bytes": int(candidate.get("ai_bytes", 0)),
+            "preview_bytes": int(candidate.get("preview_bytes", 0)),
+            "preview_validation": candidate.get("preview_validation", {}),
+        }
+        for candidate in candidates
+    ]
+
+
+def _row_quantity(row: Mapping[str, str]) -> int:
+    value = get_field(dict(row), *QUANTITY_FIELDS)
+    if not value:
+        raise ValueError("支持多姓名定制的订单数量不能为空，且必须是正整数。")
+    try:
+        number = Decimal(value)
+    except (InvalidOperation, ValueError):
+        raise ValueError("支持多姓名定制的订单数量必须是正整数。") from None
+    if not number.is_finite() or number != number.to_integral_value() or number < 1:
+        raise ValueError("支持多姓名定制的订单数量必须是正整数。")
+    return int(number)
 
 
 def _positive_number(value: object) -> float:
@@ -325,24 +476,30 @@ def main() -> int:
         rows = read_xlsx_rows(Path(args.xlsx).resolve())
         items = parse_items(rows)
         groups = group_items(items)
-        task = build_task(
-            font_report=Path(args.font_report).resolve(),
-            output_ai=output_ai,
-            groups=groups,
-            columns=args.columns,
-            keep_title_frames=args.keep_title_frames,
-            keep_name_frames=args.keep_name_frames,
-            color_mode=args.color_mode,
-        )
         task_file = output_ai.parent / "render-tasks" / "jjmb-202509-curved-render-task.json"
-        write_json(task_file, task)
+        task_options = {
+            "font_report": Path(args.font_report).resolve(),
+            "groups": groups,
+            "columns": args.columns,
+            "keep_title_frames": args.keep_title_frames,
+            "keep_name_frames": args.keep_name_frames,
+            "color_mode": args.color_mode,
+        }
         print(f"render task: groups={len(groups)}, items={len(items)}")
-        print(task_file)
         if args.dry_run:
+            write_json(task_file, build_task(output_ai=output_ai, **task_options))
+            print(task_file)
             return 0
-        script = Path(__file__).resolve().parents[1] / "scripts" / "illustrator" / "render_202509_curved.jsx"
-        IllustratorBridge(visible=args.visible).render(script, task_file)
-    except (IllustratorBridgeError, ValueError) as exc:
+        task_file = render_with_integrity_gate(
+            output_ai=output_ai,
+            task_options=task_options,
+            task_dir=task_file.parent,
+            quality_dir=output_ai.parent / "render-integrity",
+            quality_report=output_ai.with_suffix(".render-integrity.json"),
+            visible=args.visible,
+        )
+        print(task_file)
+    except (CurvedRenderIntegrityError, IllustratorBridgeError, ValueError) as exc:
         print(f"render failed: {exc}")
         return 2
     print(f"rendered: {output_ai}")

@@ -23,15 +23,41 @@ def test_generic_renderer_cycles_configured_name_colors_only():
     assert "resolveVariableTargets" in source
     assert "findFallbackNameTextFrames" in source
     assert "function createNameColumnsDocument(task, order)" in source
-    assert "function drawNameColumns(doc, order, layout, fontSource, cell)" in source
+    assert "function drawNameColumns(doc, order, layout, fontSource, cell, dimensions)" in source
     assert "function createNameColumnsSheet(task)" in source
     assert "app.documents.add(DocumentColorSpace.RGB, pageWidth, height)" in source
     assert 'String(layout.artboard_mode || "") === "single"' in source
-    assert "function planNameColumnsSingleArtboard(orders, layout, requestedColumns, cellWidth, maxArtboardSize)" in source
-    assert "function planNameColumnsMasonryUnbounded(orders, layout, columns)" in source
+    assert "function planNameColumnsSingleArtboard(orders, layout, requestedColumns, cellWidth, maxArtboardSize, dimensions)" in source
+    assert "function planNameColumnsMasonryUnbounded(orders, layout, columns, dimensions)" in source
     assert "function drawCardBackground(doc, left, top, width, height, color)" in source
     assert "drawCardBackground(doc, left, cardTop, width, height, cardBackground)" in source
+    assert "function hasLayoutTextValue(value)" in source
+    assert "var drawFooter = shouldDrawLayoutFooter(order, mode, layout);" in source
+    assert "var nameBottom = cardBottom + margin + (drawFooter ? footerHeight : 0);" in source
+    assert "if (drawFooter) {" in source
     assert "function addNameBlockText(doc, parts, x, y, size, lineGap, actions, legacyCycle, fontSource)" in source
+    assert "function addBoxedNameSegment(doc, text, x, top, height, size, box, variable, legacyCycle, index, fontSource, member)" in source
+    assert "function configuredNameSegmentBox(layout, dimensions)" in source
+    assert "segment_box_target" in source
+    assert "function splitBoxedNameParts(value, name)" in source
+    assert "function fitTextStrict(frame, widthMm, heightMm, target)" in source
+    assert "function fitTextToExactBox(frame, widthMm, heightMm, target)" in source
+    assert "function resizeTextToBounds(frame, horizontalPercent, verticalPercent)" in source
+    assert "function alignTextToExactBox(frame, left, top, width, height, target)" in source
+    assert "fill_box_exactly === true" in source
+    assert "function centerLayoutTextInBox(frame, x, top, height)" in source
+    assert "function wrapGeneratedText(frame, name)" in source
+    assert "holder.name = name;" in source
+    assert "function createLayoutAudit(task)" in source
+    assert "function recordLayoutAudit(kind, name, frame, expected)" in source
+    assert "function layoutAuditIdentity(order)" in source
+    assert 'row + "_copy_" + String(copy)' in source
+    assert "function flushLayoutAudit()" in source
+    assert "task.layout_audit_file" in source
+    assert "function shouldDrawLayoutFooter(order, mode, layout)" in source
+    assert "footer.optional === true" in source
+    assert "var minimumNameHeight = segmentBox ? mmToPt(segmentBox.height_mm) : nameSize;" in source
+    assert "var availableHeight = Math.max(minimumNameHeight, nameTop - nameBottom);" in source
     assert 'parts.join("\\r")' in source
     assert "function applyNameBlockColors(frame, parts, actions, legacyCycle)" in source
     assert "function applyNameBlockBoldness(frame, actions)" in source
@@ -115,6 +141,70 @@ def test_generic_renderer_javascript_parses_in_node(tmp_path):
     assert result.returncode == 0, result.stderr
 
 
+def test_exact_box_geometry_uses_independent_scaling_and_corner_alignment():
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node.js is unavailable")
+    script_path = SCRIPT.resolve()
+    harness = f"""
+const fs = require('fs');
+let source = fs.readFileSync({json.dumps(str(script_path))}, 'utf8').replace(/^#target.*\\r?\\n/, '');
+source = source.replace('var EXACT_BOX_MAX_DELTA_PT = 0.02;', '');
+source = source.replace(
+  '(function () {{',
+  '(function () {{ var EXACT_BOX_MAX_DELTA_PT = 0.02; global.__exactBox = {{ fit: fitTextToExactBox, align: alignTextToExactBox, mmToPt: mmToPt }}; return;'
+);
+new Function(source)();
+const frame = {{
+  visibleBounds: [0, 20, 30, 0],
+  resize: function(horizontalPercent, verticalPercent) {{
+    const left = this.visibleBounds[0];
+    const top = this.visibleBounds[1];
+    const right = this.visibleBounds[2];
+    const bottom = this.visibleBounds[3];
+    const centerX = (left + right) / 2;
+    const centerY = (top + bottom) / 2;
+    const width = (right - left) * horizontalPercent / 100;
+    const height = (top - bottom) * verticalPercent / 100;
+    this.visibleBounds = [centerX - width / 2, centerY + height / 2, centerX + width / 2, centerY - height / 2];
+  }},
+  translate: function(dx, dy) {{
+    this.visibleBounds = [
+      this.visibleBounds[0] + dx,
+      this.visibleBounds[1] + dy,
+      this.visibleBounds[2] + dx,
+      this.visibleBounds[3] + dy,
+    ];
+  }},
+}};
+const width = global.__exactBox.mmToPt(17);
+const height = global.__exactBox.mmToPt(10);
+global.__exactBox.fit(frame, 17, 10, 'Name');
+global.__exactBox.align(frame, 100, 200, width, height, 'Name');
+const actual = frame.visibleBounds;
+for (const [value, expected] of [[actual[0], 100], [actual[1], 200], [actual[2], 100 + width], [actual[3], 200 - height]]) {{
+  if (Math.abs(value - expected) > 0.02) throw new Error('exact box mismatch');
+}}
+"""
+
+    result = subprocess.run([node, "-e", harness], capture_output=True, text=True, check=False)
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_exact_box_rendering_remains_explicitly_opt_in():
+    source = SCRIPT.read_text(encoding="utf-8")
+    boxed_name_body = source[source.index("function addBoxedNameSegment"):source.index("function fittedNameSize")]
+    footer_body = source[source.index("if (drawFooter)"):source.index("function drawCardBackground")]
+
+    assert "var EXACT_BOX_MAX_DELTA_PT = 0.02;" in source
+    assert "frame.resize(horizontalPercent, verticalPercent" in source
+    assert "if (box.fill_box_exactly === true)" in boxed_name_body
+    assert "else {\n            fitTextStrict(frame" in boxed_name_body
+    assert "if (footerBox.fill_box_exactly === true)" in footer_body
+    assert "else {\n                    fitTextStrict(footerFrame" in footer_body
+
+
 def test_single_artboard_masonry_expands_columns_to_fit_canvas():
     node = shutil.which("node")
     if not node:
@@ -150,6 +240,39 @@ console.log(JSON.stringify({{ pages: plan.pages, columns: plan.columns, items: p
 
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout) == {"pages": 1, "columns": 5, "items": 144}
+
+
+def test_name_columns_footer_height_requires_a_nonblank_value():
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node.js is unavailable")
+    script_path = SCRIPT.resolve()
+    harness = f"""
+const fs = require('fs');
+let source = fs.readFileSync({json.dumps(str(script_path))}, 'utf8').replace(/^#target.*\\r?\\n/, '');
+source = source.replace(
+  '(function () {{',
+  '(function () {{ global.__height = nameColumnsBlockHeight; return;'
+);
+new Function(source)();
+const layout = {{
+  margin_mm: 10,
+  header_height_mm: 24,
+  footer_height_mm: 12,
+  default: {{ header_fields: ['order_no'], footer_field: 'year' }},
+  name: {{ delimiter: '|', font_size_pt: 72, line_gap_mm: 8 }}
+}};
+const base = {{ order_no: 'A-1', variables: [{{ target: 'Name', value: 'A|B' }}] }};
+const withYear = Object.assign({{}}, base, {{ values: {{ year: '2025' }} }});
+const withoutYear = Object.assign({{}}, base, {{ values: {{ year: '   ' }} }});
+console.log(JSON.stringify({{ withYear: global.__height(withYear, layout), withoutYear: global.__height(withoutYear, layout) }}));
+"""
+
+    result = subprocess.run([node, "-e", harness], capture_output=True, text=True, check=False)
+
+    assert result.returncode == 0, result.stderr
+    heights = json.loads(result.stdout)
+    assert heights["withYear"] > heights["withoutYear"]
 
 
 def test_grouped_renderer_applies_each_task_font_style_before_outlining():

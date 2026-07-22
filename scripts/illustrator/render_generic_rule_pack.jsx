@@ -1,11 +1,13 @@
 #target illustrator
 
 (function () {
+    var EXACT_BOX_MAX_DELTA_PT = 0.02;
     var taskPath = $.getenv("CUSTOM_RENDER_TASK");
     if (!taskPath) throw new Error("CUSTOM_RENDER_TASK missing");
     var task = readJSON(taskPath);
     if (task.type !== "generic_template_rules") throw new Error("Unsupported task type: " + task.type);
     if (!task.orders || !task.orders.length) throw new Error("Generic task has no orders");
+    var layoutAudit = createLayoutAudit(task);
     try { app.userInteractionLevel = UserInteractionLevel.DONTDISPLAYALERTS; } catch (e0) {}
 
     var outputs = [];
@@ -76,6 +78,7 @@
 
     function createNameColumnsSheet(task) {
         var layout = task.render_layout || {};
+        var dimensions = task.dimensions || {};
         var cellWidth = mmToPt(Number(layout.width_mm || 100));
         var cellHeight = mmToPt(Number(layout.height_mm || 220));
         var requestedColumns = Math.max(1, Number(task.layout && task.layout.columns || 4));
@@ -83,10 +86,10 @@
         var pageRows = Math.max(1, Number(layout.page_rows || 6));
         var masonry = String(layout.packing || "") === "masonry";
         var pageHeight = masonry ? mmToPt(Number(layout.page_height_mm || 1320)) : cellHeight * pageRows;
-        var plan = masonry ? planNameColumnsMasonry(task.orders, layout, columns, cellWidth, pageHeight) : planNameColumnsGrid(task.orders, columns, cellWidth, cellHeight, pageRows);
+        var plan = masonry ? planNameColumnsMasonry(task.orders, layout, columns, cellWidth, pageHeight, dimensions) : planNameColumnsGrid(task.orders, columns, cellWidth, cellHeight, pageRows);
         if (masonry && String(layout.artboard_mode || "") === "single") {
             var maxArtboardSize = mmToPt(Number(layout.max_artboard_size_mm || 5750));
-            var singlePlan = planNameColumnsSingleArtboard(task.orders, layout, requestedColumns, cellWidth, maxArtboardSize);
+            var singlePlan = planNameColumnsSingleArtboard(task.orders, layout, requestedColumns, cellWidth, maxArtboardSize, dimensions);
             if (singlePlan) {
                 plan = singlePlan;
                 columns = singlePlan.columns;
@@ -119,12 +122,13 @@
                     top: height - item.y,
                     width: cellWidth,
                     height: item.height
-                });
+                }, dimensions);
                 if ((index + 1) % 25 === 0 || index + 1 === plan.items.length) {
                     trace(task, "name_columns:drawn " + (index + 1) + "/" + plan.items.length);
                 }
             }
             removeFontPrototypes(fontCache);
+            flushLayoutAudit();
             return doc;
         } finally {
             source.close(SaveOptions.DONOTSAVECHANGES);
@@ -148,13 +152,13 @@
         return {items: items, pages: Math.max(1, Math.ceil(orders.length / pageSize))};
     }
 
-    function planNameColumnsMasonry(orders, layout, columns, cellWidth, pageHeight) {
+    function planNameColumnsMasonry(orders, layout, columns, cellWidth, pageHeight, dimensions) {
         var gap = mmToPt(Number(layout.card_gap_mm || 8));
         var items = [];
         var page = 0;
         var columnHeights = emptyColumnHeights(columns);
         for (var index = 0; index < orders.length; index++) {
-            var blockHeight = nameColumnsBlockHeight(orders[index], layout);
+            var blockHeight = nameColumnsBlockHeight(orders[index], layout, dimensions);
             var column = shortestColumnIndex(columnHeights);
             if (columnHeights[column] > 0 && columnHeights[column] + blockHeight > pageHeight) {
                 page++;
@@ -173,21 +177,21 @@
         return {items: items, pages: Math.max(1, page + 1)};
     }
 
-    function planNameColumnsSingleArtboard(orders, layout, requestedColumns, cellWidth, maxArtboardSize) {
+    function planNameColumnsSingleArtboard(orders, layout, requestedColumns, cellWidth, maxArtboardSize, dimensions) {
         var maxColumns = Math.floor(maxArtboardSize / cellWidth);
         for (var columns = requestedColumns; columns <= maxColumns; columns++) {
-            var plan = planNameColumnsMasonryUnbounded(orders, layout, columns);
+            var plan = planNameColumnsMasonryUnbounded(orders, layout, columns, dimensions);
             if (plan.height <= maxArtboardSize && columns * cellWidth <= maxArtboardSize) return plan;
         }
         return null;
     }
 
-    function planNameColumnsMasonryUnbounded(orders, layout, columns) {
+    function planNameColumnsMasonryUnbounded(orders, layout, columns, dimensions) {
         var gap = mmToPt(Number(layout.card_gap_mm || 8));
         var items = [];
         var columnHeights = emptyColumnHeights(columns);
         for (var index = 0; index < orders.length; index++) {
-            var blockHeight = nameColumnsBlockHeight(orders[index], layout);
+            var blockHeight = nameColumnsBlockHeight(orders[index], layout, dimensions);
             var column = shortestColumnIndex(columnHeights);
             items.push({
                 order: orders[index],
@@ -206,21 +210,23 @@
         };
     }
 
-    function nameColumnsBlockHeight(order, layout) {
+    function nameColumnsBlockHeight(order, layout, dimensions) {
         var mode = order.layout_mode || layout.default || {};
         var members = order.layout_members || [order];
         var name = layout.name || {};
         var nameSize = Number(name.font_size_pt || 72);
+        var segmentBox = configuredNameSegmentBox(layout, dimensions);
         var lineGap = mmToPt(Number(name.line_gap_mm || 8));
         var maxLines = 1;
         for (var index = 0; index < members.length; index++) {
             var variable = findNameVariable(members[index].variables || []);
-            if (variable) maxLines = Math.max(maxLines, splitNameParts(variable.value, String(name.delimiter || "|")).length);
+            if (variable) maxLines = Math.max(maxLines, (segmentBox ? splitBoxedNameParts(variable.value, name) : splitNameParts(variable.value, String(name.delimiter || "|"))).length);
         }
         var header = mode.header_fields && mode.header_fields.length ? mmToPt(Number(layout.header_height_mm || 24)) : 0;
-        var footer = String(mode.footer_field || "") ? mmToPt(Number(layout.footer_height_mm || 12)) : 0;
+        var footer = shouldDrawLayoutFooter(order, mode, layout) ? mmToPt(Number(layout.footer_height_mm || 12)) : 0;
         var margin = mmToPt(Number(layout.margin_mm || 10));
-        return margin * 2 + header + footer + maxLines * nameSize + Math.max(0, maxLines - 1) * lineGap;
+        var lineHeight = segmentBox ? mmToPt(segmentBox.height_mm) : nameSize;
+        return margin * 2 + header + footer + maxLines * lineHeight + Math.max(0, maxLines - 1) * lineGap;
     }
 
     function emptyColumnHeights(columns) {
@@ -256,15 +262,16 @@
             var fontCache = {};
             var selected = String(order.selections && order.selections.font || "");
             if (selected) fontSource = fontStyleForSelection(source, doc, fontCache, selected, task.font_option_styles || {});
-            drawNameColumns(doc, order, layout, fontSource);
+            drawNameColumns(doc, order, layout, fontSource, null, task.dimensions || {});
             removeFontPrototypes(fontCache);
+            flushLayoutAudit();
             return doc;
         } finally {
             source.close(SaveOptions.DONOTSAVECHANGES);
         }
     }
 
-    function drawNameColumns(doc, order, layout, fontSource, cell) {
+    function drawNameColumns(doc, order, layout, fontSource, cell, dimensions) {
         var mode = order.layout_mode || layout.default || {};
         var members = order.layout_members || [order];
         var margin = mmToPt(Number(layout.margin_mm || 10));
@@ -272,6 +279,7 @@
         var footerHeight = mmToPt(Number(layout.footer_height_mm || 12));
         var name = layout.name || {};
         var nameSize = Number(name.font_size_pt || 72);
+        var segmentBox = configuredNameSegmentBox(layout, dimensions);
         var lineGap = mmToPt(Number(name.line_gap_mm || 8));
         var columnGap = mmToPt(Number(name.column_gap_mm || 12));
         var bounds = doc.artboards[0].artboardRect;
@@ -290,34 +298,93 @@
         var availableWidth = width - margin * 2;
         var columnWidth = (availableWidth - Math.max(0, members.length - 1) * columnGap) / Math.max(1, members.length);
         var footerField = String(mode.footer_field || "");
+        var footerText = footerField ? fieldValue(members[0], footerField) : "";
+        var drawFooter = shouldDrawLayoutFooter(order, mode, layout);
         var nameTop = innerTop - (headerFields.length ? headerHeight : 0);
-        var nameBottom = cardBottom + margin + (footerField ? footerHeight : 0);
-        var availableHeight = Math.max(nameSize, nameTop - nameBottom);
+        var nameBottom = cardBottom + margin + (drawFooter ? footerHeight : 0);
+        var minimumNameHeight = segmentBox ? mmToPt(segmentBox.height_mm) : nameSize;
+        var availableHeight = Math.max(minimumNameHeight, nameTop - nameBottom);
         var maxNameWidth = columnWidth * Number(name.max_width_ratio || 0.96);
         var minNameSize = Number(name.min_font_size_pt || 18);
         for (var memberIndex = 0; memberIndex < members.length; memberIndex++) {
             var member = members[memberIndex];
             var variable = findNameVariable(member.variables || []);
             if (!variable) throw new Error("Name columns layout requires a Name variable");
-            var parts = splitNameParts(variable.value, String(name.delimiter || "|"));
+            var parts = segmentBox ? splitBoxedNameParts(variable.value, name) : splitNameParts(variable.value, String(name.delimiter || "|"));
             var x = left + margin + memberIndex * (columnWidth + columnGap) + columnWidth / 2;
             var fittedSize = fittedNameSize(parts, nameSize, maxNameWidth, minNameSize);
-            var blockHeight = parts.length * fittedSize + Math.max(0, parts.length - 1) * lineGap;
+            var lineHeight = segmentBox ? mmToPt(segmentBox.height_mm) : fittedSize;
+            var blockHeight = parts.length * lineHeight + Math.max(0, parts.length - 1) * lineGap;
             var startY = nameTop - Math.max(0, (availableHeight - blockHeight) / 2);
-            addNameBlockText(
-                doc,
-                parts,
-                x,
-                startY,
-                fittedSize,
-                lineGap,
-                variable.actions || [],
-                layout.name_color_cycle || {},
-                fontSource
-            );
+            if (segmentBox) {
+                for (var partIndex = 0; partIndex < parts.length; partIndex++) {
+                    addBoxedNameSegment(
+                        doc,
+                        parts[partIndex],
+                        x,
+                        startY - partIndex * (lineHeight + lineGap),
+                        lineHeight,
+                        nameSize,
+                        segmentBox,
+                        variable,
+                        layout.name_color_cycle || {},
+                        partIndex,
+                        fontSource,
+                        member
+                    );
+                }
+            } else {
+                addNameBlockText(
+                    doc,
+                    parts,
+                    x,
+                    startY,
+                    fittedSize,
+                    lineGap,
+                    variable.actions || [],
+                    layout.name_color_cycle || {},
+                    fontSource
+                );
+            }
         }
-        if (footerField) {
-            addLayoutText(doc, fieldValue(members[0], footerField), left + width / 2, cardBottom + margin + footerHeight, Number(layout.footer_font_size_pt || 20), rgbColor(layout.footer_color || "#FFFFFF"), null, true);
+        if (drawFooter) {
+            var footerFrame = addLayoutText(doc, footerText, left + width / 2, cardBottom + margin + footerHeight, Number(layout.footer_font_size_pt || 20), rgbColor(layout.footer_color || "#FFFFFF"), fontSource, true);
+            var footerBox = layout.footer || {};
+            var footerTarget = String(footerBox.box_target || "");
+            if (footerTarget) {
+                var footerVariable = findVariable(members[0].variables || [], footerTarget);
+                if (!footerVariable) throw new Error("Name columns footer requires a " + footerTarget + " variable");
+                applyNonColorActions(footerFrame, footerVariable.actions || []);
+                if (!footerVariable.actions || !footerVariable.actions.length) applyFontBoldness(footerFrame, footerVariable.font_style);
+                var footerDimension = configuredDimension(dimensions, footerTarget, "footer");
+                var footerAuditName = footerTarget + "Box_" + layoutAuditIdentity(members[0]);
+                var footerDiagnosticTarget = footerTarget + " row " + String(members[0].row_index || "unknown");
+                if (footerBox.fill_box_exactly === true) {
+                    fitTextToExactBox(footerFrame, footerDimension.width_mm, footerDimension.height_mm, footerDiagnosticTarget);
+                    var footerWidth = mmToPt(footerDimension.width_mm);
+                    var footerHeightExact = mmToPt(footerDimension.height_mm);
+                    var footerBoxTop = cardBottom + margin + footerHeight / 2 + footerHeightExact / 2;
+                    alignTextToExactBox(
+                        footerFrame,
+                        left + width / 2 - footerWidth / 2,
+                        footerBoxTop,
+                        footerWidth,
+                        footerHeightExact,
+                        footerDiagnosticTarget
+                    );
+                    recordLayoutAudit("year", footerAuditName, footerFrame, {
+                        left: left + width / 2 - footerWidth / 2,
+                        top: footerBoxTop,
+                        right: left + width / 2 + footerWidth / 2,
+                        bottom: footerBoxTop - footerHeightExact
+                    });
+                } else {
+                    fitTextStrict(footerFrame, footerDimension.width_mm, footerDimension.height_mm, footerDiagnosticTarget);
+                    centerLayoutTextInBox(footerFrame, left + width / 2, cardBottom + margin + footerHeight, footerHeight);
+                    recordLayoutAudit("year", footerAuditName, footerFrame);
+                }
+                wrapGeneratedText(footerFrame, footerAuditName);
+            }
         }
     }
 
@@ -352,6 +419,39 @@
         applyNameBlockColors(frame, parts, actions, legacyCycle);
         applyNameBlockBoldness(frame, actions);
         centerLayoutText(frame, x);
+        return frame;
+    }
+
+    function addBoxedNameSegment(doc, text, x, top, height, size, box, variable, legacyCycle, index, fontSource, member) {
+        var frame = addLayoutText(doc, text, x, top, size, null, fontSource, true);
+        var color = colorForNamePart(variable.actions || [], index, legacyCycle);
+        if (color) {
+            try { frame.textRange.characterAttributes.fillColor = color; } catch (e1) {}
+        }
+        applyNonColorActions(frame, variable.actions || []);
+        if (!variable.actions || !variable.actions.length) applyFontBoldness(frame, variable.font_style);
+        var boxWidth = mmToPt(box.width_mm);
+        var boxHeight = mmToPt(box.height_mm);
+        if (box.fill_box_exactly === true) {
+            fitTextToExactBox(frame, box.width_mm, box.height_mm, box.target);
+            alignTextToExactBox(frame, x - boxWidth / 2, top, boxWidth, boxHeight, box.target);
+        } else {
+            fitTextStrict(frame, box.width_mm, box.height_mm, box.target);
+            centerLayoutTextInBox(frame, x, top, height);
+        }
+        var auditName = box.target + "Box_" + layoutAuditIdentity(member) + "_" + String(index + 1);
+        recordLayoutAudit(
+            "name",
+            auditName,
+            frame,
+            box.fill_box_exactly === true ? {
+                left: x - boxWidth / 2,
+                top: top,
+                right: x + boxWidth / 2,
+                bottom: top - boxHeight
+            } : null
+        );
+        wrapGeneratedText(frame, auditName);
         return frame;
     }
 
@@ -461,6 +561,96 @@
         } catch (e2) {}
     }
 
+    function centerLayoutTextInBox(frame, x, top, height) {
+        try {
+            var bounds = frame.visibleBounds;
+            var centerX = (Number(bounds[0]) + Number(bounds[2])) / 2;
+            var centerY = (Number(bounds[1]) + Number(bounds[3])) / 2;
+            frame.translate(x - centerX, top - height / 2 - centerY);
+        } catch (e1) {
+            centerLayoutText(frame, x);
+        }
+    }
+
+    function wrapGeneratedText(frame, name) {
+        try {
+            var parent = frame.parent;
+            var holder = parent.groupItems.add();
+            frame.move(holder, ElementPlacement.PLACEATEND);
+            holder.name = name;
+            return holder;
+        } catch (e1) {
+            try { frame.name = name; } catch (e2) {}
+            return frame;
+        }
+    }
+
+    function createLayoutAudit(task) {
+        var path = String(task.layout_audit_file || "");
+        return path ? {file: File(path), lines: ["kind\tname\tleft_pt\ttop_pt\tright_pt\tbottom_pt\twidth_mm\theight_mm\tfill\texpected_left_pt\texpected_top_pt\texpected_right_pt\texpected_bottom_pt\tleft_delta_pt\ttop_delta_pt\tright_delta_pt\tbottom_delta_pt"]} : null;
+    }
+
+    function recordLayoutAudit(kind, name, frame, expected) {
+        if (!layoutAudit) return;
+        try {
+            var bounds = frame.visibleBounds;
+            var left = Number(bounds[0]);
+            var top = Number(bounds[1]);
+            var right = Number(bounds[2]);
+            var bottom = Number(bounds[3]);
+            layoutAudit.lines.push([
+                String(kind),
+                String(name),
+                left,
+                top,
+                right,
+                bottom,
+                Math.abs(right - left) * 25.4 / 72,
+                Math.abs(top - bottom) * 25.4 / 72,
+                auditFillColor(frame),
+                expected ? expected.left : "",
+                expected ? expected.top : "",
+                expected ? expected.right : "",
+                expected ? expected.bottom : "",
+                expected ? left - expected.left : "",
+                expected ? top - expected.top : "",
+                expected ? right - expected.right : "",
+                expected ? bottom - expected.bottom : ""
+            ].join("\t"));
+        } catch (e1) {
+            throw new Error("Cannot audit layout text: " + name);
+        }
+    }
+
+    function layoutAuditIdentity(order) {
+        var row = String(order.row_index || "row");
+        var copy = order.quantity_index;
+        return copy === undefined || copy === null || copy === "" ? row : row + "_copy_" + String(copy);
+    }
+
+    function auditFillColor(frame) {
+        try {
+            var color = frame.textRange.characterAttributes.fillColor;
+            if (String(color.typename || "") === "RGBColor") {
+                return [Math.round(Number(color.red)), Math.round(Number(color.green)), Math.round(Number(color.blue))].join(",");
+            }
+            if (String(color.typename || "") === "CMYKColor") {
+                return [Number(color.cyan), Number(color.magenta), Number(color.yellow), Number(color.black)].join(",");
+            }
+        } catch (e1) {}
+        return "";
+    }
+
+    function flushLayoutAudit() {
+        if (!layoutAudit) return;
+        var file = layoutAudit.file;
+        ensureFolder(file.parent);
+        file.encoding = "UTF-8";
+        if (!file.open("w")) throw new Error("Cannot write layout audit: " + file.fsName);
+        file.write(layoutAudit.lines.join("\r\n"));
+        file.close();
+    }
+
     function fontStyleForSelection(source, targetDoc, cache, selected, declaredStyles) {
         var key = String(selected || "");
         if (!key) return null;
@@ -507,9 +697,66 @@
         return result.length ? result : [text];
     }
 
+    function splitBoxedNameParts(value, name) {
+        var delimiter = String(name.delimiter || "|");
+        if (!delimiter) throw new Error("Name segment boxes require a delimiter");
+        var rawParts = String(value || "").split(delimiter);
+        var parts = [];
+        for (var index = 0; index < rawParts.length; index++) {
+            var part = trimText(rawParts[index]);
+            if (!part) throw new Error("Name segment boxes do not allow empty name segments");
+            parts.push(part);
+        }
+        var minimum = positiveLayoutInteger(name.min_parts, 1);
+        var maximum = positiveLayoutInteger(name.max_parts, 0);
+        if (parts.length < minimum || (maximum && parts.length > maximum)) {
+            throw new Error("Name segment count is outside the configured range");
+        }
+        return parts;
+    }
+
+    function positiveLayoutInteger(value, fallback) {
+        var parsed = Number(value);
+        return !isNaN(parsed) && parsed > 0 && Math.floor(parsed) === parsed ? parsed : fallback;
+    }
+
+    function configuredNameSegmentBox(layout, dimensions) {
+        var name = layout.name || {};
+        var target = String(name.segment_box_target || "");
+        if (!target) return null;
+        var box = configuredDimension(dimensions, target, "name segment");
+        box.fill_box_exactly = name.fill_box_exactly === true;
+        return box;
+    }
+
+    function configuredDimension(dimensions, target, label) {
+        var dimension = (dimensions || {})[target];
+        var width = Number(dimension && dimension.width_mm || 0);
+        var height = Number(dimension && dimension.height_mm || 0);
+        if (!dimension || width <= 0 || height <= 0) {
+            throw new Error("Configured " + label + " dimension is missing or invalid: " + target);
+        }
+        return {target: target, width_mm: width, height_mm: height};
+    }
+
+    function shouldDrawLayoutFooter(order, mode, layout) {
+        var field = String(mode.footer_field || "");
+        if (!field) return false;
+        var footer = layout.footer || {};
+        var value = fieldValue(order, field);
+        if (String(footer.box_target || "") && footer.optional === true) {
+            return Boolean(trimText(value));
+        }
+        return hasLayoutTextValue(value);
+    }
+
     function findNameVariable(variables) {
+        return findVariable(variables, "Name");
+    }
+
+    function findVariable(variables, target) {
         for (var i = 0; i < variables.length; i++) {
-            if (String(variables[i].target || "") === "Name") return variables[i];
+            if (String(variables[i].target || "") === String(target || "")) return variables[i];
         }
         return null;
     }
@@ -545,6 +792,10 @@
         var selections = order.selections || {};
         if (field === "order_no") return String(order.order_no || values.order_no || "");
         return String(values[field] || selections[field] || "");
+    }
+
+    function hasLayoutTextValue(value) {
+        return String(value == null ? "" : value).replace(/^\s+|\s+$/g, "") !== "";
     }
 
     function joinFields(order, fields) {
@@ -660,6 +911,94 @@
             if (size <= 4) break;
             attrs.size = Math.max(4, size * Math.min(maxW / width, maxH / height) * 0.96);
         }
+    }
+
+    function fitTextStrict(frame, widthMm, heightMm, target) {
+        if (widthMm <= 0 || heightMm <= 0) throw new Error("Invalid strict text dimensions: " + target);
+        var maxW = mmToPt(widthMm);
+        var maxH = mmToPt(heightMm);
+        for (var i = 0; i < 200; i++) {
+            var bounds = frame.visibleBounds;
+            var width = Math.abs(Number(bounds[2]) - Number(bounds[0]));
+            var height = Math.abs(Number(bounds[1]) - Number(bounds[3]));
+            if (width <= maxW && height <= maxH) return;
+            if (!width || !height) break;
+            var attrs = frame.textRange.characterAttributes;
+            var size = Number(attrs.size || 12);
+            if (size <= 0.1) break;
+            attrs.size = Math.max(0.1, size * Math.min(maxW / width, maxH / height) * 0.98);
+        }
+        var finalBounds = frame.visibleBounds;
+        var finalWidth = Math.abs(Number(finalBounds[2]) - Number(finalBounds[0]));
+        var finalHeight = Math.abs(Number(finalBounds[1]) - Number(finalBounds[3]));
+        if (finalWidth > maxW || finalHeight > maxH) {
+            throw new Error("Text cannot fit the configured dimension: " + target);
+        }
+    }
+
+    function fitTextToExactBox(frame, widthMm, heightMm, target) {
+        if (widthMm <= 0 || heightMm <= 0) throw new Error("Invalid exact text dimensions: " + target);
+        var targetWidth = mmToPt(widthMm);
+        var targetHeight = mmToPt(heightMm);
+        for (var index = 0; index < 12; index++) {
+            var bounds = frame.visibleBounds;
+            var width = Math.abs(Number(bounds[2]) - Number(bounds[0]));
+            var height = Math.abs(Number(bounds[1]) - Number(bounds[3]));
+            if (!width || !height) throw new Error("Text has no visible bounds for exact box: " + target);
+            if (boxDimensionsMatch(width, height, targetWidth, targetHeight)) return;
+            resizeTextToBounds(frame, targetWidth / width * 100, targetHeight / height * 100);
+        }
+        var finalBounds = frame.visibleBounds;
+        var finalWidth = Math.abs(Number(finalBounds[2]) - Number(finalBounds[0]));
+        var finalHeight = Math.abs(Number(finalBounds[1]) - Number(finalBounds[3]));
+        if (!boxDimensionsMatch(finalWidth, finalHeight, targetWidth, targetHeight)) {
+            throw new Error(
+                "Text cannot exactly fill the configured dimension: " + target +
+                " (actual=" + finalWidth + "x" + finalHeight + ", target=" + targetWidth + "x" + targetHeight + ")"
+            );
+        }
+    }
+
+    function resizeTextToBounds(frame, horizontalPercent, verticalPercent) {
+        try {
+            frame.resize(horizontalPercent, verticalPercent, true, true, true, true, 100, Transformation.CENTER);
+            return;
+        } catch (e1) {}
+        try {
+            frame.resize(horizontalPercent, verticalPercent, true, true, true, true, 100);
+            return;
+        } catch (e2) {}
+        throw new Error("Cannot independently scale text to exact bounds");
+    }
+
+    function alignTextToExactBox(frame, left, top, width, height, target) {
+        var bounds = frame.visibleBounds;
+        frame.translate(left - Number(bounds[0]), top - Number(bounds[1]));
+        var finalBounds = frame.visibleBounds;
+        var finalLeft = Number(finalBounds[0]);
+        var finalTop = Number(finalBounds[1]);
+        var finalRight = Number(finalBounds[2]);
+        var finalBottom = Number(finalBounds[3]);
+        if (
+            !boxCoordinatesMatch(finalLeft, left) ||
+            !boxCoordinatesMatch(finalTop, top) ||
+            !boxCoordinatesMatch(finalRight, left + width) ||
+            !boxCoordinatesMatch(finalBottom, top - height)
+        ) {
+            throw new Error(
+                "Text cannot align to the configured dimension corners: " + target +
+                " (actual=" + finalLeft + "," + finalTop + "," + finalRight + "," + finalBottom +
+                "; expected=" + left + "," + top + "," + (left + width) + "," + (top - height) + ")"
+            );
+        }
+    }
+
+    function boxDimensionsMatch(width, height, targetWidth, targetHeight) {
+        return boxCoordinatesMatch(width, targetWidth) && boxCoordinatesMatch(height, targetHeight);
+    }
+
+    function boxCoordinatesMatch(actual, expected) {
+        return Math.abs(Number(actual) - Number(expected)) <= EXACT_BOX_MAX_DELTA_PT;
     }
 
     function applyTextColor(frame, name) {

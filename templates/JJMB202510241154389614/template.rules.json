@@ -229,6 +229,9 @@
     "text_policies": {
       "fit": "scale_to_box"
     },
+    "multi_name_customization": {
+      "enabled": true
+    },
     "render_layout": {
       "type": "name_columns",
       "output_mode": "single_file",
@@ -252,7 +255,16 @@
         "delimiter": "|",
         "font_size_pt": 72,
         "line_gap_mm": 8,
-        "column_gap_mm": 12
+        "column_gap_mm": 12,
+        "segment_box_target": "Name",
+        "fill_box_exactly": true,
+        "min_parts": 1,
+        "max_parts": 7
+      },
+      "footer": {
+        "box_target": "Year",
+        "optional": true,
+        "fill_box_exactly": true
       },
       "default": {
         "group_by": ["row"],
@@ -262,8 +274,7 @@
       "department_overrides": {
         "T": {
           "group_by": ["order_no", "color"],
-          "header_fields": ["order_no", "color"],
-          "footer_field": ""
+          "header_fields": ["order_no", "color"]
         }
       }
     },
@@ -272,10 +283,17 @@
       {
         "field": "text",
         "slot": "Name"
+      },
+      {
+        "field": "year",
+        "slot": "Year",
+        "optional": true
       }
     ],
     "order_bindings": {
-      "text": "name"
+      "text": "name",
+      "quantity": "购买数量",
+      "year": "Year"
     },
     "asset_mappings": [],
     "defaults": {

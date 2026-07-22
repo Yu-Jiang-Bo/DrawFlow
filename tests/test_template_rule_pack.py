@@ -41,6 +41,18 @@ def test_migrates_flat_pure_text_rule_to_canonical_pack():
     assert pack["audit"]["source_version"] == "1.0.0"
 
 
+def test_preserves_multi_name_customization_rule():
+    pack = normalize_template_rule_pack(
+        {
+            "template_id": "TEXT001",
+            "mode": "pure_text",
+            "multi_name_customization": {"enabled": True},
+        }
+    )
+
+    assert pack["rules"]["multi_name_customization"] == {"enabled": True}
+
+
 def test_preserves_complex_design_and_asset_shapes():
     pack = normalize_template_rule_pack(
         {

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Dict, Iterable, Mapping
 
@@ -40,6 +41,8 @@ IMPLICIT_ORDER_BINDINGS = {
     "style": ("style", "style option", "\u5c3a\u5bf8", "\u6b3e\u5f0f"),
     "color": ("color", "color option", "\u989c\u8272", "\u5b57\u4f53\u989c\u8272"),
     "department": ("department", "production department", "\u751f\u4ea7\u90e8\u95e8", "\u90e8\u95e8"),
+    "quantity": ("quantity", "qty", "\u8d2d\u4e70\u6570\u91cf", "\u6570\u91cf"),
+    "year": ("year", "\u5e74\u4efd"),
     "text": (
         "text",
         "name",
@@ -69,16 +72,31 @@ def build_generic_render_task(
     if not isinstance(bindings, Mapping) or not bindings:
         raise GenericRuleRenderError("Confirmed rules do not define order_bindings.")
     rows = _read_rows(order_file, sheet_name=sheet_name)
-    _require_columns(rows, bindings.values())
+    multi_name_customization = _multi_name_customization(rules)
+    _require_quantity_column_if_enabled(rows, bindings, enabled=multi_name_customization)
+    optional_mapping_fields = _optional_mapping_fields(rules) | _optional_order_binding_fields(rules)
+    _require_columns(
+        rows,
+        (column for field, column in bindings.items() if _normalize_column(field) not in optional_mapping_fields),
+    )
     rows = _filter_rows_for_template(rows, template.template_id)
     assets = _asset_catalog(template.assets)
     orders = [
-        _build_order(index, row, rules, bindings, assets)
+        _build_order(
+            index,
+            row,
+            rules,
+            bindings,
+            assets,
+            include_implicit_quantity=multi_name_customization,
+        )
         for index, row in enumerate(rows, start=1)
         if any(value not in (None, "") for value in row.values())
     ]
     if not orders:
         raise GenericRuleRenderError("Order sheet contains no data rows.")
+    if multi_name_customization:
+        orders = _expand_orders_by_quantity(orders)
     render_layout = _mapping(rules.get("render_layout"))
     if render_layout:
         orders = _build_layout_orders(orders, render_layout)
@@ -115,6 +133,7 @@ def _build_layout_orders(orders: list[Dict[str, Any]], layout: Mapping[str, Any]
 
     if str(layout.get("type") or "").strip() != "name_columns":
         raise GenericRuleRenderError(f"Unsupported render layout: {layout.get('type')}")
+    _validate_name_columns_segments(orders, layout)
     groups: Dict[tuple[str, ...], Dict[str, Any]] = {}
     for order in orders:
         mode = _layout_mode(order, layout)
@@ -122,6 +141,14 @@ def _build_layout_orders(orders: list[Dict[str, Any]], layout: Mapping[str, Any]
         if not isinstance(group_by, list) or not group_by:
             group_by = ["row"]
         key = tuple(_layout_group_value(order, field) for field in group_by)
+        if "quantity_index" in order:
+            # A quantity-expanded order represents one complete, independently
+            # rendered effect card. It must never collapse back into the source
+            # row's shared name-columns card through a configured group_by key.
+            key += (
+                "__quantity_row__=" + str(order.get("row_index") or ""),
+                "__quantity_copy__=" + str(order.get("quantity_index") or ""),
+            )
         bucket = groups.setdefault(key, {"mode": mode, "members": []})
         bucket["members"].append(order)
 
@@ -133,6 +160,49 @@ def _build_layout_orders(orders: list[Dict[str, Any]], layout: Mapping[str, Any]
         leader["layout_mode"] = bucket["mode"]
         result.append(leader)
     return result
+
+
+def _validate_name_columns_segments(
+    orders: Iterable[Mapping[str, Any]], layout: Mapping[str, Any]
+) -> None:
+    """Validate only layouts that explicitly opt into independently boxed name segments."""
+
+    name = _mapping(layout.get("name"))
+    target = str(name.get("segment_box_target") or "").strip()
+    if not target:
+        return
+    delimiter = str(name.get("delimiter") or "|")
+    if not delimiter:
+        raise GenericRuleRenderError("姓名尺寸框规则缺少分隔符。")
+    minimum = _positive_layout_int(name.get("min_parts"), default=1)
+    maximum = _positive_layout_int(name.get("max_parts"), default=0)
+    if maximum and minimum > maximum:
+        raise GenericRuleRenderError("姓名尺寸框规则的最小数量不能大于最大数量。")
+    for order in orders:
+        variable = next(
+            (
+                item
+                for item in _list_of_mappings(order.get("variables"))
+                if str(item.get("target") or "") == target
+            ),
+            None,
+        )
+        if variable is None:
+            raise GenericRuleRenderError(f"姓名尺寸框规则缺少 {target} 定制内容。")
+        parts = str(variable.get("value") or "").split(delimiter)
+        if any(not part.strip() for part in parts):
+            raise GenericRuleRenderError("姓名定制内容不能包含空姓名段。")
+        if len(parts) < minimum or (maximum and len(parts) > maximum):
+            maximum_text = str(maximum) if maximum else "不限"
+            raise GenericRuleRenderError(
+                f"姓名定制数量必须为 {minimum} 至 {maximum_text} 个，当前为 {len(parts)} 个。"
+            )
+
+
+def _positive_layout_int(value: Any, *, default: int) -> int:
+    if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+        return value
+    return default
 
 
 def _layout_mode(order: Mapping[str, Any], layout: Mapping[str, Any]) -> Dict[str, Any]:
@@ -159,8 +229,10 @@ def _build_order(
     rules: Mapping[str, Any],
     bindings: Mapping[str, Any],
     assets: Mapping[str, str],
+    *,
+    include_implicit_quantity: bool = False,
 ) -> Dict[str, Any]:
-    values = _bound_values(row, bindings)
+    values = _bound_values(row, bindings, include_implicit_quantity=include_implicit_quantity)
     selections = {
         key: ("" if values.get(key) is None else str(values.get(key))).strip()
         for key in ("font", "design", "style", "color")
@@ -225,6 +297,8 @@ def _build_variables(
         target = str(mapping.get("slot") or mapping.get("name") or "")
         if not field or not target or field not in values:
             continue
+        if mapping.get("optional") and not str(values.get(field) if values.get(field) is not None else "").strip():
+            continue
         text_policies = rules.get("text_policies", {})
         text_policies = text_policies if isinstance(text_policies, Mapping) else {}
         resolved, value = resolve_mapped_text(values.get(field), mapping, text_policies)
@@ -244,6 +318,14 @@ def _build_variables(
     if not variables:
         raise GenericRuleRenderError("Order row does not produce any template variables.")
     return variables
+
+
+def _optional_mapping_fields(rules: Mapping[str, Any]) -> set[str]:
+    return {
+        _normalize_column(mapping.get("field") or mapping.get("source") or "")
+        for mapping in _list_of_mappings(rules.get("slot_mappings"))
+        if mapping.get("optional")
+    }
 
 
 def _read_rows(path: Path, *, sheet_name: str) -> list[Dict[str, Any]]:
@@ -294,17 +376,89 @@ def _filter_rows_for_template(rows: list[Dict[str, Any]], template_id: str) -> l
     ]
 
 
-def _bound_values(row: Mapping[str, Any], bindings: Mapping[str, Any]) -> Dict[str, Any]:
+def _bound_values(
+    row: Mapping[str, Any],
+    bindings: Mapping[str, Any],
+    *,
+    include_implicit_quantity: bool = False,
+) -> Dict[str, Any]:
     values: Dict[str, Any] = {}
     for field, column in bindings.items():
         values[str(field)] = _column_value(row, str(column))
     for field, aliases in IMPLICIT_ORDER_BINDINGS.items():
+        if field == "quantity" and not include_implicit_quantity:
+            continue
         if values.get(field) not in (None, ""):
             continue
         value = _first_column_value(row, aliases)
         if value is not _MISSING:
             values[field] = value
     return values
+
+
+def _multi_name_customization(rules: Mapping[str, Any]) -> bool:
+    policy = rules.get("multi_name_customization", {})
+    return bool(policy.get("enabled", False)) if isinstance(policy, Mapping) else False
+
+
+def _optional_order_binding_fields(rules: Mapping[str, Any]) -> set[str]:
+    """Footer-only values are display labels, not mandatory order inputs."""
+
+    layout = _mapping(rules.get("render_layout"))
+    modes = [_mapping(layout.get("default"))]
+    modes.extend(_mapping(mode) for mode in _mapping(layout.get("department_overrides")).values())
+    return {
+        _normalize_column(mode.get("footer_field"))
+        for mode in modes
+        if _normalize_column(mode.get("footer_field"))
+    }
+
+
+def _require_quantity_column_if_enabled(
+    rows: list[Mapping[str, Any]],
+    bindings: Any,
+    *,
+    enabled: bool,
+) -> None:
+    if not enabled or not rows:
+        return
+    quantity_column = ""
+    if isinstance(bindings, Mapping):
+        quantity_column = str(bindings.get("quantity") or "").strip()
+    available = _column_lookup(rows[0])
+    if quantity_column:
+        if _normalize_column(quantity_column) in available:
+            return
+        raise GenericRuleRenderError(f"支持多姓名定制要求订单表包含数量列：{quantity_column}")
+    if any(_normalize_column(alias) in available for alias in IMPLICIT_ORDER_BINDINGS["quantity"]):
+        return
+    raise GenericRuleRenderError(
+        "支持多姓名定制要求订单表包含数量列（购买数量、数量、Quantity 或 Qty）。"
+    )
+
+
+def _expand_orders_by_quantity(orders: Iterable[Mapping[str, Any]]) -> list[Dict[str, Any]]:
+    expanded: list[Dict[str, Any]] = []
+    for order in orders:
+        quantity = _parse_positive_quantity(_mapping(order.get("values")).get("quantity"))
+        for quantity_index in range(1, quantity + 1):
+            copy = dict(order)
+            copy["quantity_index"] = quantity_index
+            copy["quantity"] = quantity
+            expanded.append(copy)
+    return expanded
+
+
+def _parse_positive_quantity(value: Any) -> int:
+    if value is None or isinstance(value, bool) or not str(value).strip():
+        raise GenericRuleRenderError("支持多姓名定制的订单数量不能为空，且必须是正整数。")
+    try:
+        number = Decimal(str(value).strip())
+    except (InvalidOperation, ValueError):
+        raise GenericRuleRenderError("支持多姓名定制的订单数量必须是正整数。") from None
+    if not number.is_finite() or number != number.to_integral_value() or number < 1:
+        raise GenericRuleRenderError("支持多姓名定制的订单数量必须是正整数。")
+    return int(number)
 
 
 def _first_column_value(row: Mapping[str, Any], aliases: Iterable[Any]) -> Any:

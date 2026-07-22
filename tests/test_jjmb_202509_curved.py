@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from src.jjmb_202509_curved_main import (
     build_task,
     clean_text,
@@ -59,6 +61,48 @@ def test_parse_items_adds_default_title_when_title_missing():
         ("name", "Jc"),
         ("title", "Merry Christmas"),
     ]
+
+
+def test_parse_items_repeats_each_complete_name_and_title_group_by_quantity():
+    rows = [
+        {
+            "模板": "JJMB202509231236046265",
+            "内部订单号": "ORDER1",
+            "订单明细id": "1",
+            "生产部门": "ZW",
+            "购买数量": "3",
+            "定制信息": "Font Options:F3\nTitle:Family\nName:1. Kai\n2. Jc",
+        }
+    ]
+
+    groups = group_items(parse_items(rows, multi_name_customization=True))
+
+    assert len(groups) == 3
+    assert [group.order_no for group in groups] == ["ORDER1", "ORDER1", "ORDER1"]
+    assert [[(item.text_type, item.text) for item in group.items] for group in groups] == [
+        [("name", "Kai"), ("name", "Jc"), ("title", "Family")],
+        [("name", "Kai"), ("name", "Jc"), ("title", "Family")],
+        [("name", "Kai"), ("name", "Jc"), ("title", "Family")],
+    ]
+
+
+def test_parse_items_rejects_invalid_quantity_when_multi_name_customization_enabled():
+    rows = [
+        {
+            "模板": "JJMB202509231236046265",
+            "内部订单号": "ORDER1",
+            "订单明细id": "1",
+            "购买数量": "1.5",
+            "定制信息": "Name:Kai",
+        }
+    ]
+
+    try:
+        parse_items(rows, multi_name_customization=True)
+    except ValueError as exc:
+        assert str(exc) == "支持多姓名定制的订单数量必须是正整数。"
+    else:
+        raise AssertionError("invalid quantity should stop the curved render task")
 
 
 def test_group_items_keeps_different_detail_rows_separate():
@@ -156,3 +200,47 @@ def test_build_task_applies_layout_dimension_overrides(tmp_path):
     assert task["layout"]["title_width_mm"] == 42.0
     assert task["layout"]["title_height_mm"] == 8.0
     assert task["output"]["color_mode"] == "RGB"
+
+
+def test_build_task_can_request_internal_quality_preview(tmp_path):
+    report = tmp_path / "report.json"
+    report.write_text(
+        '{"entries":[{"status":"ok","font_option":"F1","font_name":"TestFont","baseline_ratio":{},"bounds_shape_ratio":{}}]}',
+        encoding="utf-8",
+    )
+    groups = group_items(
+        parse_items(
+            [{"模板": "JJMB202509231236046265", "内部订单号": "ORDER1", "订单明细id": "1", "定制信息": "Name:Kai"}]
+        )
+    )
+
+    task = build_task(report, tmp_path / "out.ai", groups, columns=1, preview_png=tmp_path / "preview.png")
+
+    assert task["output"]["preview_png_path"].endswith("preview.png")
+    assert task["output"]["preview_dpi"] == 300
+
+
+def test_curved_renderer_outlines_and_merges_each_text_item_independently():
+    source = Path("scripts/illustrator/render_202509_curved.jsx").read_text(encoding="utf-8")
+    outline_body = source[source.index("function outlineText(items)"):source.index("function failRender")]
+    fit_body = source[source.index("function fitPageItemToRect"):source.index("function alignPageItemToRect")]
+
+    assert "cleanupOutline(outline);" in source
+    assert "function cleanupOutlines(items)" not in source
+    assert 'failRender("Text outline failed at item " + (i + 1)' in source
+    assert "cleanupStats.failed += 1;" in source
+    assert "var OUTLINE_BATCH_SIZE = 25;" in source
+    assert "function shouldSettleOutlineBatch(processed, total)" in source
+    assert outline_body.count("settleIllustrator();") == 1
+    assert "writeRenderDebug(\"outlining\", \"\", 0);" in outline_body
+    assert "for (var i = 0; i < FIT_ITERATIONS; i++)" in fit_body
+    assert "app.redraw()" not in fit_body
+    assert "function settleIllustrator()" in source
+    assert 'writeRenderDebug("failed", message, itemIndex);' in source
+    assert "doc.close(SaveOptions.DONOTSAVECHANGES);" in source
+    assert "function exportPreviewPNG(doc, file, dpi)" in source
+    assert 'failRender("Failed to save AI or export preview: "' in source
+    assert 'previewPath.replace(/\\.png$/i, "")' in source
+    assert source.index("saveAsAI8(doc, output);") < source.index("savedDoc = app.open(output);")
+    assert source.index("savedDoc = app.open(output);") < source.index("exportPreviewPNG(savedDoc")
+    assert "if (doc) doc.close(SaveOptions.DONOTSAVECHANGES);" in source
