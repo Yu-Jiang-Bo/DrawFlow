@@ -240,6 +240,24 @@ def test_check_rejects_unbound_and_unverified_slot_mappings():
     assert "missing targets: Title1" in messages
 
 
+def test_check_allows_an_optional_year_binding_to_be_absent_from_the_sample():
+    pack = ready_pack()
+    pack["rules"]["text_targets"] = [{"name": "Name1"}, {"name": "Year"}]
+    pack["rules"]["slot_mappings"] = [
+        {"field": "text", "slot": "Name1"},
+        {"field": "year", "slot": "Year", "optional": True},
+    ]
+    pack["rules"]["order_bindings"] = {"text": "custom_text", "year": "Year"}
+    pack["validation"]["sample"] = {
+        "input": {"custom_text": "Alice"},
+        "expected": {"Name1": "Alice"},
+    }
+
+    result = check_rule_pack(pack, template_id="DEMO001")
+
+    assert result["ok"] is True, result["errors"]
+
+
 def test_check_rejects_unsupported_policy_empty_asset_catalog_and_wrong_sample_result():
     pack = ready_pack()
     pack["rules"]["text_policies"] = {"fit": "magic_resize"}

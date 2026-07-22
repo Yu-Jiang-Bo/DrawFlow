@@ -23,15 +23,29 @@ def test_generic_renderer_cycles_configured_name_colors_only():
     assert "resolveVariableTargets" in source
     assert "findFallbackNameTextFrames" in source
     assert "function createNameColumnsDocument(task, order)" in source
-    assert "function drawNameColumns(doc, order, layout, fontSource, cell)" in source
+    assert "function drawNameColumns(doc, order, layout, fontSource, cell, dimensions)" in source
     assert "function createNameColumnsSheet(task)" in source
     assert "app.documents.add(DocumentColorSpace.RGB, pageWidth, height)" in source
     assert 'String(layout.artboard_mode || "") === "single"' in source
-    assert "function planNameColumnsSingleArtboard(orders, layout, requestedColumns, cellWidth, maxArtboardSize)" in source
-    assert "function planNameColumnsMasonryUnbounded(orders, layout, columns)" in source
+    assert "function planNameColumnsSingleArtboard(orders, layout, requestedColumns, cellWidth, maxArtboardSize, dimensions)" in source
+    assert "function planNameColumnsMasonryUnbounded(orders, layout, columns, dimensions)" in source
     assert "function drawCardBackground(doc, left, top, width, height, color)" in source
     assert "drawCardBackground(doc, left, cardTop, width, height, cardBackground)" in source
     assert "function addNameBlockText(doc, parts, x, y, size, lineGap, actions, legacyCycle, fontSource)" in source
+    assert "function addBoxedNameSegment(doc, text, x, top, height, size, box, variable, legacyCycle, index, fontSource, member)" in source
+    assert "function configuredNameSegmentBox(layout, dimensions)" in source
+    assert "segment_box_target" in source
+    assert "function splitBoxedNameParts(value, name)" in source
+    assert "function fitTextStrict(frame, widthMm, heightMm, target)" in source
+    assert "function centerLayoutTextInBox(frame, x, top, height)" in source
+    assert "function wrapGeneratedText(frame, name)" in source
+    assert "holder.name = name;" in source
+    assert "function createLayoutAudit(task)" in source
+    assert "function recordLayoutAudit(kind, name, frame)" in source
+    assert "function flushLayoutAudit()" in source
+    assert "task.layout_audit_file" in source
+    assert "function shouldDrawLayoutFooter(order, mode, layout)" in source
+    assert "footer.optional === true" in source
     assert 'parts.join("\\r")' in source
     assert "function applyNameBlockColors(frame, parts, actions, legacyCycle)" in source
     assert "function applyNameBlockBoldness(frame, actions)" in source
