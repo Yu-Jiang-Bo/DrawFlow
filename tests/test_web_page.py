@@ -63,9 +63,13 @@ def test_render_page_has_progress_overlay():
     assert 'id="progressCount"' in INDEX_HTML
     assert "showProgress" in INDEX_HTML
     assert "tickProgress" in INDEX_HTML
+    assert "if (hasRealRenderProgress) return;" in INDEX_HTML
     assert "pollRenderProgress" in INDEX_HTML
     assert "currentRunningJob" in INDEX_HTML
-    assert "`${boundedCurrent}/${total}`" in INDEX_HTML
+    assert "hasRealRenderProgress = true;" in INDEX_HTML
+    assert "clearInterval(progressTimer);" in INDEX_HTML
+    assert "`已渲染 ${boundedCurrent}/${total}`" in INDEX_HTML
+    assert 'document.getElementById("progressPercent").textContent = "实时"' in INDEX_HTML
     assert "调用 Illustrator" in INDEX_HTML
     assert "生成 AI 文件" in INDEX_HTML
     assert 'return ["上传订单表格", "解析订单字段", "调用 Illustrator", "生成 AI 文件", "完成收尾"]' in INDEX_HTML

@@ -1408,6 +1408,7 @@ INDEX_HTML = """<!doctype html>
     let progressValue = 0;
     let progressMode = "render";
     let progressStartedAt = 0;
+    let hasRealRenderProgress = false;
 
     const typeNames = {
       pure_text: "纯文字模板",
@@ -3569,6 +3570,7 @@ INDEX_HTML = """<!doctype html>
       progressMode = mode;
       progressValue = 0;
       progressStartedAt = Date.now();
+      hasRealRenderProgress = false;
       const overlay = document.getElementById("renderProgressOverlay");
       overlay.classList.add("active");
       overlay.setAttribute("aria-hidden", "false");
@@ -3585,6 +3587,7 @@ INDEX_HTML = """<!doctype html>
     }
 
     function tickProgress() {
+      if (hasRealRenderProgress) return;
       const cap = progressCap();
       const next = Math.min(cap, progressValue + progressIncrement(progressValue));
       updateRenderProgress(next, stageForProgress(next));
@@ -3656,10 +3659,18 @@ INDEX_HTML = """<!doctype html>
         const total = Number(job.progress.total || 0);
         const current = Number(job.progress.current || 0);
         if (!total) return;
+        hasRealRenderProgress = true;
+        clearInterval(progressTimer);
+        progressTimer = null;
         const boundedCurrent = Math.max(0, Math.min(total, Math.round(current)));
-        document.getElementById("progressCount").textContent = `${boundedCurrent}/${total}`;
-        const realPercent = Math.max(progressValue, Math.floor((boundedCurrent / total) * 96));
-        updateRenderProgress(realPercent, job.progress.stage || stageForProgress(realPercent));
+        document.getElementById("progressCount").textContent = `已渲染 ${boundedCurrent}/${total}`;
+        const stage = job.progress.stage || "";
+        let realPercent = Math.max(2, Math.floor((boundedCurrent / total) * 92));
+        if (/转曲|清理/.test(stage)) realPercent = Math.max(realPercent, 94);
+        if (/保存|导出/.test(stage)) realPercent = Math.max(realPercent, 96);
+        if (/关闭|收尾/.test(stage)) realPercent = Math.max(realPercent, 98);
+        updateRenderProgress(realPercent, stage || stageForProgress(realPercent));
+        document.getElementById("progressPercent").textContent = "实时";
       } catch (error) {
         // Progress polling is best-effort; the render request itself remains authoritative.
       }

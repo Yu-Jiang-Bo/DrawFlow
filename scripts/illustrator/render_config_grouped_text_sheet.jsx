@@ -15,7 +15,7 @@
     var totalItems = totalTaskItems(task.groups);
 
     try { app.userInteractionLevel = UserInteractionLevel.DONTDISPLAYALERTS; } catch (e) {}
-    writeProgress(task, renderedItems, totalItems, "生成 AI 文件");
+    writeProgress(task, renderedItems, totalItems, "正在渲染条目");
 
     var layout = task.layout || {};
     var columns = Math.max(Number(layout.columns || 4), 1);
@@ -111,11 +111,14 @@
             }
             cursorTop = boxBottom - itemGap;
             renderedItems += 1;
-            writeProgress(task, renderedItems, totalItems, "生成 AI 文件");
+            writeProgress(task, renderedItems, totalItems, "正在渲染条目");
         }
     }
 
-    if (exportConfig.outline_text) outlineAndClean(outlines);
+    if (exportConfig.outline_text) {
+        writeProgress(task, renderedItems, totalItems, "正在转曲订单标识");
+        outlineAndClean(outlines);
+    }
     debugPayload.textFit = {
         count: fitStats.count,
         maxDeltaPt: fitStats.maxDeltaPt,
@@ -126,7 +129,9 @@
     var output = File(String(task.output_ai));
     ensureFolder(output.parent);
     if (output.exists) output.remove();
+    writeProgress(task, renderedItems, totalItems, "正在保存 AI 文件");
     saveAsAI8(doc, output);
+    writeProgress(task, renderedItems, totalItems, "正在关闭 Illustrator 文档");
     doc.close(SaveOptions.DONOTSAVECHANGES);
     return output.fsName;
 
@@ -577,6 +582,9 @@
                 var outline = items[i].createOutline();
                 cleanupOutline(outline);
             } catch (e) {}
+            if ((i + 1) === items.length || (i + 1) % 25 === 0) {
+                writeProgress(task, renderedItems, totalItems, "正在转曲订单标识 " + (i + 1) + "/" + items.length);
+            }
         }
     }
 

@@ -78,7 +78,7 @@
     var doc = app.documents.add(documentColorSpace(colorMode), docWidth, docHeight);
     var layer = doc.layers[0];
     layer.name = "JJMB202508261001394920_OUTPUT";
-    writeProgress(task, renderedItems, taskItemCount(renderGroups), "?? AI ??");
+    writeProgress(task, renderedItems, taskItemCount(renderGroups), "正在渲染条目");
 
     for (var i = 0; i < renderGroups.length; i++) {
         var group = renderGroups[i];
@@ -119,7 +119,7 @@
                 drawPersonalizedText(layer, item, font, design, [contentLeft + padding, contentTop - padding, contentRight - padding, contentBottom + padding], minFontSize, maxFontSize, item.text_actions || []);
                 cursorTop = contentBottom - itemGap;
                 renderedItems += 1;
-                writeProgress(task, renderedItems, taskItemCount(renderGroups), "?? AI ??");
+                writeProgress(task, renderedItems, taskItemCount(renderGroups), "正在渲染条目");
                 continue;
             }
 
@@ -131,7 +131,7 @@
             drawPersonalizedText(layer, item, font, design, [anchor[0] + padding, anchor[1] - padding, anchor[2] - padding, anchor[3] + padding], minFontSize, maxFontSize, item.text_actions || []);
             cursorTop = productBottom - itemGap;
             renderedItems += 1;
-            writeProgress(task, renderedItems, taskItemCount(renderGroups), "?? AI ??");
+            writeProgress(task, renderedItems, taskItemCount(renderGroups), "正在渲染条目");
         }
     }
 
@@ -139,7 +139,9 @@
     var output = File(String(task.output_ai));
     ensureFolder(output.parent);
     if (output.exists) output.remove();
+    writeProgress(task, renderedItems, taskItemCount(renderGroups), "正在保存 AI 文件");
     saveAsAI8(doc, output);
+    writeProgress(task, renderedItems, taskItemCount(renderGroups), "正在关闭 Illustrator 文档");
     doc.close(SaveOptions.DONOTSAVECHANGES);
     return output.fsName;
 
