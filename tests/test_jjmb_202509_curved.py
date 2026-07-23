@@ -36,6 +36,18 @@ def test_clean_text_decodes_html_entities_and_strips_markers():
     assert clean_text("4. LiL&#39; Alex") == "LiL' Alex"
 
 
+def test_clean_text_preserves_numeric_title_values():
+    assert clean_text("2025") == "2025"
+    assert clean_text("2025 Family") == "2025 Family"
+    assert clean_text("2. 2025") == "2025"
+
+
+def test_parse_custom_info_numeric_title_survives_cleaning():
+    parsed = parse_custom_info("Title: 2025\nName:1. Dustin")
+
+    assert clean_text(parsed["title"]) == "2025"
+
+
 def test_normalize_font_defaults_invalid_values_to_f1():
     assert normalize_font("F14") == "F14"
     assert normalize_font("") == "F1"

@@ -23,6 +23,8 @@ DEFAULT_FONT_OPTION = "F1"
 DEFAULT_DEPARTMENT = "ZW"
 DEFAULT_TITLE = "Merry Christmas"
 QUANTITY_FIELDS = ("购买数量", "数量", "Quantity", "Qty")
+NUMBERED_PREFIX_RE = re.compile(r"^\s*\d{1,3}(?:\s*[\.\)\]\u3001:]\s*|\s+(?=\D))")
+INLINE_NUMBERED_PREFIX_RE = re.compile(r"(?:^|\s)\d{1,3}(?:\s*[\.\)\]\u3001:]\s*|\s+(?=\D))")
 
 
 @dataclass(frozen=True)
@@ -150,8 +152,8 @@ def split_names_inline(value: str) -> List[str]:
     text = re.sub(r"\s+", " ", html.unescape(value or "")).strip()
     if not text:
         return []
-    if re.search(r"(?:^|\s)\d{1,3}\s*[\.\)\]\u3001:]?\s*", text):
-        parts = re.split(r"(?:^|\s)\d{1,3}\s*[\.\)\]\u3001:]?\s*", text)
+    if INLINE_NUMBERED_PREFIX_RE.search(text):
+        parts = INLINE_NUMBERED_PREFIX_RE.split(text)
     elif "|" in text:
         parts = text.split("|")
     elif "," in text:
@@ -163,7 +165,7 @@ def split_names_inline(value: str) -> List[str]:
 
 def clean_text(value: str) -> str:
     text = html.unescape(value or "").strip()
-    text = re.sub(r"^\s*\d{1,3}\s*[\.\)\]\u3001:]?\s*", "", text)
+    text = NUMBERED_PREFIX_RE.sub("", text)
     return re.sub(r"\s+", " ", text).strip(" ,;")
 
 
