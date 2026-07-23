@@ -315,6 +315,17 @@ def test_grouped_renderer_supports_repeated_design_instances_and_f11_f12_alignme
     assert "children.push(duplicateDesignInstance" in source
     assert "copy = layer.groupItems.add();" in source
     assert "function applyDesignTextAlignment(root, fontOption)" in source
+    assert "function applyF11PrimaryHeartFit(root, fontOption)" in source
+    assert "function findF11HeartMarker(root, primaryBounds)" in source
+    assert "function findNamedHeartMarker(candidates)" in source
+    assert "function collectFixedVisualItems(item, out)" in source
+    assert "applyF11PrimaryHeartFit(copy, fontOption);" in source
+    assert "primary.resize(scale * 100, scale * 100" in source
+    assert "availableRight = hb[0] - gap" in source
+    assert "desiredHeartLeft = pb[2] + gap" in source
+    assert "heart.item.translate(desiredHeartLeft - hb[0], desiredHeartBottom - hb[3]);" in source
+    assert source.index("var named = findNamedHeartMarker(candidates);") < source.index("var bestScore = -999999;")
+    assert 'name.indexOf("heart") >= 0 || name.indexOf("love") >= 0' in source
     assert 'if (option !== "F11" && option !== "F12") return;' in source
     assert 'if (option === "F11")' in source
     assert "secondary.translate(targetCenter - secondaryCenter, 0);" in source

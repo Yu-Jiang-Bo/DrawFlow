@@ -43,7 +43,7 @@
     if (maxColumnHeight > 0) maxColumnHeight -= gap;
     var docWidth = margin * 2 + columns * maxGroupWidth + (columns - 1) * gap;
     var docHeight = margin * 2 + maxColumnHeight;
-    var fitStats = { count: 0, maxDeltaPt: 0 };
+    var fitStats = { count: 0, maxDeltaPt: 0, f11HeartFitCount: 0 };
     var debugPayload = {
         groups: task.groups.length,
         columns: columns,
@@ -113,6 +113,7 @@
     if (exportConfig.outline_text) outlineAndClean(outlines);
     debugPayload.textFit = {
         count: fitStats.count,
+        f11HeartFitCount: fitStats.f11HeartFitCount,
         maxDeltaPt: fitStats.maxDeltaPt,
         maxDeltaMm: fitStats.maxDeltaPt * 25.4 / 72
     };
@@ -250,6 +251,7 @@
         }
         removeDiagnosticFrames(copy);
         replaceDesignTexts(copy, parts || []);
+        applyF11PrimaryHeartFit(copy, fontOption);
         applyDesignTextAlignment(copy, fontOption);
         applyFontBoldnessToTextFrames(copy, fontStyle);
         return copy;
@@ -316,6 +318,109 @@
             shiftX = shiftX === 0 ? centerShift : Math.min(shiftX, centerShift);
         }
         if (shiftX !== 0) secondary.translate(shiftX, 0);
+    }
+
+    function applyF11PrimaryHeartFit(root, fontOption) {
+        if (String(fontOption || "").toUpperCase() !== "F11") return;
+        var frames = [];
+        collectTextFrames(root, frames);
+        var primary = findTextFrameByName(frames, "Text1");
+        if (!primary) return;
+        try { app.redraw(); } catch (e0) {}
+        var pb = safeVisibleBounds(primary);
+        var heart = findF11HeartMarker(root, pb);
+        if (!pb || !heart) return;
+        var hb = heart.bounds;
+        var rootBounds = safeGeometricBounds(root) || pb;
+        var primaryWidth = Math.abs(pb[2] - pb[0]);
+        if (primaryWidth <= 0) return;
+        var gap = Math.max(mmToPt(1.2), Math.min(primaryWidth * 0.08, mmToPt(4)));
+        var availableLeft = rootBounds[0];
+        var availableRight = hb[0] - gap;
+        var availableWidth = availableRight - availableLeft;
+        if (availableWidth <= 0) return;
+        var targetWidth = primaryWidth;
+        if (pb[2] > availableRight) {
+            targetWidth = availableWidth * 0.98;
+        } else if (primaryWidth < availableWidth * 0.46) {
+            targetWidth = Math.min(availableWidth * 0.62, primaryWidth * 1.22);
+        }
+        var scale = targetWidth / primaryWidth;
+        if (scale > 0 && Math.abs(scale - 1) > 0.02) {
+            try {
+                primary.resize(scale * 100, scale * 100, true, true, true, true, 100, Transformation.CENTER);
+            } catch (e1) {
+                try { primary.resize(scale * 100, scale * 100); } catch (e2) {}
+            }
+            try { app.redraw(); } catch (e3) {}
+            pb = safeVisibleBounds(primary);
+            if (!pb) return;
+        }
+        var centerTarget = availableLeft + availableWidth / 2;
+        var centerCurrent = (pb[0] + pb[2]) / 2;
+        primary.translate(centerTarget - centerCurrent, 0);
+        try { app.redraw(); } catch (e4) {}
+        pb = safeVisibleBounds(primary);
+        hb = safeGeometricBounds(heart.item);
+        if (!pb || !hb) return;
+        var fittedHeight = Math.abs(pb[1] - pb[3]);
+        var desiredHeartLeft = pb[2] + gap;
+        var desiredHeartBottom = pb[1] - fittedHeight * 0.18;
+        heart.item.translate(desiredHeartLeft - hb[0], desiredHeartBottom - hb[3]);
+        fitStats.f11HeartFitCount += 1;
+    }
+
+    function findF11HeartMarker(root, primaryBounds) {
+        if (!primaryBounds) return null;
+        var candidates = [];
+        collectFixedVisualItems(root, candidates);
+        var named = findNamedHeartMarker(candidates);
+        if (named) return named;
+        var primaryWidth = Math.abs(primaryBounds[2] - primaryBounds[0]);
+        var primaryHeight = Math.abs(primaryBounds[1] - primaryBounds[3]);
+        var primaryCenterX = (primaryBounds[0] + primaryBounds[2]) / 2;
+        var primaryCenterY = (primaryBounds[1] + primaryBounds[3]) / 2;
+        var best = null;
+        var bestScore = -999999;
+        for (var i = 0; i < candidates.length; i++) {
+            var b = safeGeometricBounds(candidates[i]);
+            if (!b) continue;
+            var width = Math.abs(b[2] - b[0]);
+            var height = Math.abs(b[1] - b[3]);
+            if (width <= 0 || height <= 0) continue;
+            if (width > primaryWidth * 0.38 || height > primaryHeight * 0.7) continue;
+            var centerX = (b[0] + b[2]) / 2;
+            var centerY = (b[1] + b[3]) / 2;
+            if (centerY < primaryCenterY - primaryHeight * 0.15) continue;
+            var score = (centerX - primaryCenterX) + (centerY - primaryCenterY) * 0.45 - Math.abs(width - height) * 0.15;
+            if (score > bestScore) {
+                bestScore = score;
+                best = { item: candidates[i], bounds: b };
+            }
+        }
+        return best;
+    }
+
+    function findNamedHeartMarker(candidates) {
+        for (var i = 0; i < candidates.length; i++) {
+            var name = String(candidates[i].name || "").toLowerCase();
+            if (name.indexOf("heart") >= 0 || name.indexOf("love") >= 0) {
+                var b = safeGeometricBounds(candidates[i]);
+                if (b) return { item: candidates[i], bounds: b };
+            }
+        }
+        return null;
+    }
+
+    function collectFixedVisualItems(item, out) {
+        if (!item) return;
+        var type = String(item.typename || "");
+        if (type === "PathItem" || type === "CompoundPathItem") {
+            out.push(item);
+            return;
+        }
+        if (!item.pageItems) return;
+        for (var i = 0; i < item.pageItems.length; i++) collectFixedVisualItems(item.pageItems[i], out);
     }
 
     function safeVisibleBounds(item) {
