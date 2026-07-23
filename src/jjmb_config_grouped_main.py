@@ -68,22 +68,21 @@ def build_grouped_task(
             if not values:
                 continue
             design_instances = split_design_text_instances(values)
-            text_parts = design_instances[0] if design_instances else values
-            grouped.setdefault(order_item.order_no, []).append(
-                TemplateTextSheetItem(
-                    order_no=order_item.order_no,
-                    detail_id=order_item.detail_id,
-                    text="\n".join("|".join(instance) for instance in design_instances) if design_instances else "|".join(values),
-                    font_option=order_item.font_option,
-                    style_option=order_item.style_option,
-                    quantity_index=1,
-                    render_kind="design_asset",
-                    text_parts=text_parts,
-                    design_instances=design_instances if len(design_instances) > 1 else None,
-                    design_asset=mapped_asset,
-                    design_group=design_group,
+            for index, text_parts in enumerate(design_instances or [values], start=1):
+                grouped.setdefault(order_item.order_no, []).append(
+                    TemplateTextSheetItem(
+                        order_no=order_item.order_no,
+                        detail_id=order_item.detail_id,
+                        text="|".join(text_parts),
+                        font_option=order_item.font_option,
+                        style_option=order_item.style_option,
+                        quantity_index=index,
+                        render_kind="design_asset",
+                        text_parts=text_parts,
+                        design_asset=mapped_asset,
+                        design_group=design_group,
+                    )
                 )
-            )
             continue
         for index, text in enumerate(order_item.personalization_values, start=1):
             if not text.strip():

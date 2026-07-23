@@ -196,7 +196,7 @@ def test_grouped_sheet_keeps_design_font_as_single_asset_item(tmp_path):
     assert payload["text_parts"] == ["Tom", "Jery"]
 
 
-def test_grouped_sheet_keeps_multiline_design_pairs_as_repeated_instances(tmp_path, monkeypatch):
+def test_grouped_sheet_expands_multiline_design_pairs_to_separate_items(tmp_path, monkeypatch):
     xlsx = tmp_path / "orders.xlsx"
     xlsx.write_bytes(b"placeholder")
     asset = tmp_path / "designs.ai"
@@ -230,13 +230,15 @@ def test_grouped_sheet_keeps_multiline_design_pairs_as_repeated_instances(tmp_pa
         design_asset_path=asset,
     )
 
-    item = task.groups[0].items[0]
-    assert item.text == "Bride|Sara\nGroom|Jordan"
-    assert item.text_parts == ["Bride", "Sara"]
-    assert item.design_instances == [["Bride", "Sara"], ["Groom", "Jordan"]]
-    payload = item.to_json_dict()
-    assert payload["design_instances"] == [["Bride", "Sara"], ["Groom", "Jordan"]]
-    assert "|" not in "".join(payload["text_parts"])
+    items = task.groups[0].items
+    assert len(items) == 2
+    assert [item.text for item in items] == ["Bride|Sara", "Groom|Jordan"]
+    assert [item.text_parts for item in items] == [["Bride", "Sara"], ["Groom", "Jordan"]]
+    assert [item.quantity_index for item in items] == [1, 2]
+    payloads = [item.to_json_dict() for item in items]
+    assert [payload["text_parts"] for payload in payloads] == [["Bride", "Sara"], ["Groom", "Jordan"]]
+    assert all("design_instances" not in payload for payload in payloads)
+    assert all(payload["render_kind"] == "design_asset" for payload in payloads)
 
 def test_grouped_sheet_uses_rule_selected_design_asset_and_group(tmp_path):
     xlsx = tmp_path / "orders.xlsx"
