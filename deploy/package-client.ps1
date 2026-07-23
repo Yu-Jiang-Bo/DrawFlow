@@ -84,12 +84,14 @@ function Assert-CleanClientRelease {
     if ($PackagedConfig.central_url -ne $CentralUrl.TrimEnd("/")) {
         throw "Client release central_url mismatch: $($PackagedConfig.central_url)"
     }
-    $TextExtensions = @(".bat", ".json", ".md", ".py", ".txt")
+    $TextExtensions = @(".bat", ".json", ".jsx", ".md", ".py", ".txt")
     $TextFiles = Get-ChildItem -Path $ReleaseRoot -Recurse -File |
         Where-Object { $TextExtensions -contains $_.Extension.ToLowerInvariant() }
 
     $RegexPatterns = @(
         ("-----BEGIN " + "(?:RSA |EC |OPENSSH )?PRIVATE KEY-----"),
+        "C:\\Users",
+        "C:/Users",
         ("\b" + "s" + "k-" + "[A-Za-z0-9_-]{16,}\b"),
         '(?im)^\s*(?:password|passwd|pwd|secret|access_token|refresh_token)\s*[:=]\s*["'']?(?!\$|<|YOUR_|REPLACE_)[^\s"'']{12,}'
     )
