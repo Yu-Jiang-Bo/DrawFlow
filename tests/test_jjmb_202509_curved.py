@@ -254,6 +254,10 @@ def test_curved_renderer_outlines_and_merges_each_text_item_independently():
     assert 'failRender("Failed to save AI or export preview: "' in source
     assert 'previewPath.replace(/\\.png$/i, "")' in source
     assert "Preview PNG was not generated." in source
+    assert 'textItems.push({ item: tf, rect: frameRect, fitMode: "contain" });' in source
+    assert "fitPageItemWithinRect(outline, entry.rect);" in source
+    assert "function fitPageItemWithinRect(item, rect)" in source
+    assert "function clampPageItemToRect(item, rect)" in source
     assert "preview.fsName" not in source
     assert "Cannot open render task JSON." in source
     assert '"Cannot open JSON: " + file.fsName' not in source

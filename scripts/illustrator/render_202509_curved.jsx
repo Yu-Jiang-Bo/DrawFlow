@@ -200,7 +200,7 @@
         applyCenterParagraph(tf);
         tf.textRange.characterAttributes.size = Math.max(minFontSize, Math.min(maxFontSize, titleSize));
         fitTitleTextToRect(tf, fitRect, minFontSize, Math.max(minFontSize, Math.min(maxFontSize, titleSize)));
-        textItems.push({ item: tf, rect: frameRect, exactFit: true });
+        textItems.push({ item: tf, rect: frameRect, fitMode: "contain" });
     }
 
     function drawTitleFrame(layer, shape, left, top, width, height) {
@@ -435,6 +435,8 @@
                 if (!outline) throw new Error("createOutline returned nothing");
                 if (entry.exactFit && entry.rect) {
                     fitPageItemToRect(outline, entry.rect);
+                } else if (entry.fitMode === "contain" && entry.rect) {
+                    fitPageItemWithinRect(outline, entry.rect);
                 }
                 if (pathfinderMerge) cleanupOutline(outline);
                 renderProgress.processedTextItems = i + 1;
@@ -502,9 +504,57 @@
         }
     }
 
+    function fitPageItemWithinRect(item, rect) {
+        var left = rect[0], top = rect[1], right = rect[2], bottom = rect[3];
+        var targetW = right - left;
+        var targetH = top - bottom;
+        for (var i = 0; i < FIT_ITERATIONS; i++) {
+            var b = item.geometricBounds;
+            var w = Math.abs(b[2] - b[0]);
+            var h = Math.abs(b[1] - b[3]);
+            if (w <= 0 || h <= 0) return;
+            var ratio = Math.min(1, targetW / w, targetH / h);
+            if (ratio < 0.999) {
+                try {
+                    item.resize(ratio * 100, ratio * 100, true, true, true, true, 100, Transformation.CENTER);
+                } catch (e1) {
+                    try { item.resize(ratio * 100, ratio * 100); } catch (e2) {}
+                }
+            }
+            centerPageItemToRect(item, rect);
+            clampPageItemToRect(item, rect);
+            if (isPageItemWithinRect(item, rect)) break;
+        }
+    }
+
     function alignPageItemToRect(item, rect) {
         var b = item.geometricBounds;
         item.translate(rect[0] - b[0], rect[1] - b[1]);
+    }
+
+    function centerPageItemToRect(item, rect) {
+        var b = item.geometricBounds;
+        var cx = (rect[0] + rect[2]) / 2;
+        var cy = (rect[1] + rect[3]) / 2;
+        try { item.translate(cx - (b[0] + b[2]) / 2, cy - (b[1] + b[3]) / 2); } catch (e0) {}
+    }
+
+    function clampPageItemToRect(item, rect) {
+        var b = item.geometricBounds;
+        var tx = 0;
+        var ty = 0;
+        if (b[0] < rect[0]) tx = rect[0] - b[0];
+        if (b[2] > rect[2]) tx = rect[2] - b[2];
+        if (b[1] > rect[1]) ty = rect[1] - b[1];
+        if (b[3] < rect[3]) ty = rect[3] - b[3];
+        if (tx !== 0 || ty !== 0) {
+            try { item.translate(tx, ty); } catch (e0) {}
+        }
+    }
+
+    function isPageItemWithinRect(item, rect) {
+        var b = item.geometricBounds;
+        return b[0] >= rect[0] - 0.01 && b[2] <= rect[2] + 0.01 && b[1] <= rect[1] + 0.01 && b[3] >= rect[3] - 0.01;
     }
 
     function cleanupOutline(item) {
