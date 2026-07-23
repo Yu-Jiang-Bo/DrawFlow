@@ -121,6 +121,8 @@ def test_curved_service_uses_template_multi_name_policy_for_quantity_expansion(t
     )
     rules = tmp_path / "template-rules.json"
     rules.write_text('{"multi_name_customization":{"enabled":true}}', encoding="utf-8")
+    title_template = tmp_path / "title-design.ai"
+    title_template.write_text("ai", encoding="utf-8")
     template = TemplateDefinition(
         template_id="CURVED",
         name="曲线标题",
@@ -130,6 +132,15 @@ def test_curved_service_uses_template_multi_name_policy_for_quantity_expansion(t
         template_ai=None,
         template_config=report,
         template_rules_config=rules,
+        assets=[
+            {
+                "file_name": "title-design.ai",
+                "stored_path": str(title_template),
+                "asset_type": "title_design",
+                "role": "title_design_template",
+                "status": "uploaded",
+            }
+        ],
     )
     rows = [
         {
@@ -164,6 +175,7 @@ def test_curved_service_uses_template_multi_name_policy_for_quantity_expansion(t
         ["Kai", "Family"],
         ["Kai", "Family"],
     ]
+    assert task["title_template"]["ai_path"] == str(title_template)
     assert result["stats"]["groups"] == 2
     assert result["stats"]["items"] == 4
 

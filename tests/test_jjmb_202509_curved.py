@@ -2,6 +2,8 @@ from pathlib import Path
 
 from src.jjmb_202509_curved_main import (
     build_task,
+    CurvedOrderGroup,
+    CurvedOrderItem,
     clean_text,
     group_items,
     normalize_font,
@@ -232,6 +234,38 @@ def test_build_task_can_request_internal_quality_preview(tmp_path):
     assert task["output"]["preview_dpi"] == 300
 
 
+def test_build_task_includes_named_title_template_ai(tmp_path):
+    report = tmp_path / "report.json"
+    report.write_text(
+        '{"entries":[{"status":"ok","font_option":"F1","font_name":"TestFont","baseline_ratio":{},"bounds_shape_ratio":{}}]}',
+        encoding="utf-8",
+    )
+    title_template = tmp_path / "title-design.ai"
+    title_template.write_text("ai", encoding="utf-8")
+    groups = [
+        CurvedOrderGroup(
+            order_no="ORDER1",
+            items=[
+                CurvedOrderItem(
+                    order_no="ORDER1",
+                    detail_id="1",
+                    department="ZW",
+                    font_option="F1",
+                    text="2025",
+                    text_type="title",
+                    quantity_index=1,
+                )
+            ],
+        )
+    ]
+
+    task = build_task(report, tmp_path / "out.ai", groups, columns=1, title_template_ai=title_template)
+
+    assert task["title_template"]["ai_path"] == str(title_template.resolve())
+    assert task["title_template"]["text_name_pattern"] == "TITLE_{font}_TEXT"
+    assert task["title_template"]["bounds_name_pattern"] == "TITLE_{font}_BOUNDS"
+
+
 def test_curved_renderer_outlines_and_merges_each_text_item_independently():
     source = Path("scripts/illustrator/render_202509_curved.jsx").read_text(encoding="utf-8")
     outline_body = source[source.index("function outlineText(items)"):source.index("function failRender")]
@@ -255,6 +289,14 @@ def test_curved_renderer_outlines_and_merges_each_text_item_independently():
     assert 'previewPath.replace(/\\.png$/i, "")' in source
     assert "Preview PNG was not generated." in source
     assert 'textItems.push({ item: tf, rect: frameRect, fitMode: "contain" });' in source
+    assert "function drawCurvedTitleFromTemplate(layer, text, fontOption" in source
+    assert "TITLE_{font}_TEXT" in source
+    assert "sourceText.duplicate(layer, ElementPlacement.PLACEATEND)" in source
+    assert "titleTemplateStats.used += 1;" in source
+    assert "titleTemplate: titleTemplateStats" in source
+    assert "abortRenderUnexpected(eLayout);" in source
+    assert "function abortRenderUnexpected(error)" in source
+    assert "function pageItemBounds(item)" in source
     assert "fitPageItemWithinRect(outline, entry.rect);" in source
     assert "function fitPageItemWithinRect(item, rect)" in source
     assert "Math.min(targetW / w, targetH / h)" in source
