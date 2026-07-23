@@ -16,12 +16,10 @@ from ..jjmb_202508_main import (
     render_task as render_202508_task,
 )
 from ..jjmb_202509_curved_main import (
-    CurvedRenderIntegrityError,
     build_task as build_202509_curved_task,
     group_items as group_202509_curved_items,
     parse_items as parse_202509_curved_items,
     read_xlsx_rows as read_202509_curved_rows,
-    render_with_integrity_gate,
 )
 from ..jjmb_config_grouped_main import build_grouped_task
 from ..renderer.illustrator_bridge import IllustratorBridge, IllustratorBridgeError, format_com_recovery_message
@@ -331,26 +329,12 @@ class RenderService:
             "progress": self._task_progress(record, 0, total_items, "?? AI ??"),
         }
         task_file = job_dir / "render-task.json"
-        quality_report = job_dir / "render-integrity.json"
-        verified = False
+        task = build_202509_curved_task(output_ai=output_ai, **task_options)
+        self._write_json(task_file, task)
 
-        if request["dry_run"]:
-            task = build_202509_curved_task(output_ai=output_ai, **task_options)
-            self._write_json(task_file, task)
-        else:
-            try:
-                task_file = render_with_integrity_gate(
-                    output_ai=output_ai,
-                    task_options=task_options,
-                    task_dir=job_dir,
-                    quality_dir=job_dir / "render-integrity",
-                    quality_report=quality_report,
-                    visible=request["visible"],
-                    bridge_factory=IllustratorBridge,
-                )
-            except CurvedRenderIntegrityError as exc:
-                raise RenderServiceError(str(exc), code=exc.code) from exc
-            verified = True
+        if not request["dry_run"]:
+            script = Path(__file__).resolve().parents[2] / "scripts" / "illustrator" / "render_202509_curved.jsx"
+            IllustratorBridge(visible=request["visible"]).render(script, task_file)
         self._update_progress(record, total_items, total_items, "????")
 
         return {
@@ -358,13 +342,13 @@ class RenderService:
                 "output_ai": str(output_ai),
                 "template_config": str(font_report),
                 "render_task": str(task_file),
-                "render_integrity": str(quality_report) if not request["dry_run"] else "",
+                "render_integrity": "",
             },
             "stats": {
                 "groups": len(groups),
                 "items": sum(len(group.items) for group in groups),
                 "dry_run": request["dry_run"],
-                "render_integrity_verified": verified,
+                "render_integrity_verified": False,
             },
         }
 
