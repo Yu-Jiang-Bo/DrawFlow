@@ -329,8 +329,8 @@ def test_grouped_renderer_supports_repeated_design_instances_and_f11_f12_alignme
     assert 'if (option !== "F11" && option !== "F12") return;' in source
     assert 'if (option === "F11")' in source
     assert "var secondaryWidth = Math.abs(sb[2] - sb[0]);" in source
-    assert "var secondaryMaxRight = pb[2] + Math.max(mmToPt(2), Math.min(primaryWidth * 0.14, mmToPt(8)));" in source
-    assert "var desiredSecondaryLeft = primaryCenter;" in source
+    assert "var secondaryMaxRight = pb[2] + Math.max(mmToPt(5), Math.min(primaryWidth * 0.28, mmToPt(14)));" in source
+    assert "var desiredSecondaryLeft = primaryCenter + Math.min(primaryWidth * 0.07, mmToPt(4));" in source
     assert "desiredSecondaryLeft = secondaryMaxRight - secondaryWidth;" in source
     assert "secondary.translate(desiredSecondaryLeft - sb[0], 0);" in source
     assert "currentGap > desiredGap" in source
@@ -372,8 +372,9 @@ function run(secondaryBounds) {{
 }}
 const shortBounds = run([10, -10, 40, -30]);
 const longBounds = run([10, -10, 170, -30]);
-const maxRight = 100 + Math.max(global.__mmToPt(2), Math.min(100 * 0.14, global.__mmToPt(8)));
-if (Math.abs(shortBounds[0] - 50) > 0.02) throw new Error('short secondary should start from primary center');
+const shortLeft = 50 + Math.min(100 * 0.07, global.__mmToPt(4));
+const maxRight = 100 + Math.max(global.__mmToPt(5), Math.min(100 * 0.28, global.__mmToPt(14)));
+if (Math.abs(shortBounds[0] - shortLeft) > 0.02) throw new Error('short secondary should start slightly right of primary center');
 if (Math.abs(longBounds[2] - maxRight) > 0.02) throw new Error('long secondary should borrow left only after hitting max right');
 if (longBounds[0] >= 50) throw new Error('long secondary did not borrow left-side space');
 """

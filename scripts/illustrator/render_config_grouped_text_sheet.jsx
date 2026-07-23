@@ -309,8 +309,8 @@
         var secondaryCenter = (sb[0] + sb[2]) / 2;
         if (option === "F11") {
             var secondaryWidth = Math.abs(sb[2] - sb[0]);
-            var secondaryMaxRight = pb[2] + Math.max(mmToPt(2), Math.min(primaryWidth * 0.14, mmToPt(8)));
-            var desiredSecondaryLeft = primaryCenter;
+            var secondaryMaxRight = pb[2] + Math.max(mmToPt(5), Math.min(primaryWidth * 0.28, mmToPt(14)));
+            var desiredSecondaryLeft = primaryCenter + Math.min(primaryWidth * 0.07, mmToPt(4));
             if (desiredSecondaryLeft + secondaryWidth > secondaryMaxRight) {
                 desiredSecondaryLeft = secondaryMaxRight - secondaryWidth;
             }
