@@ -308,8 +308,13 @@
         var primaryCenter = (pb[0] + pb[2]) / 2;
         var secondaryCenter = (sb[0] + sb[2]) / 2;
         if (option === "F11") {
-            var targetCenter = primaryCenter + Math.min(primaryWidth * 0.12, mmToPt(8));
-            secondary.translate(targetCenter - secondaryCenter, 0);
+            var secondaryWidth = Math.abs(sb[2] - sb[0]);
+            var secondaryMaxRight = pb[2] + Math.max(mmToPt(2), Math.min(primaryWidth * 0.14, mmToPt(8)));
+            var desiredSecondaryLeft = primaryCenter;
+            if (desiredSecondaryLeft + secondaryWidth > secondaryMaxRight) {
+                desiredSecondaryLeft = secondaryMaxRight - secondaryWidth;
+            }
+            secondary.translate(desiredSecondaryLeft - sb[0], 0);
             return;
         }
         var maxCenterDelta = Math.max(primaryWidth * 0.35, mmToPt(4));

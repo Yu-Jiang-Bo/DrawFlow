@@ -328,8 +328,59 @@ def test_grouped_renderer_supports_repeated_design_instances_and_f11_f12_alignme
     assert 'name.indexOf("heart") >= 0 || name.indexOf("love") >= 0' in source
     assert 'if (option !== "F11" && option !== "F12") return;' in source
     assert 'if (option === "F11")' in source
-    assert "secondary.translate(targetCenter - secondaryCenter, 0);" in source
+    assert "var secondaryWidth = Math.abs(sb[2] - sb[0]);" in source
+    assert "var secondaryMaxRight = pb[2] + Math.max(mmToPt(2), Math.min(primaryWidth * 0.14, mmToPt(8)));" in source
+    assert "var desiredSecondaryLeft = primaryCenter;" in source
+    assert "desiredSecondaryLeft = secondaryMaxRight - secondaryWidth;" in source
+    assert "secondary.translate(desiredSecondaryLeft - sb[0], 0);" in source
     assert "currentGap > desiredGap" in source
+
+
+def test_grouped_renderer_f11_secondary_alignment_uses_left_edge_geometry():
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node.js is unavailable")
+    script_path = GROUPED_SCRIPT.resolve()
+    harness = f"""
+const fs = require('fs');
+let source = fs.readFileSync({json.dumps(str(script_path))}, 'utf8').replace(/^#target.*\\r?\\n/, '');
+source = source.replace(
+  '(function () {{',
+  '(function () {{ global.__align = applyDesignTextAlignment; global.__mmToPt = mmToPt; return;'
+);
+new Function(source)();
+function frame(name, bounds) {{
+  return {{
+    typename: 'TextFrame',
+    name,
+    visibleBounds: bounds.slice(),
+    translate: function(dx, dy) {{
+      this.visibleBounds = [
+        this.visibleBounds[0] + dx,
+        this.visibleBounds[1] + dy,
+        this.visibleBounds[2] + dx,
+        this.visibleBounds[3] + dy,
+      ];
+    }},
+  }};
+}}
+function run(secondaryBounds) {{
+  const primary = frame('Text1', [0, 30, 100, 0]);
+  const secondary = frame('Text2', secondaryBounds);
+  global.__align({{ pageItems: [primary, secondary] }}, 'F11');
+  return secondary.visibleBounds;
+}}
+const shortBounds = run([10, -10, 40, -30]);
+const longBounds = run([10, -10, 170, -30]);
+const maxRight = 100 + Math.max(global.__mmToPt(2), Math.min(100 * 0.14, global.__mmToPt(8)));
+if (Math.abs(shortBounds[0] - 50) > 0.02) throw new Error('short secondary should start from primary center');
+if (Math.abs(longBounds[2] - maxRight) > 0.02) throw new Error('long secondary should borrow left only after hitting max right');
+if (longBounds[0] >= 50) throw new Error('long secondary did not borrow left-side space');
+"""
+
+    result = subprocess.run([node, "-e", harness], capture_output=True, text=True, check=False)
+
+    assert result.returncode == 0, result.stderr
 
 
 def test_grouped_renderer_javascript_parses_in_node(tmp_path):
