@@ -31,7 +31,7 @@ python -m src.main --csv samples/orders_text.csv --output output
 
 ## JJMB202603281027102517 模板纯文字渲染
 
-当前只处理字体选项 `F1-F9` 的纯文字订单，`F10-F12` 设计字体先跳过。
+当前支持 `F1-F9` 纯文字订单，并支持 `F10-F12` 独立设计字体订单；设计字体会按 `|` 拆分为 `Text1/Text2`，多行 `A|B` 会作为多个设计实例纵向排布。
 
 ```powershell
 python -m src.jjmb_template_main `

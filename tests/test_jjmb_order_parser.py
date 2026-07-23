@@ -196,6 +196,48 @@ def test_grouped_sheet_keeps_design_font_as_single_asset_item(tmp_path):
     assert payload["text_parts"] == ["Tom", "Jery"]
 
 
+def test_grouped_sheet_keeps_multiline_design_pairs_as_repeated_instances(tmp_path, monkeypatch):
+    xlsx = tmp_path / "orders.xlsx"
+    xlsx.write_bytes(b"placeholder")
+    asset = tmp_path / "designs.ai"
+    asset.write_text("fake ai", encoding="utf-8")
+
+    from src.jjmb_order_parser import JJMBOrderItem
+
+    monkeypatch.setattr("src.jjmb_config_grouped_main.read_xlsx_rows", lambda path, sheet_name=None: [{}])
+    monkeypatch.setattr(
+        "src.jjmb_config_grouped_main.parse_order_items",
+        lambda rows, template_id=None: [
+            JJMBOrderItem(
+                order_no="4024990683",
+                detail_id="2337497",
+                quantity=2,
+                template="JJMB202603281027102517",
+                style_option="Style1",
+                font_option="F10",
+                personalization_values=["Bride|Sara", "Groom|Jordan"],
+            )
+        ],
+    )
+
+    task = build_grouped_task(
+        xlsx_path=xlsx,
+        template_config=Path("template.config.json"),
+        output_ai=tmp_path / "design.ai",
+        columns=4,
+        allowed_font_options=[f"F{i}" for i in range(1, 13)],
+        design_font_options=["F10", "F11", "F12"],
+        design_asset_path=asset,
+    )
+
+    item = task.groups[0].items[0]
+    assert item.text == "Bride|Sara\nGroom|Jordan"
+    assert item.text_parts == ["Bride", "Sara"]
+    assert item.design_instances == [["Bride", "Sara"], ["Groom", "Jordan"]]
+    payload = item.to_json_dict()
+    assert payload["design_instances"] == [["Bride", "Sara"], ["Groom", "Jordan"]]
+    assert "|" not in "".join(payload["text_parts"])
+
 def test_grouped_sheet_uses_rule_selected_design_asset_and_group(tmp_path):
     xlsx = tmp_path / "orders.xlsx"
     asset = tmp_path / "f10-design.ai"

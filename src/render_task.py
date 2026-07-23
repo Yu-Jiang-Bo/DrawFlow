@@ -150,6 +150,7 @@ class TemplateTextSheetItem:
     quantity_index: int = 1
     render_kind: str = "text"
     text_parts: List[str] | None = None
+    design_instances: List[List[str]] | None = None
     design_asset: str = ""
     design_group: str = ""
 
@@ -171,6 +172,8 @@ class TemplateTextSheetItem:
         }
         if self.text_parts:
             payload["text_parts"] = list(self.text_parts)
+        if self.design_instances:
+            payload["design_instances"] = [list(instance) for instance in self.design_instances]
         if self.render_kind == "design_asset":
             if not self.design_asset:
                 raise RenderTaskError("设计资产任务缺少 design_asset")

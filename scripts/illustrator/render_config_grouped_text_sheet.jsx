@@ -214,18 +214,117 @@
             designDoc.close(SaveOptions.DONOTSAVECHANGES);
             throw new Error("Design group not found: " + groupName);
         }
-        var copy = sourceGroup.duplicate(layer, ElementPlacement.PLACEATEND);
-        removeDiagnosticFrames(copy);
-        var parts = item.text_parts || [];
-        if (!parts.length && item.text) parts = String(item.text).split("|");
-        replaceDesignTexts(copy, parts);
-        applyFontBoldnessToTextFrames(copy, fontStyle);
+        var instances = normalizeDesignInstances(item);
+        var copy = null;
+        if (instances.length > 1) {
+            copy = layer.groupItems.add();
+            try { copy.name = groupName + "_instances"; } catch (eN0) {}
+            var children = [];
+            for (var i = 0; i < instances.length; i++) {
+                children.push(duplicateDesignInstance(sourceGroup, layer, copy, instances[i], fontStyle, item.font_option));
+            }
+            arrangeDesignInstances(children);
+        } else {
+            copy = duplicateDesignInstance(sourceGroup, layer, null, instances[0], fontStyle, item.font_option);
+        }
         designDoc.close(SaveOptions.DONOTSAVECHANGES);
         fitPageItemToRect(copy, rect);
         outlineTextFrames(copy);
         cleanupOutline(copy);
         recordFitDelta(fitPageItemToRect(copy, rect));
         return copy;
+    }
+
+    function normalizeDesignInstances(item) {
+        var instances = item.design_instances || [];
+        if (instances.length) return instances;
+        var parts = item.text_parts || [];
+        if (!parts.length && item.text) parts = String(item.text).split("|");
+        return [parts];
+    }
+
+    function duplicateDesignInstance(sourceGroup, layer, container, parts, fontStyle, fontOption) {
+        var copy = sourceGroup.duplicate(layer, ElementPlacement.PLACEATEND);
+        if (container) {
+            try { copy.move(container, ElementPlacement.PLACEATEND); } catch (eM0) {}
+        }
+        removeDiagnosticFrames(copy);
+        replaceDesignTexts(copy, parts || []);
+        applyDesignTextAlignment(copy, fontOption);
+        applyFontBoldnessToTextFrames(copy, fontStyle);
+        return copy;
+    }
+
+    function arrangeDesignInstances(items) {
+        if (!items || items.length <= 1) return;
+        var maxWidth = 0;
+        var maxHeight = 0;
+        var minLeft = null;
+        var top = null;
+        for (var i = 0; i < items.length; i++) {
+            var b = safeGeometricBounds(items[i]);
+            if (!b) continue;
+            var w = Math.abs(b[2] - b[0]);
+            var h = Math.abs(b[1] - b[3]);
+            maxWidth = Math.max(maxWidth, w);
+            maxHeight = Math.max(maxHeight, h);
+            minLeft = minLeft === null ? b[0] : Math.min(minLeft, b[0]);
+            top = top === null ? b[1] : Math.max(top, b[1]);
+        }
+        if (minLeft === null || top === null) return;
+        var gap = Math.max(maxHeight * 0.18, mmToPt(3));
+        var centerX = minLeft + maxWidth / 2;
+        var cursorTop = top;
+        for (var j = 0; j < items.length; j++) {
+            var bounds = safeGeometricBounds(items[j]);
+            if (!bounds) continue;
+            var height = Math.abs(bounds[1] - bounds[3]);
+            var itemCenterX = (bounds[0] + bounds[2]) / 2;
+            items[j].translate(centerX - itemCenterX, cursorTop - bounds[1]);
+            cursorTop -= height + gap;
+        }
+    }
+
+    function applyDesignTextAlignment(root, fontOption) {
+        var option = String(fontOption || "").toUpperCase();
+        if (option !== "F11" && option !== "F12") return;
+        var frames = [];
+        collectTextFrames(root, frames);
+        var primary = findTextFrameByName(frames, "Text1");
+        var secondary = findTextFrameByName(frames, "Text2");
+        if (!primary || !secondary) return;
+        try { app.redraw(); } catch (e0) {}
+        var pb = safeVisibleBounds(primary);
+        var sb = safeVisibleBounds(secondary);
+        if (!pb || !sb) return;
+        var primaryWidth = Math.abs(pb[2] - pb[0]);
+        if (primaryWidth <= 0) return;
+        var desiredGap = Math.max(mmToPt(1), Math.min(primaryWidth * 0.18, mmToPt(6)));
+        var shiftX = 0;
+        var currentGap = sb[0] - pb[2];
+        if (currentGap > desiredGap) shiftX = (pb[2] + desiredGap) - sb[0];
+        var primaryCenter = (pb[0] + pb[2]) / 2;
+        var secondaryCenter = (sb[0] + sb[2]) / 2;
+        if (option === "F11") {
+            var targetCenter = primaryCenter + Math.min(primaryWidth * 0.12, mmToPt(8));
+            secondary.translate(targetCenter - secondaryCenter, 0);
+            return;
+        }
+        var maxCenterDelta = Math.max(primaryWidth * 0.35, mmToPt(4));
+        if (secondaryCenter - primaryCenter > maxCenterDelta) {
+            var centerShift = (primaryCenter + maxCenterDelta) - secondaryCenter;
+            shiftX = shiftX === 0 ? centerShift : Math.min(shiftX, centerShift);
+        }
+        if (shiftX !== 0) secondary.translate(shiftX, 0);
+    }
+
+    function safeVisibleBounds(item) {
+        try {
+            var b = item.visibleBounds;
+            return [Number(b[0]), Number(b[1]), Number(b[2]), Number(b[3])];
+        } catch (e0) {
+            return null;
+        }
     }
 
     function removeDiagnosticFrames(root) {

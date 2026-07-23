@@ -283,11 +283,10 @@ def test_grouped_renderer_applies_each_task_font_style_before_outlining():
     assert "function applyFontBoldness(tf, style)" in source
     assert "attributes.strokeColor = attributes.fillColor" in source
     assert "attributes.strokeWeight = boldness" in source
-    design_body = source[source.index("function renderDesignAssetItem"):source.index("function replaceDesignTexts")]
-    assert "applyFontBoldnessToTextFrames(copy, fontStyle);" in design_body
-    assert design_body.index("applyFontBoldnessToTextFrames(copy, fontStyle);") < design_body.index(
-        "outlineTextFrames(copy);"
-    )
+    design_body = source[source.index("function renderDesignAssetItem"):source.index("function removeDiagnosticFrames")]
+    instance_body = source[source.index("function duplicateDesignInstance"):source.index("function arrangeDesignInstances")]
+    assert "applyFontBoldnessToTextFrames(copy, fontStyle);" in instance_body
+    assert design_body.index("duplicateDesignInstance") < design_body.index("outlineTextFrames(copy);")
     assert "function applyFontBoldnessToTextFrames(root, style)" in source
     assert "var showStyleBoxes = layout.show_style_boxes === true;" in source
 
@@ -295,9 +294,9 @@ def test_grouped_renderer_applies_each_task_font_style_before_outlining():
 def test_grouped_renderer_removes_diagnostic_frames_from_design_assets():
     source = GROUPED_SCRIPT.read_text(encoding="utf-8")
 
-    design_body = source[source.index("function renderDesignAssetItem"):source.index("function replaceDesignTexts")]
-    assert "removeDiagnosticFrames(copy);" in design_body
-    assert design_body.index("removeDiagnosticFrames(copy);") < design_body.index("replaceDesignTexts(copy, parts);")
+    instance_body = source[source.index("function duplicateDesignInstance"):source.index("function arrangeDesignInstances")]
+    assert "removeDiagnosticFrames(copy);" in instance_body
+    assert instance_body.index("removeDiagnosticFrames(copy);") < instance_body.index("replaceDesignTexts(copy, parts || []);")
     assert "function removeDiagnosticFrames(root)" in source
     assert "function isUnfilledStrokedRed(item)" in source
     assert "function isLargeFrame(item, rootBounds)" in source
@@ -305,6 +304,21 @@ def test_grouped_renderer_removes_diagnostic_frames_from_design_assets():
     assert "item.stroked !== true" in source
     assert "Number(color.red) >= 180" in source
     assert "Number(color.magenta) >= 70" in source
+
+
+def test_grouped_renderer_supports_repeated_design_instances_and_f11_f12_alignment():
+    source = GROUPED_SCRIPT.read_text(encoding="utf-8")
+
+    assert "function normalizeDesignInstances(item)" in source
+    assert "var instances = item.design_instances || [];" in source
+    assert "function arrangeDesignInstances(items)" in source
+    assert "children.push(duplicateDesignInstance" in source
+    assert "copy = layer.groupItems.add();" in source
+    assert "function applyDesignTextAlignment(root, fontOption)" in source
+    assert 'if (option !== "F11" && option !== "F12") return;' in source
+    assert 'if (option === "F11")' in source
+    assert "secondary.translate(targetCenter - secondaryCenter, 0);" in source
+    assert "currentGap > desiredGap" in source
 
 
 def test_grouped_renderer_javascript_parses_in_node(tmp_path):

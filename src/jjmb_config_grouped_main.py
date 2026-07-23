@@ -67,16 +67,19 @@ def build_grouped_task(
             values = [value.strip() for value in order_item.personalization_values if value.strip()]
             if not values:
                 continue
+            design_instances = split_design_text_instances(values)
+            text_parts = design_instances[0] if design_instances else values
             grouped.setdefault(order_item.order_no, []).append(
                 TemplateTextSheetItem(
                     order_no=order_item.order_no,
                     detail_id=order_item.detail_id,
-                    text="|".join(values),
+                    text="\n".join("|".join(instance) for instance in design_instances) if design_instances else "|".join(values),
                     font_option=order_item.font_option,
                     style_option=order_item.style_option,
                     quantity_index=1,
                     render_kind="design_asset",
-                    text_parts=values,
+                    text_parts=text_parts,
+                    design_instances=design_instances if len(design_instances) > 1 else None,
                     design_asset=mapped_asset,
                     design_group=design_group,
                 )
@@ -119,6 +122,20 @@ def build_grouped_task(
             if str(option).strip() and isinstance(style, Mapping)
         },
     )
+
+
+def split_design_text_instances(values: Iterable[str]) -> List[List[str]]:
+    cleaned = [str(value).strip() for value in values if str(value).strip()]
+    if not cleaned:
+        return []
+    paired_lines = [split_design_pair(value) for value in cleaned if "|" in value]
+    if paired_lines and len(paired_lines) == len(cleaned):
+        return paired_lines
+    return [cleaned]
+
+
+def split_design_pair(value: str) -> List[str]:
+    return [part.strip() for part in str(value or "").split("|") if part.strip()]
 
 
 def write_task_file(task: ConfigGroupedSheetRenderTask) -> Path:
