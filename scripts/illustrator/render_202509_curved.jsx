@@ -513,8 +513,8 @@
             var w = Math.abs(b[2] - b[0]);
             var h = Math.abs(b[1] - b[3]);
             if (w <= 0 || h <= 0) return;
-            var ratio = Math.min(1, targetW / w, targetH / h);
-            if (ratio < 0.999) {
+            var ratio = Math.min(targetW / w, targetH / h);
+            if (Math.abs(ratio - 1) > 0.001) {
                 try {
                     item.resize(ratio * 100, ratio * 100, true, true, true, true, 100, Transformation.CENTER);
                 } catch (e1) {

@@ -257,6 +257,8 @@ def test_curved_renderer_outlines_and_merges_each_text_item_independently():
     assert 'textItems.push({ item: tf, rect: frameRect, fitMode: "contain" });' in source
     assert "fitPageItemWithinRect(outline, entry.rect);" in source
     assert "function fitPageItemWithinRect(item, rect)" in source
+    assert "Math.min(targetW / w, targetH / h)" in source
+    assert "Math.min(1, targetW / w, targetH / h)" not in source
     assert "function clampPageItemToRect(item, rect)" in source
     assert "preview.fsName" not in source
     assert "Cannot open render task JSON." in source
