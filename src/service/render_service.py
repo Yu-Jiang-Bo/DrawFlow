@@ -132,16 +132,21 @@ class RenderService:
             columns=request["columns"],
         )
         task_file = job_dir / "render-task.json"
+        total_orders = len(task["orders"])
+        self._update_progress(record, 0, total_orders, "?? AI ??")
+        task["progress"] = self._task_progress(record, 0, total_orders, "?? AI ??")
         self._write_json(task_file, task)
         if not request["dry_run"]:
             script = Path(__file__).resolve().parents[2] / "scripts" / "illustrator" / "render_generic_rule_pack.jsx"
             bridge = IllustratorBridge(visible=request["visible"], fresh_instance=True, reuse_instance=True)
             try:
                 chunks = [task["orders"]] if task["render_layout"].get("output_mode") == "single_file" else _chunked(task["orders"], GENERIC_RULE_RENDER_CHUNK_SIZE)
+                rendered_orders = 0
                 for chunk_index, orders in enumerate(chunks, start=1):
                     chunk_task = dict(task)
                     chunk_task["orders"] = orders
                     chunk_task["output_ai_files"] = [order["output_ai"] for order in orders]
+                    chunk_task["progress"] = self._task_progress(record, rendered_orders, total_orders, "?? AI ??")
                     chunk_file = (
                         task_file
                         if len(orders) == len(task["orders"])
@@ -150,8 +155,11 @@ class RenderService:
                     if chunk_file != task_file:
                         self._write_json(chunk_file, chunk_task)
                     _render_generic_chunk(bridge, script, chunk_file)
+                    rendered_orders += len(orders)
+                    self._update_progress(record, rendered_orders, total_orders, "?? AI ??")
             finally:
                 bridge.close()
+        self._update_progress(record, total_orders, total_orders, "????")
         return {
             "outputs": {
                 "output_ai": task["output_ai_files"][0],
@@ -186,6 +194,8 @@ class RenderService:
             preserve_personalization=_202508_preserves_personalization(template_rules),
         )
         groups = group_202508_items(items)
+        total_items = sum(len(group.items) for group in groups)
+        self._update_progress(record, 0, total_items, "?? AI ??")
         if not request["dry_run"]:
             self._complete_202508_template_config(
                 template=template,
@@ -204,11 +214,13 @@ class RenderService:
             font_styles=_font_styles(template_rules),
             text_actions=_202508_text_actions(template_rules, groups),
         )
+        task["progress"] = self._task_progress(record, 0, total_items, "?? AI ??")
         task_file = job_dir / "render-task.json"
         self._write_json(task_file, task)
 
         if not request["dry_run"]:
             render_202508_task(task_file, request["visible"])
+        self._update_progress(record, total_items, total_items, "????")
 
         outputs = {
                 "output_ai": str(output_ai),
@@ -261,11 +273,16 @@ class RenderService:
             font_styles=_font_styles(template_rules),
         )
         task_file = job_dir / "render-task.json"
-        self._write_json(task_file, task.to_json_dict())
+        task_payload = task.to_json_dict()
+        total_items = sum(len(group.items) for group in task.groups)
+        self._update_progress(record, 0, total_items, "?? AI ??")
+        task_payload["progress"] = self._task_progress(record, 0, total_items, "?? AI ??")
+        self._write_json(task_file, task_payload)
 
         if not request["dry_run"]:
             script = Path(__file__).resolve().parents[2] / "scripts" / "illustrator" / "render_config_grouped_text_sheet.jsx"
             IllustratorBridge(visible=request["visible"]).render(script, task_file)
+        self._update_progress(record, total_items, total_items, "????")
 
         return {
             "outputs": {
@@ -301,6 +318,8 @@ class RenderService:
             ),
         )
         groups = group_202509_curved_items(items)
+        total_items = sum(len(group.items) for group in groups)
+        self._update_progress(record, 0, total_items, "?? AI ??")
         title_template_ai = _curved_title_template_ai_path(template, template_rules)
         task_options = {
             "font_report": font_report,
@@ -309,6 +328,7 @@ class RenderService:
             "layout_overrides": curved_layout_overrides(template_rules),
             "title_template_ai": title_template_ai,
             "color_mode": output_color_mode(template_rules),
+            "progress": self._task_progress(record, 0, total_items, "?? AI ??"),
         }
         task_file = job_dir / "render-task.json"
         quality_report = job_dir / "render-integrity.json"
@@ -331,6 +351,7 @@ class RenderService:
             except CurvedRenderIntegrityError as exc:
                 raise RenderServiceError(str(exc), code=exc.code) from exc
             verified = True
+        self._update_progress(record, total_items, total_items, "????")
 
         return {
             "outputs": {
@@ -404,6 +425,27 @@ class RenderService:
     def _write_json(self, path: Path, payload: Any) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    def _progress_path(self, record: Mapping[str, Any]) -> Path:
+        return Path(str(record["job_dir"])) / "progress.json"
+
+    def _task_progress(self, record: Mapping[str, Any], offset: int, total: int, stage: str) -> Dict[str, Any]:
+        return {
+            "file": str(self._progress_path(record)),
+            "offset": max(int(offset), 0),
+            "total": max(int(total), 0),
+            "stage": stage,
+        }
+
+    def _update_progress(self, record: Dict[str, Any], current: int, total: int, stage: str) -> None:
+        progress = {
+            "current": max(int(current), 0),
+            "total": max(int(total), 0),
+            "stage": stage,
+        }
+        record["progress"] = progress
+        self._write_json(self._progress_path(record), progress)
+        self.jobs.save(record)
 
 
 def safe_filename(value: str) -> str:

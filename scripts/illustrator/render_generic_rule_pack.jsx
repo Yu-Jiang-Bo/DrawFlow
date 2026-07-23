@@ -9,6 +9,7 @@
     try { app.userInteractionLevel = UserInteractionLevel.DONTDISPLAYALERTS; } catch (e0) {}
 
     var outputs = [];
+    writeProgress(task, 0, task.orders.length, "生成 AI 文件");
     if (usesNameColumnsLayout(task) && String(task.render_layout.output_mode || "") === "single_file") {
         trace(task, "name_columns:start");
         var sheet = createNameColumnsSheet(task);
@@ -41,6 +42,7 @@
             if (output.exists) output.remove();
             saveAsNativeAI(doc, output);
             outputs.push(output.fsName);
+            writeProgress(task, orderIndex + 1, task.orders.length, "生成 AI 文件");
         } finally {
             doc.close(SaveOptions.DONOTSAVECHANGES);
         }
@@ -120,6 +122,7 @@
                     width: cellWidth,
                     height: item.height
                 });
+                writeProgress(task, index + 1, plan.items.length, "生成 AI 文件");
                 if ((index + 1) % 25 === 0 || index + 1 === plan.items.length) {
                     trace(task, "name_columns:drawn " + (index + 1) + "/" + plan.items.length);
                 }
@@ -982,6 +985,38 @@
             file.write(String(new Date().getTime()) + " " + message + "\n");
             file.close();
         } catch (e1) {}
+    }
+
+    function writeProgress(task, current, total, stage) {
+        var progress = task.progress || {};
+        if (!progress.file) return;
+        var offset = Number(progress.offset || 0);
+        var grandTotal = Number(progress.total || total || 0);
+        var payload = {
+            current: Math.min(offset + current, grandTotal),
+            total: grandTotal,
+            stage: String(stage || progress.stage || "")
+        };
+        var file = File(String(progress.file));
+        try {
+            ensureFolder(file.parent);
+            file.encoding = "UTF-8";
+            file.open("w");
+            file.write(progressJson(payload));
+            file.close();
+        } catch (e1) {}
+    }
+
+    function progressJson(value) {
+        if (value === null) return "null";
+        var type = typeof value;
+        if (type === "number" || type === "boolean") return String(value);
+        if (type === "string") return "\"" + String(value).replace(/\\/g, "\\\\").replace(/"/g, "\\\"").replace(/\r/g, "\\r").replace(/\n/g, "\\n") + "\"";
+        var props = [];
+        for (var key in value) {
+            if (value.hasOwnProperty(key)) props.push(progressJson(key) + ":" + progressJson(value[key]));
+        }
+        return "{" + props.join(",") + "}";
     }
 
     function readJSON(path) {

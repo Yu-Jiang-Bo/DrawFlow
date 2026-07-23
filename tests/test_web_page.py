@@ -1,3 +1,4 @@
+from src.service.job_store import JobStore
 from src.service.web_page import INDEX_HTML
 
 
@@ -59,8 +60,12 @@ def test_render_page_preserves_gateway_error_codes_and_explains_browser_fetch_fa
 def test_render_page_has_progress_overlay():
     assert 'id="renderProgressOverlay"' in INDEX_HTML
     assert 'id="progressBar"' in INDEX_HTML
+    assert 'id="progressCount"' in INDEX_HTML
     assert "showProgress" in INDEX_HTML
     assert "tickProgress" in INDEX_HTML
+    assert "pollRenderProgress" in INDEX_HTML
+    assert "currentRunningJob" in INDEX_HTML
+    assert "`${boundedCurrent}/${total}`" in INDEX_HTML
     assert "调用 Illustrator" in INDEX_HTML
     assert "生成 AI 文件" in INDEX_HTML
     assert 'return ["上传订单表格", "解析订单字段", "调用 Illustrator", "生成 AI 文件", "完成收尾"]' in INDEX_HTML

@@ -813,6 +813,16 @@ INDEX_HTML = """<!doctype html>
       color: var(--muted);
       font-size: 13px;
     }
+    .progress-meta {
+      display: inline-flex;
+      gap: 8px;
+      align-items: center;
+      white-space: nowrap;
+    }
+    .progress-count {
+      color: var(--ink);
+      font-weight: 700;
+    }
     .progress-stage {
       color: var(--ink);
       font-weight: 700;
@@ -1328,7 +1338,7 @@ INDEX_HTML = """<!doctype html>
         <div class="progress-track"><div class="progress-bar" id="progressBar"></div></div>
         <div class="progress-row">
           <span class="progress-stage" id="progressStage">准备任务</span>
-          <span id="progressPercent">0%</span>
+          <span class="progress-meta"><span class="progress-count" id="progressCount"></span><span id="progressPercent">0%</span></span>
         </div>
         <ul class="progress-steps" id="progressSteps"></ul>
       </div>
@@ -1394,8 +1404,10 @@ INDEX_HTML = """<!doctype html>
       pendingTemplateRemovalId: ""
     };
     let progressTimer = null;
+    let progressPollTimer = null;
     let progressValue = 0;
     let progressMode = "render";
+    let progressStartedAt = 0;
 
     const typeNames = {
       pure_text: "纯文字模板",
@@ -3556,15 +3568,20 @@ INDEX_HTML = """<!doctype html>
     function showProgress(mode) {
       progressMode = mode;
       progressValue = 0;
+      progressStartedAt = Date.now();
       const overlay = document.getElementById("renderProgressOverlay");
       overlay.classList.add("active");
       overlay.setAttribute("aria-hidden", "false");
       document.getElementById("progressTitle").textContent = progressTitle(mode);
       document.getElementById("progressSubtitle").textContent = progressSubtitle(mode);
+      document.getElementById("progressCount").textContent = "";
       renderProgressSteps(0);
       updateRenderProgress(6, progressStages()[0]);
       clearInterval(progressTimer);
       progressTimer = setInterval(tickProgress, 900);
+      clearInterval(progressPollTimer);
+      progressPollTimer = mode === "render" ? setInterval(pollRenderProgress, 1000) : null;
+      if (mode === "render") pollRenderProgress();
     }
 
     function tickProgress() {
@@ -3629,6 +3646,33 @@ INDEX_HTML = """<!doctype html>
       document.getElementById("progressPercent").textContent = `${progressValue}%`;
       document.getElementById("progressStage").textContent = stage;
       renderProgressSteps(progressValue);
+    }
+
+    async function pollRenderProgress() {
+      try {
+        const payload = await getJson("/api/jobs");
+        const job = currentRunningJob(payload.jobs || []);
+        if (!job || !job.progress) return;
+        const total = Number(job.progress.total || 0);
+        const current = Number(job.progress.current || 0);
+        if (!total) return;
+        const boundedCurrent = Math.max(0, Math.min(total, Math.round(current)));
+        document.getElementById("progressCount").textContent = `${boundedCurrent}/${total}`;
+        const realPercent = Math.max(progressValue, Math.floor((boundedCurrent / total) * 96));
+        updateRenderProgress(realPercent, job.progress.stage || stageForProgress(realPercent));
+      } catch (error) {
+        // Progress polling is best-effort; the render request itself remains authoritative.
+      }
+    }
+
+    function currentRunningJob(jobs) {
+      const startedAt = progressStartedAt ? new Date(progressStartedAt - 30000) : null;
+      return jobs.find(job => {
+        if (job.status !== "running") return false;
+        if (!startedAt) return true;
+        const createdAt = Date.parse(job.created_at || "");
+        return !Number.isFinite(createdAt) || createdAt >= startedAt.getTime();
+      }) || jobs.find(job => job.status === "running") || null;
     }
 
     function renderProgressSteps(value) {

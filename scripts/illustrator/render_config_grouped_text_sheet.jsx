@@ -11,8 +11,11 @@
     var exportConfig = task.export || {};
     var colorMode = outputColorMode(exportConfig.color_mode);
     var fontStyles = task.font_styles || {};
+    var renderedItems = 0;
+    var totalItems = totalTaskItems(task.groups);
 
     try { app.userInteractionLevel = UserInteractionLevel.DONTDISPLAYALERTS; } catch (e) {}
+    writeProgress(task, renderedItems, totalItems, "生成 AI 文件");
 
     var layout = task.layout || {};
     var columns = Math.max(Number(layout.columns || 4), 1);
@@ -107,6 +110,8 @@
                 try { outline.name = String(item.order_no || "") + "_" + String(item.quantity_index || j + 1) + "_TEXT"; } catch (e0) {}
             }
             cursorTop = boxBottom - itemGap;
+            renderedItems += 1;
+            writeProgress(task, renderedItems, totalItems, "生成 AI 文件");
         }
     }
 
@@ -135,6 +140,14 @@
             if (i < group.items.length - 1) height += itemGapValue;
         }
         return { width: width, height: height };
+    }
+
+    function totalTaskItems(groups) {
+        var total = 0;
+        for (var i = 0; i < groups.length; i++) {
+            total += (groups[i].items || []).length;
+        }
+        return total;
     }
 
     function drawStyleBox(layer, left, top, width, height, name) {
@@ -401,6 +414,25 @@
             file.write(toJson(payload));
             file.close();
         } catch (e) {}
+    }
+
+    function writeProgress(task, current, total, stage) {
+        var progress = task.progress || {};
+        if (!progress.file) return;
+        var offset = Number(progress.offset || 0);
+        var grandTotal = Number(progress.total || total || 0);
+        var payload = {
+            current: Math.min(offset + current, grandTotal),
+            total: grandTotal,
+            stage: String(stage || progress.stage || "")
+        };
+        var file = File(String(progress.file));
+        ensureFolder(file.parent);
+        if (file.open("w")) {
+            file.encoding = "UTF-8";
+            file.write(toJson(payload));
+            file.close();
+        }
     }
 
     function toJson(value) {

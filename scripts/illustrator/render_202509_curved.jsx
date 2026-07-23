@@ -35,6 +35,9 @@
 
     var groups = task.groups || [];
     if (groups.length === 0) throw new Error("No groups");
+    var renderedItems = 0;
+    var totalItems = totalTaskItems(groups);
+    writeProgress(task, renderedItems, totalItems, "生成 AI 文件");
     var groupMetrics = [];
     var columnWidth = Math.max(titleWidth, nameWidth, mmToPt(35));
     for (var g = 0; g < groups.length; g++) {
@@ -95,6 +98,8 @@
                     drawName(layer, String(item.text || ""), font, itemLeft, itemTop, width, heightForItem, textItems, nameFrameItems);
                 }
                 cursorTop = itemBottom - itemGap;
+                renderedItems += 1;
+                writeProgress(task, renderedItems, totalItems, "生成 AI 文件");
             }
         }
     } catch (eLayout) {
@@ -565,6 +570,14 @@
         return { items: items, columnHeights: heights };
     }
 
+    function totalTaskItems(groups) {
+        var total = 0;
+        for (var i = 0; i < groups.length; i++) {
+            total += (groups[i].items || []).length;
+        }
+        return total;
+    }
+
     function outlineText(items) {
         renderProgress.stage = "outlining";
         renderProgress.totalTextItems = items.length;
@@ -751,6 +764,26 @@
         try {
             if (!task.debug || !task.debug.report_path) return;
             var file = File(String(task.debug.report_path));
+            ensureFolder(file.parent);
+            file.encoding = "UTF-8";
+            if (!file.open("w")) return;
+            file.write(toJson(payload));
+            file.close();
+        } catch (e0) {}
+    }
+
+    function writeProgress(task, current, total, stage) {
+        var progress = task.progress || {};
+        if (!progress.file) return;
+        var offset = Number(progress.offset || 0);
+        var grandTotal = Number(progress.total || total || 0);
+        var payload = {
+            current: Math.min(offset + current, grandTotal),
+            total: grandTotal,
+            stage: String(stage || progress.stage || "")
+        };
+        var file = File(String(progress.file));
+        try {
             ensureFolder(file.parent);
             file.encoding = "UTF-8";
             if (!file.open("w")) return;
