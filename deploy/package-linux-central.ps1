@@ -14,7 +14,57 @@ $ReleaseRoot = Join-Path $ReleaseBase $ReleaseName
 $ArchivePath = Join-Path $ReleaseBase "$ReleaseName.zip"
 New-Item -ItemType Directory -Force -Path $ReleaseBase | Out-Null
 if (Test-Path $ReleaseRoot) { throw "Release folder already exists: $ReleaseRoot" }
-New-Item -ItemType Directory -Force -Path $ReleaseRoot | Out-Null
+
+function Get-ActiveTemplates {
+    $RegistryPath = Join-Path $ProjectRoot "config\templates.json"
+    if (-not (Test-Path $RegistryPath)) { throw "Missing template registry: $RegistryPath" }
+    $Registry = Get-Content -Raw -Encoding UTF8 $RegistryPath | ConvertFrom-Json
+    @($Registry.templates | Where-Object { $_.status -eq "active" })
+}
+
+function Assert-RequiredAiFile {
+    param(
+        [Parameter(Mandatory = $true)][string]$PathValue,
+        [Parameter(Mandatory = $true)][string]$Label,
+        [Parameter(Mandatory = $true)][string]$BasePath
+    )
+    if ([string]::IsNullOrWhiteSpace($PathValue)) {
+        throw "Active template is missing ${Label}."
+    }
+    if ([System.IO.Path]::GetExtension($PathValue).ToLowerInvariant() -ne ".ai") {
+        throw "Active template ${Label} must point to a .ai file: $PathValue"
+    }
+    $ResolvedPath = if ([System.IO.Path]::IsPathRooted($PathValue)) {
+        $PathValue
+    } else {
+        Join-Path $BasePath $PathValue
+    }
+    if (-not (Test-Path $ResolvedPath -PathType Leaf)) {
+        throw "Active template ${Label} .ai file is missing: $ResolvedPath"
+    }
+}
+
+function Assert-ActiveTemplateAiFiles {
+    param([Parameter(Mandatory = $true)][string]$BasePath)
+    foreach ($Template in (Get-ActiveTemplates)) {
+        Assert-RequiredAiFile -PathValue ([string]$Template.template_ai) -Label "$($Template.template_id) template_ai" -BasePath $BasePath
+        foreach ($Asset in @($Template.assets)) {
+            $StoredPath = [string]$Asset.stored_path
+            if ($StoredPath -and [System.IO.Path]::GetExtension($StoredPath).ToLowerInvariant() -eq ".ai") {
+                Assert-RequiredAiFile -PathValue $StoredPath -Label "$($Template.template_id) asset $($Asset.file_name)" -BasePath $BasePath
+            }
+        }
+    }
+}
+
+function Normalize-LinuxShellScripts {
+    foreach ($File in (Get-ChildItem -Path (Join-Path $ReleaseRoot "deploy\linux") -Recurse -File -Filter "*.sh")) {
+        $Text = [System.IO.File]::ReadAllText($File.FullName)
+        $Text = $Text -replace "`r`n", "`n"
+        $Text = $Text -replace "`r", "`n"
+        [System.IO.File]::WriteAllText($File.FullName, $Text, [System.Text.UTF8Encoding]::new($false))
+    }
+}
 
 function Copy-Tree {
     param(
@@ -33,6 +83,9 @@ function Copy-Tree {
     if ($LASTEXITCODE -gt 7) { throw "robocopy failed for ${RelativePath}: $LASTEXITCODE" }
     $global:LASTEXITCODE = 0
 }
+
+Assert-ActiveTemplateAiFiles -BasePath $ProjectRoot
+New-Item -ItemType Directory -Force -Path $ReleaseRoot | Out-Null
 
 Copy-Tree "src" -ExcludeFiles @("local_client.py", "local_gateway.py")
 Copy-Tree "config"
@@ -91,6 +144,8 @@ function Assert-CleanRelease {
     }
 }
 
+Normalize-LinuxShellScripts
+Assert-ActiveTemplateAiFiles -BasePath $ReleaseRoot
 Sanitize-ReleaseJson
 Assert-CleanRelease
 
