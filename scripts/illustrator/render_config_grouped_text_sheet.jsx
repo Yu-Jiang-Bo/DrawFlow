@@ -11,8 +11,11 @@
     var exportConfig = task.export || {};
     var colorMode = outputColorMode(exportConfig.color_mode);
     var fontStyles = task.font_styles || {};
+    var renderedItems = 0;
+    var totalItems = totalTaskItems(task.groups);
 
     try { app.userInteractionLevel = UserInteractionLevel.DONTDISPLAYALERTS; } catch (e) {}
+    writeProgress(task, renderedItems, totalItems, "正在渲染条目");
 
     var layout = task.layout || {};
     var columns = Math.max(Number(layout.columns || 4), 1);
@@ -107,10 +110,15 @@
                 try { outline.name = String(item.order_no || "") + "_" + String(item.quantity_index || j + 1) + "_TEXT"; } catch (e0) {}
             }
             cursorTop = boxBottom - itemGap;
+            renderedItems += 1;
+            writeProgress(task, renderedItems, totalItems, "正在渲染条目");
         }
     }
 
-    if (exportConfig.outline_text) outlineAndClean(outlines);
+    if (exportConfig.outline_text) {
+        writeProgress(task, renderedItems, totalItems, "正在转曲订单标识");
+        outlineAndClean(outlines);
+    }
     debugPayload.textFit = {
         count: fitStats.count,
         f11HeartFitCount: fitStats.f11HeartFitCount,
@@ -122,7 +130,9 @@
     var output = File(String(task.output_ai));
     ensureFolder(output.parent);
     if (output.exists) output.remove();
+    writeProgress(task, renderedItems, totalItems, "正在保存 AI 文件");
     saveAsAI8(doc, output);
+    writeProgress(task, renderedItems, totalItems, "正在关闭 Illustrator 文档");
     doc.close(SaveOptions.DONOTSAVECHANGES);
     return output.fsName;
 
@@ -136,6 +146,14 @@
             if (i < group.items.length - 1) height += itemGapValue;
         }
         return { width: width, height: height };
+    }
+
+    function totalTaskItems(groups) {
+        var total = 0;
+        for (var i = 0; i < groups.length; i++) {
+            total += (groups[i].items || []).length;
+        }
+        return total;
     }
 
     function drawStyleBox(layer, left, top, width, height, name) {
@@ -612,6 +630,25 @@
         } catch (e) {}
     }
 
+    function writeProgress(task, current, total, stage) {
+        var progress = task.progress || {};
+        if (!progress.file) return;
+        var offset = Number(progress.offset || 0);
+        var grandTotal = Number(progress.total || total || 0);
+        var payload = {
+            current: Math.min(offset + current, grandTotal),
+            total: grandTotal,
+            stage: String(stage || progress.stage || "")
+        };
+        var file = File(String(progress.file));
+        ensureFolder(file.parent);
+        if (file.open("w")) {
+            file.encoding = "UTF-8";
+            file.write(toJson(payload));
+            file.close();
+        }
+    }
+
     function toJson(value) {
         if (value === null) return "null";
         var type = typeof value;
@@ -754,6 +791,9 @@
                 var outline = items[i].createOutline();
                 cleanupOutline(outline);
             } catch (e) {}
+            if ((i + 1) === items.length || (i + 1) % 25 === 0) {
+                writeProgress(task, renderedItems, totalItems, "正在转曲订单标识 " + (i + 1) + "/" + items.length);
+            }
         }
     }
 

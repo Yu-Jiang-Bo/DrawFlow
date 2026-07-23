@@ -35,6 +35,9 @@
 
     var groups = task.groups || [];
     if (groups.length === 0) throw new Error("No groups");
+    var renderedItems = 0;
+    var totalItems = totalTaskItems(groups);
+    writeProgress(task, renderedItems, totalItems, "正在渲染条目");
     var groupMetrics = [];
     var columnWidth = Math.max(titleWidth, nameWidth, mmToPt(35));
     for (var g = 0; g < groups.length; g++) {
@@ -95,6 +98,8 @@
                     drawName(layer, String(item.text || ""), font, itemLeft, itemTop, width, heightForItem, textItems, nameFrameItems);
                 }
                 cursorTop = itemBottom - itemGap;
+                renderedItems += 1;
+                writeProgress(task, renderedItems, totalItems, "正在渲染条目");
             }
         }
     } catch (eLayout) {
@@ -104,20 +109,30 @@
     renderProgress.totalTextItems = textItems.length;
     if (outputConfig.outline_text) {
         renderProgress.stage = "outlining";
+        writeProgress(task, renderedItems, totalItems, "正在转曲文字 0/" + textItems.length);
         writeRenderDebug("outlining", "", 0);
         outlineText(textItems);
+        writeProgress(task, renderedItems, totalItems, "正在清理辅助对象");
         removeItems(pathItems);
     }
-    if (!keepNameFrames) removeItems(nameFrameItems);
-    if (!keepTitleFrames) removeItems(titleFrameItems);
+    if (!keepNameFrames) {
+        writeProgress(task, renderedItems, totalItems, "正在清理姓名辅助框");
+        removeItems(nameFrameItems);
+    }
+    if (!keepTitleFrames) {
+        writeProgress(task, renderedItems, totalItems, "正在清理标题辅助框");
+        removeItems(titleFrameItems);
+    }
 
     var output = File(String(task.output_ai));
     try {
         renderProgress.stage = "saving";
+        writeProgress(task, renderedItems, totalItems, "正在保存 AI 文件");
         writeRenderDebug("saving", "", 0);
         ensureFolder(output.parent);
         if (output.exists) output.remove();
         saveAsAI8(doc, output);
+        writeProgress(task, renderedItems, totalItems, "正在关闭 Illustrator 文档");
         doc.close(SaveOptions.DONOTSAVECHANGES);
         doc = null;
         closeTitleTemplate();
@@ -132,16 +147,19 @@
             var previewExport = File(previewPath.replace(/\.png$/i, ""));
             var savedDoc = null;
             try {
+                writeProgress(task, renderedItems, totalItems, "正在导出预览 PNG");
                 savedDoc = app.open(output);
                 exportPreviewPNG(savedDoc, previewExport, Number(outputConfig.preview_dpi || 300));
             } finally {
                 if (savedDoc) {
+                    writeProgress(task, renderedItems, totalItems, "正在关闭预览文档");
                     try { savedDoc.close(SaveOptions.DONOTSAVECHANGES); } catch (e0) {}
                 }
             }
             if (!preview.exists) throw new Error("Preview PNG was not generated.");
         }
         renderProgress.stage = "completed";
+        writeProgress(task, renderedItems, totalItems, "正在完成收尾");
         writeRenderDebug("completed", "", 0);
         closeTitleTemplate();
     } catch (e1) {
@@ -565,6 +583,14 @@
         return { items: items, columnHeights: heights };
     }
 
+    function totalTaskItems(groups) {
+        var total = 0;
+        for (var i = 0; i < groups.length; i++) {
+            total += (groups[i].items || []).length;
+        }
+        return total;
+    }
+
     function outlineText(items) {
         renderProgress.stage = "outlining";
         renderProgress.totalTextItems = items.length;
@@ -584,6 +610,7 @@
                 renderProgress.processedTextItems = i + 1;
                 if (shouldSettleOutlineBatch(i + 1, items.length)) {
                     settleIllustrator();
+                    writeProgress(task, renderedItems, totalItems, "正在转曲文字 " + (i + 1) + "/" + items.length);
                     writeRenderDebug("outlining", "", 0);
                 }
             } catch (e0) {
@@ -751,6 +778,26 @@
         try {
             if (!task.debug || !task.debug.report_path) return;
             var file = File(String(task.debug.report_path));
+            ensureFolder(file.parent);
+            file.encoding = "UTF-8";
+            if (!file.open("w")) return;
+            file.write(toJson(payload));
+            file.close();
+        } catch (e0) {}
+    }
+
+    function writeProgress(task, current, total, stage) {
+        var progress = task.progress || {};
+        if (!progress.file) return;
+        var offset = Number(progress.offset || 0);
+        var grandTotal = Number(progress.total || total || 0);
+        var payload = {
+            current: Math.min(offset + current, grandTotal),
+            total: grandTotal,
+            stage: String(stage || progress.stage || "")
+        };
+        var file = File(String(progress.file));
+        try {
             ensureFolder(file.parent);
             file.encoding = "UTF-8";
             if (!file.open("w")) return;

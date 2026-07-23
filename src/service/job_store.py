@@ -33,6 +33,7 @@ class JobStore:
             "job_dir": str(job_dir),
             "outputs": {},
             "stats": {},
+            "progress": {"current": 0, "total": 0, "stage": "queued"},
             "error": "",
             "error_code": "",
         }
@@ -43,7 +44,7 @@ class JobStore:
         path = self.root / job_id / "job.json"
         if not path.exists():
             raise KeyError(f"任务不存在: {job_id}")
-        return json.loads(path.read_text(encoding="utf-8"))
+        return self._with_live_progress(json.loads(path.read_text(encoding="utf-8")))
 
     def list_recent(self, limit: int = 10) -> List[Dict[str, Any]]:
         if limit <= 0 or not self.root.exists():
@@ -51,7 +52,7 @@ class JobStore:
         records: List[Dict[str, Any]] = []
         for path in self.root.glob("*/job.json"):
             try:
-                records.append(json.loads(path.read_text(encoding="utf-8")))
+                records.append(self._with_live_progress(json.loads(path.read_text(encoding="utf-8"))))
             except json.JSONDecodeError:
                 continue
         records.sort(key=lambda record: str(record.get("updated_at") or record.get("created_at") or ""), reverse=True)
@@ -65,4 +66,21 @@ class JobStore:
     def update(self, record: Dict[str, Any], **changes: Any) -> Dict[str, Any]:
         record.update(changes)
         self.save(record)
+        return record
+
+    def _with_live_progress(self, record: Dict[str, Any]) -> Dict[str, Any]:
+        job_dir = str(record.get("job_dir") or "")
+        if not job_dir:
+            return record
+        progress_path = Path(job_dir) / "progress.json"
+        if not progress_path.exists():
+            return record
+        try:
+            progress = json.loads(progress_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return record
+        if isinstance(progress, dict):
+            merged = dict(record.get("progress") or {})
+            merged.update(progress)
+            record["progress"] = merged
         return record

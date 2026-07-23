@@ -30,6 +30,7 @@
     var padding = mmToPt(Number(task.fit && task.fit.padding_mm || 0));
     var minFontSize = Number(task.fit && task.fit.min_font_size_pt || 4);
     var maxFontSize = Number(task.fit && task.fit.max_font_size_pt || 300);
+    var renderedItems = 0;
 
     var productSize = maxProductSize(config);
     var contentSize = compactOutput ? maxAnchorSize(config) : productSize;
@@ -77,6 +78,7 @@
     var doc = app.documents.add(documentColorSpace(colorMode), docWidth, docHeight);
     var layer = doc.layers[0];
     layer.name = "JJMB202508261001394920_OUTPUT";
+    writeProgress(task, renderedItems, taskItemCount(renderGroups), "正在渲染条目");
 
     for (var i = 0; i < renderGroups.length; i++) {
         var group = renderGroups[i];
@@ -116,6 +118,8 @@
 
                 drawPersonalizedText(layer, item, font, design, [contentLeft + padding, contentTop - padding, contentRight - padding, contentBottom + padding], minFontSize, maxFontSize, item.text_actions || []);
                 cursorTop = contentBottom - itemGap;
+                renderedItems += 1;
+                writeProgress(task, renderedItems, taskItemCount(renderGroups), "正在渲染条目");
                 continue;
             }
 
@@ -126,6 +130,8 @@
 
             drawPersonalizedText(layer, item, font, design, [anchor[0] + padding, anchor[1] - padding, anchor[2] - padding, anchor[3] + padding], minFontSize, maxFontSize, item.text_actions || []);
             cursorTop = productBottom - itemGap;
+            renderedItems += 1;
+            writeProgress(task, renderedItems, taskItemCount(renderGroups), "正在渲染条目");
         }
     }
 
@@ -133,7 +139,9 @@
     var output = File(String(task.output_ai));
     ensureFolder(output.parent);
     if (output.exists) output.remove();
+    writeProgress(task, renderedItems, taskItemCount(renderGroups), "正在保存 AI 文件");
     saveAsAI8(doc, output);
+    writeProgress(task, renderedItems, taskItemCount(renderGroups), "正在关闭 Illustrator 文档");
     doc.close(SaveOptions.DONOTSAVECHANGES);
     return output.fsName;
 
@@ -196,6 +204,14 @@
             }
         }
         return result;
+    }
+
+    function taskItemCount(groups) {
+        var total = 0;
+        for (var i = 0; i < groups.length; i++) {
+            total += (groups[i].items || []).length;
+        }
+        return total;
     }
 
     function mapAnchor(design, productLeft, productTop, productWidth, productHeight) {
@@ -527,6 +543,25 @@
             file.write(toJson(payload));
             file.close();
         } catch (e) {}
+    }
+
+    function writeProgress(task, current, total, stage) {
+        var progress = task.progress || {};
+        if (!progress.file) return;
+        var offset = Number(progress.offset || 0);
+        var grandTotal = Number(progress.total || total || 0);
+        var payload = {
+            current: Math.min(offset + current, grandTotal),
+            total: grandTotal,
+            stage: String(stage || progress.stage || "")
+        };
+        var file = File(String(progress.file));
+        ensureFolder(file.parent);
+        if (file.open("w")) {
+            file.encoding = "UTF-8";
+            file.write(toJson(payload));
+            file.close();
+        }
     }
 
     function toJson(value) {

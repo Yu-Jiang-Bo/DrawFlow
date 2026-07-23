@@ -11,6 +11,7 @@
     try { app.userInteractionLevel = UserInteractionLevel.DONTDISPLAYALERTS; } catch (e0) {}
 
     var outputs = [];
+    writeProgress(task, 0, task.orders.length, "正在渲染条目");
     if (usesNameColumnsLayout(task) && String(task.render_layout.output_mode || "") === "single_file") {
         trace(task, "name_columns:start");
         var sheet = createNameColumnsSheet(task);
@@ -19,31 +20,41 @@
             ensureFolder(sheetOutput.parent);
             if (sheetOutput.exists) sheetOutput.remove();
             trace(task, "name_columns:before_save");
+            writeProgress(task, task.orders.length, task.orders.length, "正在保存 AI 文件");
             saveAsNativeAI(sheet, sheetOutput);
             trace(task, "name_columns:after_save");
             outputs.push(sheetOutput.fsName);
         } finally {
+            writeProgress(task, task.orders.length, task.orders.length, "正在关闭 Illustrator 文档");
             sheet.close(SaveOptions.DONOTSAVECHANGES);
         }
         return outputs.join("\n");
     }
     for (var orderIndex = 0; orderIndex < task.orders.length; orderIndex++) {
         var order = task.orders[orderIndex];
+        writeProgress(task, orderIndex, task.orders.length, "正在打开模板");
         var doc = usesNameColumnsLayout(task) ? createNameColumnsDocument(task, order) : app.open(File(String(task.template_ai)));
         try {
+            writeProgress(task, orderIndex, task.orders.length, "正在渲染条目");
             if (!usesNameColumnsLayout(task)) {
                 applyOptionGroups(doc, task.option_groups || [], order.selections || {});
                 applyVariables(doc, order.variables || [], task.dimensions || {}, task.text_policies || {}, order.selections || {}, task.allow_unnamed_name_fallback === true);
                 applyAssets(doc, order.assets || []);
                 applyTransforms(doc, order.transforms || task.transforms || {}, order.variables || []);
+                if (task.output && task.output.outline_text) {
+                    writeProgress(task, orderIndex, task.orders.length, "正在转曲文字");
+                }
                 applyOutputSettings(doc, task.output || {}, order.variables || []);
             }
             var output = File(String(order.output_ai));
             ensureFolder(output.parent);
             if (output.exists) output.remove();
+            writeProgress(task, orderIndex, task.orders.length, "正在保存 AI 文件");
             saveAsNativeAI(doc, output);
             outputs.push(output.fsName);
+            writeProgress(task, orderIndex + 1, task.orders.length, "已保存 AI 文件");
         } finally {
+            writeProgress(task, Math.min(orderIndex + 1, task.orders.length), task.orders.length, "正在关闭 Illustrator 文档");
             doc.close(SaveOptions.DONOTSAVECHANGES);
         }
     }
@@ -123,6 +134,7 @@
                     width: cellWidth,
                     height: item.height
                 }, dimensions);
+                writeProgress(task, index + 1, plan.items.length, "正在渲染条目");
                 if ((index + 1) % 25 === 0 || index + 1 === plan.items.length) {
                     trace(task, "name_columns:drawn " + (index + 1) + "/" + plan.items.length);
                 }
@@ -1313,6 +1325,38 @@
             file.write(String(new Date().getTime()) + " " + message + "\n");
             file.close();
         } catch (e1) {}
+    }
+
+    function writeProgress(task, current, total, stage) {
+        var progress = task.progress || {};
+        if (!progress.file) return;
+        var offset = Number(progress.offset || 0);
+        var grandTotal = Number(progress.total || total || 0);
+        var payload = {
+            current: Math.min(offset + current, grandTotal),
+            total: grandTotal,
+            stage: String(stage || progress.stage || "")
+        };
+        var file = File(String(progress.file));
+        try {
+            ensureFolder(file.parent);
+            file.encoding = "UTF-8";
+            file.open("w");
+            file.write(progressJson(payload));
+            file.close();
+        } catch (e1) {}
+    }
+
+    function progressJson(value) {
+        if (value === null) return "null";
+        var type = typeof value;
+        if (type === "number" || type === "boolean") return String(value);
+        if (type === "string") return "\"" + String(value).replace(/\\/g, "\\\\").replace(/"/g, "\\\"").replace(/\r/g, "\\r").replace(/\n/g, "\\n") + "\"";
+        var props = [];
+        for (var key in value) {
+            if (value.hasOwnProperty(key)) props.push(progressJson(key) + ":" + progressJson(value[key]));
+        }
+        return "{" + props.join(",") + "}";
     }
 
     function readJSON(path) {

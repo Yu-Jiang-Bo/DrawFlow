@@ -52,7 +52,7 @@ def test_compare_png_previews_rejects_non_png_input(tmp_path):
         compare_png_previews(bad, good)
 
 
-def test_curved_service_publishes_one_validated_candidate(tmp_path, monkeypatch):
+def test_curved_service_renders_formal_ai_without_preview_png(tmp_path, monkeypatch):
     report = tmp_path / "font-report.json"
     report.write_text(
         '{"entries":[{"status":"ok","font_option":"F1","font_name":"TestFont","baseline_ratio":{},"bounds_shape_ratio":{}}]}',
@@ -85,9 +85,10 @@ def test_curved_service_publishes_one_validated_candidate(tmp_path, monkeypatch)
         def render(self, script, task_path):
             task = __import__("json").loads(Path(task_path).read_text(encoding="utf-8"))
             calls.append(Path(task_path).name)
+            assert task["output"]["preview_png_path"] == ""
+            assert task["output"]["preview_dpi"] == 0
             Path(task["output_ai"]).parent.mkdir(parents=True, exist_ok=True)
-            Path(task["output_ai"]).write_text("candidate", encoding="utf-8")
-            _write_rgb_png(Path(task["output"]["preview_png_path"]), b"\x01\x02\x03")
+            Path(task["output_ai"]).write_text("formal-ai", encoding="utf-8")
 
     monkeypatch.setattr(render_service_module, "IllustratorBridge", Bridge)
     monkeypatch.setattr(render_service_module, "read_202509_curved_rows", lambda *args, **kwargs: rows)
@@ -108,9 +109,10 @@ def test_curved_service_publishes_one_validated_candidate(tmp_path, monkeypatch)
     result = service._run_202509_curved(record, template)
 
     assert len(calls) == 1
-    assert Path(result["outputs"]["output_ai"]).read_text(encoding="utf-8") == "candidate"
-    assert result["stats"]["render_integrity_verified"] is True
-    assert '"status": "passed"' in Path(result["outputs"]["render_integrity"]).read_text(encoding="utf-8")
+    assert calls == ["render-task.json"]
+    assert Path(result["outputs"]["output_ai"]).read_text(encoding="utf-8") == "formal-ai"
+    assert result["outputs"]["render_integrity"] == ""
+    assert result["stats"]["render_integrity_verified"] is False
 
 
 def test_curved_service_uses_template_multi_name_policy_for_quantity_expansion(tmp_path, monkeypatch):

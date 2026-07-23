@@ -259,6 +259,7 @@ def build_task(
     color_mode: str = "CMYK",
     preview_png: Path | None = None,
     preview_dpi: int = 300,
+    progress: Mapping[str, object] | None = None,
 ) -> Dict[str, object]:
     if not groups:
         raise ValueError("No renderable orders")
@@ -308,6 +309,7 @@ def build_task(
         "debug": {
             "report_path": str(output_ai.with_suffix(".debug.json")),
         },
+        "progress": dict(progress or {}),
     }
 
 
