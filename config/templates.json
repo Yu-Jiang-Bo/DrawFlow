@@ -21,6 +21,14 @@
           "role": "原始参考模板",
           "status": "uploaded",
           "size_bytes": 7543007
+        },
+        {
+          "file_name": "JJMB202509231236046265TitleDesign.ai",
+          "stored_path": "templates/JJMB202509231236046265/assets/JJMB202509231236046265TitleDesign.ai",
+          "asset_type": "title_design",
+          "role": "title_design_template",
+          "status": "uploaded",
+          "size_bytes": 7544948
         }
       ]
     },

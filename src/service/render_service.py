@@ -301,11 +301,13 @@ class RenderService:
             ),
         )
         groups = group_202509_curved_items(items)
+        title_template_ai = _curved_title_template_ai_path(template, template_rules)
         task_options = {
             "font_report": font_report,
             "groups": groups,
             "columns": request["columns"],
             "layout_overrides": curved_layout_overrides(template_rules),
+            "title_template_ai": title_template_ai,
             "color_mode": output_color_mode(template_rules),
         }
         task_file = job_dir / "render-task.json"
@@ -682,3 +684,47 @@ def _template_asset_path(asset: Dict[str, Any]) -> Path | None:
     if not path.is_absolute():
         path = (Path(__file__).resolve().parents[2] / path).resolve()
     return path
+
+
+def _curved_title_template_ai_path(
+    template: TemplateDefinition, rules: Mapping[str, Any]
+) -> Path | None:
+    direct = _configured_title_template_path(rules)
+    if direct and direct.exists():
+        return direct
+    for asset in template.assets:
+        role = str(asset.get("role", "") or "").casefold()
+        asset_type = str(asset.get("asset_type", "") or "").casefold()
+        if (
+            "title_design_template" not in role
+            and "title template" not in role
+            and "title_design" not in asset_type
+        ):
+            continue
+        path = _template_asset_path(asset)
+        if path and path.exists():
+            return path
+    return None
+
+
+def _configured_title_template_path(rules: Mapping[str, Any]) -> Path | None:
+    candidates: List[object] = []
+    title_template = rules.get("title_template") if isinstance(rules, Mapping) else None
+    if isinstance(title_template, Mapping):
+        candidates.extend(
+            [
+                title_template.get("ai_path"),
+                title_template.get("title_design_ai"),
+                title_template.get("title_template_ai"),
+            ]
+        )
+    candidates.extend([rules.get("title_design_ai"), rules.get("title_template_ai")])
+    for value in candidates:
+        text = str(value or "").strip()
+        if not text:
+            continue
+        path = Path(text)
+        if not path.is_absolute():
+            path = (Path(__file__).resolve().parents[2] / path).resolve()
+        return path
+    return None

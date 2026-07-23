@@ -63,32 +63,42 @@
     var pathItems = [];
     var nameFrameItems = [];
     var titleFrameItems = [];
+    var titleTemplateInfo = loadTitleTemplate(task.title_template || {});
+    var titleTemplateStats = { loaded: titleTemplateInfo ? true : false, used: 0, fallback: 0 };
+    try { app.activeDocument = doc; } catch (e0) {}
 
-    for (var gi = 0; gi < groups.length; gi++) {
-        var group = groups[gi];
-        var col = placements.items[gi].column;
-        var left = margin + col * (columnWidth + gap);
-        var top = docHeight - margin - placements.items[gi].y;
-        var cursorTop = top;
-        drawOrderLabel(layer, String(group.order_no || ""), left, cursorTop, left + columnWidth, cursorTop - orderLabelHeight, orderLabelFontSize, textItems);
-        cursorTop -= orderLabelHeight;
+    try {
+        for (var gi = 0; gi < groups.length; gi++) {
+            var group = groups[gi];
+            var col = placements.items[gi].column;
+            var left = margin + col * (columnWidth + gap);
+            var top = docHeight - margin - placements.items[gi].y;
+            var cursorTop = top;
+            drawOrderLabel(layer, String(group.order_no || ""), left, cursorTop, left + columnWidth, cursorTop - orderLabelHeight, orderLabelFontSize, textItems);
+            cursorTop -= orderLabelHeight;
 
-        var groupItems = group.items || [];
-        for (var ii = 0; ii < groupItems.length; ii++) {
-            var item = groupItems[ii];
-            var font = fontConfig(task.font_map, item.font_option);
-            var width = item.text_type === "title" ? titleWidth : nameWidth;
-            var heightForItem = itemHeight(item);
-            var itemLeft = left + (columnWidth - width) / 2;
-            var itemTop = cursorTop;
-            var itemBottom = itemTop - heightForItem;
-            if (item.text_type === "title") {
-                drawCurvedTitle(layer, String(item.text || ""), font, itemLeft, itemTop, width, heightForItem, textItems, pathItems, titleFrameItems);
-            } else {
-                drawName(layer, String(item.text || ""), font, itemLeft, itemTop, width, heightForItem, textItems, nameFrameItems);
+            var groupItems = group.items || [];
+            for (var ii = 0; ii < groupItems.length; ii++) {
+                var item = groupItems[ii];
+                var font = fontConfig(task.font_map, item.font_option);
+                var width = item.text_type === "title" ? titleWidth : nameWidth;
+                var heightForItem = itemHeight(item);
+                var itemLeft = left + (columnWidth - width) / 2;
+                var itemTop = cursorTop;
+                var itemBottom = itemTop - heightForItem;
+                if (item.text_type === "title") {
+                    if (!drawCurvedTitleFromTemplate(layer, String(item.text || ""), String(item.font_option || ""), itemLeft, itemTop, width, heightForItem, textItems, titleFrameItems)) {
+                        titleTemplateStats.fallback += 1;
+                        drawCurvedTitle(layer, String(item.text || ""), font, itemLeft, itemTop, width, heightForItem, textItems, pathItems, titleFrameItems);
+                    }
+                } else {
+                    drawName(layer, String(item.text || ""), font, itemLeft, itemTop, width, heightForItem, textItems, nameFrameItems);
+                }
+                cursorTop = itemBottom - itemGap;
             }
-            cursorTop = itemBottom - itemGap;
         }
+    } catch (eLayout) {
+        abortRenderUnexpected(eLayout);
     }
 
     renderProgress.totalTextItems = textItems.length;
@@ -110,6 +120,7 @@
         saveAsAI8(doc, output);
         doc.close(SaveOptions.DONOTSAVECHANGES);
         doc = null;
+        closeTitleTemplate();
 
         var previewPath = String(outputConfig.preview_png_path || "");
         if (previewPath) {
@@ -128,10 +139,11 @@
                     try { savedDoc.close(SaveOptions.DONOTSAVECHANGES); } catch (e0) {}
                 }
             }
-            if (!preview.exists) throw new Error("Preview PNG was not generated: " + preview.fsName);
+            if (!preview.exists) throw new Error("Preview PNG was not generated.");
         }
         renderProgress.stage = "completed";
         writeRenderDebug("completed", "", 0);
+        closeTitleTemplate();
     } catch (e1) {
         failRender("Failed to save AI or export preview: " + String(e1), 0);
     }
@@ -161,6 +173,136 @@
         tf.textRange.characterAttributes.size = 18;
         fitTextToRect(tf, [left + padding, top - padding, left + width - padding, top - height + padding], minFontSize, maxFontSize);
         textItems.push({ item: tf, rect: rect, exactFit: true });
+    }
+
+    function drawCurvedTitleFromTemplate(layer, text, fontOption, left, top, width, height, textItems, titleFrameItems) {
+        if (!titleTemplateInfo) return false;
+        var option = String(fontOption || "").toUpperCase();
+        if (!option) return false;
+        var sourceText = findNamedPageItem(titleTemplateInfo.doc, patternName(titleTemplateInfo.textPattern, option));
+        if (!sourceText) return false;
+
+        var frameRect = [left, top, left + width, top - height];
+        var fitRect = [left + padding, top - padding, left + width - padding, top - height + padding];
+        var sourceBounds = findNamedPageItem(titleTemplateInfo.doc, patternName(titleTemplateInfo.boundsPattern, option));
+        if (sourceBounds) {
+            try {
+                var frame = sourceBounds.duplicate(layer, ElementPlacement.PLACEATEND);
+                frame.name = "TITLE_DEBUG_BOUNDS";
+                fitPageItemToRect(frame, frameRect);
+                titleFrameItems.push(frame);
+            } catch (e1) {}
+        } else {
+            var fallbackFrame = drawFallbackTitleFrame(layer, left, top, width, height);
+            titleFrameItems.push(fallbackFrame);
+        }
+
+        try {
+            var clonedText = sourceText.duplicate(layer, ElementPlacement.PLACEATEND);
+            clonedText.name = "TITLE_RENDER_TEMPLATE_" + option;
+            if (!setTextContents(clonedText, text)) {
+                try { clonedText.remove(); } catch (e2) {}
+                return false;
+            }
+            applyBlackToPageItem(clonedText);
+            fitPageItemWithinRect(clonedText, fitRect);
+            textItems.push({ item: clonedText, rect: frameRect, fitMode: "contain" });
+            titleTemplateStats.used += 1;
+            return true;
+        } catch (e3) {
+            return false;
+        }
+    }
+
+    function loadTitleTemplate(config) {
+        var aiPath = String(config.ai_path || "");
+        if (!aiPath) return null;
+        var file = File(aiPath);
+        if (!file.exists) return null;
+        try {
+            var sourceDoc = app.open(file);
+            return {
+                doc: sourceDoc,
+                textPattern: String(config.text_name_pattern || "TITLE_{font}_TEXT"),
+                boundsPattern: String(config.bounds_name_pattern || "TITLE_{font}_BOUNDS")
+            };
+        } catch (e0) {
+            return null;
+        }
+    }
+
+    function closeTitleTemplate() {
+        if (!titleTemplateInfo || !titleTemplateInfo.doc) return;
+        try { titleTemplateInfo.doc.close(SaveOptions.DONOTSAVECHANGES); } catch (e0) {}
+        titleTemplateInfo = null;
+    }
+
+    function patternName(pattern, fontOption) {
+        return String(pattern || "").replace(/\{font\}/g, fontOption);
+    }
+
+    function findNamedPageItem(container, name) {
+        if (!container || !name) return null;
+        try {
+            if (container.name === name) return container;
+        } catch (e0) {}
+        var directCollections = ["pageItems", "textFrames", "pathItems", "compoundPathItems"];
+        for (var d = 0; d < directCollections.length; d++) {
+            try {
+                var direct = container[directCollections[d]].getByName(name);
+                if (direct) return direct;
+            } catch (e1) {}
+        }
+        var collections = ["layers", "groupItems"];
+        for (var c = 0; c < collections.length; c++) {
+            var items = null;
+            try { items = container[collections[c]]; } catch (e2) {}
+            if (!items) continue;
+            for (var i = 0; i < items.length; i++) {
+                var found = findNamedPageItem(items[i], name);
+                if (found) return found;
+            }
+        }
+        return null;
+    }
+
+    function setTextContents(item, text) {
+        if (!item) return false;
+        try {
+            if (item.typename === "TextFrame") {
+                item.contents = text;
+                return true;
+            }
+        } catch (e0) {}
+        var changed = false;
+        try {
+            for (var i = 0; i < item.textFrames.length; i++) {
+                item.textFrames[i].contents = text;
+                changed = true;
+            }
+        } catch (e1) {}
+        try {
+            for (var g = 0; g < item.groupItems.length; g++) {
+                changed = setTextContents(item.groupItems[g], text) || changed;
+            }
+        } catch (e2) {}
+        return changed;
+    }
+
+    function applyBlackToPageItem(item) {
+        if (!item) return;
+        try {
+            if (item.typename === "TextFrame") {
+                applyBlack(item);
+                return;
+            }
+        } catch (e0) {}
+        try {
+            for (var i = 0; i < item.textFrames.length; i++) applyBlack(item.textFrames[i]);
+        } catch (e1) {}
+        try {
+            for (var g = 0; g < item.groupItems.length; g++) applyBlackToPageItem(item.groupItems[g]);
+        } catch (e2) {}
     }
 
     function drawCurvedTitle(layer, text, font, left, top, width, height, textItems, pathItems, titleFrameItems) {
@@ -200,7 +342,7 @@
         applyCenterParagraph(tf);
         tf.textRange.characterAttributes.size = Math.max(minFontSize, Math.min(maxFontSize, titleSize));
         fitTitleTextToRect(tf, fitRect, minFontSize, Math.max(minFontSize, Math.min(maxFontSize, titleSize)));
-        textItems.push({ item: tf, rect: frameRect, exactFit: true });
+        textItems.push({ item: tf, rect: frameRect, fitMode: "contain" });
     }
 
     function drawTitleFrame(layer, shape, left, top, width, height) {
@@ -435,6 +577,8 @@
                 if (!outline) throw new Error("createOutline returned nothing");
                 if (entry.exactFit && entry.rect) {
                     fitPageItemToRect(outline, entry.rect);
+                } else if (entry.fitMode === "contain" && entry.rect) {
+                    fitPageItemWithinRect(outline, entry.rect);
                 }
                 if (pathfinderMerge) cleanupOutline(outline);
                 renderProgress.processedTextItems = i + 1;
@@ -454,8 +598,15 @@
 
     function failRender(message, itemIndex) {
         writeRenderDebug("failed", message, itemIndex);
+        closeTitleTemplate();
         try { if (doc) doc.close(SaveOptions.DONOTSAVECHANGES); } catch (e0) {}
         throw new Error(message);
+    }
+
+    function abortRenderUnexpected(error) {
+        closeTitleTemplate();
+        try { if (doc) doc.close(SaveOptions.DONOTSAVECHANGES); } catch (e0) {}
+        throw error;
     }
 
     function writeRenderDebug(status, errorMessage, failedItemIndex) {
@@ -472,6 +623,7 @@
             colorMode: colorMode,
             keepNameFrames: keepNameFrames,
             keepTitleFrames: keepTitleFrames,
+            titleTemplate: titleTemplateStats,
             pathfinderMerge: pathfinderMerge,
             cleanupStats: cleanupStats,
             stage: renderProgress.stage,
@@ -502,9 +654,62 @@
         }
     }
 
+    function fitPageItemWithinRect(item, rect) {
+        var left = rect[0], top = rect[1], right = rect[2], bottom = rect[3];
+        var targetW = right - left;
+        var targetH = top - bottom;
+        for (var i = 0; i < FIT_ITERATIONS; i++) {
+            var b = pageItemBounds(item);
+            var w = Math.abs(b[2] - b[0]);
+            var h = Math.abs(b[1] - b[3]);
+            if (w <= 0 || h <= 0) return;
+            var ratio = Math.min(targetW / w, targetH / h);
+            if (Math.abs(ratio - 1) > 0.001) {
+                try {
+                    item.resize(ratio * 100, ratio * 100, true, true, true, true, 100, Transformation.CENTER);
+                } catch (e1) {
+                    try { item.resize(ratio * 100, ratio * 100); } catch (e2) {}
+                }
+            }
+            centerPageItemToRect(item, rect);
+            clampPageItemToRect(item, rect);
+            if (isPageItemWithinRect(item, rect)) break;
+        }
+    }
+
+    function pageItemBounds(item) {
+        try { return item.visibleBounds; } catch (e0) {}
+        return item.geometricBounds;
+    }
+
     function alignPageItemToRect(item, rect) {
         var b = item.geometricBounds;
         item.translate(rect[0] - b[0], rect[1] - b[1]);
+    }
+
+    function centerPageItemToRect(item, rect) {
+        var b = pageItemBounds(item);
+        var cx = (rect[0] + rect[2]) / 2;
+        var cy = (rect[1] + rect[3]) / 2;
+        try { item.translate(cx - (b[0] + b[2]) / 2, cy - (b[1] + b[3]) / 2); } catch (e0) {}
+    }
+
+    function clampPageItemToRect(item, rect) {
+        var b = pageItemBounds(item);
+        var tx = 0;
+        var ty = 0;
+        if (b[0] < rect[0]) tx = rect[0] - b[0];
+        if (b[2] > rect[2]) tx = rect[2] - b[2];
+        if (b[1] > rect[1]) ty = rect[1] - b[1];
+        if (b[3] < rect[3]) ty = rect[3] - b[3];
+        if (tx !== 0 || ty !== 0) {
+            try { item.translate(tx, ty); } catch (e0) {}
+        }
+    }
+
+    function isPageItemWithinRect(item, rect) {
+        var b = pageItemBounds(item);
+        return b[0] >= rect[0] - 0.01 && b[2] <= rect[2] + 0.01 && b[1] <= rect[1] + 0.01 && b[3] >= rect[3] - 0.01;
     }
 
     function cleanupOutline(item) {
@@ -535,7 +740,7 @@
 
     function readJSON(file) {
         file.encoding = "UTF-8";
-        if (!file.open("r")) throw new Error("Cannot open JSON: " + file.fsName);
+        if (!file.open("r")) throw new Error("Cannot open render task JSON.");
         var text = file.read();
         file.close();
         if (typeof JSON !== "undefined" && JSON.parse) return JSON.parse(text);

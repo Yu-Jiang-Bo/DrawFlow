@@ -23,6 +23,8 @@ DEFAULT_FONT_OPTION = "F1"
 DEFAULT_DEPARTMENT = "ZW"
 DEFAULT_TITLE = "Merry Christmas"
 QUANTITY_FIELDS = ("购买数量", "数量", "Quantity", "Qty")
+NUMBERED_PREFIX_RE = re.compile(r"^\s*\d{1,3}(?:\s*[\.\)\]\u3001:]\s*|\s+(?=\D))")
+INLINE_NUMBERED_PREFIX_RE = re.compile(r"(?:^|\s)\d{1,3}(?:\s*[\.\)\]\u3001:]\s*|\s+(?=\D))")
 
 
 @dataclass(frozen=True)
@@ -150,8 +152,8 @@ def split_names_inline(value: str) -> List[str]:
     text = re.sub(r"\s+", " ", html.unescape(value or "")).strip()
     if not text:
         return []
-    if re.search(r"(?:^|\s)\d{1,3}\s*[\.\)\]\u3001:]?\s*", text):
-        parts = re.split(r"(?:^|\s)\d{1,3}\s*[\.\)\]\u3001:]?\s*", text)
+    if INLINE_NUMBERED_PREFIX_RE.search(text):
+        parts = INLINE_NUMBERED_PREFIX_RE.split(text)
     elif "|" in text:
         parts = text.split("|")
     elif "," in text:
@@ -163,7 +165,7 @@ def split_names_inline(value: str) -> List[str]:
 
 def clean_text(value: str) -> str:
     text = html.unescape(value or "").strip()
-    text = re.sub(r"^\s*\d{1,3}\s*[\.\)\]\u3001:]?\s*", "", text)
+    text = NUMBERED_PREFIX_RE.sub("", text)
     return re.sub(r"\s+", " ", text).strip(" ,;")
 
 
@@ -253,6 +255,7 @@ def build_task(
     keep_title_frames: bool = False,
     keep_name_frames: bool = False,
     layout_overrides: Mapping[str, object] | None = None,
+    title_template_ai: Path | None = None,
     color_mode: str = "CMYK",
     preview_png: Path | None = None,
     preview_dpi: int = 300,
@@ -280,6 +283,11 @@ def build_task(
     return {
         "type": "jjmb_202509_curved",
         "font_map": load_font_map(font_report),
+        "title_template": {
+            "ai_path": str(title_template_ai.resolve()) if title_template_ai else "",
+            "text_name_pattern": "TITLE_{font}_TEXT",
+            "bounds_name_pattern": "TITLE_{font}_BOUNDS",
+        },
         "output_ai": str(output_ai),
         "groups": [group.to_json_dict() for group in groups],
         "layout": layout,
@@ -462,6 +470,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--columns", type=int, default=5)
     parser.add_argument("--keep-title-frames", action="store_true")
     parser.add_argument("--keep-name-frames", action="store_true")
+    parser.add_argument("--title-template-ai", default="")
     parser.add_argument("--color-mode", choices=["CMYK", "RGB"], default="CMYK")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--visible", action="store_true")
@@ -483,6 +492,7 @@ def main() -> int:
             "columns": args.columns,
             "keep_title_frames": args.keep_title_frames,
             "keep_name_frames": args.keep_name_frames,
+            "title_template_ai": Path(args.title_template_ai).resolve() if args.title_template_ai else None,
             "color_mode": args.color_mode,
         }
         print(f"render task: groups={len(groups)}, items={len(items)}")
