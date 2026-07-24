@@ -11,6 +11,8 @@
       "template_ai_role": "尺寸/作图区模板",
       "default_columns": 5,
       "default_hide_boxes": true,
+      "outline_text": true,
+      "pathfinder_merge": true,
       "template_config": "output/template-named/JJMB202509231236046265/curved-title-mark-report.json",
       "template_rules_config": "templates/JJMB202509231236046265/template.config.json",
       "assets": [
@@ -42,6 +44,8 @@
       "template_ai_role": "尺寸/作图区模板",
       "default_columns": 5,
       "default_hide_boxes": true,
+      "outline_text": true,
+      "pathfinder_merge": true,
       "template_rules_config": "templates/JJMB202508261001394920/template.rules.json",
       "assets": [
         {
@@ -64,6 +68,8 @@
       "template_ai_role": "原始参考模板",
       "default_columns": 4,
       "default_hide_boxes": true,
+      "outline_text": true,
+      "pathfinder_merge": false,
       "assets": [],
       "template_rules_config": "templates/JJMB202510241154389614/template.rules.json"
     },
@@ -77,6 +83,8 @@
       "template_ai_role": "原始参考模板",
       "default_columns": 4,
       "default_hide_boxes": true,
+      "outline_text": true,
+      "pathfinder_merge": true,
       "template_config": "output/template-configs/JJMB202603281027102517/template.config.json",
       "template_rules_config": "templates/JJMB202603281027102517/template.rules.json",
       "assets": [

@@ -10,12 +10,14 @@
     if (!task.groups || task.groups.length === 0) throw new Error("No order groups");
     var exportConfig = task.export || {};
     var colorMode = outputColorMode(exportConfig.color_mode);
+    var outlineText = exportConfig.outline_text !== false;
+    var pathfinderMerge = exportConfig.pathfinder_merge !== false;
     var fontStyles = task.font_styles || {};
     var renderedItems = 0;
     var totalItems = totalTaskItems(task.groups);
 
     try { app.userInteractionLevel = UserInteractionLevel.DONTDISPLAYALERTS; } catch (e) {}
-    writeProgress(task, renderedItems, totalItems, "正在渲染条目");
+    writeProgress(task, renderedItems, totalItems, "姝ｅ湪娓叉煋鏉＄洰");
 
     var layout = task.layout || {};
     var columns = Math.max(Number(layout.columns || 4), 1);
@@ -111,12 +113,12 @@
             }
             cursorTop = boxBottom - itemGap;
             renderedItems += 1;
-            writeProgress(task, renderedItems, totalItems, "正在渲染条目");
+            writeProgress(task, renderedItems, totalItems, "姝ｅ湪娓叉煋鏉＄洰");
         }
     }
 
-    if (exportConfig.outline_text) {
-        writeProgress(task, renderedItems, totalItems, "正在转曲订单标识");
+    if (outlineText) {
+        writeProgress(task, renderedItems, totalItems, "姝ｅ湪杞洸璁㈠崟鏍囪瘑");
         outlineAndClean(outlines);
     }
     debugPayload.textFit = {
@@ -130,9 +132,9 @@
     var output = File(String(task.output_ai));
     ensureFolder(output.parent);
     if (output.exists) output.remove();
-    writeProgress(task, renderedItems, totalItems, "正在保存 AI 文件");
+    writeProgress(task, renderedItems, totalItems, "姝ｅ湪淇濆瓨 AI 鏂囦欢");
     saveAsAI8(doc, output);
-    writeProgress(task, renderedItems, totalItems, "正在关闭 Illustrator 文档");
+    writeProgress(task, renderedItems, totalItems, "姝ｅ湪鍏抽棴 Illustrator 鏂囨。");
     doc.close(SaveOptions.DONOTSAVECHANGES);
     return output.fsName;
 
@@ -248,8 +250,10 @@
         }
         designDoc.close(SaveOptions.DONOTSAVECHANGES);
         fitPageItemToRect(copy, rect);
-        outlineTextFrames(copy);
-        cleanupOutline(copy);
+        if (outlineText) {
+            outlineTextFrames(copy);
+            if (pathfinderMerge) cleanupOutline(copy);
+        }
         recordFitDelta(fitPageItemToRect(copy, rect));
         return copy;
     }
@@ -568,7 +572,7 @@
         for (var i = frames.length - 1; i >= 0; i--) {
             try {
                 var outlined = frames[i].createOutline();
-                cleanupOutline(outlined);
+                if (pathfinderMerge) cleanupOutline(outlined);
             } catch (e) {}
         }
     }
@@ -717,9 +721,13 @@
         var size = Math.min(Math.max(tf.textRange.characterAttributes.size, minSize), maxSize);
         tf.textRange.characterAttributes.size = size;
         try { app.redraw(); } catch (e0) {}
+        if (!outlineText) {
+            fitTextToRect(tf, rect, minSize, maxSize);
+            return tf;
+        }
         var outline = tf.createOutline();
         fitPageItemToRect(outline, rect);
-        cleanupOutline(outline);
+        if (pathfinderMerge) cleanupOutline(outline);
         recordFitDelta(fitPageItemToRect(outline, rect));
         return outline;
     }
@@ -789,10 +797,10 @@
         for (var i = 0; i < items.length; i++) {
             try {
                 var outline = items[i].createOutline();
-                cleanupOutline(outline);
+                if (pathfinderMerge) cleanupOutline(outline);
             } catch (e) {}
             if ((i + 1) === items.length || (i + 1) % 25 === 0) {
-                writeProgress(task, renderedItems, totalItems, "正在转曲订单标识 " + (i + 1) + "/" + items.length);
+                writeProgress(task, renderedItems, totalItems, "姝ｅ湪杞洸璁㈠崟鏍囪瘑 " + (i + 1) + "/" + items.length);
             }
         }
     }

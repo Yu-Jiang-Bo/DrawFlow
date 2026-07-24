@@ -20,6 +20,7 @@
             ensureFolder(sheetOutput.parent);
             if (sheetOutput.exists) sheetOutput.remove();
             trace(task, "name_columns:before_save");
+            applyOutputSettings(sheet, task.output || {}, []);
             writeProgress(task, task.orders.length, task.orders.length, "正在保存 AI 文件");
             saveAsNativeAI(sheet, sheetOutput);
             trace(task, "name_columns:after_save");
@@ -45,6 +46,8 @@
                     writeProgress(task, orderIndex, task.orders.length, "正在转曲文字");
                 }
                 applyOutputSettings(doc, task.output || {}, order.variables || []);
+            } else {
+                applyOutputSettings(doc, task.output || {}, []);
             }
             var output = File(String(order.output_ai));
             ensureFolder(output.parent);
@@ -888,16 +891,7 @@
                 }
             }
         }
-        if (transforms.outline_text) {
-            for (var i = 0; i < variables.length; i++) {
-                var outlineItems = findPageItemsByName(doc, String(variables[i].target || ""));
-                for (var outlineIndex = 0; outlineIndex < outlineItems.length; outlineIndex++) {
-                    var frame = firstTextFrame(outlineItems[outlineIndex]);
-                    if (!frame) continue;
-                    try { frame.createOutline(); } catch (e4) {}
-                }
-            }
-        }
+        if (transforms.outline_text) outlineAllTextFrames(doc, transforms.pathfinder_merge === true);
     }
 
     function applyOutputSettings(doc, output, variables) {
@@ -906,7 +900,36 @@
             if (mode === "CMYK") app.executeMenuCommand("doc-color-cmyk");
             if (mode === "RGB") app.executeMenuCommand("doc-color-rgb");
         } catch (e1) {}
-        if (output.outline_text) applyTransforms(doc, {outline_text: true}, variables);
+        if (output.outline_text) {
+            applyTransforms(doc, {
+                outline_text: true,
+                pathfinder_merge: output.pathfinder_merge !== false
+            }, variables);
+        }
+    }
+
+    function outlineAllTextFrames(doc, pathfinderMerge) {
+        var frames = [];
+        for (var l = 0; l < doc.layers.length; l++) collectTextFrames(doc.layers[l], frames);
+        for (var i = frames.length - 1; i >= 0; i--) {
+            try {
+                var outline = frames[i].createOutline();
+                if (pathfinderMerge) cleanupOutline(outline);
+            } catch (e1) {}
+        }
+    }
+
+    function cleanupOutline(item) {
+        if (!item) return;
+        try { app.executeMenuCommand("deselectall"); } catch (e0) {}
+        try {
+            item.selected = true;
+            app.executeMenuCommand("Live Pathfinder Add");
+            app.executeMenuCommand("expandStyle");
+            item.selected = false;
+        } catch (e1) {
+            try { item.selected = false; } catch (e2) {}
+        }
     }
 
     function fitText(frame, widthMm, heightMm) {

@@ -63,8 +63,8 @@ def test_parse_items_applies_department_color_rule():
     assert items[0].show_color_label is True
     assert items[0].color_option == "Gold"
     assert items[0].design_option == "Design3"
-    assert items[0].production_label == "ORDER1  Gold"
-    assert items[0].production_label_lines == ["ORDER1", "Gold"]
+    assert items[0].production_label == "ORDER1  金色"
+    assert items[0].production_label_lines == ["ORDER1", "金色"]
     assert items[0].show_frame is False
     assert items[1].apply_color_to_artwork is True
     assert items[1].show_color_label is False
@@ -105,7 +105,7 @@ def test_parse_items_sets_department_labels_and_frames():
 
     assert items[0].production_label == "ORDER3  皮质首饰盒"
     assert items[0].show_frame is True
-    assert items[1].production_label == "ORDER4  皮质首饰盒  Black"
+    assert items[1].production_label == "ORDER4  皮质首饰盒  黑色"
     assert items[1].show_frame is False
 
 
@@ -176,6 +176,12 @@ def test_202508_renderer_accepts_compiled_fill_color_actions():
     assert "var showBoxes = layout.show_style_boxes === true;" in source
     assert "var drawFrame = !compactOutput && showBoxes;" in source
     assert "item.show_frame === true" not in source
+    assert "var outlineText = outputConfig.outline_text !== false;" in source
+    assert "if (!outlineText)" in source
+    assert "var pathfinderMerge = outputConfig.pathfinder_merge !== false;" in source
+    assert "if (outlineText)" in source
+    assert "outlineAllTextFrames(doc, pathfinderMerge);" in source
+    assert "function collectTextFrames(container, result)" in source
 
     node = shutil.which("node")
     if not node:

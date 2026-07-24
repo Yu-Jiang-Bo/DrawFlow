@@ -9,6 +9,7 @@
     if (!task.groups || task.groups.length === 0) throw new Error("No order groups");
     var outputConfig = task.output || {};
     var colorMode = outputColorMode(outputConfig.color_mode);
+    var outlineText = outputConfig.outline_text !== false;
     var pathfinderMerge = outputConfig.pathfinder_merge !== false;
     var cleanupStats = { attempted: 0, failed: 0 };
     var fontStyles = task.font_styles || {};
@@ -135,6 +136,10 @@
         }
     }
 
+    if (outlineText) {
+        writeProgress(task, renderedItems, taskItemCount(renderGroups), "正在转曲标注文字");
+        outlineAllTextFrames(doc, pathfinderMerge);
+    }
     writeDebug(task, debugPayload);
     var output = File(String(task.output_ai));
     ensureFolder(output.parent);
@@ -424,6 +429,13 @@
         var maxH = top - bottom;
         tf.textRange.characterAttributes.size = fitMaxFontSize(tf, maxW, maxH, minSize, maxSize);
         try { app.redraw(); } catch (e0) {}
+        if (!outlineText) {
+            fitTextToRect(tf, rect, minSize, maxSize);
+            if (rotationDeg) {
+                try { tf.rotate(rotationDeg, true, true, true, true, Transformation.CENTER); } catch (eTextRotate) {}
+            }
+            return tf;
+        }
         var outline = tf.createOutline();
         if (rotationDeg) {
             try { outline.rotate(rotationDeg, true, true, true, true, Transformation.CENTER); } catch (e1) {}
@@ -504,6 +516,30 @@
         } catch (e1) {
             cleanupStats.failed += 1;
             try { item.selected = false; } catch (e2) {}
+        }
+    }
+
+    function outlineAllTextFrames(doc, shouldCleanup) {
+        var frames = [];
+        for (var l = 0; l < doc.layers.length; l++) collectTextFrames(doc.layers[l], frames);
+        for (var i = frames.length - 1; i >= 0; i--) {
+            try {
+                var outline = frames[i].createOutline();
+                if (shouldCleanup) cleanupOutline(outline);
+            } catch (e1) {
+                cleanupStats.failed += 1;
+            }
+        }
+    }
+
+    function collectTextFrames(container, result) {
+        if (!container || !container.pageItems) return;
+        for (var i = 0; i < container.pageItems.length; i++) {
+            var item = container.pageItems[i];
+            if (item.typename === "TextFrame") result.push(item);
+            if (item.typename === "GroupItem" || item.typename === "Layer") {
+                collectTextFrames(item, result);
+            }
         }
     }
 

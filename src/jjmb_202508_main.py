@@ -35,6 +35,19 @@ COLOR_ALIASES = {
     "darkgreen": "Dark Green",
 }
 
+COLOR_DISPLAY_NAMES = {
+    "White": "白色",
+    "Black": "黑色",
+    "Rose Gold": "玫瑰金",
+    "Gold": "金色",
+    "Silver": "银色",
+    "Blue": "蓝色",
+    "Navy": "藏青色",
+    "Pink": "粉色",
+    "Red": "红色",
+    "Dark Green": "深绿色",
+}
+
 
 @dataclass(frozen=True)
 class ColorDesignOrderItem:
@@ -110,6 +123,11 @@ def normalize_color(value: str) -> str:
     return DEFAULT_COLOR
 
 
+def display_color_name(value: str) -> str:
+    color = normalize_color(value)
+    return COLOR_DISPLAY_NAMES.get(color, color)
+
+
 def is_h_department(value: str) -> bool:
     return (value or "").strip().upper() == TEXT_COLOR_DEPARTMENT
 
@@ -161,12 +179,13 @@ def build_production_label(
     color_option: str,
     rule: Dict[str, object] | None = None,
 ) -> str:
+    display_color = display_color_name(color_option)
     values = {
         "order_no": order_no,
         "department": department,
         "product_name": product_name,
         "text": text,
-        "color_option": color_option,
+        "color_option": display_color,
     }
     if rule and rule.get("label_fields"):
         return compact_label(*(values.get(str(field), "") for field in rule["label_fields"]))
@@ -176,10 +195,10 @@ def build_production_label(
     if "D" in code:
         return compact_label(order_no, product_name)
     if code in {"K", "T", "FK", "ZK"}:
-        return compact_label(order_no, color_option, text)
+        return compact_label(order_no, display_color, text)
     if code in {"PW", "EW"}:
-        return compact_label(order_no, product_name, color_option)
-    return compact_label(order_no, color_option, text)
+        return compact_label(order_no, product_name, display_color)
+    return compact_label(order_no, display_color, text)
 
 
 def build_production_label_lines(
@@ -195,7 +214,7 @@ def build_production_label_lines(
         "department": department,
         "product_name": product_name,
         "text": text,
-        "color_option": color_option,
+        "color_option": display_color_name(color_option),
     }
     label_lines = rule.get("label_lines") if rule else None
     if isinstance(label_lines, list) and label_lines:
@@ -297,6 +316,8 @@ def build_task(
     columns: int,
     show_style_boxes: bool,
     color_mode: str = "CMYK",
+    outline_text: bool = True,
+    pathfinder_merge: bool = True,
     font_styles: Mapping[str, Mapping[str, float]] | None = None,
     text_actions: List[List[List[Dict[str, Any]]]] | None = None,
 ) -> Dict[str, object]:
@@ -341,8 +362,8 @@ def build_task(
             "format": "ai",
             "compatibility": "Illustrator 8",
             "color_mode": _normalize_color_mode(color_mode),
-            "outline_text": True,
-            "pathfinder_merge": True,
+            "outline_text": bool(outline_text),
+            "pathfinder_merge": bool(pathfinder_merge),
         },
         "debug": {
             "report_path": str(output_ai.with_suffix(".debug.json")),

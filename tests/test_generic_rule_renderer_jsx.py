@@ -108,8 +108,13 @@ def test_generic_renderer_cycles_configured_name_colors_only():
     assert "options.compressed = true;" not in source
     assert "doc.pathItems.rectangle(height, 0, width, height)" not in source
     outline_body = source[source.index("if (transforms.outline_text)"):source.index("function applyOutputSettings")]
-    assert "findPageItemsByName" in outline_body
-    assert "outlineItems.length" in outline_body
+    assert "outlineAllTextFrames(doc, transforms.pathfinder_merge === true)" in outline_body
+    assert "findPageItemsByName" not in outline_body
+    assert "outlineItems.length" not in outline_body
+    assert "function outlineAllTextFrames(doc, pathfinderMerge)" in source
+    assert "function collectTextFrames(container, result)" in source
+    assert "function cleanupOutline(item)" in source
+    assert "pathfinder_merge: output.pathfinder_merge !== false" in source
     assert "JJMB" not in source
 
 
@@ -286,6 +291,9 @@ def test_grouped_renderer_applies_each_task_font_style_before_outlining():
     design_body = source[source.index("function renderDesignAssetItem"):source.index("function removeDiagnosticFrames")]
     instance_body = source[source.index("function duplicateDesignInstance"):source.index("function arrangeDesignInstances")]
     assert "applyFontBoldnessToTextFrames(copy, fontStyle);" in instance_body
+    assert "var outlineText = exportConfig.outline_text !== false;" in source
+    assert "if (!outlineText)" in source
+    assert "if (outlineText)" in design_body
     assert design_body.index("duplicateDesignInstance") < design_body.index("outlineTextFrames(copy);")
     assert "function applyFontBoldnessToTextFrames(root, style)" in source
     assert "var showStyleBoxes = layout.show_style_boxes === true;" in source

@@ -251,6 +251,8 @@ class ConfigGroupedSheetRenderTask:
     color_name: str = "black"
     columns: int = 4
     color_mode: str = "CMYK"
+    outline_text: bool = True
+    pathfinder_merge: bool = True
     font_styles: Dict[str, Dict[str, float]] = field(default_factory=dict)
 
     def to_json_dict(self) -> Dict[str, Any]:
@@ -287,7 +289,8 @@ class ConfigGroupedSheetRenderTask:
                 "format": "ai",
                 "compatibility": "Illustrator 8",
                 "color_mode": _normalize_color_mode(self.color_mode),
-                "outline_text": True,
+                "outline_text": bool(self.outline_text),
+                "pathfinder_merge": bool(self.pathfinder_merge),
             },
             "debug": {
                 "report_path": str(self.output_ai.with_suffix(".debug.json")),

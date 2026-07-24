@@ -8,120 +8,7 @@
   },
   "structure": {
     "scan_version": "42ec10bec44919a8",
-    "evidence": {
-      "document": {
-        "source_ai": "C:\\Users\\Administrator\\Desktop\\image\\custom-renderer\\templates\\JJMB202510241154389614\\template.ai",
-        "name": "template.ai",
-        "color_space": "DocumentColorSpace.CMYK",
-        "width_pt": 7050.66666666666,
-        "height_pt": 4544,
-        "source_role": "原始参考模板",
-        "size_bytes": 2415602,
-        "modified_ns": 1783927691892999600
-      },
-      "documents": [
-        {
-          "source_ai": "C:\\Users\\Administrator\\Desktop\\image\\custom-renderer\\templates\\JJMB202510241154389614\\template.ai",
-          "name": "template.ai",
-          "color_space": "DocumentColorSpace.CMYK",
-          "width_pt": 7050.66666666666,
-          "height_pt": 4544,
-          "source_role": "原始参考模板",
-          "size_bytes": 2415602,
-          "modified_ns": 1783927691892999600
-        }
-      ],
-      "source_files": [
-        {
-          "key": "primary",
-          "file_name": "template.ai",
-          "source_ai": "C:\\Users\\Administrator\\Desktop\\image\\custom-renderer\\templates\\JJMB202510241154389614\\template.ai",
-          "source_role": "原始参考模板",
-          "scan_ok": true,
-          "error": "",
-          "item_count": 34,
-          "layer_count": 1,
-          "scan_path": "C:\\Users\\Administrator\\Desktop\\image\\custom-renderer\\templates\\JJMB202510241154389614\\onboarding\\inspection\\35d45c9f348e4d2b9de6025553a36df3\\000-template-scan.json"
-        }
-      ],
-      "layer_count": 1,
-      "item_count": 34,
-      "type_counts": {
-        "RasterItem": 1,
-        "TextFrame": 28,
-        "PathItem": 4,
-        "GroupItem": 1
-      },
-      "named_items": [
-        {
-          "path": "图层 1/Font",
-          "type": "GroupItem",
-          "name": "Font"
-        },
-        {
-          "path": "图层 1/Font/F4",
-          "type": "TextFrame",
-          "name": "F4"
-        },
-        {
-          "path": "图层 1/Font/F9",
-          "type": "TextFrame",
-          "name": "F9"
-        },
-        {
-          "path": "图层 1/Font/F6",
-          "type": "TextFrame",
-          "name": "F6"
-        },
-        {
-          "path": "图层 1/Font/F3",
-          "type": "TextFrame",
-          "name": "F3"
-        },
-        {
-          "path": "图层 1/Font/F10",
-          "type": "TextFrame",
-          "name": "F10"
-        },
-        {
-          "path": "图层 1/Font/F2",
-          "type": "TextFrame",
-          "name": "F2"
-        },
-        {
-          "path": "图层 1/Font/F8",
-          "type": "TextFrame",
-          "name": "F8"
-        },
-        {
-          "path": "图层 1/Font/F7",
-          "type": "TextFrame",
-          "name": "F7"
-        },
-        {
-          "path": "图层 1/Font/F5",
-          "type": "TextFrame",
-          "name": "F5"
-        },
-        {
-          "path": "图层 1/Font/F1",
-          "type": "TextFrame",
-          "name": "F1"
-        },
-        {
-          "path": "图层 1/Font/F11",
-          "type": "TextFrame",
-          "name": "F11"
-        },
-        {
-          "path": "图层 1/Font/F12",
-          "type": "TextFrame",
-          "name": "F12"
-        }
-      ],
-      "scan_errors": [],
-      "fatal_error": ""
-    }
+    "evidence": {}
   },
   "rules": {
     "option_groups": [
@@ -267,14 +154,24 @@
         "fill_box_exactly": true
       },
       "default": {
-        "group_by": ["row"],
-        "header_fields": ["order_no"],
+        "group_by": [
+          "row"
+        ],
+        "header_fields": [
+          "order_no"
+        ],
         "footer_field": "year"
       },
       "department_overrides": {
         "T": {
-          "group_by": ["order_no", "color"],
-          "header_fields": ["order_no", "color"]
+          "group_by": [
+            "order_no",
+            "color"
+          ],
+          "header_fields": [
+            "order_no",
+            "color"
+          ]
         }
       }
     },
@@ -304,7 +201,7 @@
     },
     "font_style_rules": [],
     "option_overrides": {},
-    "special_rules_text": "Name列按 | 分隔，奇数位渲染为红色，偶数位渲染为白色，F2,F3,F10,F11,F12使用0.4pt描边加粗，F5,F6,F7,F8,F9按照0.5描边加粗",
+    "special_rules_text": "Name 列按 | 分隔，奇数位渲染为红色，偶数位渲染为白色；F2,F3,F10,F11,F12 使用 0.4pt 描边加粗；F5,F6,F7,F8,F9 按照 0.5pt 描边加粗。",
     "rule_ast": {
       "$schema": "custom-renderer/template-rule-ast",
       "version": 1,
@@ -400,7 +297,9 @@
     "notes": {},
     "transforms": {},
     "output": {
-      "color_mode": "CMYK"
+      "color_mode": "CMYK",
+      "outline_text": true,
+      "pathfinder_merge": false
     },
     "exceptions": {
       "status": "none"
@@ -427,47 +326,7 @@
   },
   "audit": {
     "source_format": "ai_scan_draft",
-    "source_ai": "C:\\Users\\Administrator\\Desktop\\image\\custom-renderer\\templates\\JJMB202510241154389614\\template.ai",
-    "field_sources": {
-      "rules.font_options": {
-        "source": "ai_scan",
-        "evidence_fields": [
-          "name"
-        ],
-        "suggestion": [
-          "F1",
-          "F2",
-          "F3",
-          "F4",
-          "F5",
-          "F6",
-          "F7",
-          "F8",
-          "F9",
-          "F10",
-          "F11",
-          "F12"
-        ],
-        "modified": false
-      }
-    },
-    "untrusted_suggestions": {
-      "font_options": [
-        "F1",
-        "F2",
-        "F3",
-        "F4",
-        "F5",
-        "F6",
-        "F7",
-        "F8",
-        "F9",
-        "F10",
-        "F11",
-        "F12"
-      ]
-    },
     "confirmed_at": "2026-07-15T02:35:10.792455+00:00",
-    "change_summary": ""
+    "change_summary": "开启文字转曲，关闭文字去重。"
   }
 }

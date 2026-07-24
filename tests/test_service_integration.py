@@ -185,10 +185,32 @@ def test_service_dry_run_creates_job_and_render_task(tmp_path):
     task_path = Path(record["outputs"]["render_task"])
     assert task_path.exists()
     task = json.loads(task_path.read_text(encoding="utf-8"))
-    assert task["groups"][0]["items"][0]["production_label_lines"] == ["ORDER1", "Gold"]
+    assert task["groups"][0]["items"][0]["production_label_lines"] == ["ORDER1", "金色"]
     assert task["output"]["color_mode"] == "CMYK"
     assert task["output"]["outline_text"] is True
     assert task["output"]["pathfinder_merge"] is True
+
+
+def test_service_dry_run_uses_template_text_output_flags(tmp_path):
+    config_path = tmp_path / "templates.json"
+    order_path = tmp_path / "orders.xlsx"
+    write_templates_config(config_path)
+    write_order_xlsx(order_path)
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    config["templates"][0]["outline_text"] = True
+    config["templates"][0]["pathfinder_merge"] = False
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+
+    record = RenderService(
+        registry=TemplateRegistry(config_path),
+        jobs=JobStore(tmp_path / "jobs"),
+    ).submit(
+        {"template_id": "JJMB202508261001394920", "order_file": str(order_path), "dry_run": True}
+    )
+
+    task = json.loads(Path(record["outputs"]["render_task"]).read_text(encoding="utf-8"))
+    assert task["output"]["outline_text"] is True
+    assert task["output"]["pathfinder_merge"] is False
 
 
 def test_202508_task_receives_every_configured_font_boldness_mapping(tmp_path):
@@ -768,6 +790,48 @@ def test_confirmed_pack_is_published_to_runtime_config_and_activates(tmp_path):
     assert template.status == "active"
     assert template.template_rules_config
     assert json.loads(template.template_rules_config.read_text(encoding="utf-8")) == pack
+
+
+def test_template_registry_persists_template_text_output_flags(tmp_path):
+    registry = TemplateRegistry(tmp_path / "templates.json", tmp_path / "templates")
+
+    template = registry.upsert_template(
+        {
+            "template_id": "DEMO001",
+            "name": "Demo",
+            "template_type": "pure_text",
+            "outline_text": False,
+            "pathfinder_merge": False,
+        }
+    )
+
+    reloaded = TemplateRegistry(tmp_path / "templates.json", tmp_path / "templates").get_template("DEMO001")
+    assert template.outline_text is False
+    assert template.pathfinder_merge is False
+    assert reloaded.to_json_dict()["outline_text"] is False
+    assert reloaded.to_json_dict()["pathfinder_merge"] is False
+
+
+def test_confirmed_pack_updates_template_text_output_flags(tmp_path):
+    registry = TemplateRegistry(tmp_path / "templates.json", tmp_path / "templates")
+    registry.upsert_template(
+        {
+            "template_id": "DEMO001",
+            "name": "Demo",
+            "template_type": "pure_text",
+            "outline_text": False,
+            "pathfinder_merge": True,
+        }
+    )
+    pack = {
+        "template": {"template_id": "DEMO001"},
+        "rules": {"output": {"outline_text": True, "pathfinder_merge": False}},
+    }
+
+    template = registry.apply_confirmed_rule_pack("DEMO001", pack, activate=False)
+
+    assert template.outline_text is True
+    assert template.pathfinder_merge is False
 
 
 def test_destructive_template_action_requires_exact_id_confirmation():

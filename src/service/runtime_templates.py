@@ -146,6 +146,8 @@ class RuntimeTemplateService:
                 "pipeline": template.pipeline,
                 "default_columns": template.default_columns,
                 "default_hide_boxes": template.default_hide_boxes,
+                "outline_text": template.outline_text,
+                "pathfinder_merge": template.pathfinder_merge,
             },
             "required_fonts": required_fonts_from_rules(rules),
             "template_config": "template.config.json" if (output_dir / "template.config.json").exists() else "",

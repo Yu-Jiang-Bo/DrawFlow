@@ -1259,6 +1259,8 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
             "template_ai_role": template_ai_role,
             "default_columns": fields.get("default_columns", existing.default_columns if existing else 4),
             "default_hide_boxes": fields.get("default_hide_boxes", existing.default_hide_boxes if existing else True),
+            "outline_text": fields.get("outline_text", existing.outline_text if existing else True),
+            "pathfinder_merge": fields.get("pathfinder_merge", existing.pathfinder_merge if existing else True),
             "assets": assets,
         }
         if template_config:
