@@ -3700,6 +3700,8 @@ INDEX_HTML = """<!doctype html>
     function completeProgress(success) {
       clearInterval(progressTimer);
       progressTimer = null;
+      clearInterval(progressPollTimer);
+      progressPollTimer = null;
       updateRenderProgress(success ? 100 : progressValue, success ? "处理完成" : "处理失败");
       if (success) {
         setTimeout(hideRenderProgress, 550);
@@ -3711,6 +3713,8 @@ INDEX_HTML = """<!doctype html>
     function failProgress() {
       clearInterval(progressTimer);
       progressTimer = null;
+      clearInterval(progressPollTimer);
+      progressPollTimer = null;
       updateRenderProgress(progressValue || 100, "处理失败");
       setTimeout(hideRenderProgress, 900);
     }
@@ -3801,9 +3805,7 @@ INDEX_HTML = """<!doctype html>
     }
 
     function renderTaskResult(result) {
-      if (result.status === "completed" && result.outputs && result.outputs.output_ai) {
-        window.location.href = `/local/jobs/${encodeURIComponent(result.job_id)}/output`;
-      } else if (result.status === "completed" && result.outputs && result.outputs.render_task) {
+      if (result.status === "completed" && result.outputs && (result.outputs.primary_output || result.outputs.output_ai)) {
         window.location.href = `/local/jobs/${encodeURIComponent(result.job_id)}/output`;
       } else if (result.status === "failed") {
         showRenderError(result.error || "渲染失败");
@@ -3826,10 +3828,10 @@ INDEX_HTML = """<!doctype html>
       target.innerHTML = state.jobs.map(job => {
         const request = job.request || {};
         const stats = job.stats || {};
-        const hasOutput = job.status === "completed" && job.outputs && job.outputs.output_ai;
+        const hasOutput = job.status === "completed" && job.outputs && (job.outputs.primary_output || job.outputs.output_ai);
         const hasRenderTask = job.status === "completed" && job.outputs && job.outputs.render_task;
         const link = hasOutput
-          ? `<a class="download-link" href="/api/jobs/${encodeURIComponent(job.job_id)}/download/output_ai">下载 AI</a>`
+          ? `<a class="download-link" href="/api/jobs/${encodeURIComponent(job.job_id)}/download/${job.outputs.primary_output ? "primary_output" : "output_ai"}">${escapeHtml(deliveryDownloadLabel(job.outputs))}</a>`
           : (hasRenderTask ? `<a class="download-link" href="/api/jobs/${encodeURIComponent(job.job_id)}/download/render_task">下载解析 JSON</a>` : "-");
         return `
           <tr>
@@ -3842,6 +3844,13 @@ INDEX_HTML = """<!doctype html>
           </tr>
         `;
       }).join("");
+    }
+
+    function deliveryDownloadLabel(outputs) {
+      const path = String((outputs || {}).primary_output || (outputs || {}).output_ai || "").toLowerCase();
+      if (path.endsWith(".zip")) return "下载全部成品 ZIP";
+      if (path.endsWith(".png")) return "下载 PNG 成品";
+      return "下载 AI 成品";
     }
 
     function renderRuleCategories() {

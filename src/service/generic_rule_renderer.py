@@ -43,6 +43,15 @@ IMPLICIT_ORDER_BINDINGS = {
     "department": ("department", "production department", "\u751f\u4ea7\u90e8\u95e8", "\u90e8\u95e8"),
     "quantity": ("quantity", "qty", "\u8d2d\u4e70\u6570\u91cf", "\u6570\u91cf"),
     "year": ("year", "\u5e74\u4efd"),
+    "manufacturer": (
+        "manufacturer",
+        "factory",
+        "supplier",
+        "\u5382\u5bb6",
+        "\u5382\u5546",
+        "\u751f\u4ea7\u5382\u5bb6",
+        "\u4f9b\u5e94\u5546",
+    ),
     "text": (
         "text",
         "name",

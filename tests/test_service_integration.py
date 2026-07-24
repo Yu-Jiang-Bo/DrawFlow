@@ -90,7 +90,13 @@ def test_http_render_releases_lock_after_failure():
     FailingHandler.render_lock.release()
 
 
-def write_order_xlsx(path: Path, *, template_id: str = "JJMB202508261001394920") -> None:
+def write_order_xlsx(
+    path: Path,
+    *,
+    template_id: str = "JJMB202508261001394920",
+    department: str = "",
+    manufacturer: str = "",
+) -> None:
     workbook = Workbook()
     sheet = workbook.active
     sheet.append(
@@ -109,6 +115,7 @@ def write_order_xlsx(path: Path, *, template_id: str = "JJMB202508261001394920")
             "定制信息",
             "字体颜色",
             "设计",
+            "厂家",
         ]
     )
     sheet.append(
@@ -119,7 +126,7 @@ def write_order_xlsx(path: Path, *, template_id: str = "JJMB202508261001394920")
             "SKU1",
             "平纹方形皮质首饰盒",
             "1",
-            "K",
+            department,
             template_id,
             "DETAIL1",
             "SPU1",
@@ -127,6 +134,7 @@ def write_order_xlsx(path: Path, *, template_id: str = "JJMB202508261001394920")
             "Meg",
             "Gold",
             "Design 3",
+            manufacturer,
         ]
     )
     workbook.save(path)
@@ -182,13 +190,186 @@ def test_service_dry_run_creates_job_and_render_task(tmp_path):
     assert record["stats"]["groups"] == 1
     assert record["stats"]["items"] == 1
     assert record["stats"]["dry_run"] is True
+    assert "primary_output" not in record["outputs"]
+    assert "delivery_plan" in record["outputs"]
     task_path = Path(record["outputs"]["render_task"])
     assert task_path.exists()
+    assert json.loads(task_path.read_text(encoding="utf-8"))["type"] == "jjmb_202508_batch"
+    task_path = Path(record["outputs"]["render_task_files"][0])
     task = json.loads(task_path.read_text(encoding="utf-8"))
     assert task["groups"][0]["items"][0]["production_label_lines"] == ["ORDER1", "金色"]
     assert task["output"]["color_mode"] == "CMYK"
     assert task["output"]["outline_text"] is True
     assert task["output"]["pathfinder_merge"] is True
+
+
+def test_service_routes_h_to_one_fixed_master_png(tmp_path):
+    config_path = tmp_path / "templates.json"
+    order_path = tmp_path / "orders.xlsx"
+    write_templates_config(config_path)
+    write_order_xlsx(order_path, department="H")
+
+    record = RenderService(
+        registry=TemplateRegistry(config_path),
+        jobs=JobStore(tmp_path / "jobs"),
+    ).submit(
+        {"template_id": "JJMB202508261001394920", "order_file": str(order_path), "dry_run": True}
+    )
+
+    assert record["status"] == "completed", record.get("error")
+    assert "primary_output" not in record["outputs"]
+    assert record["outputs"]["delivery_plan"][0]["path"].endswith("-H-580x2000mm.png")
+    task = json.loads(Path(record["outputs"]["render_task_files"][0]).read_text(encoding="utf-8"))
+    assert task["output"]["format"] == "png"
+    assert task["output"]["fixed_canvas_mm"] == {"width_mm": 580.0, "height_mm": 2000.0}
+    assert task["output"]["dpi"] == 300
+
+
+def test_service_dry_run_uses_template_text_output_flags(tmp_path):
+    config_path = tmp_path / "templates.json"
+    order_path = tmp_path / "orders.xlsx"
+    write_templates_config(config_path)
+    write_order_xlsx(order_path)
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    config["templates"][0]["outline_text"] = True
+    config["templates"][0]["pathfinder_merge"] = False
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+
+    record = RenderService(
+        registry=TemplateRegistry(config_path),
+        jobs=JobStore(tmp_path / "jobs"),
+    ).submit(
+        {"template_id": "JJMB202508261001394920", "order_file": str(order_path), "dry_run": True}
+    )
+
+    task = json.loads(Path(record["outputs"]["render_task_files"][0]).read_text(encoding="utf-8"))
+    assert task["output"]["outline_text"] is True
+    assert task["output"]["pathfinder_merge"] is False
+
+
+def test_service_routes_t_to_one_ai_with_color_frame_artboards(tmp_path):
+    config_path = tmp_path / "templates.json"
+    order_path = tmp_path / "orders.xlsx"
+    write_templates_config(config_path)
+    write_order_xlsx(order_path, department="T")
+    workbook = load_workbook(order_path)
+    sheet = workbook.active
+    second = [cell.value for cell in sheet[2]]
+    second[2] = "ORDER2"
+    second[8] = "DETAIL2"
+    second[11] = "Beth"
+    second[12] = "Silver"
+    sheet.append(second)
+    workbook.save(order_path)
+
+    record = RenderService(
+        registry=TemplateRegistry(config_path),
+        jobs=JobStore(tmp_path / "jobs"),
+    ).submit(
+        {"template_id": "JJMB202508261001394920", "order_file": str(order_path), "dry_run": True}
+    )
+
+    assert record["status"] == "completed", record.get("error")
+    assert record["outputs"]["delivery_plan"][0]["path"].endswith("-T.ai")
+    master_task = json.loads(Path(record["outputs"]["render_task"]).read_text(encoding="utf-8"))
+    component_task_path = next(
+        Path(task_path)
+        for task_path in record["outputs"]["render_task_files"]
+        if "-color-" in Path(task_path).name
+    )
+    compose_task_path = next(
+        Path(task_path)
+        for task_path in record["outputs"]["render_task_files"]
+        if "compose-color-frames" in Path(task_path).name
+    )
+    component_task = json.loads(component_task_path.read_text(encoding="utf-8"))
+    compose_task = json.loads(compose_task_path.read_text(encoding="utf-8"))
+    assert master_task["type"] == "jjmb_202508_batch"
+    assert len(master_task["tasks"]) == len(record["outputs"]["render_task_files"])
+    assert [item["name"] for item in record["outputs"]["single_order_files"]] == ["ORDER1.ai", "ORDER2.ai"]
+    assert [item["arcname"] for item in record["outputs"]["bundle_plan"][:2]] == [
+        "single-orders/ORDER1.ai",
+        "single-orders/ORDER2.ai",
+    ]
+    assert component_task["output"]["compatibility"] == "Illustrator 8"
+    assert component_task["output"]["fixed_canvas_mm"] == {"width_mm": 580.0, "height_mm": 2000.0}
+    assert compose_task["type"] == "compose_color_frames"
+    assert [frame["color_option"] for frame in compose_task["inputs"]] == ["Gold", "Silver"]
+
+
+def test_non_202508_pipeline_rejects_department_controlled_order(tmp_path):
+    config_path = tmp_path / "templates.json"
+    order_path = tmp_path / "orders.xlsx"
+    write_templates_config(config_path)
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    structure_path = tmp_path / "template.config.json"
+    structure_path.write_text(
+        json.dumps({"font_options": {"F7": {}}, "slots": [{"name": "text_fit_box"}]}),
+        encoding="utf-8",
+    )
+    config["templates"][0].update(
+        {
+            "pipeline": "jjmb_202603_grouped",
+            "template_type": "pure_text",
+            "template_config": str(structure_path),
+        }
+    )
+    config_path.write_text(json.dumps(config, ensure_ascii=False), encoding="utf-8")
+    write_order_xlsx(order_path, department="H")
+
+    record = RenderService(
+        registry=TemplateRegistry(config_path),
+        jobs=JobStore(tmp_path / "jobs"),
+    ).submit(
+        {"template_id": "JJMB202508261001394920", "order_file": str(order_path), "dry_run": True}
+    )
+
+    assert record["status"] == "failed"
+    assert record["error_code"] == "department_output_pipeline_unsupported"
+
+
+def test_service_routes_w_manufacturers_to_cs5_and_no_label_pngs(tmp_path):
+    config_path = tmp_path / "templates.json"
+    order_path = tmp_path / "orders.xlsx"
+    write_templates_config(config_path)
+    write_order_xlsx(order_path, department="W", manufacturer="MY-W196")
+
+    cs5_record = RenderService(
+        registry=TemplateRegistry(config_path),
+        jobs=JobStore(tmp_path / "jobs-cs5"),
+    ).submit(
+        {"template_id": "JJMB202508261001394920", "order_file": str(order_path), "dry_run": True}
+    )
+    cs5_task = json.loads(Path(cs5_record["outputs"]["render_task_files"][0]).read_text(encoding="utf-8"))
+    assert cs5_task["output"]["format"] == "ai"
+    assert cs5_task["output"]["compatibility"] == "CS5"
+    assert cs5_task["groups"][0]["items"][0]["apply_color_to_artwork"] is True
+    assert cs5_task["groups"][0]["items"][0]["production_label_lines"] == ["ORDER1"]
+    assert cs5_record["outputs"]["delivery_plan"][0]["path"].endswith("-W-MY-W196.ai")
+
+    workbook = load_workbook(order_path)
+    sheet = workbook.active
+    sheet["C2"] = "W-120-001"
+    sheet["O2"] = "MY-W120"
+    second = [cell.value for cell in sheet[2]]
+    second[2] = "W-120-002"
+    second[8] = "DETAIL2"
+    second[11] = "Amy"
+    sheet.append(second)
+    workbook.save(order_path)
+
+    png_record = RenderService(
+        registry=TemplateRegistry(config_path),
+        jobs=JobStore(tmp_path / "jobs-png"),
+    ).submit(
+        {"template_id": "JJMB202508261001394920", "order_file": str(order_path), "dry_run": True}
+    )
+    assert "output_bundle" not in png_record["outputs"]
+    assert [item["name"] for item in png_record["outputs"]["delivery_plan"]] == ["W-120-001.png", "W-120-002.png"]
+    for task_path in png_record["outputs"]["render_task_files"]:
+        task = json.loads(Path(task_path).read_text(encoding="utf-8"))
+        assert task["output"]["format"] == "png"
+        assert task["layout"]["suppress_labels"] is True
 
 
 def test_202508_task_receives_every_configured_font_boldness_mapping(tmp_path):
@@ -219,7 +400,7 @@ def test_202508_task_receives_every_configured_font_boldness_mapping(tmp_path):
         {"template_id": "JJMB202508261001394920", "order_file": str(order_path), "dry_run": True}
     )
 
-    task = json.loads(Path(record["outputs"]["render_task"]).read_text(encoding="utf-8"))
+    task = json.loads(Path(record["outputs"]["render_task_files"][0]).read_text(encoding="utf-8"))
     assert task["font_styles"] == {
         "F2": {"boldness": 0.4},
         "F3": {"boldness": 0.4},
@@ -264,7 +445,7 @@ def test_202508_task_receives_compiled_segment_color_actions(tmp_path):
         {"template_id": "JJMB202508261001394920", "order_file": str(order_path), "dry_run": True}
     )
 
-    task = json.loads(Path(record["outputs"]["render_task"]).read_text(encoding="utf-8"))
+    task = json.loads(Path(record["outputs"]["render_task_files"][0]).read_text(encoding="utf-8"))
     assert len(task["groups"]) == 1
     assert len(task["groups"][0]["items"]) == 1
     assert task["groups"][0]["items"][0]["text"] == "Alice|Bob|Cara"
@@ -770,6 +951,48 @@ def test_confirmed_pack_is_published_to_runtime_config_and_activates(tmp_path):
     assert json.loads(template.template_rules_config.read_text(encoding="utf-8")) == pack
 
 
+def test_template_registry_persists_template_text_output_flags(tmp_path):
+    registry = TemplateRegistry(tmp_path / "templates.json", tmp_path / "templates")
+
+    template = registry.upsert_template(
+        {
+            "template_id": "DEMO001",
+            "name": "Demo",
+            "template_type": "pure_text",
+            "outline_text": False,
+            "pathfinder_merge": False,
+        }
+    )
+
+    reloaded = TemplateRegistry(tmp_path / "templates.json", tmp_path / "templates").get_template("DEMO001")
+    assert template.outline_text is False
+    assert template.pathfinder_merge is False
+    assert reloaded.to_json_dict()["outline_text"] is False
+    assert reloaded.to_json_dict()["pathfinder_merge"] is False
+
+
+def test_confirmed_pack_updates_template_text_output_flags(tmp_path):
+    registry = TemplateRegistry(tmp_path / "templates.json", tmp_path / "templates")
+    registry.upsert_template(
+        {
+            "template_id": "DEMO001",
+            "name": "Demo",
+            "template_type": "pure_text",
+            "outline_text": False,
+            "pathfinder_merge": True,
+        }
+    )
+    pack = {
+        "template": {"template_id": "DEMO001"},
+        "rules": {"output": {"outline_text": True, "pathfinder_merge": False}},
+    }
+
+    template = registry.apply_confirmed_rule_pack("DEMO001", pack, activate=False)
+
+    assert template.outline_text is True
+    assert template.pathfinder_merge is False
+
+
 def test_destructive_template_action_requires_exact_id_confirmation():
     with pytest.raises(ValueError, match="template ID"):
         RenderRequestHandler._require_template_confirmation("DEMO001", {"confirmation": "wrong"})
@@ -987,7 +1210,7 @@ def test_service_never_enables_diagnostic_boxes_from_request_flags(tmp_path):
     )
 
     assert record["status"] == "completed"
-    task_path = Path(record["outputs"]["render_task"])
+    task_path = Path(record["outputs"]["render_task_files"][0])
     task = json.loads(task_path.read_text(encoding="utf-8"))
     assert task["layout"]["show_style_boxes"] is False
 

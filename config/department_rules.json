@@ -9,7 +9,7 @@
   "shop_rules": {
     "source_file": "test/ai测试/部门作图要求和细节.xls",
     "interpretation": "表格中的“定制信息”指系统生成的实际效果图/作图内容，不是订单表里的原始定制文字。",
-    "current_render_policy": "当前渲染仍只输出订单号、颜色标注和实际效果图；暂不按本节规则执行最终部门排版。",
+    "current_render_policy": "本机渲染按本节执行最终部门排版和成品格式；中央服务不保存成品。H 仅交付一张总 PNG，W 仅对 MY-W196 与 MY-W120 使用厂家例外。",
     "global_requirements": {
       "default_output_color_mode": "CMYK",
       "allowed_output_color_modes": ["CMYK", "RGB"],
@@ -90,12 +90,13 @@
       {
         "name": "H",
         "departments": ["H"],
-        "output_format": "png",
+        "output_format": "png_master",
         "artwork_content": "订单号 + 效果图；字体颜色填充到名字本身",
-        "save_strategy": "先按图逐单保存，图命名为订单号；多图命名为订单号-1、订单号-2",
+        "save_strategy": "同一次订单表只保存一张总 PNG，不输出单图 PNG、AI 或 CDR",
         "layout": {
           "frame_width_mm": 580,
           "frame_height_mm": 2000,
+          "dpi": 300,
           "color_mode": "CMYK",
           "keep_same_order_together": true
         }
@@ -115,14 +116,14 @@
           },
           {
             "manufacturer": "MY-W120",
-            "output_format": "png",
+            "output_format": "png_per_item",
             "artwork_content": "按图输出，图上不加订单号",
-            "file_naming": "订单号"
+            "file_naming": "订单号；同一订单多图使用安全后缀"
           },
           {
             "manufacturer": "other",
-            "output_format": "ai_or_png_or_jpg",
-            "note": "大多数保存为整体 AI 文件，个别厂家为 PNG/JPG"
+            "output_format": "ai8",
+            "save_strategy": "所有其他 W 厂家均保存为整体 AI8 文件"
           }
         ]
       }
@@ -132,11 +133,11 @@
     {
       "name": "H",
       "display_name": "H 部门",
-      "description": "标注订单号和定制信息，不带框；效果图本体按订单字体颜色渲染。",
+      "description": "标注订单号，不带框；效果图本体按订单字体颜色渲染。",
       "match": "exact",
       "departments": ["H"],
-      "label_fields": ["order_no", "text"],
-      "label_lines": [["order_no"], ["text"]],
+      "label_fields": ["order_no"],
+      "label_lines": [["order_no"]],
       "apply_color_to_artwork": true,
       "show_frame": false
     },
