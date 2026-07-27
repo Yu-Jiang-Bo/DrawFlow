@@ -27,19 +27,46 @@
 
         var source = app.open(File(String(input.path)));
         var sourceArtboard = source.artboards[0].artboardRect;
+        var copies = [];
+        var sourceItems = [];
         for (var sourceLayerIndex = 0; sourceLayerIndex < source.layers.length; sourceLayerIndex++) {
             var sourceLayer = source.layers[sourceLayerIndex];
             for (var itemIndex = sourceLayer.pageItems.length - 1; itemIndex >= 0; itemIndex--) {
                 var sourceItem = sourceLayer.pageItems[itemIndex];
-                // Document.pageItems is recursive. Copy only direct order groups so
-                // their children are not duplicated as flattened artwork.
                 if (sourceItem.parent !== sourceLayer) continue;
+                // Document.pageItems is recursive. Copy only direct order
+                // groups so their children are not duplicated as artwork.
+                sourceItems.push(sourceItem);
                 var copy = sourceItem.duplicate(layer, ElementPlacement.PLACEATEND);
-                copy.translate(frameLeft - sourceArtboard[0], height - sourceArtboard[1]);
+                copies.push(copy);
             }
         }
+        var sourceContentBounds = combinedVisibleBounds(sourceItems);
         source.close(SaveOptions.DONOTSAVECHANGES);
-        drawLabel(layer, String(input.color_option || "Unspecified"), frameLeft - gutter, height, frameLeft - mmToPt(2), height - mmToPt(14));
+
+        var copiedBounds = combinedVisibleBounds(copies);
+        // A valid component keeps its artwork inside the source artboard. Some
+        // AI8 components instead retain artwork at document origin while the
+        // artboard has a negative x offset; use document origin in that case.
+        var artworkInsideArtboard = (
+            sourceContentBounds[0] >= sourceArtboard[0] &&
+            sourceContentBounds[2] <= sourceArtboard[2]
+        );
+        var sourceLeft = artworkInsideArtboard ? sourceArtboard[0] : 0;
+        var sourceLeftInset = sourceContentBounds[0] - sourceLeft;
+        var sourceTopInset = sourceArtboard[1] - sourceContentBounds[1];
+        var destinationLeft = frameLeft + sourceLeftInset;
+        var destinationTop = height - sourceTopInset;
+        // Illustrator can add a document-origin offset while copying across
+        // files. Normalize from the copied bounds rather than assuming the
+        // copied coordinates equal the source coordinates.
+        var deltaX = destinationLeft - copiedBounds[0];
+        var deltaY = destinationTop - copiedBounds[1];
+        for (var copyIndex = 0; copyIndex < copies.length; copyIndex++) {
+            copies[copyIndex].translate(deltaX, deltaY);
+        }
+
+        drawLabel(layer, String(input.color_option || "Unspecified"), destinationLeft, height);
     }
 
     var output = File(String(task.output_ai));
@@ -53,11 +80,28 @@
     doc.close(SaveOptions.DONOTSAVECHANGES);
     return output.fsName;
 
-    function drawLabel(layer, text, left, top, right, bottom) {
+    function drawLabel(layer, text, left, top) {
         var frame = layer.textFrames.add();
         frame.contents = text;
         frame.textRange.characterAttributes.size = 12;
         frame.position = [left, top - mmToPt(4)];
+        return frame;
+    }
+    function combinedVisibleBounds(items) {
+        if (!items || items.length === 0) throw new Error("Color component has no artwork");
+        var first = items[0].visibleBounds;
+        var left = first[0];
+        var top = first[1];
+        var right = first[2];
+        var bottom = first[3];
+        for (var itemIndex = 1; itemIndex < items.length; itemIndex++) {
+            var bounds = items[itemIndex].visibleBounds;
+            left = Math.min(left, bounds[0]);
+            top = Math.max(top, bounds[1]);
+            right = Math.max(right, bounds[2]);
+            bottom = Math.min(bottom, bounds[3]);
+        }
+        return [left, top, right, bottom];
     }
     function mmToPt(mm) { return Number(mm || 0) * 72 / 25.4; }
     function readJSON(path) {
