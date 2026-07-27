@@ -41,6 +41,19 @@ def test_shared_planner_partitions_by_department_rule_and_color():
     assert batches[1].rule.has_master is False
 
 
+def test_shared_planner_groups_equivalent_color_aliases_under_one_chinese_header():
+    frames = color_frames(
+        [
+            make_unit(order_no="GOLD-EN", department="K", color="Gold"),
+            make_unit(order_no="GOLD-ZH", department="K", color="金色", detail_id="2"),
+        ]
+    )
+
+    assert len(frames) == 1
+    assert frames[0].color_option == "金色"
+    assert [unit.order_no for unit in frames[0].units] == ["GOLD-EN", "GOLD-ZH"]
+
+
 def test_shared_planner_uses_parenthesized_names_for_duplicate_order_artwork(tmp_path):
     outputs = single_order_outputs(
         [

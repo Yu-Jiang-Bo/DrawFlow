@@ -235,8 +235,19 @@ class RenderService:
             rule: DepartmentOutputRule,
             fixed_canvas: Mapping[str, float] | None,
             progress: Mapping[str, Any],
+            color_summary: bool = False,
         ) -> Dict[str, Any]:
             native_items = [unit.payload for unit in units]
+            if color_summary:
+                native_items = [
+                    replace(
+                        item,
+                        show_color_label=False,
+                        production_label=str(item.order_no or ""),
+                        production_label_lines=[str(item.order_no or "")],
+                    )
+                    for item in native_items
+                ]
             native_groups = group_202508_items(native_items)
             return build_202508_task(
                 template_config=template_config,
@@ -363,6 +374,7 @@ class RenderService:
                         columns=request["columns"],
                         rule=rule,
                         fixed_canvas=canvas,
+                        color_summary=True,
                         progress=self._task_progress(
                             record,
                             rendered_items + summary_item_count,
@@ -570,13 +582,20 @@ class RenderService:
                 rule: DepartmentOutputRule,
                 fixed_canvas: Mapping[str, float] | None,
                 progress: Mapping[str, Any],
+                color_summary: bool = False,
             ) -> Dict[str, Any]:
                 if output_png is not None:
                     raise RenderServiceError("曲线标题模板不支持 PNG 部门交付", code="department_output_pipeline_unsupported")
+                rendered_groups = [unit.payload for unit in units]
+                if color_summary:
+                    rendered_groups = [
+                        replace(group, production_label_lines=(str(group.order_no or ""),))
+                        for group in rendered_groups
+                    ]
                 return build_202509_curved_task(
                     font_report=font_report,
                     output_ai=output_ai,
-                    groups=[unit.payload for unit in units],
+                    groups=rendered_groups,
                     columns=columns,
                     layout_overrides=curved_layout_overrides(template_rules),
                     title_template_ai=title_template_ai,

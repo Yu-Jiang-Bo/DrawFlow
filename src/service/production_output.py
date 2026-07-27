@@ -145,9 +145,10 @@ def color_frames(units: Iterable[ProductionOutputUnit]) -> list[ColorFrame]:
     labels: dict[str, str] = {}
     for unit in units:
         raw_label = unit.color_option.strip() or "Unspecified"
-        key = raw_label.casefold()
+        canonical_label = translate_color_to_chinese(raw_label) or raw_label
+        key = canonical_label.casefold()
         buckets.setdefault(key, []).append(unit)
-        labels.setdefault(key, translate_color_to_chinese(raw_label) or raw_label)
+        labels.setdefault(key, canonical_label)
     return [ColorFrame(color_option=labels[key], units=tuple(bucket)) for key, bucket in buckets.items()]
 
 

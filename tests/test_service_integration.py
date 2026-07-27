@@ -368,6 +368,7 @@ def test_service_routes_t_to_one_ai_with_color_frame_artboards(tmp_path):
     ]
     assert component_task["output"]["compatibility"] == "Illustrator 8"
     assert component_task["output"]["fixed_canvas_mm"] == {"width_mm": 580.0, "height_mm": 2000.0}
+    assert component_task["groups"][0]["items"][0]["production_label_lines"] == ["ORDER1"]
     assert compose_task["type"] == "compose_color_frames"
     assert [frame["color_option"] for frame in compose_task["inputs"]] == ["金色", "银色"]
 
@@ -412,7 +413,7 @@ def test_curved_template_reuses_shared_department_output_pipeline(tmp_path):
     color_task = json.loads(color_task_path.read_text(encoding="utf-8"))
     d_task = json.loads(d_task_path.read_text(encoding="utf-8"))
     assert color_task["output"]["fixed_canvas_mm"] == {"width_mm": 580.0, "height_mm": 2000.0}
-    assert color_task["groups"][0]["production_label_lines"] == ["CURVED-T", "红色"]
+    assert color_task["groups"][0]["production_label_lines"] == ["CURVED-T"]
     assert d_task["groups"][0]["production_label_lines"] == ["CURVED-D", "圣诞曲线标题挂件"]
 
 
