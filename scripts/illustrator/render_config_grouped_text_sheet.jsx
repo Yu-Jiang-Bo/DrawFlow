@@ -17,7 +17,7 @@
     var totalItems = totalTaskItems(task.groups);
 
     try { app.userInteractionLevel = UserInteractionLevel.DONTDISPLAYALERTS; } catch (e) {}
-    writeProgress(task, renderedItems, totalItems, "姝ｅ湪娓叉煋鏉＄洰");
+    writeProgress(task, renderedItems, totalItems, "正在渲染条目");
 
     var layout = task.layout || {};
     var columns = Math.max(Number(layout.columns || 4), 1);
@@ -113,12 +113,12 @@
             }
             cursorTop = boxBottom - itemGap;
             renderedItems += 1;
-            writeProgress(task, renderedItems, totalItems, "姝ｅ湪娓叉煋鏉＄洰");
+            writeProgress(task, renderedItems, totalItems, "正在渲染条目");
         }
     }
 
     if (outlineText) {
-        writeProgress(task, renderedItems, totalItems, "姝ｅ湪杞洸璁㈠崟鏍囪瘑");
+        writeProgress(task, renderedItems, totalItems, "正在转曲订单标识");
         outlineAndClean(outlines);
     }
     debugPayload.textFit = {
@@ -132,9 +132,9 @@
     var output = File(String(task.output_ai));
     ensureFolder(output.parent);
     if (output.exists) output.remove();
-    writeProgress(task, renderedItems, totalItems, "姝ｅ湪淇濆瓨 AI 鏂囦欢");
+    writeProgress(task, renderedItems, totalItems, "正在保存 AI 文件");
     saveAsAI8(doc, output);
-    writeProgress(task, renderedItems, totalItems, "姝ｅ湪鍏抽棴 Illustrator 鏂囨。");
+    writeProgress(task, renderedItems, totalItems, "正在关闭 Illustrator 文档");
     doc.close(SaveOptions.DONOTSAVECHANGES);
     return output.fsName;
 
@@ -800,7 +800,7 @@
                 if (pathfinderMerge) cleanupOutline(outline);
             } catch (e) {}
             if ((i + 1) === items.length || (i + 1) % 25 === 0) {
-                writeProgress(task, renderedItems, totalItems, "姝ｅ湪杞洸璁㈠崟鏍囪瘑 " + (i + 1) + "/" + items.length);
+                writeProgress(task, renderedItems, totalItems, "正在转曲订单标识 " + (i + 1) + "/" + items.length);
             }
         }
     }
