@@ -166,6 +166,81 @@ def write_templates_config(path: Path) -> None:
     )
 
 
+def write_curved_order_xlsx(path: Path, rows: list[tuple[str, str, str, str]]) -> None:
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["内部订单号", "订单明细id", "生产部门", "产品中文名称", "字体颜色", "模板", "定制信息"])
+    for order_no, detail_id, department, color in rows:
+        sheet.append(
+            [
+                order_no,
+                detail_id,
+                department,
+                "圣诞曲线标题挂件",
+                color,
+                "JJMB202509231236046265",
+                "Font Options:F1\nTitle:Family\nName:1. Kai",
+            ]
+        )
+    workbook.save(path)
+
+
+def write_curved_templates_config(path: Path) -> None:
+    fake_ai = path.parent / "curved-template.ai"
+    font_report = path.parent / "curved-font-report.json"
+    rules_path = path.parent / "curved.rules.json"
+    fake_ai.write_text("fake ai", encoding="utf-8")
+    font_report.write_text(
+        json.dumps(
+            {
+                "entries": [
+                    {
+                        "status": "ok",
+                        "font_option": "F1",
+                        "font_name": "Test Font",
+                        "baseline_ratio": {},
+                        "bounds_shape_ratio": {},
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    rules_path.write_text(
+        json.dumps(
+            {
+                "mode": "annotated_ai",
+                "capabilities": ["text_on_curve"],
+                "slots": [{"name": "Title", "type": "text_on_curve"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "templates": [
+                    {
+                        "template_id": "JJMB202509231236046265",
+                        "name": "曲线标题测试模板",
+                        "template_type": "curved_title_text",
+                        "pipeline": "jjmb_202509_curved",
+                        "status": "active",
+                        "template_ai": str(fake_ai),
+                        "template_config": str(font_report),
+                        "template_rules_config": str(rules_path),
+                        "default_columns": 3,
+                        "default_hide_boxes": True,
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+
 def test_service_dry_run_creates_job_and_render_task(tmp_path):
     config_path = tmp_path / "templates.json"
     order_path = tmp_path / "orders.xlsx"
@@ -194,7 +269,7 @@ def test_service_dry_run_creates_job_and_render_task(tmp_path):
     assert "delivery_plan" in record["outputs"]
     task_path = Path(record["outputs"]["render_task"])
     assert task_path.exists()
-    assert json.loads(task_path.read_text(encoding="utf-8"))["type"] == "jjmb_202508_batch"
+    assert json.loads(task_path.read_text(encoding="utf-8"))["type"] == "render_batch"
     task_path = Path(record["outputs"]["render_task_files"][0])
     task = json.loads(task_path.read_text(encoding="utf-8"))
     assert task["groups"][0]["items"][0]["production_label_lines"] == ["ORDER1", "金色"]
@@ -284,7 +359,7 @@ def test_service_routes_t_to_one_ai_with_color_frame_artboards(tmp_path):
     )
     component_task = json.loads(component_task_path.read_text(encoding="utf-8"))
     compose_task = json.loads(compose_task_path.read_text(encoding="utf-8"))
-    assert master_task["type"] == "jjmb_202508_batch"
+    assert master_task["type"] == "render_batch"
     assert len(master_task["tasks"]) == len(record["outputs"]["render_task_files"])
     assert [item["name"] for item in record["outputs"]["single_order_files"]] == ["ORDER1.ai", "ORDER2.ai"]
     assert [item["arcname"] for item in record["outputs"]["bundle_plan"][:2]] == [
@@ -295,6 +370,71 @@ def test_service_routes_t_to_one_ai_with_color_frame_artboards(tmp_path):
     assert component_task["output"]["fixed_canvas_mm"] == {"width_mm": 580.0, "height_mm": 2000.0}
     assert compose_task["type"] == "compose_color_frames"
     assert [frame["color_option"] for frame in compose_task["inputs"]] == ["金色", "银色"]
+
+
+def test_curved_template_reuses_shared_department_output_pipeline(tmp_path):
+    config_path = tmp_path / "templates.json"
+    order_path = tmp_path / "curved-orders.xlsx"
+    write_curved_templates_config(config_path)
+    write_curved_order_xlsx(
+        order_path,
+        [
+            ("CURVED-T", "DETAIL-T", "T", "Red"),
+            ("CURVED-D", "DETAIL-D", "Dept_D", "Black"),
+        ],
+    )
+
+    record = RenderService(
+        registry=TemplateRegistry(config_path),
+        jobs=JobStore(tmp_path / "jobs"),
+    ).submit(
+        {"template_id": "JJMB202509231236046265", "order_file": str(order_path), "dry_run": True}
+    )
+
+    assert record["status"] == "completed", record.get("error")
+    assert [item["name"] for item in record["outputs"]["single_order_files"]] == ["CURVED-T.ai", "CURVED-D.ai"]
+    assert [item["department"] for item in record["outputs"]["delivery_plan"]] == ["T"]
+    assert record["outputs"]["bundle_plan"][-1]["arcname"] == "manifest.json"
+    batch_task = json.loads(Path(record["outputs"]["render_task"]).read_text(encoding="utf-8"))
+    assert batch_task["type"] == "render_batch"
+
+    color_task_path = next(
+        Path(path)
+        for path in record["outputs"]["render_task_files"]
+        if "-color-" in Path(path).name
+    )
+    d_task_path = next(
+        Path(path)
+        for path in record["outputs"]["render_task_files"]
+        if "single-order-tasks" in str(path)
+        and json.loads(Path(path).read_text(encoding="utf-8"))["groups"][0]["order_no"] == "CURVED-D"
+    )
+    color_task = json.loads(color_task_path.read_text(encoding="utf-8"))
+    d_task = json.loads(d_task_path.read_text(encoding="utf-8"))
+    assert color_task["output"]["fixed_canvas_mm"] == {"width_mm": 580.0, "height_mm": 2000.0}
+    assert color_task["groups"][0]["production_label_lines"] == ["CURVED-T", "红色"]
+    assert d_task["groups"][0]["production_label_lines"] == ["CURVED-D", "圣诞曲线标题挂件"]
+
+
+def test_curved_zw_keeps_its_existing_single_ai_delivery(tmp_path):
+    config_path = tmp_path / "templates.json"
+    order_path = tmp_path / "curved-zw-orders.xlsx"
+    write_curved_templates_config(config_path)
+    write_curved_order_xlsx(order_path, [("CURVED-ZW", "DETAIL-ZW", "ZW", "Gold")])
+
+    record = RenderService(
+        registry=TemplateRegistry(config_path),
+        jobs=JobStore(tmp_path / "jobs"),
+    ).submit(
+        {"template_id": "JJMB202509231236046265", "order_file": str(order_path), "dry_run": True}
+    )
+
+    assert record["status"] == "completed", record.get("error")
+    assert record["outputs"]["output_ai"].endswith("JJMB202509231236046265-3col.ai")
+    assert "output_bundle" not in record["outputs"]
+    task = json.loads(Path(record["outputs"]["render_task"]).read_text(encoding="utf-8"))
+    assert task["type"] == "jjmb_202509_curved"
+    assert task["groups"][0]["production_label_lines"] == ["CURVED-ZW"]
 
 
 @pytest.mark.parametrize(

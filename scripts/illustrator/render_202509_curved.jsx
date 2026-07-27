@@ -41,7 +41,7 @@
     var groupMetrics = [];
     var columnWidth = Math.max(titleWidth, nameWidth, mmToPt(35));
     for (var g = 0; g < groups.length; g++) {
-        var height = orderLabelHeight;
+        var height = groupLabelHeight(groups[g]);
         var items = groups[g].items || [];
         for (var i = 0; i < items.length; i++) {
             height += itemHeight(items[i]) + itemGap;
@@ -58,6 +58,8 @@
     if (maxColumnHeight > 0) maxColumnHeight -= gap;
     var docWidth = margin * 2 + columns * columnWidth + (columns - 1) * gap;
     var docHeight = margin * 2 + maxColumnHeight;
+    docWidth = fixedCanvasWidth(outputConfig, docWidth);
+    docHeight = fixedCanvasHeight(outputConfig, docHeight);
 
     var doc = app.documents.add(documentColorSpace(colorMode), docWidth, docHeight);
     var layer = doc.layers[0];
@@ -77,8 +79,8 @@
             var left = margin + col * (columnWidth + gap);
             var top = docHeight - margin - placements.items[gi].y;
             var cursorTop = top;
-            drawOrderLabel(layer, String(group.order_no || ""), left, cursorTop, left + columnWidth, cursorTop - orderLabelHeight, orderLabelFontSize, textItems);
-            cursorTop -= orderLabelHeight;
+            drawProductionOrderLabel(layer, group, left, cursorTop, left + columnWidth, orderLabelFontSize, textItems);
+            cursorTop -= groupLabelHeight(group);
 
             var groupItems = group.items || [];
             for (var ii = 0; ii < groupItems.length; ii++) {
@@ -171,13 +173,45 @@
         return item.text_type === "title" ? titleHeight : nameHeight;
     }
 
-    function drawOrderLabel(layer, text, left, top, right, bottom, size, textItems) {
-        var tf = layer.textFrames.add();
-        tf.contents = text;
-        tf.textRange.characterAttributes.size = size;
-        applyBlack(tf);
-        fitTextToRect(tf, [left, top, right, bottom], 5, size);
-        textItems.push({ item: tf });
+    function groupLabelLines(group) {
+        var lines = group.production_label_lines || [];
+        if (lines.length === 0 && group.order_no) lines = [String(group.order_no)];
+        return lines;
+    }
+
+    function groupLabelHeight(group) {
+        if (layout.suppress_labels === true) return 0;
+        var lines = groupLabelLines(group);
+        return Math.max(orderLabelHeight, Math.max(lines.length, 1) * orderLabelHeight);
+    }
+
+    function drawProductionOrderLabel(layer, group, left, top, right, size, textItems) {
+        if (layout.suppress_labels === true) return;
+        var lines = groupLabelLines(group);
+        var height = groupLabelHeight(group);
+        var lineCount = Math.max(lines.length, 1);
+        var lineHeight = height / lineCount;
+        for (var i = 0; i < lineCount; i++) {
+            var tf = layer.textFrames.add();
+            tf.contents = String(lines[i] || "");
+            tf.textRange.characterAttributes.size = size;
+            applyBlack(tf);
+            var lineTop = top - i * lineHeight;
+            fitTextToRect(tf, [left, lineTop, right, lineTop - lineHeight], 5, size);
+            textItems.push({ item: tf });
+        }
+    }
+
+    function fixedCanvasWidth(output, fallback) {
+        var canvas = output.fixed_canvas_mm || {};
+        var width = mmToPt(Number(canvas.width_mm || 0));
+        return width > 0 ? width : fallback;
+    }
+
+    function fixedCanvasHeight(output, fallback) {
+        var canvas = output.fixed_canvas_mm || {};
+        var height = mmToPt(Number(canvas.height_mm || 0));
+        return height > 0 ? height : fallback;
     }
 
     function drawName(layer, text, font, left, top, width, height, textItems, nameFrameItems) {

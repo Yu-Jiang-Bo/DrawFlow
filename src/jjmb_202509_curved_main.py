@@ -15,6 +15,13 @@ from typing import Callable, Dict, Iterable, List, Mapping
 from openpyxl import load_workbook
 
 from .renderer.illustrator_bridge import IllustratorBridge, IllustratorBridgeError
+from .service.department_output import (
+    ANNOTATION_COLOR,
+    ANNOTATION_PRODUCT_NAME,
+    normalize_identifier,
+    resolve_department_output,
+    translate_color_to_chinese,
+)
 from .service.render_integrity import RenderIntegrityError, compare_png_previews
 
 
@@ -37,6 +44,10 @@ class CurvedOrderItem:
     text_type: str
     quantity_index: int
     copy_index: int = 1
+    product_name: str = ""
+    manufacturer: str = ""
+    color_option: str = ""
+    production_label_lines: tuple[str, ...] = ()
 
     def to_json_dict(self) -> Dict[str, object]:
         return {
@@ -48,6 +59,10 @@ class CurvedOrderItem:
             "text_type": self.text_type,
             "quantity_index": self.quantity_index,
             "copy_index": self.copy_index,
+            "product_name": self.product_name,
+            "manufacturer": self.manufacturer,
+            "color_option": self.color_option,
+            "production_label_lines": list(self.production_label_lines),
         }
 
 
@@ -56,11 +71,18 @@ class CurvedOrderGroup:
     order_no: str
     items: List[CurvedOrderItem]
     group_key: str = ""
+    detail_id: str = ""
+    department: str = ""
+    manufacturer: str = ""
+    product_name: str = ""
+    color_option: str = ""
+    production_label_lines: tuple[str, ...] = ()
 
     def to_json_dict(self) -> Dict[str, object]:
         return {
             "order_no": self.order_no,
             "items": [item.to_json_dict() for item in self.items],
+            "production_label_lines": list(self.production_label_lines),
         }
 
 
@@ -169,6 +191,24 @@ def clean_text(value: str) -> str:
     return re.sub(r"\s+", " ", text).strip(" ,;")
 
 
+def production_label_lines(
+    order_no: str,
+    department: str,
+    product_name: str,
+    color_option: str,
+) -> tuple[str, ...]:
+    """Build the department annotation once per curved order group."""
+
+    if normalize_identifier(department) == "ZW":
+        return (order_no,) if order_no else ()
+    rule = resolve_department_output(department)
+    if rule.annotation_type == ANNOTATION_COLOR:
+        return tuple(part for part in (order_no, translate_color_to_chinese(color_option)) if part)
+    if rule.annotation_type == ANNOTATION_PRODUCT_NAME:
+        return tuple(part for part in (order_no, product_name) if part)
+    return (order_no,) if order_no else ()
+
+
 def parse_items(
     rows: Iterable[Dict[str, str]],
     *,
@@ -183,6 +223,10 @@ def parse_items(
         order_no = get_field(row, "内部订单号", "订单号")
         detail_id = get_field(row, "订单明细id", "订单明细ID")
         department = get_field(row, "生产部门") or DEFAULT_DEPARTMENT
+        product_name = get_field(row, "产品中文名称", "产品名称")
+        manufacturer = get_field(row, "厂家", "厂商", "生产厂家", "供应商", "Manufacturer", "Factory", "Supplier")
+        color_option = get_field(row, "字体颜色", "颜色", "Color", "Color Option")
+        label_lines = production_label_lines(order_no, department, product_name, color_option)
         copy_count = _row_quantity(row) if multi_name_customization else 1
         names = split_names(custom["names"])
         title = clean_text(custom["title"]) or DEFAULT_TITLE
@@ -199,6 +243,10 @@ def parse_items(
                         text_type="name",
                         quantity_index=index,
                         copy_index=copy_index,
+                        product_name=product_name,
+                        manufacturer=manufacturer,
+                        color_option=color_option,
+                        production_label_lines=label_lines,
                     )
                 )
                 index += 1
@@ -213,6 +261,10 @@ def parse_items(
                         text_type="title",
                         quantity_index=index,
                         copy_index=copy_index,
+                        product_name=product_name,
+                        manufacturer=manufacturer,
+                        color_option=color_option,
+                        production_label_lines=label_lines,
                     )
                 )
     return items
@@ -224,9 +276,19 @@ def group_items(items: Iterable[CurvedOrderItem]) -> List[CurvedOrderGroup]:
         key = item.order_no + "\u001f" + item.detail_id + "\u001f" + str(item.copy_index)
         grouped.setdefault(key, []).append(item)
     return [
-        CurvedOrderGroup(order_no=items[0].order_no, items=items, group_key=group_key)
-        for group_key, items in grouped.items()
-        if items
+        CurvedOrderGroup(
+            order_no=group_items[0].order_no,
+            items=group_items,
+            group_key=group_key,
+            detail_id=group_items[0].detail_id,
+            department=group_items[0].department,
+            manufacturer=group_items[0].manufacturer,
+            product_name=group_items[0].product_name,
+            color_option=group_items[0].color_option,
+            production_label_lines=group_items[0].production_label_lines,
+        )
+        for group_key, group_items in grouped.items()
+        if group_items
     ]
 
 
@@ -262,6 +324,9 @@ def build_task(
     preview_png: Path | None = None,
     preview_dpi: int = 300,
     progress: Mapping[str, object] | None = None,
+    fixed_canvas_mm: Mapping[str, float] | None = None,
+    output_compatibility: str = "Illustrator 8",
+    suppress_labels: bool = False,
 ) -> Dict[str, object]:
     if not groups:
         raise ValueError("No renderable orders")
@@ -278,6 +343,7 @@ def build_task(
         "title_height_mm": 7.0,
         "keep_title_frames": keep_title_frames,
         "keep_name_frames": keep_name_frames,
+        "suppress_labels": suppress_labels,
     }
     for key in ("name_width_mm", "name_height_mm", "title_width_mm", "title_height_mm"):
         value = _positive_number((layout_overrides or {}).get(key))
@@ -301,12 +367,13 @@ def build_task(
         },
         "output": {
             "format": "ai",
-            "compatibility": "Illustrator 8",
+            "compatibility": output_compatibility,
             "color_mode": _normalize_color_mode(color_mode),
             "outline_text": bool(outline_text),
             "pathfinder_merge": bool(pathfinder_merge),
             "preview_png_path": str(preview_png) if preview_png else "",
             "preview_dpi": max(int(preview_dpi), 1) if preview_png else 0,
+            "fixed_canvas_mm": dict(fixed_canvas_mm or {}),
         },
         "debug": {
             "report_path": str(output_ai.with_suffix(".debug.json")),

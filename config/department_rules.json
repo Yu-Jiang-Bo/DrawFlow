@@ -22,6 +22,13 @@
     },
     "department_output_requirements": [
       {
+        "name": "ZW",
+        "departments": ["ZW"],
+        "output_format": "ai8",
+        "artwork_content": "订单号 + 曲线标题效果图",
+        "save_strategy": "保持曲线标题模板的单个整体 AI8 输出"
+      },
+      {
         "name": "T",
         "departments": ["T"],
         "output_format": "ai8",

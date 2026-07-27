@@ -4,10 +4,9 @@ from __future__ import annotations
 
 import json
 import time
-import zipfile
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Mapping
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Sequence
 
 from ..jjmb_202508_main import (
     build_task as build_202508_task,
@@ -30,10 +29,22 @@ from .department_output import (
     DepartmentOutputRule,
     resolve_department_output,
     set_png_resolution,
-    translate_color_to_chinese,
 )
 from .generic_rule_renderer import build_generic_render_task
 from .llm_rule_parser import normalize_option_list
+from .production_output import (
+    ProductionOutputUnit,
+    build_delivery_outputs,
+    color_frames,
+    delivery_path,
+    fixed_canvas_mm,
+    partition_output_units,
+    requires_color_master,
+    requires_master_output,
+    requires_single_order_ai,
+    single_order_outputs,
+    write_batch_task_files,
+)
 from .rule_center import check_template_definition, curved_layout_overrides, output_color_mode, read_template_rule_config
 from .template_registry import TemplateDefinition, TemplateRegistry
 from .template_rule_ast import RULE_AST_SCHEMA, font_styles_from_ast, runtime_actions
@@ -54,21 +65,6 @@ class RenderServiceError(RuntimeError):
     def __init__(self, message: str, *, code: str = "render_failed") -> None:
         super().__init__(message)
         self.code = code
-
-
-@dataclass(frozen=True)
-class _202508DeliveryBatch:
-    rule: DepartmentOutputRule
-    items: tuple[Any, ...]
-    scope: str = ""
-
-
-@dataclass(frozen=True)
-class _202508SingleOrderFile:
-    item: Any
-    output_path: Path
-    arcname: str
-
 
 class RenderService:
     def __init__(
@@ -201,7 +197,7 @@ class RenderService:
 
     def _run_202508(self, record: Dict[str, Any], template: TemplateDefinition) -> Dict[str, Any]:
         request = record["request"]
-        job_dir = Path(record["job_dir"])
+        job_dir = Path(record["job_dir"]).resolve()
         order_file = Path(request["order_file"])
         output_ai = self._output_ai_path(job_dir, request, template)
         template_config = job_dir / "template.config.json"
@@ -229,243 +225,226 @@ class RenderService:
                 job_dir=job_dir,
                 visible=request["visible"],
             )
-        batches = _partition_202508_deliveries(items)
-        single_order_work = sum(
-            len(batch.items)
-            for batch in batches
-            if _requires_202508_single_order_ai(batch.rule)
+
+        def build_task_for_units(
+            *,
+            units: Sequence[ProductionOutputUnit],
+            output_ai: Path,
+            output_png: Path | None,
+            columns: int,
+            rule: DepartmentOutputRule,
+            fixed_canvas: Mapping[str, float] | None,
+            progress: Mapping[str, Any],
+        ) -> Dict[str, Any]:
+            native_items = [unit.payload for unit in units]
+            native_groups = group_202508_items(native_items)
+            return build_202508_task(
+                template_config=template_config,
+                output_ai=output_ai,
+                groups=native_groups,
+                columns=columns,
+                show_style_boxes=not request["hide_boxes"],
+                color_mode=str(output_settings["color_mode"]),
+                outline_text=bool(output_settings["outline_text"]),
+                pathfinder_merge=bool(output_settings["pathfinder_merge"]),
+                font_styles=_font_styles(template_rules),
+                text_actions=_202508_text_actions(template_rules, native_groups),
+                output_png=output_png,
+                fixed_canvas_mm=fixed_canvas,
+                output_compatibility=rule.ai_compatibility,
+                suppress_labels=rule.omit_order_label,
+            ) | {"progress": dict(progress)}
+
+        result = self._run_production_output_pipeline(
+            record,
+            template,
+            output_ai,
+            _202508_output_units(items),
+            build_task_for_units,
+            item_count=len(items),
+            render_script=Path(__file__).resolve().parents[2] / "scripts" / "illustrator" / "render_202508_grouped.jsx",
         )
-        master_work = sum(len(batch.items) for batch in batches if _requires_202508_master_output(batch.rule))
+        result["outputs"]["template_config"] = str(template_config)
+        reference_config = job_dir / "reference-template.config.json"
+        if reference_config.exists():
+            result["outputs"]["reference_template_config"] = str(reference_config)
+        result["stats"]["groups"] = len(groups)
+        return result
+
+    def _run_production_output_pipeline(
+        self,
+        record: Dict[str, Any],
+        template: TemplateDefinition,
+        output_ai: Path,
+        units: Sequence[ProductionOutputUnit],
+        task_builder: Callable[..., Dict[str, Any]],
+        *,
+        item_count: int,
+        render_script: Path,
+    ) -> Dict[str, Any]:
+        """Run the department delivery policy around template-specific task creation."""
+
+        request = record["request"]
+        job_dir = Path(record["job_dir"]).resolve()
+        batches = partition_output_units(units)
+        single_order_work = sum(len(batch.units) for batch in batches if requires_single_order_ai(batch.rule))
+        master_work = sum(len(batch.units) for batch in batches if requires_master_output(batch.rule))
         total_work = single_order_work + master_work
         self._update_progress(record, 0, total_work, "生成 AI 文件")
+
         delivery_files: List[Dict[str, str]] = []
         single_order_files: List[Dict[str, str]] = []
         bundle_members: List[Dict[str, str]] = []
         task_files: List[str] = []
         render_entries: List[Dict[str, str]] = []
-        batch_task_files: List[str] = []
         png_outputs: List[tuple[Path, int]] = []
         occupied_names: set[str] = set()
         single_order_names: set[str] = set()
         rendered_items = 0
-        master_task_file: Path | None = None
-        render_script = Path(__file__).resolve().parents[2] / "scripts" / "illustrator" / "render_202508_grouped.jsx"
         compose_script = Path(__file__).resolve().parents[2] / "scripts" / "illustrator" / "compose_color_frames.jsx"
+
         for index, batch in enumerate(batches, start=1):
-            batch_groups = group_202508_items(batch.items)
-            delivery_path = _202508_delivery_path(
-                job_dir,
-                output_ai.stem,
-                batch,
-                occupied_names,
-            )
+            rule = batch.rule
+            target_path = delivery_path(job_dir, output_ai.stem, batch, occupied_names)
             intermediate_ai = job_dir / f".department-{index:03d}.ai"
-            fixed_canvas = _fixed_canvas_mm(batch.rule)
-            color_frames = _color_frame_groups(batch.items) if _requires_202508_color_master(batch.rule) else []
-            if _requires_202508_single_order_ai(batch.rule):
-                single_entries: List[Dict[str, str]] = []
-                single_specs = _202508_single_order_files(
-                    batch.items,
-                    job_dir / "single-orders",
-                    single_order_names,
-                )
-                for single_index, spec in enumerate(single_specs, start=1):
-                    single_groups = group_202508_items([spec.item])
-                    single_task = build_202508_task(
-                        template_config=template_config,
+            canvas = fixed_canvas_mm(rule)
+
+            if requires_single_order_ai(rule):
+                for single_index, spec in enumerate(
+                    single_order_outputs(batch.units, job_dir / "single-orders", single_order_names),
+                    start=1,
+                ):
+                    task = task_builder(
+                        units=(spec.unit,),
                         output_ai=spec.output_path,
-                        groups=single_groups,
+                        output_png=None,
                         columns=1,
-                        show_style_boxes=not request["hide_boxes"],
-                        color_mode=output_color_mode(template_rules),
-                        font_styles=_font_styles(template_rules),
-                        text_actions=_202508_text_actions(template_rules, single_groups),
-                        output_compatibility=batch.rule.ai_compatibility,
+                        rule=rule,
+                        fixed_canvas=None,
+                        progress=self._task_progress(
+                            record,
+                            rendered_items + single_index - 1,
+                            total_work,
+                            "生成单订单 AI 文件",
+                        ),
                     )
-                    single_task["progress"] = self._task_progress(
-                        record,
-                        rendered_items + single_index - 1,
-                        total_work,
-                        "生成单订单 AI 文件",
-                    )
-                    single_task_file = job_dir / "single-order-tasks" / f"render-task-{index:03d}-{single_index:04d}.json"
-                    self._write_json(single_task_file, single_task)
-                    task_files.append(str(single_task_file))
-                    single_entries.append(
-                        {
-                            "script": str(render_script),
-                            "task_file": str(single_task_file),
-                        }
-                    )
+                    task_file = job_dir / "single-order-tasks" / f"render-task-{index:03d}-{single_index:04d}.json"
+                    self._write_json(task_file, task)
+                    task_files.append(str(task_file))
+                    render_entries.append({"script": str(render_script), "task_file": str(task_file)})
                     single_order_files.append(
                         {
                             "path": str(spec.output_path),
                             "name": spec.output_path.name,
                             "arcname": spec.arcname,
                             "format": "ai8",
-                            "department": batch.rule.department,
-                            "order_no": str(getattr(spec.item, "order_no", "")),
-                            "detail_id": str(getattr(spec.item, "detail_id", "")),
+                            "department": rule.department,
+                            "order_no": spec.unit.order_no,
+                            "detail_id": spec.unit.detail_id,
                         }
                     )
-                    bundle_members.append(
-                        {
-                            "path": str(spec.output_path),
-                            "arcname": spec.arcname,
-                        }
-                    )
-                render_entries.extend(single_entries)
-                rendered_items += len(single_specs)
+                    bundle_members.append({"path": str(spec.output_path), "arcname": spec.arcname})
+                rendered_items += len(batch.units)
                 if request["dry_run"]:
                     self._update_progress(record, rendered_items, total_work, "生成单订单 AI 文件")
-            if not _requires_202508_master_output(batch.rule):
-                continue
-            if color_frames:
-                component_paths: List[Dict[str, str]] = []
-                summary_entries: List[Dict[str, str]] = []
-                summary_item_count = 0
-                for frame_index, frame in enumerate(color_frames, start=1):
-                    component_path = job_dir / f".department-{index:03d}-color-{frame_index:03d}.ai"
-                    frame_task = build_202508_task(
-                        template_config=template_config,
-                        output_ai=component_path,
-                        groups=frame["groups"],
-                        columns=request["columns"],
-                        show_style_boxes=not request["hide_boxes"],
-                        color_mode=output_color_mode(template_rules),
-                        font_styles=_font_styles(template_rules),
-                        text_actions=_202508_text_actions(template_rules, frame["groups"]),
-                        fixed_canvas_mm=fixed_canvas,
-                        output_compatibility=batch.rule.ai_compatibility,
-                    )
-                    frame_item_count = sum(len(group.items) for group in frame["groups"])
-                    frame_task["progress"] = self._task_progress(
-                        record,
-                        rendered_items + summary_item_count,
-                        total_work,
-                        "生成颜色汇总 AI 文件",
-                    )
-                    frame_task_file = job_dir / f"render-task-{index:03d}-color-{frame_index:03d}.json"
-                    self._write_json(frame_task_file, frame_task)
-                    task_files.append(str(frame_task_file))
-                    summary_entries.append(
-                        {
-                            "script": str(render_script),
-                            "task_file": str(frame_task_file),
-                        }
-                    )
-                    summary_item_count += frame_item_count
-                    component_paths.append(
-                        {"path": str(component_path), "color_option": str(frame["color_option"])}
-                    )
 
-                compose_task = {
-                    "type": "compose_color_frames",
-                    "output_ai": str(delivery_path),
-                    "frame_width_mm": fixed_canvas["width_mm"] if fixed_canvas else 0,
-                    "frame_height_mm": fixed_canvas["height_mm"] if fixed_canvas else 0,
-                    "label_gutter_mm": 24,
-                    "inputs": component_paths,
-                }
+            if not requires_master_output(rule):
+                continue
+
+            if requires_color_master(rule):
+                component_paths: List[Dict[str, str]] = []
+                summary_item_count = 0
+                for frame_index, frame in enumerate(color_frames(batch.units), start=1):
+                    component_path = job_dir / f".department-{index:03d}-color-{frame_index:03d}.ai"
+                    task = task_builder(
+                        units=frame.units,
+                        output_ai=component_path,
+                        output_png=None,
+                        columns=request["columns"],
+                        rule=rule,
+                        fixed_canvas=canvas,
+                        progress=self._task_progress(
+                            record,
+                            rendered_items + summary_item_count,
+                            total_work,
+                            "生成颜色汇总 AI 文件",
+                        ),
+                    )
+                    task_file = job_dir / f"render-task-{index:03d}-color-{frame_index:03d}.json"
+                    self._write_json(task_file, task)
+                    task_files.append(str(task_file))
+                    render_entries.append({"script": str(render_script), "task_file": str(task_file)})
+                    component_paths.append({"path": str(component_path), "color_option": frame.color_option})
+                    summary_item_count += len(frame.units)
+
                 compose_file = job_dir / f"compose-color-frames-{index:03d}.json"
-                self._write_json(compose_file, compose_task)
-                task_files.append(str(compose_file))
-                summary_entries.append(
+                self._write_json(
+                    compose_file,
                     {
-                        "script": str(compose_script),
-                        "task_file": str(compose_file),
-                    }
+                        "type": "compose_color_frames",
+                        "output_ai": str(target_path),
+                        "frame_width_mm": canvas["width_mm"] if canvas else 0,
+                        "frame_height_mm": canvas["height_mm"] if canvas else 0,
+                        "label_gutter_mm": 24,
+                        "inputs": component_paths,
+                    },
                 )
-                render_entries.extend(summary_entries)
+                task_files.append(str(compose_file))
+                render_entries.append({"script": str(compose_script), "task_file": str(compose_file)})
                 rendered_items += summary_item_count
                 if request["dry_run"]:
                     self._update_progress(record, rendered_items, total_work, "生成颜色汇总 AI 文件")
-                delivery_files.append(
-                    {
-                        "path": str(delivery_path),
-                        "name": delivery_path.name,
-                        "format": batch.rule.output_format,
-                        "department": batch.rule.department,
-                    }
+            else:
+                task = task_builder(
+                    units=batch.units,
+                    output_ai=intermediate_ai if rule.is_png else target_path,
+                    output_png=target_path if rule.is_png else None,
+                    columns=request["columns"],
+                    rule=rule,
+                    fixed_canvas=canvas,
+                    progress=self._task_progress(record, rendered_items, total_work, "生成总图 AI 文件"),
                 )
-                bundle_members.append(
-                    {
-                        "path": str(delivery_path),
-                        "arcname": f"summary/{delivery_path.name}",
-                    }
-                )
-                continue
-            task = build_202508_task(
-                template_config=template_config,
-                output_ai=intermediate_ai if batch.rule.is_png else delivery_path,
-                groups=batch_groups,
-                columns=request["columns"],
-                show_style_boxes=not request["hide_boxes"],
-                color_mode=output_color_mode(template_rules),
-                font_styles=_font_styles(template_rules),
-                text_actions=_202508_text_actions(template_rules, batch_groups),
-                output_png=delivery_path if batch.rule.is_png else None,
-                fixed_canvas_mm=fixed_canvas,
-                output_compatibility=batch.rule.ai_compatibility,
-                suppress_labels=batch.rule.omit_order_label,
-            )
-            task["progress"] = self._task_progress(record, rendered_items, total_work, "生成总图 AI 文件")
-            task_file = job_dir / ("render-task.json" if len(batches) == 1 else f"render-task-{index:03d}.json")
-            self._write_json(task_file, task)
-            task_files.append(str(task_file))
-            render_entries.append({"script": str(render_script), "task_file": str(task_file)})
-            if batch.rule.is_png:
-                png_outputs.append((delivery_path, int(batch.rule.layout.get("dpi") or 300)))
-            rendered_items += len(batch.items)
-            if request["dry_run"]:
-                self._update_progress(record, rendered_items, total_work, "生成 AI 文件")
-            delivery_entry = {
-                "path": str(delivery_path),
-                "name": delivery_path.name,
-                "format": batch.rule.output_format,
-                "department": batch.rule.department,
-            }
-            delivery_files.append(delivery_entry)
-            if _requires_202508_single_order_ai(batch.rule):
-                bundle_members.append(
-                    {
-                        "path": str(delivery_path),
-                        "arcname": f"summary/{delivery_path.name}",
-                    }
-                )
+                task_file = job_dir / f"render-task-{index:03d}.json"
+                self._write_json(task_file, task)
+                task_files.append(str(task_file))
+                render_entries.append({"script": str(render_script), "task_file": str(task_file)})
+                if rule.is_png:
+                    png_outputs.append((target_path, int(rule.layout.get("dpi") or 300)))
+                rendered_items += len(batch.units)
+                if request["dry_run"]:
+                    self._update_progress(record, rendered_items, total_work, "生成总图 AI 文件")
 
-        if render_entries:
-            master_task_file = job_dir / "render-batch.json"
-            self._write_json(
-                master_task_file,
+            delivery_files.append(
                 {
-                    "type": "jjmb_202508_batch",
-                    "tasks": render_entries,
-                },
+                    "path": str(target_path),
+                    "name": target_path.name,
+                    "format": rule.output_format,
+                    "department": rule.department,
+                }
             )
-            batch_task_paths = _202508_batch_task_files(
-                job_dir,
-                render_entries,
-                chunk_size=JJMB_202508_RENDER_CHUNK_SIZE,
-            )
-            batch_task_files = [str(path) for path in batch_task_paths]
-            if not request["dry_run"]:
-                _render_202508_batch_files(batch_task_paths, request["visible"])
-                for png_path, dpi in png_outputs:
-                    set_png_resolution(png_path, dpi)
+            if requires_single_order_ai(rule):
+                bundle_members.append({"path": str(target_path), "arcname": f"summary/{target_path.name}"})
+
+        batch_task_paths = write_batch_task_files(job_dir, render_entries, chunk_size=JJMB_202508_RENDER_CHUNK_SIZE)
+        if not request["dry_run"]:
+            _render_production_batch_files(batch_task_paths, request["visible"])
+            for png_path, dpi in png_outputs:
+                set_png_resolution(png_path, dpi)
 
         manifest_path = job_dir / "manifest.json"
-        manifest = {
-            "job_id": record["job_id"],
-            "template_id": template.template_id,
-            "single_order_files": single_order_files,
-            "summary_files": delivery_files,
-            "file_count": len(single_order_files) + len(delivery_files),
-        }
-        self._write_json(manifest_path, manifest)
+        self._write_json(
+            manifest_path,
+            {
+                "job_id": record["job_id"],
+                "template_id": template.template_id,
+                "single_order_files": single_order_files,
+                "summary_files": delivery_files,
+                "file_count": len(single_order_files) + len(delivery_files),
+            },
+        )
         if bundle_members:
             bundle_members.append({"path": str(manifest_path), "arcname": "manifest.json"})
-        outputs = _delivery_outputs(
+        outputs = build_delivery_outputs(
             delivery_files,
             task_files,
             request["dry_run"],
@@ -475,22 +454,16 @@ class RenderService:
             extra_outputs={
                 "single_order_files": single_order_files,
                 "output_manifest": str(manifest_path),
-                "render_batch_files": batch_task_files,
+                "render_batch_files": [str(path) for path in batch_task_paths],
             },
         )
-        if master_task_file is not None:
-            outputs["render_task"] = str(master_task_file)
-        outputs["template_config"] = str(template_config)
-        reference_config = job_dir / "reference-template.config.json"
-        if reference_config.exists():
-            outputs["reference_template_config"] = str(reference_config)
+        if batch_task_paths:
+            outputs["render_task"] = str(batch_task_paths[0])
         self._update_progress(record, total_work, total_work, "完成收尾")
-
         return {
             "outputs": outputs,
             "stats": {
-                "groups": len(groups),
-                "items": len(items),
+                "items": item_count,
                 "deliveries": len(delivery_files),
                 "single_order_files": len(single_order_files),
                 "dry_run": request["dry_run"],
@@ -499,7 +472,7 @@ class RenderService:
 
     def _run_202603_grouped(self, record: Dict[str, Any], template: TemplateDefinition) -> Dict[str, Any]:
         request = record["request"]
-        job_dir = Path(record["job_dir"])
+        job_dir = Path(record["job_dir"]).resolve()
         order_file = Path(request["order_file"])
         output_ai = self._output_ai_path(job_dir, request, template)
         template_config = template.template_config or (job_dir / "template.config.json")
@@ -563,7 +536,7 @@ class RenderService:
 
     def _run_202509_curved(self, record: Dict[str, Any], template: TemplateDefinition) -> Dict[str, Any]:
         request = record["request"]
-        job_dir = Path(record["job_dir"])
+        job_dir = Path(record["job_dir"]).resolve()
         order_file = Path(request["order_file"])
         output_ai = self._output_ai_path(job_dir, request, template)
         font_report = template.template_config
@@ -573,7 +546,6 @@ class RenderService:
         rows = read_202509_curved_rows(order_file, sheet_name=request["sheet_name"] or None)
         template_rules = _rules_with_effective_output(template, read_template_rule_config(template.template_rules_config))
         output_settings = _effective_output_settings(template, template_rules)
-        _require_department_output_pipeline(rows, pipeline="jjmb_202509_curved")
         multi_name_policy = template_rules.get("multi_name_customization", {})
         items = parse_202509_curved_items(
             rows,
@@ -585,6 +557,54 @@ class RenderService:
         )
         groups = group_202509_curved_items(items)
         total_items = sum(len(group.items) for group in groups)
+        if any(_output_key_part(group.department) != "ZW" for group in groups):
+            _validate_curved_department_outputs(groups)
+            title_template_ai = _curved_title_template_ai_path(template, template_rules)
+
+            def build_task_for_units(
+                *,
+                units: Sequence[ProductionOutputUnit],
+                output_ai: Path,
+                output_png: Path | None,
+                columns: int,
+                rule: DepartmentOutputRule,
+                fixed_canvas: Mapping[str, float] | None,
+                progress: Mapping[str, Any],
+            ) -> Dict[str, Any]:
+                if output_png is not None:
+                    raise RenderServiceError("曲线标题模板不支持 PNG 部门交付", code="department_output_pipeline_unsupported")
+                return build_202509_curved_task(
+                    font_report=font_report,
+                    output_ai=output_ai,
+                    groups=[unit.payload for unit in units],
+                    columns=columns,
+                    layout_overrides=curved_layout_overrides(template_rules),
+                    title_template_ai=title_template_ai,
+                    color_mode=str(output_settings["color_mode"]),
+                    outline_text=bool(output_settings["outline_text"]),
+                    pathfinder_merge=bool(output_settings["pathfinder_merge"]),
+                    progress=progress,
+                    fixed_canvas_mm=fixed_canvas,
+                    output_compatibility=rule.ai_compatibility,
+                    suppress_labels=rule.omit_order_label,
+                )
+
+            result = self._run_production_output_pipeline(
+                record,
+                template,
+                output_ai,
+                _202509_output_units(groups),
+                build_task_for_units,
+                item_count=total_items,
+                render_script=Path(__file__).resolve().parents[2] / "scripts" / "illustrator" / "render_202509_curved.jsx",
+            )
+            result["outputs"]["template_config"] = str(font_report)
+            result["outputs"]["render_integrity"] = ""
+            result["stats"]["groups"] = len(groups)
+            result["stats"]["items"] = total_items
+            result["stats"]["render_integrity_verified"] = False
+            return result
+
         self._update_progress(record, 0, total_items, "生成 AI 文件")
         title_template_ai = _curved_title_template_ai_path(template, template_rules)
         task_options = {
@@ -681,7 +701,7 @@ class RenderService:
         path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
     def _progress_path(self, record: Mapping[str, Any]) -> Path:
-        return Path(str(record["job_dir"])) / "progress.json"
+        return Path(str(record["job_dir"])).resolve() / "progress.json"
 
     def _task_progress(self, record: Mapping[str, Any], offset: int, total: int, stage: str) -> Dict[str, Any]:
         return {
@@ -710,34 +730,15 @@ class RenderService:
             record["progress"] = progress
 
 
-def _partition_202508_deliveries(items: Iterable[Any]) -> List[_202508DeliveryBatch]:
-    """Keep each production format in an isolated Illustrator delivery task."""
+def _202508_output_units(items: Iterable[Any]) -> list[ProductionOutputUnit]:
+    """Adapt 202508 text/color items to the shared production output contract."""
 
-    buckets: Dict[tuple[str, str, str, str], List[Any]] = {}
-    rules: Dict[tuple[str, str, str, str], DepartmentOutputRule] = {}
+    result: list[ProductionOutputUnit] = []
     for item in items:
         rule = resolve_department_output(
             getattr(item, "department", ""),
             getattr(item, "manufacturer", ""),
         )
-        department = _output_key_part(getattr(item, "department", "")) or "DEFAULT"
-        manufacturer = _output_key_part(getattr(item, "manufacturer", ""))
-        if rule.name == "W_CONTAINS" and rule.output_format == "ai8":
-            manufacturer = "OTHER"
-        if rule.output_format == "png_per_item":
-            scope = "|".join(
-                [
-                    str(getattr(item, "order_no", "") or "ORDER"),
-                    str(getattr(item, "detail_id", "") or ""),
-                    str(getattr(item, "quantity_index", "") or ""),
-                    str(getattr(item, "text", "") or ""),
-                ]
-            )
-        elif rule.per_order:
-            scope = str(getattr(item, "order_no", "") or "ORDER")
-        else:
-            scope = ""
-        key = (rule.name, department, manufacturer, scope)
         if rule.apply_color_to_artwork and not bool(getattr(item, "apply_color_to_artwork", False)):
             item = replace(
                 item,
@@ -746,181 +747,80 @@ def _partition_202508_deliveries(items: Iterable[Any]) -> List[_202508DeliveryBa
                 production_label=str(getattr(item, "order_no", "") or ""),
                 production_label_lines=[str(getattr(item, "order_no", "") or "")],
             )
-        buckets.setdefault(key, []).append(item)
-        rules[key] = rule
-    return [
-        _202508DeliveryBatch(rule=rules[key], items=tuple(bucket), scope=key[3])
-        for key, bucket in buckets.items()
-    ]
-
-
-def _202508_delivery_path(
-    job_dir: Path,
-    base_name: str,
-    batch: _202508DeliveryBatch,
-    occupied_names: set[str],
-) -> Path:
-    rule = batch.rule
-    department = _output_key_part(rule.department) or rule.name
-    if rule.output_format == "png_master":
-        candidate = f"{base_name}-{department}-580x2000mm.png"
-    elif rule.output_format == "png_per_item":
-        order_filename = safe_filename(batch.scope.split("|", 1)[0])
-        candidate = f"{order_filename or 'ORDER'}.png"
-    elif rule.per_order:
-        candidate = f"{base_name}-{department}-{_output_key_part(batch.scope) or 'ORDER'}.ai"
-    elif rule.output_format == "cs5_ai":
-        candidate = f"{base_name}-{department}-MY-W196.ai"
-    else:
-        candidate = f"{base_name}-{department}.ai"
-
-    stem = Path(candidate).stem
-    suffix = Path(candidate).suffix
-    sequence = 1
-    unique = candidate
-    while unique.casefold() in occupied_names:
-        sequence += 1
-        unique = f"{stem}-{sequence}{suffix}"
-    occupied_names.add(unique.casefold())
-    return job_dir / safe_filename(unique)
-
-
-def _requires_202508_single_order_ai(rule: DepartmentOutputRule) -> bool:
-    return rule.output_format == "ai8" and bool(rule.single_order_ai)
-
-
-def _requires_202508_master_output(rule: DepartmentOutputRule) -> bool:
-    return not (rule.single_order_ai and not rule.has_master)
-
-
-def _requires_202508_color_master(rule: DepartmentOutputRule) -> bool:
-    return _requires_202508_master_output(rule) and bool(rule.master_group_by_color)
-
-
-def _202508_single_order_files(
-    items: Iterable[Any],
-    output_dir: Path,
-    occupied_names: set[str] | None = None,
-) -> List[_202508SingleOrderFile]:
-    item_list = list(items)
-    counts: Dict[str, int] = {}
-    for item in item_list:
-        order_no = str(getattr(item, "order_no", "") or "ORDER")
-        counts[order_no] = counts.get(order_no, 0) + 1
-
-    seen_by_order: Dict[str, int] = {}
-    occupied = occupied_names if occupied_names is not None else set()
-    result: List[_202508SingleOrderFile] = []
-    for item in item_list:
-        order_no = str(getattr(item, "order_no", "") or "ORDER")
-        seen_by_order[order_no] = seen_by_order.get(order_no, 0) + 1
-        stem = _safe_order_stem(order_no)
-        if counts[order_no] > 1:
-            candidate = f"{stem}({seen_by_order[order_no]}).ai"
-        else:
-            candidate = f"{stem}.ai"
-        filename = _unique_generated_filename(candidate, occupied)
         result.append(
-            _202508SingleOrderFile(
-                item=item,
-                output_path=output_dir / filename,
-                arcname=f"single-orders/{filename}",
+            ProductionOutputUnit(
+                order_no=str(getattr(item, "order_no", "") or ""),
+                detail_id=str(getattr(item, "detail_id", "") or ""),
+                department=str(getattr(item, "department", "") or ""),
+                manufacturer=str(getattr(item, "manufacturer", "") or ""),
+                product_name=str(getattr(item, "product_name", "") or ""),
+                color_option=str(getattr(item, "color_option", "") or ""),
+                quantity_index=int(getattr(item, "quantity_index", 1) or 1),
+                identity=str(getattr(item, "text", "") or ""),
+                payload=item,
+                rule=rule,
             )
         )
     return result
 
 
-def _safe_order_stem(value: object) -> str:
-    chars = []
-    for char in str(value or ""):
-        if char.isalnum() or char in {"-", "_", "."}:
-            chars.append(char)
-        else:
-            chars.append("_")
-    return "".join(chars).strip("._") or "ORDER"
+def _202509_output_units(groups: Iterable[Any]) -> list[ProductionOutputUnit]:
+    """Adapt complete curved-title groups to the shared delivery contract."""
 
-
-def _unique_generated_filename(candidate: str, occupied_names: set[str]) -> str:
-    stem = Path(candidate).stem
-    suffix = Path(candidate).suffix
-    unique = candidate
-    sequence = 1
-    while unique.casefold() in occupied_names:
-        sequence += 1
-        unique = f"{stem}-{sequence}{suffix}"
-    occupied_names.add(unique.casefold())
-    return unique
-
-
-def _fixed_canvas_mm(rule: DepartmentOutputRule) -> Dict[str, float] | None:
-    layout = rule.layout
-    try:
-        width = float(rule.master_frame_width_mm or layout.get("frame_width_mm") or 0)
-        height = float(rule.master_frame_height_mm or layout.get("frame_height_mm") or 0)
-    except (TypeError, ValueError):
-        return None
-    return {"width_mm": width, "height_mm": height} if width > 0 and height > 0 else None
-
-
-def _color_frame_groups(items: Iterable[Any]) -> List[Dict[str, Any]]:
-    """Build one fixed-size Illustrator artboard per production font color.
-
-    T/K/ZK/FK require a complete frame for each color, while the delivery is
-    still one AI file.  We retain order grouping inside every color frame so a
-    multi-name order cannot be split between columns.
-    """
-
-    buckets: Dict[str, List[Any]] = {}
-    labels: Dict[str, str] = {}
-    for item in items:
-        raw_label = str(getattr(item, "color_option", "") or "Unspecified").strip() or "Unspecified"
-        label = translate_color_to_chinese(raw_label) or raw_label
-        key = raw_label.casefold()
-        buckets.setdefault(key, []).append(item)
-        labels.setdefault(key, label)
-    return [
-        {"color_option": labels[key], "groups": group_202508_items(bucket)}
-        for key, bucket in buckets.items()
-    ]
-
-
-def _202508_batch_task_files(
-    job_dir: Path,
-    entries: Iterable[Dict[str, str]],
-    *,
-    chunk_size: int,
-) -> List[Path]:
-    entry_list = list(entries)
-    if len(entry_list) <= max(int(chunk_size), 1):
-        return [job_dir / "render-batch.json"]
-
-    result: List[Path] = []
-    for index, chunk in enumerate(_chunked(entry_list, max(int(chunk_size), 1)), start=1):
-        path = job_dir / f"render-batch-chunk-{index:03d}.json"
-        path.write_text(
-            json.dumps({"type": "jjmb_202508_batch", "tasks": chunk}, ensure_ascii=False, indent=2),
-            encoding="utf-8",
+    result: list[ProductionOutputUnit] = []
+    for group in groups:
+        rule = resolve_department_output(
+            getattr(group, "department", ""),
+            getattr(group, "manufacturer", ""),
         )
-        result.append(path)
+        result.append(
+            ProductionOutputUnit(
+                order_no=str(getattr(group, "order_no", "") or ""),
+                detail_id=str(getattr(group, "detail_id", "") or ""),
+                department=str(getattr(group, "department", "") or ""),
+                manufacturer=str(getattr(group, "manufacturer", "") or ""),
+                product_name=str(getattr(group, "product_name", "") or ""),
+                color_option=str(getattr(group, "color_option", "") or ""),
+                quantity_index=1,
+                identity=str(getattr(group, "group_key", "") or ""),
+                payload=group,
+                rule=rule,
+            )
+        )
     return result
 
 
-def _require_department_output_pipeline(rows: Iterable[Mapping[str, Any]], *, pipeline: str) -> None:
-    """Refuse unsupported pipelines instead of silently delivering the wrong file.
+def _validate_curved_department_outputs(groups: Iterable[Any]) -> None:
+    """Keep curved title delivery limited to the AI8 rules it can render."""
 
-    The known 202508 text/color renderer is the only pipeline that can enforce
-    the fixed frames, PNG exports and manufacturer-specific W rules.  Other
-    templates retain their existing behavior for ordinary departments, but a
-    department-controlled row gets an explicit actionable error rather than a
-    misleading default AI download.
+    supported = {"DEFAULT", "ZW", "T", "K", "ZK_FK", "PW_EW", "D_CONTAINS"}
+    unsupported: List[str] = []
+    for group in groups:
+        department = str(getattr(group, "department", "") or "")
+        rule = resolve_department_output(department, getattr(group, "manufacturer", ""))
+        if rule.name in supported and rule.output_format == "ai8":
+            continue
+        if department and department not in unsupported:
+            unsupported.append(department)
+    if unsupported:
+        raise RenderServiceError(
+            f"曲线标题模板尚不支持以下部门的特殊文件格式：{', '.join(unsupported)}",
+            code="department_output_pipeline_unsupported",
+        )
+
+
+def _require_department_output_pipeline(rows: Iterable[Mapping[str, Any]], *, pipeline: str) -> None:
+    """Reject department-controlled delivery for legacy pipelines.
+
+    The shared production output pipeline is available to the 202508 and curved
+    renderers. Other renderers must not silently emit a generic file when an
+    order requires a department-specific delivery format.
     """
 
     unsupported: List[str] = []
     for row in rows:
         department = _row_value(row, ("department", "production department", "生产部门", "部门"))
         manufacturer = _row_value(row, ("manufacturer", "factory", "supplier", "厂家", "厂商", "生产厂家", "供应商"))
-        # ZW is its own curved-title AI8 department, not a manufacturer-specific
-        # W order. The broad W contains rule is reserved for real W codes.
         if _output_key_part(department) == "ZW":
             continue
         rule = resolve_department_output(department, manufacturer)
@@ -930,8 +830,7 @@ def _require_department_output_pipeline(rows: Iterable[Mapping[str, Any]], *, pi
                 unsupported.append(label)
     if unsupported:
         raise RenderServiceError(
-            f"模板管线 {pipeline} 尚未实现生产部门成品规则（{', '.join(unsupported)}），"
-            "为避免错误交付已停止渲染；请使用已支持部门分流的 202508 模板。",
+            f"Pipeline {pipeline} does not support department-specific delivery: {', '.join(unsupported)}",
             code="department_output_pipeline_unsupported",
         )
 
@@ -943,62 +842,6 @@ def _row_value(row: Mapping[str, Any], keys: Iterable[str]) -> str:
         if value not in (None, ""):
             return str(value).strip()
     return ""
-
-
-def _delivery_outputs(
-    deliveries: List[Dict[str, str]],
-    task_files: List[str],
-    dry_run: bool,
-    *,
-    bundle_members: List[Dict[str, str]] | None = None,
-    bundle_dir: Path | None = None,
-    bundle_name: str = "department-deliveries.zip",
-    extra_outputs: Mapping[str, Any] | None = None,
-) -> Dict[str, Any]:
-    if not deliveries and not bundle_members:
-        raise RenderServiceError("没有可交付的部门成品", code="department_output_empty")
-    outputs: Dict[str, Any] = {
-        "delivery_plan": deliveries,
-        "render_task": task_files[0] if task_files else "",
-        "render_task_files": task_files,
-    }
-    if extra_outputs:
-        for key, value in extra_outputs.items():
-            outputs[key] = value
-    if dry_run:
-        if bundle_members:
-            outputs["bundle_plan"] = bundle_members
-        return outputs
-
-    outputs["delivery_files"] = deliveries
-    primary = deliveries[0] if deliveries else None
-    if primary:
-        if primary["path"].lower().endswith(".ai"):
-            outputs["output_ai"] = primary["path"]
-        elif primary["path"].lower().endswith(".png"):
-            outputs["output_png"] = primary["path"]
-    if bundle_members or len(deliveries) > 1:
-        members = bundle_members or [
-            {"path": delivery["path"], "arcname": Path(delivery["path"]).name}
-            for delivery in deliveries
-        ]
-        target_dir = bundle_dir or (
-            Path(primary["path"]).parent
-            if primary
-            else Path(str(members[0]["path"])).parent
-        )
-        bundle = target_dir / bundle_name
-        with zipfile.ZipFile(bundle, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-            for member in members:
-                path = Path(str(member.get("path") or ""))
-                if not path.exists():
-                    raise RenderServiceError(f"部门成品未生成：{path.name}", code="department_output_missing")
-                archive.write(path, arcname=str(member.get("arcname") or path.name))
-        outputs["output_bundle"] = str(bundle)
-        outputs["primary_output"] = str(bundle)
-    else:
-        outputs["primary_output"] = primary["path"] if primary else ""
-    return outputs
 
 
 def _output_key_part(value: object) -> str:
@@ -1079,8 +922,8 @@ def _render_generic_chunk(bridge: IllustratorBridge, script: Path, task_file: Pa
             time.sleep(GENERIC_RULE_COM_RETRY_DELAY_SECONDS)
 
 
-def _render_202508_batch_files(batch_files: Iterable[Path], visible: bool) -> None:
-    script = Path(__file__).resolve().parents[2] / "scripts" / "illustrator" / "render_202508_batch.jsx"
+def _render_production_batch_files(batch_files: Iterable[Path], visible: bool) -> None:
+    script = Path(__file__).resolve().parents[2] / "scripts" / "illustrator" / "render_batch.jsx"
     for batch_file in batch_files:
         _render_202508_batch_chunk(script, Path(batch_file), visible)
         time.sleep(1.0)
