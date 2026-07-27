@@ -70,8 +70,8 @@ def test_parse_items_applies_department_color_rule():
     assert items[1].show_color_label is False
     assert items[1].color_option == DEFAULT_COLOR
     assert items[1].design_option == DEFAULT_DESIGN
-    assert items[1].production_label == "ORDER2  Amy"
-    assert items[1].production_label_lines == ["ORDER2", "Amy"]
+    assert items[1].production_label == "ORDER2"
+    assert items[1].production_label_lines == ["ORDER2"]
     assert items[1].show_frame is False
 
 
@@ -105,7 +105,7 @@ def test_parse_items_sets_department_labels_and_frames():
 
     assert items[0].production_label == "ORDER3  皮质首饰盒"
     assert items[0].show_frame is True
-    assert items[1].production_label == "ORDER4  皮质首饰盒  黑色"
+    assert items[1].production_label == "ORDER4  皮质首饰盒"
     assert items[1].show_frame is False
 
 
@@ -165,6 +165,63 @@ def test_build_task_keeps_actions_for_each_202508_text_item(tmp_path):
     assert task["groups"][0]["items"][0]["text_actions"] == actions[0][0]
 
 
+def test_build_task_creates_exact_color_frames_with_actions(tmp_path):
+    rows = [
+        {
+            "内部订单号": "ORDER8",
+            "订单明细id": "8",
+            "生产部门": "T",
+            "模板": "JJMB202508261001394920",
+            "产品中文名称": "产品",
+            "字体": "F2",
+            "定制信息": "Alice",
+            "字体颜色": "Gold",
+            "设计": "Design1",
+        },
+        {
+            "内部订单号": "ORDER9",
+            "订单明细id": "9",
+            "生产部门": "T",
+            "模板": "JJMB202508261001394920",
+            "产品中文名称": "产品",
+            "字体": "F2",
+            "定制信息": "Beth",
+            "字体颜色": "Silver",
+            "设计": "Design1",
+        },
+    ]
+    groups = group_items(parse_items(rows))
+    actions = [
+        [[{"type": "fill_color", "values": ["#FF0000"]}]],
+        [[{"type": "fill_color", "values": ["#FFFFFF"]}]],
+    ]
+    by_color = {
+        "Gold": [groups[0]],
+        "Silver": [groups[1]],
+    }
+
+    task = build_task(
+        tmp_path / "template.config.json",
+        tmp_path / "out.ai",
+        groups,
+        columns=1,
+        show_style_boxes=False,
+        text_actions=actions,
+        fixed_canvas_mm={"width_mm": 580, "height_mm": 2000},
+        master_packing={"target_width_mm": 580, "item_gap_mm": 2},
+        color_frames=[
+            {"color_option": color, "groups": frame_groups}
+            for color, frame_groups in by_color.items()
+        ],
+    )
+
+    assert [frame["color_option"] for frame in task["color_frames"]] == ["Gold", "Silver"]
+    assert task["color_frames"][0]["groups"][0]["items"][0]["text_actions"] == actions[0][0]
+    assert task["output"]["fixed_canvas_mm"] == {"width_mm": 580, "height_mm": 2000}
+    assert task["layout"]["pack_order_blocks"] is True
+    assert task["layout"]["master_packing"] == {"target_width_mm": 580, "item_gap_mm": 2}
+
+
 def test_202508_renderer_accepts_compiled_fill_color_actions():
     source = Path("scripts/illustrator/render_202508_grouped.jsx").read_text(encoding="utf-8")
 
@@ -175,6 +232,13 @@ def test_202508_renderer_accepts_compiled_fill_color_actions():
     assert "function applyBoldnessToAttributes(attributes, boldness)" in source
     assert "var showBoxes = layout.show_style_boxes === true;" in source
     assert "var drawFrame = !compactOutput && showBoxes;" in source
+    compose_source = Path("scripts/illustrator/compose_color_frames.jsx").read_text(encoding="utf-8")
+    assert "task.type !== \"compose_color_frames\"" in compose_source
+    assert "COLOR_FRAME_" in compose_source
+    assert "boundary.stroked = false;" in compose_source
+    assert "COLOR_FRAME_OUTPUT" in compose_source
+    assert "function packBlocks(blocks, width, gap, colorOption)" in compose_source
+    assert "function collectOrderBlocks(source)" in compose_source
     assert "item.show_frame === true" not in source
     assert "var outlineText = outputConfig.outline_text !== false;" in source
     assert "if (!outlineText)" in source
@@ -182,12 +246,19 @@ def test_202508_renderer_accepts_compiled_fill_color_actions():
     assert "if (outlineText)" in source
     assert "outlineAllTextFrames(doc, pathfinderMerge);" in source
     assert "function collectTextFrames(container, result)" in source
+    assert "function groupNewLayerItems(layer, previousItems, name)" in source
+    assert "var packOrderBlocks = layout.pack_order_blocks === true;" in source
 
     node = shutil.which("node")
     if not node:
         return
     result = subprocess.run(
-        [node, "-e", "new Function(process.argv[1]);", source.replace("#target illustrator", "", 1)],
+        [
+            node,
+            "-e",
+            "const fs=require('fs');new Function(fs.readFileSync(process.argv[1],'utf8').replace(/^#target.*\\r?\\n/,''));",
+            str(Path("scripts/illustrator/render_202508_grouped.jsx").resolve()),
+        ],
         capture_output=True,
         text=True,
         check=False,
@@ -332,16 +403,27 @@ def test_department_rules_are_loaded_from_config():
 
     assert k_rule["label_fields"] == ["order_no", "color_option"]
     assert k_rule["label_lines"] == [["order_no"], ["color_option"]]
+    assert k_rule["annotation_type"] == "COLOR"
     assert k_rule["apply_color_to_artwork"] is False
-    assert h_rule["label_fields"] == ["order_no", "text"]
+    assert h_rule["label_fields"] == ["order_no"]
     assert h_rule["apply_color_to_artwork"] is True
     assert "实际效果图" in shop_rules["interpretation"]
-    assert "暂不按本节规则执行最终部门排版" in shop_rules["current_render_policy"]
+    assert "执行最终部门排版和成品格式" in shop_rules["current_render_policy"]
     assert shop_rules["global_requirements"]["must_pathfinder_merge"] is True
     assert shop_rules["global_requirements"]["default_output_color_mode"] == "CMYK"
     assert shop_rules["global_requirements"]["allowed_output_color_modes"] == ["CMYK", "RGB"]
     assert shop_rules["global_requirements"]["size_frame_text_path_overlap"] is True
     assert "去重很重要" in shop_rules["global_requirements"]["outline_dedupe_note"]
     k_output = next(rule for rule in shop_rules["department_output_requirements"] if rule["name"] == "K")
+    pw_output = next(rule for rule in shop_rules["department_output_requirements"] if rule["name"] == "PW_EW")
+    d_output = next(rule for rule in shop_rules["department_output_requirements"] if rule["name"] == "D_CONTAINS")
     assert k_output["layout"]["frame_width_mm"] == 480
+    assert k_output["single_order_ai"] is True
+    assert k_output["annotation_type"] == "COLOR"
+    assert pw_output["annotation_type"] == "PRODUCT_NAME"
+    assert pw_output["single_order_ai"] is True
+    assert pw_output["has_master"] is True
+    assert d_output["annotation_type"] == "PRODUCT_NAME"
+    assert d_output["single_order_ai"] is True
+    assert d_output["has_master"] is False
     assert k_output["artwork_content"] == "订单号 + 字体颜色 + 效果图"

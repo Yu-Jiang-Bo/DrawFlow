@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from src.service.job_store import JobStore
 from src.service.web_page import INDEX_HTML
 
@@ -73,6 +75,35 @@ def test_render_page_has_progress_overlay():
     assert "调用 Illustrator" in INDEX_HTML
     assert "生成 AI 文件" in INDEX_HTML
     assert 'return ["上传订单表格", "解析订单字段", "调用 Illustrator", "生成 AI 文件", "完成收尾"]' in INDEX_HTML
+
+
+def test_job_store_merges_live_progress_file(tmp_path):
+    store = JobStore(tmp_path)
+    record = store.create({"template_id": "T1"})
+    progress_file = tmp_path / record["job_id"] / "progress.json"
+    progress_file.write_text('{"current": 153, "total": 199, "stage": "生成 AI 文件"}', encoding="utf-8")
+
+    loaded = store.load(record["job_id"])
+    recent = store.list_recent(1)[0]
+
+    assert loaded["progress"]["current"] == 153
+    assert loaded["progress"]["total"] == 199
+    assert recent["progress"]["current"] == 153
+
+
+def test_render_page_downloads_the_department_primary_delivery():
+    assert "outputs.primary_output" in INDEX_HTML
+    assert 'job.outputs.primary_output ? "primary_output" : "output_ai"' in INDEX_HTML
+    assert "下载全部成品 ZIP" in INDEX_HTML
+    assert "下载 PNG 成品" in INDEX_HTML
+
+
+def test_legacy_render_page_downloads_the_department_primary_delivery():
+    source = Path("src/service/http_server.py").read_text(encoding="utf-8")
+
+    assert "function primaryOutputKey(outputs)" in source
+    assert 'outputs.output_png' in source
+    assert 'download/${encodeURIComponent(outputKey)}' in source
 
 
 def test_template_rule_form_uses_structured_check():

@@ -6,6 +6,7 @@ import argparse
 import json
 import logging
 import os
+import shutil
 import sys
 import threading
 import uuid
@@ -123,7 +124,7 @@ class LocalGatewayRequestHandler(BaseHTTPRequestHandler):
             self._send_local_job(parts[2])
             return
         if len(parts) == 4 and parts[3] == "output":
-            self._send_job_output(parts[2], "output_ai")
+            self._send_job_output(parts[2], "primary_output")
             return
         self._send_error(HTTPStatus.NOT_FOUND, "not found")
 
@@ -132,7 +133,13 @@ class LocalGatewayRequestHandler(BaseHTTPRequestHandler):
         if len(parts) == 3:
             self._send_local_job(parts[2])
             return
-        if len(parts) == 5 and parts[3] == "download" and parts[4] in {"output_ai", "render_task"}:
+        if len(parts) == 5 and parts[3] == "download" and parts[4] in {
+            "primary_output",
+            "output_ai",
+            "output_png",
+            "output_bundle",
+            "render_task",
+        }:
             self._send_job_output(parts[2], parts[4])
             return
         self._send_error(HTTPStatus.NOT_FOUND, "not found")
@@ -163,11 +170,18 @@ class LocalGatewayRequestHandler(BaseHTTPRequestHandler):
         except KeyError as exc:
             self._send_error(HTTPStatus.NOT_FOUND, str(exc))
             return
-        output_path = Path(str(record.get("outputs", {}).get(key, "")))
+        outputs = record.get("outputs", {})
+        if not isinstance(outputs, dict):
+            outputs = {}
+        output_value = outputs.get(key, "")
+        if key == "primary_output" and not output_value:
+            output_value = outputs.get("output_bundle") or outputs.get("output_ai") or outputs.get("output_png")
+        output_path = Path(str(output_value or ""))
         if not output_path.exists():
             self._send_error(HTTPStatus.NOT_FOUND, "输出文件不存在")
             return
-        self._send_bytes(output_path.read_bytes(), "application/octet-stream", _safe_download_name(output_path.name))
+        content_type = "application/zip" if output_path.suffix.lower() == ".zip" else "application/octet-stream"
+        self._send_file(output_path, content_type, _safe_download_name(output_path.name))
 
     def _send_central_or_fallback(self, path: str) -> None:
         try:
@@ -261,6 +275,15 @@ class LocalGatewayRequestHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
         self.wfile.write(data)
+
+    def _send_file(self, path: Path, content_type: str, download_name: str) -> None:
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Disposition", f'attachment; filename="{download_name}"')
+        self.send_header("Content-Length", str(path.stat().st_size))
+        self.end_headers()
+        with path.open("rb") as source:
+            shutil.copyfileobj(source, self.wfile, length=1024 * 1024)
 
     def _send_error(self, status: HTTPStatus, message: str) -> None:
         self._send_json({"error": message}, status)

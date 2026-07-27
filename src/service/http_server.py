@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import socket
 import threading
 import uuid
@@ -644,8 +645,9 @@ function renderJobResult(result) {
   document.getElementById("jobStatusCell").textContent = result.status || "-";
   document.getElementById("downloadStatus").textContent = result.status === "completed" ? "准备下载" : "-";
   document.getElementById("result").textContent = renderResultMessage(result);
-  if (result.status === "completed" && result.job_id && result.outputs && result.outputs.output_ai) {
-    downloadOutput(result.job_id);
+  if (result.status === "completed" && result.job_id && result.outputs) {
+    const outputKey = primaryOutputKey(result.outputs);
+    if (outputKey) downloadOutput(result.job_id, outputKey);
   }
 }
 function renderResultMessage(result) {
@@ -653,13 +655,20 @@ function renderResultMessage(result) {
     return result.error || "渲染失败";
   }
   if (result.status === "completed") {
-    return `渲染完成，共 ${result.stats && result.stats.items !== undefined ? result.stats.items : "-"} 项，AI 文件已开始下载。`;
+    return `渲染完成，共 ${result.stats && result.stats.items !== undefined ? result.stats.items : "-"} 项，部门成品已开始下载。`;
   }
   return JSON.stringify(result, null, 2);
 }
-function downloadOutput(jobId) {
+function primaryOutputKey(outputs) {
+  if (outputs.primary_output) return "primary_output";
+  if (outputs.output_bundle) return "output_bundle";
+  if (outputs.output_png) return "output_png";
+  if (outputs.output_ai) return "output_ai";
+  return "";
+}
+function downloadOutput(jobId, outputKey) {
   document.getElementById("downloadStatus").textContent = "下载中";
-  window.location.href = `/api/jobs/${encodeURIComponent(jobId)}/download/output_ai`;
+  window.location.href = `/api/jobs/${encodeURIComponent(jobId)}/download/${encodeURIComponent(outputKey)}`;
 }
 function escapeHtml(value) {
   return String(value)
@@ -784,7 +793,7 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
             return
         if path.startswith("/local/jobs/"):
             if len(parts) == 4 and parts[0] == "local" and parts[1] == "jobs" and parts[3] == "output":
-                self._send_job_output(parts[2], "output_ai")
+                self._send_job_output(parts[2], "primary_output")
                 return
             self._send_error(HTTPStatus.NOT_FOUND, "not found")
             return
@@ -853,7 +862,13 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
             return
         if path.startswith("/api/jobs/") and "/download/" in path:
             parts = path.strip("/").split("/")
-            if len(parts) == 5 and parts[3] == "download" and parts[4] in {"output_ai", "render_task"}:
+            if len(parts) == 5 and parts[3] == "download" and parts[4] in {
+                "primary_output",
+                "output_ai",
+                "output_png",
+                "output_bundle",
+                "render_task",
+            }:
                 self._send_job_output(parts[2], parts[4])
                 return
             self._send_error(HTTPStatus.NOT_FOUND, "not found")
@@ -1439,17 +1454,24 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
         except KeyError as exc:
             self._send_error(HTTPStatus.NOT_FOUND, str(exc))
             return
-        output_path = Path(record.get("outputs", {}).get(key, ""))
+        outputs = record.get("outputs", {})
+        if not isinstance(outputs, dict):
+            outputs = {}
+        output_value = outputs.get(key, "")
+        if key == "primary_output" and not output_value:
+            output_value = outputs.get("output_bundle") or outputs.get("output_ai") or outputs.get("output_png")
+        output_path = Path(str(output_value or ""))
         if not output_path.exists():
             self._send_error(HTTPStatus.NOT_FOUND, "输出文件不存在")
             return
-        data = output_path.read_bytes()
+        content_type = "application/zip" if output_path.suffix.lower() == ".zip" else "application/octet-stream"
         self.send_response(HTTPStatus.OK)
-        self.send_header("Content-Type", "application/octet-stream")
+        self.send_header("Content-Type", content_type)
         self.send_header("Content-Disposition", f'attachment; filename="{_safe_download_name(output_path.name)}"')
-        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Content-Length", str(output_path.stat().st_size))
         self.end_headers()
-        self.wfile.write(data)
+        with output_path.open("rb") as source:
+            shutil.copyfileobj(source, self.wfile, length=1024 * 1024)
 
     def _send_json(self, payload: object, status: HTTPStatus = HTTPStatus.OK) -> None:
         data = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")

@@ -19,6 +19,8 @@
     var layout = task.layout || {};
     var showBoxes = layout.show_style_boxes === true;
     var compactOutput = !showBoxes;
+    var suppressLabels = layout.suppress_labels === true;
+    var packOrderBlocks = layout.pack_order_blocks === true;
     var columns = Math.max(Number(layout.columns || 4), 1);
     var gap = mmToPt(Number(compactOutput ? (layout.compact_gap_mm || 4) : (layout.gap_mm || 8)));
     var margin = mmToPt(Number(compactOutput ? (layout.compact_margin_mm || 4) : (layout.margin_mm || 8)));
@@ -41,7 +43,7 @@
     var maxGroupWidth = columnWidth;
     for (var g = 0; g < renderGroups.length; g++) {
         var itemCount = renderGroups[g].items.length;
-        var compactHeight = itemLabelHeight + itemGap + itemCount * (contentSize.height + itemGap);
+        var compactHeight = (suppressLabels ? 0 : itemLabelHeight + itemGap) + itemCount * (contentSize.height + itemGap);
         var metric = {
             width: columnWidth,
             height: compactOutput ? compactHeight : groupLabelHeight + itemCount * (itemLabelHeight + contentSize.height + itemGap)
@@ -51,18 +53,39 @@
     }
 
     var placements = compactPlacements(groupMetrics, columns, gap);
-    var maxColumnHeight = 0;
-    for (var h = 0; h < placements.columnHeights.length; h++) {
-        maxColumnHeight = Math.max(maxColumnHeight, placements.columnHeights[h]);
-    }
-    if (maxColumnHeight > 0) maxColumnHeight -= gap;
+    var maxColumnHeight = placementHeight(placements);
     var docWidth = margin * 2 + columns * maxGroupWidth + (columns - 1) * gap;
     var docHeight = margin * 2 + maxColumnHeight;
+    var fixedCanvas = outputConfig.fixed_canvas_mm || {};
+    var fixedWidthMm = Number(fixedCanvas.width_mm || 0);
+    var fixedHeightMm = Number(fixedCanvas.height_mm || 0);
+    if (fixedWidthMm > 0 && fixedHeightMm > 0) {
+        var fixedWidth = mmToPt(fixedWidthMm);
+        var fixedHeight = mmToPt(fixedHeightMm);
+        var maxColumns = Math.floor((fixedWidth - margin * 2 + gap) / (maxGroupWidth + gap));
+        if (maxColumns < 1) throw new Error("固定画布宽度不足，无法放入一个完整订单组");
+        var fitting = null;
+        for (var candidateColumns = 1; candidateColumns <= maxColumns; candidateColumns++) {
+            var candidatePlacements = compactPlacements(groupMetrics, candidateColumns, gap);
+            if (placementHeight(candidatePlacements) <= fixedHeight - margin * 2) {
+                fitting = candidatePlacements;
+                columns = candidateColumns;
+                break;
+            }
+        }
+        if (!fitting) throw new Error("固定画布高度不足，无法完整放入全部订单；请减少订单或分批出图");
+        placements = fitting;
+        maxColumnHeight = placementHeight(placements);
+        docWidth = fixedWidth;
+        docHeight = fixedHeight;
+    }
     var debugPayload = {
         groups: renderGroups.length,
         sourceGroups: task.groups.length,
         columns: columns,
         compactOutput: compactOutput,
+        suppressLabels: suppressLabels,
+        packOrderBlocks: packOrderBlocks,
         docWidth: docWidth,
         docHeight: docHeight,
         productWidthPt: productSize.width,
@@ -83,6 +106,7 @@
 
     for (var i = 0; i < renderGroups.length; i++) {
         var group = renderGroups[i];
+        var beforeGroupItems = packOrderBlocks ? directLayerItems(layer) : null;
         var col = placements.items[i].column;
         var groupLeft = margin + col * (maxGroupWidth + gap);
         var groupTop = docHeight - margin - placements.items[i].y;
@@ -105,7 +129,7 @@
             var drawFrame = !compactOutput && showBoxes;
 
             if (compactOutput) {
-                if (j === 0) {
+                if (!suppressLabels && j === 0) {
                     var labelLinesForGroup = group.production_label_lines || labelLines(item, itemLabel);
                     var labelLeftForGroup = groupLeft + (maxGroupWidth - compactLabelWidth) / 2;
                     var labelRightForGroup = labelLeftForGroup + compactLabelWidth;
@@ -134,6 +158,9 @@
             renderedItems += 1;
             writeProgress(task, renderedItems, taskItemCount(renderGroups), "正在渲染条目");
         }
+        if (packOrderBlocks) {
+            groupNewLayerItems(layer, beforeGroupItems, "ORDER_PACK_BLOCK_" + i);
+        }
     }
 
     if (outlineText) {
@@ -141,14 +168,32 @@
         outlineAllTextFrames(doc, pathfinderMerge);
     }
     writeDebug(task, debugPayload);
-    var output = File(String(task.output_ai));
-    ensureFolder(output.parent);
-    if (output.exists) output.remove();
-    writeProgress(task, renderedItems, taskItemCount(renderGroups), "正在保存 AI 文件");
-    saveAsAI8(doc, output);
+    var output;
+    if (String(outputConfig.format || "ai").toLowerCase() === "png") {
+        output = File(String(outputConfig.png_path || ""));
+        if (!output.fsName) throw new Error("PNG 输出路径缺失");
+        ensureFolder(output.parent);
+        if (output.exists) output.remove();
+        writeProgress(task, renderedItems, taskItemCount(renderGroups), "正在导出 PNG 文件");
+        exportPNG(doc, output, Number(outputConfig.dpi || 300));
+    } else {
+        output = File(String(task.output_ai));
+        ensureFolder(output.parent);
+        if (output.exists) output.remove();
+        writeProgress(task, renderedItems, taskItemCount(renderGroups), "正在保存 AI 文件");
+        saveAsAI(doc, output, String(outputConfig.compatibility || "Illustrator 8"));
+    }
     writeProgress(task, renderedItems, taskItemCount(renderGroups), "正在关闭 Illustrator 文档");
     doc.close(SaveOptions.DONOTSAVECHANGES);
     return output.fsName;
+
+    function placementHeight(plan) {
+        var height = 0;
+        for (var index = 0; index < plan.columnHeights.length; index++) {
+            height = Math.max(height, plan.columnHeights[index]);
+        }
+        return height > 0 ? height - gap : 0;
+    }
 
     function maxProductSize(config) {
         var width = 0;
@@ -543,6 +588,37 @@
         }
     }
 
+    function directLayerItems(layer) {
+        var result = [];
+        for (var i = 0; i < layer.pageItems.length; i++) {
+            if (layer.pageItems[i].parent === layer) result.push(layer.pageItems[i]);
+        }
+        return result;
+    }
+    function groupNewLayerItems(layer, previousItems, name) {
+        var additions = [];
+        var currentItems = directLayerItems(layer);
+        for (var i = 0; i < currentItems.length; i++) {
+            var known = false;
+            for (var j = 0; j < previousItems.length; j++) {
+                if (currentItems[i] === previousItems[j]) { known = true; break; }
+            }
+            if (!known) additions.push(currentItems[i]);
+        }
+        if (!additions.length) throw new Error("Order pack block has no artwork");
+        var doc = app.activeDocument;
+        doc.selection = null;
+        for (var selectionIndex = 0; selectionIndex < additions.length; selectionIndex++) {
+            additions[selectionIndex].selected = true;
+        }
+        app.executeMenuCommand("group");
+        var block = doc.selection.length ? doc.selection[0] : null;
+        if (!block || block.typename !== "GroupItem") throw new Error("Cannot create order pack block");
+        block.name = name;
+        doc.selection = null;
+        return block;
+    }
+
     function compactPlacements(metrics, columnCount, gapValue) {
         var heights = [];
         var items = [];
@@ -617,12 +693,26 @@
         return "{" + props.join(",") + "}";
     }
 
-    function saveAsAI8(doc, file) {
+    function saveAsAI(doc, file, compatibility) {
         var opts = new IllustratorSaveOptions();
-        opts.compatibility = Compatibility.ILLUSTRATOR8;
+        opts.compatibility = String(compatibility).toLowerCase() === "cs5" ? Compatibility.ILLUSTRATOR15 : Compatibility.ILLUSTRATOR8;
         opts.pdfCompatible = false;
         opts.compressed = false;
         doc.saveAs(file, opts);
+    }
+
+    function exportPNG(doc, file, dpi) {
+        var opts = new ExportOptionsPNG24();
+        // Illustrator floors some large artboard exports one pixel below their
+        // mathematical size. A tiny positive guard preserves the requested
+        // 580 x 2000mm / 300PPI raster without crossing the next width pixel.
+        var scale = Math.max(1, Number(dpi || 300) / 72 * 100 + 0.02);
+        opts.antiAliasing = true;
+        opts.artBoardClipping = true;
+        opts.transparency = false;
+        opts.horizontalScale = scale;
+        opts.verticalScale = scale;
+        doc.exportFile(file, ExportType.PNG24, opts);
     }
 
     function ensureFolder(folder) {

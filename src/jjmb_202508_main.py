@@ -8,10 +8,16 @@ import re
 from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Mapping
+from typing import Any, Dict, Iterable, List, Mapping, Sequence
 
 from .jjmb_order_parser import read_xlsx_rows, split_personalization
 from .renderer.illustrator_bridge import IllustratorBridge, IllustratorBridgeError
+from .service.department_output import (
+    ANNOTATION_COLOR,
+    ANNOTATION_PRODUCT_NAME,
+    is_department_d,
+    translate_color_to_chinese,
+)
 
 
 TEMPLATE_ID = "JJMB202508261001394920"
@@ -64,6 +70,7 @@ class ColorDesignOrderItem:
     production_label: str
     production_label_lines: List[str]
     show_frame: bool
+    manufacturer: str = ""
     quantity_index: int = 1
 
     def to_json_dict(self) -> Dict[str, object]:
@@ -72,6 +79,7 @@ class ColorDesignOrderItem:
             "detail_id": self.detail_id,
             "department": self.department,
             "product_name": self.product_name,
+            "manufacturer": self.manufacturer,
             "text": self.text,
             "font_option": self.font_option,
             "color_option": self.color_option,
@@ -179,26 +187,31 @@ def build_production_label(
     color_option: str,
     rule: Dict[str, object] | None = None,
 ) -> str:
-    display_color = display_color_name(color_option)
+    color_label = translate_color_to_chinese(color_option)
     values = {
         "order_no": order_no,
         "department": department,
         "product_name": product_name,
         "text": text,
-        "color_option": display_color,
+        "color_option": color_label,
     }
+    annotation_type = str(rule.get("annotation_type") or "").upper() if rule else ""
+    if annotation_type == ANNOTATION_COLOR:
+        return compact_label(order_no, color_label)
+    if annotation_type == ANNOTATION_PRODUCT_NAME:
+        return compact_label(order_no, product_name)
     if rule and rule.get("label_fields"):
         return compact_label(*(values.get(str(field), "") for field in rule["label_fields"]))
     code = normalize_department(department)
     if code == "H":
         return compact_label(order_no, text)
-    if "D" in code:
+    if is_department_d(code):
         return compact_label(order_no, product_name)
     if code in {"K", "T", "FK", "ZK"}:
-        return compact_label(order_no, display_color, text)
+        return compact_label(order_no, color_label)
     if code in {"PW", "EW"}:
-        return compact_label(order_no, product_name, display_color)
-    return compact_label(order_no, display_color, text)
+        return compact_label(order_no, product_name)
+    return compact_label(order_no, color_label, text)
 
 
 def build_production_label_lines(
@@ -209,13 +222,19 @@ def build_production_label_lines(
     color_option: str,
     rule: Dict[str, object] | None = None,
 ) -> List[str]:
+    color_label = translate_color_to_chinese(color_option)
     values = {
         "order_no": order_no,
         "department": department,
         "product_name": product_name,
         "text": text,
-        "color_option": display_color_name(color_option),
+        "color_option": color_label,
     }
+    annotation_type = str(rule.get("annotation_type") or "").upper() if rule else ""
+    if annotation_type == ANNOTATION_COLOR:
+        return [part for part in [order_no, color_label] if part]
+    if annotation_type == ANNOTATION_PRODUCT_NAME:
+        return [part for part in [order_no, product_name] if part]
     label_lines = rule.get("label_lines") if rule else None
     if isinstance(label_lines, list) and label_lines:
         result: List[str] = []
@@ -242,6 +261,15 @@ def build_production_label_lines(
 
 def compact_label(*parts: str) -> str:
     return "  ".join(part.strip() for part in parts if part and part.strip())
+
+
+def row_value(row: Mapping[str, str], *names: str) -> str:
+    normalized = {str(key).strip().casefold(): str(value or "").strip() for key, value in row.items()}
+    for name in names:
+        value = normalized.get(name.casefold(), "")
+        if value:
+            return value
+    return ""
 
 
 def parse_items(
@@ -273,6 +301,7 @@ def parse_items(
                     detail_id=(row.get("订单明细id") or "").strip(),
                     department=department,
                     product_name=product_name,
+                    manufacturer=row_value(row, "厂家", "厂商", "生产厂家", "供应商", "manufacturer", "factory", "supplier"),
                     text=text,
                     font_option=font,
                     color_option=color_option,
@@ -320,6 +349,12 @@ def build_task(
     pathfinder_merge: bool = True,
     font_styles: Mapping[str, Mapping[str, float]] | None = None,
     text_actions: List[List[List[Dict[str, Any]]]] | None = None,
+    output_png: Path | None = None,
+    fixed_canvas_mm: Mapping[str, float] | None = None,
+    output_compatibility: str = "Illustrator 8",
+    suppress_labels: bool = False,
+    master_packing: Mapping[str, object] | None = None,
+    color_frames: Sequence[Mapping[str, object]] | None = None,
 ) -> Dict[str, object]:
     if not groups:
         raise ValueError("没有可渲染订单")
@@ -330,6 +365,35 @@ def build_task(
             for item_index, item in enumerate(group["items"]):
                 actions = action_rows[item_index] if item_index < len(action_rows) else []
                 item["text_actions"] = actions if isinstance(actions, list) else []
+
+    actions_by_item = {
+        _serialized_item_identity(item): item["text_actions"]
+        for group in serialized_groups
+        for item in group["items"]
+        if isinstance(item, Mapping) and isinstance(item.get("text_actions"), list)
+    }
+    serialized_color_frames: List[Dict[str, object]] = []
+    for frame in color_frames or []:
+        frame_groups = frame.get("groups") if isinstance(frame, Mapping) else None
+        if not isinstance(frame_groups, list) or not frame_groups:
+            continue
+        frame_groups_serialized = [
+            group.to_json_dict() if isinstance(group, ColorDesignOrderGroup) else dict(group)
+            for group in frame_groups
+            if isinstance(group, (ColorDesignOrderGroup, Mapping))
+        ]
+        for group in frame_groups_serialized:
+            for item in group.get("items", []):
+                if isinstance(item, dict):
+                    actions = actions_by_item.get(_serialized_item_identity(item))
+                    if actions is not None:
+                        item["text_actions"] = actions
+        serialized_color_frames.append(
+            {
+                "color_option": str(frame.get("color_option") or "") if isinstance(frame, Mapping) else "",
+                "groups": frame_groups_serialized,
+            }
+        )
     task: Dict[str, object] = {
         "type": "jjmb_202508_grouped",
         "template_config": str(template_config),
@@ -352,6 +416,10 @@ def build_task(
             "compact_item_label_height_mm": 10.0,
             "compact_label_font_size_pt": 8.0,
             "show_style_boxes": show_style_boxes,
+            "suppress_labels": suppress_labels,
+            "color_label_gutter_mm": 24.0,
+            "pack_order_blocks": bool(master_packing),
+            "master_packing": dict(master_packing or {}),
         },
         "fit": {
             "padding_mm": 0.0,
@@ -359,17 +427,31 @@ def build_task(
             "max_font_size_pt": 300.0,
         },
         "output": {
-            "format": "ai",
-            "compatibility": "Illustrator 8",
+            "format": "png" if output_png else "ai",
+            "compatibility": output_compatibility,
             "color_mode": _normalize_color_mode(color_mode),
             "outline_text": bool(outline_text),
             "pathfinder_merge": bool(pathfinder_merge),
+            "png_path": str(output_png) if output_png else "",
+            "dpi": 300 if output_png else 0,
+            "fixed_canvas_mm": dict(fixed_canvas_mm or {}),
         },
         "debug": {
             "report_path": str(output_ai.with_suffix(".debug.json")),
         },
     }
+    if serialized_color_frames:
+        task["color_frames"] = serialized_color_frames
     return task
+
+
+def _serialized_item_identity(item: Mapping[str, object]) -> tuple[str, str, str, str]:
+    return (
+        str(item.get("order_no") or ""),
+        str(item.get("detail_id") or ""),
+        str(item.get("quantity_index") or ""),
+        str(item.get("text") or ""),
+    )
 
 
 def write_json(path: Path, payload: Dict[str, object]) -> None:
@@ -393,11 +475,16 @@ def export_template_config(template_ai: Path, output_json: Path, visible: bool) 
         },
     )
     script = Path(__file__).resolve().parents[1] / "scripts" / "illustrator" / "export_202508_config.jsx"
-    IllustratorBridge(visible=visible).render(script, task_file)
+    IllustratorBridge(visible=visible, fresh_instance=True, quit_after=True).render(script, task_file)
 
 
 def render_task(task_file: Path, visible: bool) -> None:
     script = Path(__file__).resolve().parents[1] / "scripts" / "illustrator" / "render_202508_grouped.jsx"
+    IllustratorBridge(visible=visible).render(script, task_file)
+
+
+def render_task_batch(task_file: Path, visible: bool) -> None:
+    script = Path(__file__).resolve().parents[1] / "scripts" / "illustrator" / "render_202508_batch.jsx"
     IllustratorBridge(visible=visible).render(script, task_file)
 
 
