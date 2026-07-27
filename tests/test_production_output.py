@@ -68,6 +68,15 @@ def test_generic_batch_jsx_executes_child_tasks_by_script_path():
     assert "$.evalFile(File(scriptPath))" in source
 
 
+def test_color_frame_composer_copies_only_top_level_source_items():
+    source = Path("scripts/illustrator/compose_color_frames.jsx").read_text(encoding="utf-8")
+
+    assert "source.pageItems.length" not in source
+    assert "var sourceLayer = source.layers[sourceLayerIndex];" in source
+    assert "if (sourceItem.parent !== sourceLayer) continue;" in source
+    assert "copy.translate(frameLeft - sourceArtboard[0], height - sourceArtboard[1]);" in source
+
+
 def test_batch_tasks_use_absolute_paths_for_illustrator_child_evaluation(tmp_path):
     batch = write_batch_task_files(
         tmp_path / "jobs",

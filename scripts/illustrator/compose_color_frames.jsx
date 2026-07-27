@@ -26,9 +26,17 @@
         boundary.stroked = false;
 
         var source = app.open(File(String(input.path)));
-        for (var itemIndex = source.pageItems.length - 1; itemIndex >= 0; itemIndex--) {
-            var copy = source.pageItems[itemIndex].duplicate(layer, ElementPlacement.PLACEATEND);
-            copy.translate(frameLeft, 0);
+        var sourceArtboard = source.artboards[0].artboardRect;
+        for (var sourceLayerIndex = 0; sourceLayerIndex < source.layers.length; sourceLayerIndex++) {
+            var sourceLayer = source.layers[sourceLayerIndex];
+            for (var itemIndex = sourceLayer.pageItems.length - 1; itemIndex >= 0; itemIndex--) {
+                var sourceItem = sourceLayer.pageItems[itemIndex];
+                // Document.pageItems is recursive. Copy only direct order groups so
+                // their children are not duplicated as flattened artwork.
+                if (sourceItem.parent !== sourceLayer) continue;
+                var copy = sourceItem.duplicate(layer, ElementPlacement.PLACEATEND);
+                copy.translate(frameLeft - sourceArtboard[0], height - sourceArtboard[1]);
+            }
         }
         source.close(SaveOptions.DONOTSAVECHANGES);
         drawLabel(layer, String(input.color_option || "Unspecified"), frameLeft - gutter, height, frameLeft - mmToPt(2), height - mmToPt(14));
