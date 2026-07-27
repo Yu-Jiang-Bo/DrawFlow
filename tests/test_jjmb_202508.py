@@ -208,6 +208,7 @@ def test_build_task_creates_exact_color_frames_with_actions(tmp_path):
         show_style_boxes=False,
         text_actions=actions,
         fixed_canvas_mm={"width_mm": 580, "height_mm": 2000},
+        master_packing={"target_width_mm": 580, "item_gap_mm": 2},
         color_frames=[
             {"color_option": color, "groups": frame_groups}
             for color, frame_groups in by_color.items()
@@ -217,6 +218,8 @@ def test_build_task_creates_exact_color_frames_with_actions(tmp_path):
     assert [frame["color_option"] for frame in task["color_frames"]] == ["Gold", "Silver"]
     assert task["color_frames"][0]["groups"][0]["items"][0]["text_actions"] == actions[0][0]
     assert task["output"]["fixed_canvas_mm"] == {"width_mm": 580, "height_mm": 2000}
+    assert task["layout"]["pack_order_blocks"] is True
+    assert task["layout"]["master_packing"] == {"target_width_mm": 580, "item_gap_mm": 2}
 
 
 def test_202508_renderer_accepts_compiled_fill_color_actions():
@@ -234,6 +237,8 @@ def test_202508_renderer_accepts_compiled_fill_color_actions():
     assert "COLOR_FRAME_" in compose_source
     assert "boundary.stroked = false;" in compose_source
     assert "COLOR_FRAME_OUTPUT" in compose_source
+    assert "function packBlocks(blocks, width, gap, colorOption)" in compose_source
+    assert "function collectOrderBlocks(source)" in compose_source
     assert "item.show_frame === true" not in source
     assert "var outlineText = outputConfig.outline_text !== false;" in source
     assert "if (!outlineText)" in source
@@ -241,6 +246,8 @@ def test_202508_renderer_accepts_compiled_fill_color_actions():
     assert "if (outlineText)" in source
     assert "outlineAllTextFrames(doc, pathfinderMerge);" in source
     assert "function collectTextFrames(container, result)" in source
+    assert "function groupNewLayerItems(layer, previousItems, name)" in source
+    assert "var packOrderBlocks = layout.pack_order_blocks === true;" in source
 
     node = shutil.which("node")
     if not node:

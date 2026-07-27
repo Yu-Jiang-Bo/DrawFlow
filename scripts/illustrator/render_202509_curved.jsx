@@ -24,6 +24,7 @@
     var titleHeight = mmToPt(Number(layout.title_height_mm || 7));
     var keepTitleFrames = layout.keep_title_frames === true;
     var keepNameFrames = layout.keep_name_frames === true;
+    var packOrderBlocks = layout.pack_order_blocks === true;
     var pathfinderMerge = outputConfig.pathfinder_merge !== false;
     var cleanupStats = { attempted: 0, failed: 0 };
     var OUTLINE_BATCH_SIZE = 25;
@@ -75,6 +76,7 @@
     try {
         for (var gi = 0; gi < groups.length; gi++) {
             var group = groups[gi];
+            var beforeGroupItems = packOrderBlocks ? directLayerItems(layer) : null;
             var col = placements.items[gi].column;
             var left = margin + col * (columnWidth + gap);
             var top = docHeight - margin - placements.items[gi].y;
@@ -102,6 +104,9 @@
                 cursorTop = itemBottom - itemGap;
                 renderedItems += 1;
                 writeProgress(task, renderedItems, totalItems, "正在渲染条目");
+            }
+            if (packOrderBlocks) {
+                groupNewLayerItems(layer, beforeGroupItems, "ORDER_PACK_BLOCK_" + gi);
             }
         }
     } catch (eLayout) {
@@ -212,6 +217,38 @@
         var canvas = output.fixed_canvas_mm || {};
         var height = mmToPt(Number(canvas.height_mm || 0));
         return height > 0 ? height : fallback;
+    }
+
+    function directLayerItems(layer) {
+        var result = [];
+        for (var i = 0; i < layer.pageItems.length; i++) {
+            if (layer.pageItems[i].parent === layer) result.push(layer.pageItems[i]);
+        }
+        return result;
+    }
+
+    function groupNewLayerItems(layer, previousItems, name) {
+        var additions = [];
+        var currentItems = directLayerItems(layer);
+        for (var i = 0; i < currentItems.length; i++) {
+            var known = false;
+            for (var j = 0; j < previousItems.length; j++) {
+                if (currentItems[i] === previousItems[j]) { known = true; break; }
+            }
+            if (!known) additions.push(currentItems[i]);
+        }
+        if (!additions.length) throw new Error("Order pack block has no artwork");
+        var doc = app.activeDocument;
+        doc.selection = null;
+        for (var selectionIndex = 0; selectionIndex < additions.length; selectionIndex++) {
+            additions[selectionIndex].selected = true;
+        }
+        app.executeMenuCommand("group");
+        var block = doc.selection.length ? doc.selection[0] : null;
+        if (!block || block.typename !== "GroupItem") throw new Error("Cannot create order pack block");
+        block.name = name;
+        doc.selection = null;
+        return block;
     }
 
     function drawName(layer, text, font, left, top, width, height, textItems, nameFrameItems) {

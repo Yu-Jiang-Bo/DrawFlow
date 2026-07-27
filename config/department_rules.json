@@ -45,7 +45,16 @@
           "frame_width_mm": 580,
           "frame_height_mm": 2000,
           "color_label_outside_frame": true,
-          "keep_same_order_together": true
+          "keep_same_order_together": true,
+          "master_packing": {
+            "algorithm": "best_fit_decreasing_height",
+            "target_width_mm": 580,
+            "item_gap_mm": 2,
+            "outer_margin_mm": 2,
+            "header_height_mm": 7,
+            "color_gap_mm": 4,
+            "allow_rotation": false
+          }
         },
         "file_naming": "店名+几单几图日期+生产部门，例如 T-5411D58T0816T"
       },
@@ -66,7 +75,16 @@
           "frame_width_mm": 480,
           "frame_height_mm": 2000,
           "color_label_outside_frame": true,
-          "keep_same_order_together": true
+          "keep_same_order_together": true,
+          "master_packing": {
+            "algorithm": "best_fit_decreasing_height",
+            "target_width_mm": 480,
+            "item_gap_mm": 2,
+            "outer_margin_mm": 2,
+            "header_height_mm": 7,
+            "color_gap_mm": 4,
+            "allow_rotation": false
+          }
         },
         "file_naming": "店名+几单几图日期+生产部门，例如 T-5411D58T0816K"
       },
@@ -87,7 +105,16 @@
           "frame_width_mm": 450,
           "frame_height_mm": 2000,
           "color_label_outside_frame": true,
-          "keep_same_order_together": true
+          "keep_same_order_together": true,
+          "master_packing": {
+            "algorithm": "best_fit_decreasing_height",
+            "target_width_mm": 450,
+            "item_gap_mm": 2,
+            "outer_margin_mm": 2,
+            "header_height_mm": 7,
+            "color_gap_mm": 4,
+            "allow_rotation": false
+          }
         },
         "file_naming": "店名+几单几图日期+生产部门，例如 T-5411D58T0816ZK 或 T-5411D58T0816FK"
       },

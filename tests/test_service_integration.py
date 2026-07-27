@@ -367,9 +367,13 @@ def test_service_routes_t_to_one_ai_with_color_frame_artboards(tmp_path):
         "single-orders/ORDER2.ai",
     ]
     assert component_task["output"]["compatibility"] == "Illustrator 8"
-    assert component_task["output"]["fixed_canvas_mm"] == {"width_mm": 580.0, "height_mm": 2000.0}
+    assert component_task["output"]["fixed_canvas_mm"] == {}
+    assert component_task["layout"]["pack_order_blocks"] is True
+    assert component_task["layout"]["master_packing"]["target_width_mm"] == 580.0
     assert component_task["groups"][0]["items"][0]["production_label_lines"] == ["ORDER1"]
     assert compose_task["type"] == "compose_color_frames"
+    assert compose_task["master_packing"]["target_width_mm"] == 580.0
+    assert compose_task["show_color_header"] is True
     assert [frame["color_option"] for frame in compose_task["inputs"]] == ["金色", "银色"]
 
 
@@ -412,7 +416,9 @@ def test_curved_template_reuses_shared_department_output_pipeline(tmp_path):
     )
     color_task = json.loads(color_task_path.read_text(encoding="utf-8"))
     d_task = json.loads(d_task_path.read_text(encoding="utf-8"))
-    assert color_task["output"]["fixed_canvas_mm"] == {"width_mm": 580.0, "height_mm": 2000.0}
+    assert color_task["output"]["fixed_canvas_mm"] == {}
+    assert color_task["layout"]["pack_order_blocks"] is True
+    assert color_task["layout"]["master_packing"]["target_width_mm"] == 580.0
     assert color_task["groups"][0]["production_label_lines"] == ["CURVED-T"]
     assert d_task["groups"][0]["production_label_lines"] == ["CURVED-D", "圣诞曲线标题挂件"]
 
@@ -466,7 +472,15 @@ def test_service_routes_color_master_widths_by_department(tmp_path, department, 
         if "-color-" in Path(task_path).name
     )
     component_task = json.loads(component_task_path.read_text(encoding="utf-8"))
-    assert component_task["output"]["fixed_canvas_mm"] == {"width_mm": width_mm, "height_mm": 2000.0}
+    compose_task_path = next(
+        Path(task_path)
+        for task_path in record["outputs"]["render_task_files"]
+        if "compose-color-frames" in Path(task_path).name
+    )
+    compose_task = json.loads(compose_task_path.read_text(encoding="utf-8"))
+    assert component_task["output"]["fixed_canvas_mm"] == {}
+    assert component_task["layout"]["pack_order_blocks"] is True
+    assert compose_task["master_packing"]["target_width_mm"] == width_mm
 
 
 @pytest.mark.parametrize("department", ["PW", "EW"])

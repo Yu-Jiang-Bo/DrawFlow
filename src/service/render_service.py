@@ -38,6 +38,7 @@ from .production_output import (
     color_frames,
     delivery_path,
     fixed_canvas_mm,
+    master_packing_config,
     partition_output_units,
     requires_color_master,
     requires_master_output,
@@ -236,6 +237,7 @@ class RenderService:
             fixed_canvas: Mapping[str, float] | None,
             progress: Mapping[str, Any],
             color_summary: bool = False,
+            master_packing: Mapping[str, Any] | None = None,
         ) -> Dict[str, Any]:
             native_items = [unit.payload for unit in units]
             if color_summary:
@@ -254,7 +256,7 @@ class RenderService:
                 output_ai=output_ai,
                 groups=native_groups,
                 columns=columns,
-                show_style_boxes=not request["hide_boxes"],
+                show_style_boxes=False if color_summary else not request["hide_boxes"],
                 color_mode=str(output_settings["color_mode"]),
                 outline_text=bool(output_settings["outline_text"]),
                 pathfinder_merge=bool(output_settings["pathfinder_merge"]),
@@ -264,6 +266,7 @@ class RenderService:
                 fixed_canvas_mm=fixed_canvas,
                 output_compatibility=rule.ai_compatibility,
                 suppress_labels=rule.omit_order_label,
+                master_packing=master_packing,
             ) | {"progress": dict(progress)}
 
         result = self._run_production_output_pipeline(
@@ -319,6 +322,7 @@ class RenderService:
             target_path = delivery_path(job_dir, output_ai.stem, batch, occupied_names)
             intermediate_ai = job_dir / f".department-{index:03d}.ai"
             canvas = fixed_canvas_mm(rule)
+            packing = master_packing_config(rule)
 
             if requires_single_order_ai(rule):
                 for single_index, spec in enumerate(
@@ -363,6 +367,11 @@ class RenderService:
                 continue
 
             if requires_color_master(rule):
+                if packing is None:
+                    raise RenderServiceError(
+                        f"{rule.department or rule.name} 部门缺少总图紧凑排版宽度配置",
+                        code="department_master_packing_missing",
+                    )
                 component_paths: List[Dict[str, str]] = []
                 summary_item_count = 0
                 for frame_index, frame in enumerate(color_frames(batch.units), start=1):
@@ -371,10 +380,11 @@ class RenderService:
                         units=frame.units,
                         output_ai=component_path,
                         output_png=None,
-                        columns=request["columns"],
+                        columns=1,
                         rule=rule,
-                        fixed_canvas=canvas,
+                        fixed_canvas=None,
                         color_summary=True,
+                        master_packing={**packing, "color_group": frame.color_option},
                         progress=self._task_progress(
                             record,
                             rendered_items + summary_item_count,
@@ -395,10 +405,10 @@ class RenderService:
                     {
                         "type": "compose_color_frames",
                         "output_ai": str(target_path),
-                        "frame_width_mm": canvas["width_mm"] if canvas else 0,
-                        "frame_height_mm": canvas["height_mm"] if canvas else 0,
-                        "label_gutter_mm": 24,
+                        "master_packing": packing,
+                        "show_color_header": True,
                         "inputs": component_paths,
+                        "debug": {"report_path": str(target_path.with_suffix(".compact-layout.json"))},
                     },
                 )
                 task_files.append(str(compose_file))
@@ -406,6 +416,39 @@ class RenderService:
                 rendered_items += summary_item_count
                 if request["dry_run"]:
                     self._update_progress(record, rendered_items, total_work, "生成颜色汇总 AI 文件")
+            elif packing is not None:
+                component_path = job_dir / f".department-{index:03d}-master-component.ai"
+                task = task_builder(
+                    units=batch.units,
+                    output_ai=component_path,
+                    output_png=None,
+                    columns=1,
+                    rule=rule,
+                    fixed_canvas=None,
+                    progress=self._task_progress(record, rendered_items, total_work, "生成总图 AI 文件"),
+                    master_packing=packing,
+                )
+                task_file = job_dir / f"render-task-{index:03d}-master-component.json"
+                self._write_json(task_file, task)
+                task_files.append(str(task_file))
+                render_entries.append({"script": str(render_script), "task_file": str(task_file)})
+                compose_file = job_dir / f"compose-color-frames-{index:03d}.json"
+                self._write_json(
+                    compose_file,
+                    {
+                        "type": "compose_color_frames",
+                        "output_ai": str(target_path),
+                        "master_packing": packing,
+                        "show_color_header": False,
+                        "inputs": [{"path": str(component_path), "color_option": ""}],
+                        "debug": {"report_path": str(target_path.with_suffix(".compact-layout.json"))},
+                    },
+                )
+                task_files.append(str(compose_file))
+                render_entries.append({"script": str(compose_script), "task_file": str(compose_file)})
+                rendered_items += len(batch.units)
+                if request["dry_run"]:
+                    self._update_progress(record, rendered_items, total_work, "生成总图 AI 文件")
             else:
                 task = task_builder(
                     units=batch.units,
@@ -583,6 +626,7 @@ class RenderService:
                 fixed_canvas: Mapping[str, float] | None,
                 progress: Mapping[str, Any],
                 color_summary: bool = False,
+                master_packing: Mapping[str, Any] | None = None,
             ) -> Dict[str, Any]:
                 if output_png is not None:
                     raise RenderServiceError("曲线标题模板不支持 PNG 部门交付", code="department_output_pipeline_unsupported")
@@ -606,6 +650,7 @@ class RenderService:
                     fixed_canvas_mm=fixed_canvas,
                     output_compatibility=rule.ai_compatibility,
                     suppress_labels=rule.omit_order_label,
+                    master_packing=master_packing,
                 )
 
             result = self._run_production_output_pipeline(

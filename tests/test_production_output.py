@@ -7,10 +7,12 @@ from src.service.production_output import (
     ProductionOutputError,
     ProductionOutputUnit,
     color_frames,
+    master_packing_config,
     partition_output_units,
     single_order_outputs,
     write_batch_task_files,
 )
+from src.service.department_output import resolve_department_output
 
 
 def make_unit(*, order_no: str, department: str, color: str = "Gold", detail_id: str = "1") -> ProductionOutputUnit:
@@ -81,16 +83,36 @@ def test_generic_batch_jsx_executes_child_tasks_by_script_path():
     assert "$.evalFile(File(scriptPath))" in source
 
 
-def test_color_frame_composer_copies_only_top_level_source_items():
+def test_color_frame_composer_packs_only_top_level_order_blocks_by_visible_bounds():
     source = Path("scripts/illustrator/compose_color_frames.jsx").read_text(encoding="utf-8")
 
     assert "source.pageItems.length" not in source
-    assert "var sourceLayer = source.layers[sourceLayerIndex];" in source
+    assert "function collectOrderBlocks(source)" in source
+    assert 'sourceItem.typename !== "GroupItem"' in source
     assert "if (sourceItem.parent !== sourceLayer) continue;" in source
-    assert "var sourceContentBounds = combinedVisibleBounds(sourceItems);" in source
-    assert "var copiedBounds = combinedVisibleBounds(copies);" in source
-    assert "var deltaX = destinationLeft - copiedBounds[0];" in source
-    assert "copies[copyIndex].translate(deltaX, deltaY);" in source
+    assert "function pageItemBounds(item)" in source
+    assert "item.visibleBounds" in source
+    assert "item.geometricBounds" in source
+    assert "function packBlocks(blocks, width, gap, colorOption)" in source
+    assert "best_fit_decreasing_height" in source
+    assert "block.width > width + 0.01" in source
+    assert "copy.translate(destinationLeft - copiedBounds[0], destinationTop - copiedBounds[1]);" in source
+    assert "coordinate_unit: \"mm\"" in source
+    assert "function auditBlocks(blocks)" in source
+
+
+def test_master_packing_config_uses_department_width_and_configured_spacing():
+    packing = master_packing_config(resolve_department_output("K"))
+
+    assert packing == {
+        "algorithm": "best_fit_decreasing_height",
+        "target_width_mm": 480.0,
+        "item_gap_mm": 2.0,
+        "outer_margin_mm": 2.0,
+        "header_height_mm": 7.0,
+        "color_gap_mm": 4.0,
+        "allow_rotation": False,
+    }
 
 
 def test_batch_tasks_use_absolute_paths_for_illustrator_child_evaluation(tmp_path):

@@ -20,6 +20,7 @@
     var showBoxes = layout.show_style_boxes === true;
     var compactOutput = !showBoxes;
     var suppressLabels = layout.suppress_labels === true;
+    var packOrderBlocks = layout.pack_order_blocks === true;
     var columns = Math.max(Number(layout.columns || 4), 1);
     var gap = mmToPt(Number(compactOutput ? (layout.compact_gap_mm || 4) : (layout.gap_mm || 8)));
     var margin = mmToPt(Number(compactOutput ? (layout.compact_margin_mm || 4) : (layout.margin_mm || 8)));
@@ -84,6 +85,7 @@
         columns: columns,
         compactOutput: compactOutput,
         suppressLabels: suppressLabels,
+        packOrderBlocks: packOrderBlocks,
         docWidth: docWidth,
         docHeight: docHeight,
         productWidthPt: productSize.width,
@@ -104,6 +106,7 @@
 
     for (var i = 0; i < renderGroups.length; i++) {
         var group = renderGroups[i];
+        var beforeGroupItems = packOrderBlocks ? directLayerItems(layer) : null;
         var col = placements.items[i].column;
         var groupLeft = margin + col * (maxGroupWidth + gap);
         var groupTop = docHeight - margin - placements.items[i].y;
@@ -154,6 +157,9 @@
             cursorTop = productBottom - itemGap;
             renderedItems += 1;
             writeProgress(task, renderedItems, taskItemCount(renderGroups), "正在渲染条目");
+        }
+        if (packOrderBlocks) {
+            groupNewLayerItems(layer, beforeGroupItems, "ORDER_PACK_BLOCK_" + i);
         }
     }
 
@@ -580,6 +586,37 @@
                 collectTextFrames(item, result);
             }
         }
+    }
+
+    function directLayerItems(layer) {
+        var result = [];
+        for (var i = 0; i < layer.pageItems.length; i++) {
+            if (layer.pageItems[i].parent === layer) result.push(layer.pageItems[i]);
+        }
+        return result;
+    }
+    function groupNewLayerItems(layer, previousItems, name) {
+        var additions = [];
+        var currentItems = directLayerItems(layer);
+        for (var i = 0; i < currentItems.length; i++) {
+            var known = false;
+            for (var j = 0; j < previousItems.length; j++) {
+                if (currentItems[i] === previousItems[j]) { known = true; break; }
+            }
+            if (!known) additions.push(currentItems[i]);
+        }
+        if (!additions.length) throw new Error("Order pack block has no artwork");
+        var doc = app.activeDocument;
+        doc.selection = null;
+        for (var selectionIndex = 0; selectionIndex < additions.length; selectionIndex++) {
+            additions[selectionIndex].selected = true;
+        }
+        app.executeMenuCommand("group");
+        var block = doc.selection.length ? doc.selection[0] : null;
+        if (!block || block.typename !== "GroupItem") throw new Error("Cannot create order pack block");
+        block.name = name;
+        doc.selection = null;
+        return block;
     }
 
     function compactPlacements(metrics, columnCount, gapValue) {

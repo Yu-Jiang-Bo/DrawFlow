@@ -140,6 +140,32 @@ def fixed_canvas_mm(rule: DepartmentOutputRule) -> dict[str, float] | None:
     return {"width_mm": width, "height_mm": height} if width > 0 and height > 0 else None
 
 
+def master_packing_config(rule: DepartmentOutputRule) -> dict[str, Any] | None:
+    """Return the renderer-neutral compact-master contract for one department."""
+
+    layout = rule.layout
+    configured = layout.get("master_packing") if isinstance(layout, Mapping) else None
+    if not isinstance(configured, Mapping):
+        return None
+    options = dict(configured)
+    width = _positive_float(
+        options.get("target_width_mm"),
+        rule.master_frame_width_mm,
+        layout.get("frame_width_mm") if isinstance(layout, Mapping) else None,
+    )
+    if width is None:
+        return None
+    return {
+        "algorithm": str(options.get("algorithm") or "best_fit_decreasing_height"),
+        "target_width_mm": width,
+        "item_gap_mm": _positive_float(options.get("item_gap_mm"), 2.0) or 2.0,
+        "outer_margin_mm": _positive_float(options.get("outer_margin_mm"), 2.0) or 2.0,
+        "header_height_mm": _positive_float(options.get("header_height_mm"), 7.0) or 7.0,
+        "color_gap_mm": _positive_float(options.get("color_gap_mm"), 4.0) or 4.0,
+        "allow_rotation": bool(options.get("allow_rotation", False)),
+    }
+
+
 def color_frames(units: Iterable[ProductionOutputUnit]) -> list[ColorFrame]:
     buckets: dict[str, list[ProductionOutputUnit]] = {}
     labels: dict[str, str] = {}
@@ -243,6 +269,17 @@ def _batch_scope(rule: DepartmentOutputRule, unit: ProductionOutputUnit) -> str:
 
 def _key_part(value: object) -> str:
     return "".join(character for character in str(value or "").upper() if character.isalnum())
+
+
+def _positive_float(*values: object) -> float | None:
+    for value in values:
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            continue
+        if number > 0:
+            return number
+    return None
 
 
 def _unique_filename(candidate: str, occupied_names: set[str]) -> str:

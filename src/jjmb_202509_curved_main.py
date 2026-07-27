@@ -327,6 +327,7 @@ def build_task(
     fixed_canvas_mm: Mapping[str, float] | None = None,
     output_compatibility: str = "Illustrator 8",
     suppress_labels: bool = False,
+    master_packing: Mapping[str, object] | None = None,
 ) -> Dict[str, object]:
     if not groups:
         raise ValueError("No renderable orders")
@@ -344,6 +345,8 @@ def build_task(
         "keep_title_frames": keep_title_frames,
         "keep_name_frames": keep_name_frames,
         "suppress_labels": suppress_labels,
+        "pack_order_blocks": bool(master_packing),
+        "master_packing": dict(master_packing or {}),
     }
     for key in ("name_width_mm", "name_height_mm", "title_width_mm", "title_height_mm"):
         value = _positive_number((layout_overrides or {}).get(key))

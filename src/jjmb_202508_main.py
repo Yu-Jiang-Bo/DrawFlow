@@ -353,6 +353,7 @@ def build_task(
     fixed_canvas_mm: Mapping[str, float] | None = None,
     output_compatibility: str = "Illustrator 8",
     suppress_labels: bool = False,
+    master_packing: Mapping[str, object] | None = None,
     color_frames: Sequence[Mapping[str, object]] | None = None,
 ) -> Dict[str, object]:
     if not groups:
@@ -417,6 +418,8 @@ def build_task(
             "show_style_boxes": show_style_boxes,
             "suppress_labels": suppress_labels,
             "color_label_gutter_mm": 24.0,
+            "pack_order_blocks": bool(master_packing),
+            "master_packing": dict(master_packing or {}),
         },
         "fit": {
             "padding_mm": 0.0,
