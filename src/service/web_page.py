@@ -1186,12 +1186,6 @@ INDEX_HTML = """<!doctype html>
                         <option value="RGB">RGB</option>
                       </select>
                     </div>
-                    <div>
-                      <label><input id="outputOutlineText" type="checkbox" /> 文字转曲</label>
-                    </div>
-                    <div>
-                      <label><input id="outputPathfinderMerge" type="checkbox" /> 文字去重</label>
-                    </div>
                   </div>
                 </div>
 
@@ -1550,8 +1544,6 @@ INDEX_HTML = """<!doctype html>
         "#defaultStyle",
         "#defaultColor",
         "#outputColorMode",
-        "#outputOutlineText",
-        "#outputPathfinderMerge",
         "#textSourceColumn",
         "#textTargetName",
         "#textFitPolicy",
@@ -2443,9 +2435,7 @@ INDEX_HTML = """<!doctype html>
         option_overrides: nonBoldOptionOverrides(baseConfig.option_overrides),
         output: {
           ...(isPlainObject(baseConfig.output) ? baseConfig.output : {}),
-          color_mode: document.getElementById("outputColorMode").value,
-          outline_text: document.getElementById("outputOutlineText").checked,
-          pathfinder_merge: document.getElementById("outputPathfinderMerge").checked
+          color_mode: document.getElementById("outputColorMode").value
         },
         exceptions: { status: "none" },
         assets: buildAssetsRulePayload(baseConfig),
@@ -2883,8 +2873,6 @@ INDEX_HTML = """<!doctype html>
       document.getElementById("defaultStyle").value = "";
       document.getElementById("defaultColor").value = "";
       document.getElementById("outputColorMode").value = "CMYK";
-      document.getElementById("outputOutlineText").checked = true;
-      document.getElementById("outputPathfinderMerge").checked = true;
       document.getElementById("textSourceColumn").value = "";
       document.getElementById("textTargetName").value = "";
       document.getElementById("textFitPolicy").value = "scale_to_box";
@@ -3214,15 +3202,7 @@ INDEX_HTML = """<!doctype html>
       document.getElementById("defaultDesign").value = defaults.design || "";
       document.getElementById("defaultStyle").value = defaults.style || "";
       document.getElementById("defaultColor").value = defaults.color || "";
-      const output = isPlainObject(config.output) ? config.output : {};
-      const template = formTemplate();
-      document.getElementById("outputColorMode").value = output.color_mode || "CMYK";
-      document.getElementById("outputOutlineText").checked = output.outline_text !== undefined
-        ? output.outline_text === true
-        : !(template && template.outline_text === false);
-      document.getElementById("outputPathfinderMerge").checked = output.pathfinder_merge !== undefined
-        ? output.pathfinder_merge === true
-        : !(template && template.pathfinder_merge === false);
+      document.getElementById("outputColorMode").value = (config.output && config.output.color_mode) || "CMYK";
 
     }
 
@@ -3354,13 +3334,10 @@ INDEX_HTML = """<!doctype html>
         return;
       }
       const form = new FormData();
-      const rulePayload = buildTemplateRulePayload();
       form.append("template_id", templateId);
       form.append("name", name);
-      form.append("template_type", rulePayload.template_type);
+      form.append("template_type", buildTemplateRulePayload().template_type);
       form.append("status", "draft");
-      form.append("outline_text", rulePayload.output && rulePayload.output.outline_text ? "true" : "false");
-      form.append("pathfinder_merge", rulePayload.output && rulePayload.output.pathfinder_merge ? "true" : "false");
       if (reference) form.append("reference_ai", reference);
       if (primary) form.append("template_ai", primary);
       designFontFiles.forEach(file => form.append("design_font_assets", file));

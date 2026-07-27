@@ -39,9 +39,7 @@
   },
   "dimensions": {},
   "output": {
-    "color_mode": "CMYK",
-    "outline_text": true,
-    "pathfinder_merge": true
+    "color_mode": "CMYK"
   },
   "slots": [
     {

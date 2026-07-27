@@ -44,8 +44,6 @@ class TemplateDefinition:
     template_ai_role: str = "尺寸/作图区模板"
     default_columns: int = 4
     default_hide_boxes: bool = True
-    outline_text: bool = True
-    pathfinder_merge: bool = True
     template_config: Path | None = None
     template_rules_config: Path | None = None
     assets: List[Dict[str, Any]] = field(default_factory=list)
@@ -63,8 +61,6 @@ class TemplateDefinition:
             "template_rules_config": str(self.template_rules_config) if self.template_rules_config else "",
             "default_columns": self.default_columns,
             "default_hide_boxes": self.default_hide_boxes,
-            "outline_text": self.outline_text,
-            "pathfinder_merge": self.pathfinder_merge,
             "assets": self.assets,
         }
 
@@ -251,11 +247,6 @@ class TemplateRegistry:
         target["template_rules_config"] = self.to_config_path(output_path)
         if _pack_requests_generic_pipeline(pack):
             target["pipeline"] = "generic_rules_only"
-        output = _pack_output_settings(pack)
-        if "outline_text" in output:
-            target["outline_text"] = _to_bool(output["outline_text"])
-        if "pathfinder_merge" in output:
-            target["pathfinder_merge"] = _to_bool(output["pathfinder_merge"])
         if activate:
             target["status"] = "active"
         self._write_config(raw)
@@ -303,8 +294,6 @@ class TemplateRegistry:
             template_ai_role=str(item.get("template_ai_role", "尺寸/作图区模板") or "尺寸/作图区模板").strip(),
             default_columns=int(item.get("default_columns", 4) or 4),
             default_hide_boxes=bool(item.get("default_hide_boxes", True)),
-            outline_text=_to_bool(item.get("outline_text", True)),
-            pathfinder_merge=_to_bool(item.get("pathfinder_merge", True)),
             template_config=self._optional_path(item.get("template_config", "")),
             template_rules_config=self._optional_path(item.get("template_rules_config", "")),
             assets=self._parse_assets(item.get("assets", [])),
@@ -367,8 +356,6 @@ class TemplateRegistry:
             "template_ai_role": str(item.get("template_ai_role", "尺寸/作图区模板") or "尺寸/作图区模板").strip(),
             "default_columns": int(item.get("default_columns", 4) or 4),
             "default_hide_boxes": _to_bool(item.get("default_hide_boxes", True)),
-            "outline_text": _to_bool(item.get("outline_text", True)),
-            "pathfinder_merge": _to_bool(item.get("pathfinder_merge", True)),
         }
         template_config = str(item.get("template_config", "")).strip()
         if template_config:
@@ -440,12 +427,3 @@ def _pack_requests_generic_pipeline(pack: Dict[str, Any]) -> bool:
     if not isinstance(bindings, dict) or not bindings:
         return False
     return bool(rules.get("slot_mappings") or rules.get("text_targets") or rules.get("asset_mappings"))
-
-
-def _pack_output_settings(pack: Dict[str, Any]) -> Dict[str, Any]:
-    rules = pack.get("rules") if isinstance(pack, dict) else None
-    if isinstance(rules, dict) and isinstance(rules.get("output"), dict):
-        return dict(rules["output"])
-    if isinstance(pack.get("output"), dict):
-        return dict(pack["output"])
-    return {}

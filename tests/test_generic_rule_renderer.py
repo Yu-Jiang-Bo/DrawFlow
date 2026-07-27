@@ -601,8 +601,7 @@ def test_confirmed_jjmb_202510_template_enables_exact_box_fill_only_for_its_layo
         "optional": True,
         "fill_box_exactly": True,
     }
-    assert rules["output"]["outline_text"] is True
-    assert rules["output"]["pathfinder_merge"] is False
+    assert rules["output"] == {"color_mode": "CMYK"}
 
 
 def test_passes_selected_font_boldness_to_every_text_variable(tmp_path):

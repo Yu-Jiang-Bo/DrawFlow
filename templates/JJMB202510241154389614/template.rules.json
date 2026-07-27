@@ -297,9 +297,7 @@
     "notes": {},
     "transforms": {},
     "output": {
-      "color_mode": "CMYK",
-      "outline_text": true,
-      "pathfinder_merge": false
+      "color_mode": "CMYK"
     },
     "exceptions": {
       "status": "none"
@@ -327,6 +325,6 @@
   "audit": {
     "source_format": "ai_scan_draft",
     "confirmed_at": "2026-07-15T02:35:10.792455+00:00",
-    "change_summary": "开启文字转曲，关闭文字去重。"
+    "change_summary": ""
   }
 }

@@ -46,8 +46,8 @@ def test_runtime_manifest_and_bundle_are_built_from_active_template(tmp_path):
     assert service.active_manifest("DEMO001")["version"] == "v0001"
     assert manifest["version"] == "v0001"
     assert manifest["required_fonts"] == ["DemoFont"]
-    assert manifest["template"]["outline_text"] is True
-    assert manifest["template"]["pathfinder_merge"] is True
+    assert "outline_text" not in manifest["template"]
+    assert "pathfinder_merge" not in manifest["template"]
     assert {item["path"] for item in manifest["files"]} >= {"template.ai", "rules.json", "assets/asset.ai"}
     assert (tmp_path / "data/templates/DEMO001/active.json").exists()
     with zipfile.ZipFile(bundle) as archive:

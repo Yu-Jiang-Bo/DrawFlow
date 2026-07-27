@@ -97,24 +97,19 @@ def test_template_rule_preview_normalizes_object_options():
 def test_template_form_hides_type_and_status_from_user():
     assert 'id="templateType"' not in INDEX_HTML
     assert 'id="templateStatus"' not in INDEX_HTML
-    assert 'const rulePayload = buildTemplateRulePayload();' in INDEX_HTML
-    assert 'form.append("template_type", rulePayload.template_type);' in INDEX_HTML
+    assert 'form.append("template_type", buildTemplateRulePayload().template_type)' in INDEX_HTML
     assert 'form.append("status", "draft")' in INDEX_HTML
     assert "function inferTemplateTypeFromForm" in INDEX_HTML
     assert "内部模板类型" not in INDEX_HTML
 
 
-def test_template_form_exposes_text_output_switches():
-    assert 'id="outputOutlineText"' in INDEX_HTML
-    assert 'id="outputPathfinderMerge"' in INDEX_HTML
-    assert 'outline_text: document.getElementById("outputOutlineText").checked' in INDEX_HTML
-    assert 'pathfinder_merge: document.getElementById("outputPathfinderMerge").checked' in INDEX_HTML
-    assert 'document.getElementById("outputOutlineText").checked = true;' in INDEX_HTML
-    assert 'document.getElementById("outputPathfinderMerge").checked = true;' in INDEX_HTML
-    assert 'template && template.outline_text === false' in INDEX_HTML
-    assert 'template && template.pathfinder_merge === false' in INDEX_HTML
-    assert 'form.append("outline_text"' in INDEX_HTML
-    assert 'form.append("pathfinder_merge"' in INDEX_HTML
+def test_template_form_does_not_expose_text_output_switches():
+    assert 'id="outputOutlineText"' not in INDEX_HTML
+    assert 'id="outputPathfinderMerge"' not in INDEX_HTML
+    assert 'outline_text: document.getElementById("outputOutlineText").checked' not in INDEX_HTML
+    assert 'pathfinder_merge: document.getElementById("outputPathfinderMerge").checked' not in INDEX_HTML
+    assert 'form.append("outline_text"' not in INDEX_HTML
+    assert 'form.append("pathfinder_merge"' not in INDEX_HTML
 
 
 def test_template_rule_editor_is_business_readable():

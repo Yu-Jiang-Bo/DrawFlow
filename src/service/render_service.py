@@ -120,7 +120,7 @@ class RenderService:
         request = record["request"]
         job_dir = Path(record["job_dir"])
         output_ai = self._output_ai_path(job_dir, request, template)
-        rules = _rules_with_effective_output(template, read_template_rule_config(template.template_rules_config))
+        rules = read_template_rule_config(template.template_rules_config)
         task = build_generic_render_task(
             template,
             rules,
@@ -184,8 +184,7 @@ class RenderService:
                 raise RenderServiceError("模板缺少可用的 .ai 模板文件", code="template_bundle_invalid")
             export_202508_config(template.template_ai, template_config, request["visible"])
 
-        template_rules = _rules_with_effective_output(template, read_template_rule_config(template.template_rules_config))
-        output_settings = _effective_output_settings(template, template_rules)
+        template_rules = read_template_rule_config(template.template_rules_config)
         rows = read_202508_rows(order_file, sheet_name=request["sheet_name"] or None)
         items = parse_202508_items(
             rows,
@@ -209,9 +208,7 @@ class RenderService:
             groups=groups,
             columns=request["columns"],
             show_style_boxes=not request["hide_boxes"],
-            color_mode=str(output_settings["color_mode"]),
-            outline_text=bool(output_settings["outline_text"]),
-            pathfinder_merge=bool(output_settings["pathfinder_merge"]),
+            color_mode=output_color_mode(template_rules),
             font_styles=_font_styles(template_rules),
             text_actions=_202508_text_actions(template_rules, groups),
         )
@@ -253,8 +250,7 @@ class RenderService:
                 raise RenderServiceError(f"模板配置不存在，无法 dry-run: {template_config}", code="template_config_missing")
             self._export_generic_template_config(template.template_ai, template.template_id, template_config, request["visible"])
 
-        template_rules = _rules_with_effective_output(template, read_template_rule_config(template.template_rules_config))
-        output_settings = _effective_output_settings(template, template_rules)
+        template_rules = read_template_rule_config(template.template_rules_config)
         structure_config = read_template_rule_config(template_config)
         design_fonts = _design_font_options(template_rules)
         has_design_mapping_rules = isinstance(template_rules.get("asset_mappings"), list)
@@ -263,9 +259,7 @@ class RenderService:
             template_config=template_config,
             output_ai=output_ai,
             columns=request["columns"],
-            color_mode=str(output_settings["color_mode"]),
-            outline_text=bool(output_settings["outline_text"]),
-            pathfinder_merge=bool(output_settings["pathfinder_merge"]),
+            color_mode=output_color_mode(template_rules),
             allowed_font_options=_configured_font_options(template_rules, structure_config),
             sheet_name=request["sheet_name"] or None,
             design_font_options=design_fonts,
@@ -311,8 +305,7 @@ class RenderService:
             raise RenderServiceError(f"曲线标题字体报告不存在: {font_report}", code="template_font_config_missing")
 
         rows = read_202509_curved_rows(order_file, sheet_name=request["sheet_name"] or None)
-        template_rules = _rules_with_effective_output(template, read_template_rule_config(template.template_rules_config))
-        output_settings = _effective_output_settings(template, template_rules)
+        template_rules = read_template_rule_config(template.template_rules_config)
         multi_name_policy = template_rules.get("multi_name_customization", {})
         items = parse_202509_curved_items(
             rows,
@@ -332,9 +325,7 @@ class RenderService:
             "columns": request["columns"],
             "layout_overrides": curved_layout_overrides(template_rules),
             "title_template_ai": title_template_ai,
-            "color_mode": str(output_settings["color_mode"]),
-            "outline_text": bool(output_settings["outline_text"]),
-            "pathfinder_merge": bool(output_settings["pathfinder_merge"]),
+            "color_mode": output_color_mode(template_rules),
             "progress": self._task_progress(record, 0, total_items, "?? AI ??"),
         }
         task_file = job_dir / "render-task.json"
@@ -472,25 +463,6 @@ def _effective_pipeline(template: TemplateDefinition) -> str:
     if isinstance(bindings, Mapping) and bindings and has_targets:
         return "generic_rules_only"
     return template.pipeline
-
-
-def _rules_with_effective_output(template: TemplateDefinition, rules: Dict[str, Any]) -> Dict[str, Any]:
-    merged = dict(rules or {})
-    merged["output"] = _effective_output_settings(template, merged)
-    return merged
-
-
-def _effective_output_settings(template: TemplateDefinition, rules: Mapping[str, Any]) -> Dict[str, Any]:
-    output = rules.get("output") if isinstance(rules, Mapping) else {}
-    output = dict(output) if isinstance(output, Mapping) else {}
-    return {
-        **output,
-        "color_mode": output_color_mode(dict(rules or {})),
-        "outline_text": _to_bool(getattr(template, "outline_text", output.get("outline_text", True))),
-        "pathfinder_merge": _to_bool(
-            getattr(template, "pathfinder_merge", output.get("pathfinder_merge", True))
-        ),
-    }
 
 
 def _chunked(items: List[Any], size: int) -> Iterable[List[Any]]:
