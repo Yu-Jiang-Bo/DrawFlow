@@ -105,7 +105,7 @@ def test_parse_items_sets_department_labels_and_frames():
 
     assert items[0].production_label == "ORDER3  皮质首饰盒"
     assert items[0].show_frame is True
-    assert items[1].production_label == "ORDER4  皮质首饰盒  黑色"
+    assert items[1].production_label == "ORDER4  皮质首饰盒"
     assert items[1].show_frame is False
 
 
@@ -396,6 +396,7 @@ def test_department_rules_are_loaded_from_config():
 
     assert k_rule["label_fields"] == ["order_no", "color_option"]
     assert k_rule["label_lines"] == [["order_no"], ["color_option"]]
+    assert k_rule["annotation_type"] == "COLOR"
     assert k_rule["apply_color_to_artwork"] is False
     assert h_rule["label_fields"] == ["order_no"]
     assert h_rule["apply_color_to_artwork"] is True
@@ -407,5 +408,15 @@ def test_department_rules_are_loaded_from_config():
     assert shop_rules["global_requirements"]["size_frame_text_path_overlap"] is True
     assert "去重很重要" in shop_rules["global_requirements"]["outline_dedupe_note"]
     k_output = next(rule for rule in shop_rules["department_output_requirements"] if rule["name"] == "K")
+    pw_output = next(rule for rule in shop_rules["department_output_requirements"] if rule["name"] == "PW_EW")
+    d_output = next(rule for rule in shop_rules["department_output_requirements"] if rule["name"] == "D_CONTAINS")
     assert k_output["layout"]["frame_width_mm"] == 480
+    assert k_output["single_order_ai"] is True
+    assert k_output["annotation_type"] == "COLOR"
+    assert pw_output["annotation_type"] == "PRODUCT_NAME"
+    assert pw_output["single_order_ai"] is True
+    assert pw_output["has_master"] is True
+    assert d_output["annotation_type"] == "PRODUCT_NAME"
+    assert d_output["single_order_ai"] is True
+    assert d_output["has_master"] is False
     assert k_output["artwork_content"] == "订单号 + 字体颜色 + 效果图"

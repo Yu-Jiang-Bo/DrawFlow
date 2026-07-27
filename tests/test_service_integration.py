@@ -294,7 +294,98 @@ def test_service_routes_t_to_one_ai_with_color_frame_artboards(tmp_path):
     assert component_task["output"]["compatibility"] == "Illustrator 8"
     assert component_task["output"]["fixed_canvas_mm"] == {"width_mm": 580.0, "height_mm": 2000.0}
     assert compose_task["type"] == "compose_color_frames"
-    assert [frame["color_option"] for frame in compose_task["inputs"]] == ["Gold", "Silver"]
+    assert [frame["color_option"] for frame in compose_task["inputs"]] == ["金色", "银色"]
+
+
+@pytest.mark.parametrize(
+    ("department", "width_mm"),
+    [
+        ("K", 480.0),
+        ("ZK", 450.0),
+        ("FK", 450.0),
+    ],
+)
+def test_service_routes_color_master_widths_by_department(tmp_path, department, width_mm):
+    config_path = tmp_path / f"templates-{department}.json"
+    order_path = tmp_path / f"orders-{department}.xlsx"
+    write_templates_config(config_path)
+    write_order_xlsx(order_path, department=department)
+
+    record = RenderService(
+        registry=TemplateRegistry(config_path),
+        jobs=JobStore(tmp_path / f"jobs-{department}"),
+    ).submit(
+        {"template_id": "JJMB202508261001394920", "order_file": str(order_path), "dry_run": True}
+    )
+
+    assert record["status"] == "completed", record.get("error")
+    component_task_path = next(
+        Path(task_path)
+        for task_path in record["outputs"]["render_task_files"]
+        if "-color-" in Path(task_path).name
+    )
+    component_task = json.loads(component_task_path.read_text(encoding="utf-8"))
+    assert component_task["output"]["fixed_canvas_mm"] == {"width_mm": width_mm, "height_mm": 2000.0}
+
+
+@pytest.mark.parametrize("department", ["PW", "EW"])
+def test_service_routes_pw_ew_to_single_orders_and_one_master(tmp_path, department):
+    config_path = tmp_path / f"templates-{department}.json"
+    order_path = tmp_path / f"orders-{department}.xlsx"
+    write_templates_config(config_path)
+    write_order_xlsx(order_path, department=department)
+
+    record = RenderService(
+        registry=TemplateRegistry(config_path),
+        jobs=JobStore(tmp_path / f"jobs-{department}"),
+    ).submit(
+        {"template_id": "JJMB202508261001394920", "order_file": str(order_path), "dry_run": True}
+    )
+
+    assert record["status"] == "completed", record.get("error")
+    assert [item["name"] for item in record["outputs"]["single_order_files"]] == ["ORDER1.ai"]
+    assert record["outputs"]["delivery_plan"][0]["path"].endswith(f"-{department}.ai")
+    arcnames = [member["arcname"] for member in record["outputs"]["bundle_plan"]]
+    assert arcnames[0] == "single-orders/ORDER1.ai"
+    assert arcnames[1].startswith("summary/")
+    assert arcnames[1].endswith(f"-{department}.ai")
+    assert arcnames[2] == "manifest.json"
+    master_task_path = next(
+        Path(task_path)
+        for task_path in record["outputs"]["render_task_files"]
+        if "single-order-tasks" not in str(task_path)
+    )
+    master_task = json.loads(master_task_path.read_text(encoding="utf-8"))
+    item = master_task["groups"][0]["items"][0]
+    assert item["production_label_lines"] == ["ORDER1", "平纹方形皮质首饰盒"]
+    assert master_task["output"]["fixed_canvas_mm"] == {}
+
+
+def test_service_routes_d_department_to_single_orders_without_master(tmp_path):
+    config_path = tmp_path / "templates-d.json"
+    order_path = tmp_path / "orders-d.xlsx"
+    write_templates_config(config_path)
+    write_order_xlsx(order_path, department="Dept_D")
+
+    record = RenderService(
+        registry=TemplateRegistry(config_path),
+        jobs=JobStore(tmp_path / "jobs-d"),
+    ).submit(
+        {"template_id": "JJMB202508261001394920", "order_file": str(order_path), "dry_run": True}
+    )
+
+    assert record["status"] == "completed", record.get("error")
+    assert record["stats"]["deliveries"] == 0
+    assert record["outputs"]["delivery_plan"] == []
+    assert [item["name"] for item in record["outputs"]["single_order_files"]] == ["ORDER1.ai"]
+    assert [member["arcname"] for member in record["outputs"]["bundle_plan"]] == [
+        "single-orders/ORDER1.ai",
+        "manifest.json",
+    ]
+    single_task_path = Path(record["outputs"]["render_task_files"][0])
+    single_task = json.loads(single_task_path.read_text(encoding="utf-8"))
+    item = single_task["groups"][0]["items"][0]
+    assert item["production_label_lines"] == ["ORDER1", "平纹方形皮质首饰盒"]
 
 
 def test_non_202508_pipeline_rejects_department_controlled_order(tmp_path):

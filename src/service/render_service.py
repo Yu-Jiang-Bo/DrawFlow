@@ -26,7 +26,12 @@ from ..jjmb_config_grouped_main import build_grouped_task
 from ..renderer.illustrator_bridge import IllustratorBridge, IllustratorBridgeError, format_com_recovery_message
 from .job_store import JobStore
 from .font_style_rules import font_style_by_option
-from .department_output import DepartmentOutputRule, resolve_department_output, set_png_resolution
+from .department_output import (
+    DepartmentOutputRule,
+    resolve_department_output,
+    set_png_resolution,
+    translate_color_to_chinese,
+)
 from .generic_rule_renderer import build_generic_render_task
 from .llm_rule_parser import normalize_option_list
 from .rule_center import check_template_definition, curved_layout_overrides, output_color_mode, read_template_rule_config
@@ -230,7 +235,8 @@ class RenderService:
             for batch in batches
             if _requires_202508_single_order_ai(batch.rule)
         )
-        total_work = total_items + single_order_work
+        master_work = sum(len(batch.items) for batch in batches if _requires_202508_master_output(batch.rule))
+        total_work = single_order_work + master_work
         self._update_progress(record, 0, total_work, "生成 AI 文件")
         delivery_files: List[Dict[str, str]] = []
         single_order_files: List[Dict[str, str]] = []
@@ -255,11 +261,7 @@ class RenderService:
             )
             intermediate_ai = job_dir / f".department-{index:03d}.ai"
             fixed_canvas = _fixed_canvas_mm(batch.rule)
-            color_frames = (
-                _color_frame_groups(batch.items)
-                if bool(batch.rule.layout.get("group_by_color"))
-                else []
-            )
+            color_frames = _color_frame_groups(batch.items) if _requires_202508_color_master(batch.rule) else []
             if _requires_202508_single_order_ai(batch.rule):
                 single_entries: List[Dict[str, str]] = []
                 single_specs = _202508_single_order_files(
@@ -316,6 +318,8 @@ class RenderService:
                 rendered_items += len(single_specs)
                 if request["dry_run"]:
                     self._update_progress(record, rendered_items, total_work, "生成单订单 AI 文件")
+            if not _requires_202508_master_output(batch.rule):
+                continue
             if color_frames:
                 component_paths: List[Dict[str, str]] = []
                 summary_entries: List[Dict[str, str]] = []
@@ -405,7 +409,7 @@ class RenderService:
                 output_compatibility=batch.rule.ai_compatibility,
                 suppress_labels=batch.rule.omit_order_label,
             )
-            task["progress"] = self._task_progress(record, rendered_items, total_work, "生成 AI 文件")
+            task["progress"] = self._task_progress(record, rendered_items, total_work, "生成总图 AI 文件")
             task_file = job_dir / ("render-task.json" if len(batches) == 1 else f"render-task-{index:03d}.json")
             self._write_json(task_file, task)
             task_files.append(str(task_file))
@@ -415,14 +419,20 @@ class RenderService:
             rendered_items += len(batch.items)
             if request["dry_run"]:
                 self._update_progress(record, rendered_items, total_work, "生成 AI 文件")
-            delivery_files.append(
-                {
-                    "path": str(delivery_path),
-                    "name": delivery_path.name,
-                    "format": batch.rule.output_format,
-                    "department": batch.rule.department,
-                }
-            )
+            delivery_entry = {
+                "path": str(delivery_path),
+                "name": delivery_path.name,
+                "format": batch.rule.output_format,
+                "department": batch.rule.department,
+            }
+            delivery_files.append(delivery_entry)
+            if _requires_202508_single_order_ai(batch.rule):
+                bundle_members.append(
+                    {
+                        "path": str(delivery_path),
+                        "arcname": f"summary/{delivery_path.name}",
+                    }
+                )
 
         if render_entries:
             master_task_file = job_dir / "render-batch.json"
@@ -460,6 +470,7 @@ class RenderService:
             task_files,
             request["dry_run"],
             bundle_members=bundle_members,
+            bundle_dir=job_dir,
             bundle_name=f"{record['job_id']}_output_bundle.zip",
             extra_outputs={
                 "single_order_files": single_order_files,
@@ -775,11 +786,15 @@ def _202508_delivery_path(
 
 
 def _requires_202508_single_order_ai(rule: DepartmentOutputRule) -> bool:
-    return (
-        rule.output_format == "ai8"
-        and not rule.per_order
-        and bool(rule.layout.get("group_by_color"))
-    )
+    return rule.output_format == "ai8" and bool(rule.single_order_ai)
+
+
+def _requires_202508_master_output(rule: DepartmentOutputRule) -> bool:
+    return not (rule.single_order_ai and not rule.has_master)
+
+
+def _requires_202508_color_master(rule: DepartmentOutputRule) -> bool:
+    return _requires_202508_master_output(rule) and bool(rule.master_group_by_color)
 
 
 def _202508_single_order_files(
@@ -840,8 +855,8 @@ def _unique_generated_filename(candidate: str, occupied_names: set[str]) -> str:
 def _fixed_canvas_mm(rule: DepartmentOutputRule) -> Dict[str, float] | None:
     layout = rule.layout
     try:
-        width = float(layout.get("frame_width_mm") or 0)
-        height = float(layout.get("frame_height_mm") or 0)
+        width = float(rule.master_frame_width_mm or layout.get("frame_width_mm") or 0)
+        height = float(rule.master_frame_height_mm or layout.get("frame_height_mm") or 0)
     except (TypeError, ValueError):
         return None
     return {"width_mm": width, "height_mm": height} if width > 0 and height > 0 else None
@@ -858,8 +873,9 @@ def _color_frame_groups(items: Iterable[Any]) -> List[Dict[str, Any]]:
     buckets: Dict[str, List[Any]] = {}
     labels: Dict[str, str] = {}
     for item in items:
-        label = str(getattr(item, "color_option", "") or "Unspecified").strip() or "Unspecified"
-        key = label.casefold()
+        raw_label = str(getattr(item, "color_option", "") or "Unspecified").strip() or "Unspecified"
+        label = translate_color_to_chinese(raw_label) or raw_label
+        key = raw_label.casefold()
         buckets.setdefault(key, []).append(item)
         labels.setdefault(key, label)
     return [
@@ -935,14 +951,15 @@ def _delivery_outputs(
     dry_run: bool,
     *,
     bundle_members: List[Dict[str, str]] | None = None,
+    bundle_dir: Path | None = None,
     bundle_name: str = "department-deliveries.zip",
     extra_outputs: Mapping[str, Any] | None = None,
 ) -> Dict[str, Any]:
-    if not deliveries:
+    if not deliveries and not bundle_members:
         raise RenderServiceError("没有可交付的部门成品", code="department_output_empty")
     outputs: Dict[str, Any] = {
         "delivery_plan": deliveries,
-        "render_task": task_files[0],
+        "render_task": task_files[0] if task_files else "",
         "render_task_files": task_files,
     }
     if extra_outputs:
@@ -953,18 +970,24 @@ def _delivery_outputs(
             outputs["bundle_plan"] = bundle_members
         return outputs
 
-    primary = deliveries[0]
     outputs["delivery_files"] = deliveries
-    if primary["path"].lower().endswith(".ai"):
-        outputs["output_ai"] = primary["path"]
-    elif primary["path"].lower().endswith(".png"):
-        outputs["output_png"] = primary["path"]
+    primary = deliveries[0] if deliveries else None
+    if primary:
+        if primary["path"].lower().endswith(".ai"):
+            outputs["output_ai"] = primary["path"]
+        elif primary["path"].lower().endswith(".png"):
+            outputs["output_png"] = primary["path"]
     if bundle_members or len(deliveries) > 1:
         members = bundle_members or [
             {"path": delivery["path"], "arcname": Path(delivery["path"]).name}
             for delivery in deliveries
         ]
-        bundle = Path(primary["path"]).parent / bundle_name
+        target_dir = bundle_dir or (
+            Path(primary["path"]).parent
+            if primary
+            else Path(str(members[0]["path"])).parent
+        )
+        bundle = target_dir / bundle_name
         with zipfile.ZipFile(bundle, "w", compression=zipfile.ZIP_DEFLATED) as archive:
             for member in members:
                 path = Path(str(member.get("path") or ""))
@@ -974,7 +997,7 @@ def _delivery_outputs(
         outputs["output_bundle"] = str(bundle)
         outputs["primary_output"] = str(bundle)
     else:
-        outputs["primary_output"] = primary["path"]
+        outputs["primary_output"] = primary["path"] if primary else ""
     return outputs
 
 

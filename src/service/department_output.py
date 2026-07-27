@@ -18,6 +18,77 @@ from typing import Any, Iterable, Mapping
 
 CONFIG_PATH = Path(__file__).resolve().parents[2] / "config" / "department_rules.json"
 
+ANNOTATION_COLOR = "COLOR"
+ANNOTATION_PRODUCT_NAME = "PRODUCT_NAME"
+
+DEPARTMENT_CONFIG: Mapping[str, Mapping[str, Any]] = {
+    "T": {
+        "departments": ("T",),
+        "annotation_type": ANNOTATION_COLOR,
+        "single_order_ai": True,
+        "has_master": True,
+        "master_group_by_color": True,
+        "master_frame_width_mm": 580.0,
+        "master_frame_height_mm": 2000.0,
+    },
+    "K": {
+        "departments": ("K",),
+        "annotation_type": ANNOTATION_COLOR,
+        "single_order_ai": True,
+        "has_master": True,
+        "master_group_by_color": True,
+        "master_frame_width_mm": 480.0,
+        "master_frame_height_mm": 2000.0,
+    },
+    "ZK_FK": {
+        "departments": ("ZK", "FK"),
+        "annotation_type": ANNOTATION_COLOR,
+        "single_order_ai": True,
+        "has_master": True,
+        "master_group_by_color": True,
+        "master_frame_width_mm": 450.0,
+        "master_frame_height_mm": 2000.0,
+    },
+    "PW_EW": {
+        "departments": ("PW", "EW"),
+        "annotation_type": ANNOTATION_PRODUCT_NAME,
+        "single_order_ai": True,
+        "has_master": True,
+        "master_group_by_color": False,
+        "master_frame_width_mm": None,
+        "master_frame_height_mm": None,
+    },
+    "D_CONTAINS": {
+        "match": "contains",
+        "departments": ("D",),
+        "annotation_type": ANNOTATION_PRODUCT_NAME,
+        "single_order_ai": True,
+        "has_master": False,
+        "master_group_by_color": False,
+        "master_frame_width_mm": None,
+        "master_frame_height_mm": None,
+    },
+}
+
+_COLOR_TRANSLATIONS = {
+    "RED": "红色",
+    "BLACK": "黑色",
+    "WHITE": "白色",
+    "GOLD": "金色",
+    "SILVER": "银色",
+    "ROSEGOLD": "玫瑰金",
+    "BLUE": "蓝色",
+    "NAVY": "藏蓝色",
+    "PINK": "粉色",
+    "DARKGREEN": "深绿色",
+    "GREEN": "绿色",
+    "PURPLE": "紫色",
+    "YELLOW": "黄色",
+    "ORANGE": "橙色",
+    "GRAY": "灰色",
+    "GREY": "灰色",
+}
+
 _DEPARTMENT_KEYS = ("department", "production department", "生产部门", "部门")
 _MANUFACTURER_KEYS = (
     "manufacturer",
@@ -47,6 +118,12 @@ class DepartmentOutputRule:
     per_order: bool = False
     omit_order_label: bool = False
     apply_color_to_artwork: bool = False
+    annotation_type: str = ANNOTATION_COLOR
+    single_order_ai: bool = False
+    has_master: bool = True
+    master_group_by_color: bool = False
+    master_frame_width_mm: float | None = None
+    master_frame_height_mm: float | None = None
 
     @property
     def extension(self) -> str:
@@ -72,6 +149,19 @@ class DepartmentDelivery:
 
 def normalize_identifier(value: object) -> str:
     return re.sub(r"[^A-Za-z0-9]+", "", str(value or "")).upper()
+
+
+def is_department_d(dept_name: object) -> bool:
+    return "D" in normalize_identifier(dept_name)
+
+
+def translate_color_to_chinese(value: object) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if re.search(r"[\u4e00-\u9fff]", text):
+        return text
+    return _COLOR_TRANSLATIONS.get(normalize_identifier(text), text)
 
 
 def read_department_rules(path: Path | None = None) -> Mapping[str, Any]:
@@ -120,6 +210,7 @@ def resolve_department_output(
     name = str(matched.get("name") or "DEFAULT")
     output_format = str(matched.get("output_format") or "ai8")
     layout = _mapping(matched.get("layout"))
+    config_defaults = _mapping(DEPARTMENT_CONFIG.get(name))
     if output_format == "manufacturer_specific":
         manufacturer_rule = _find_manufacturer_rule(matched, manufacturer_text)
         output_format = str(manufacturer_rule.get("output_format") or "ai8")
@@ -132,6 +223,7 @@ def resolve_department_output(
             per_order=output_format == "png_per_item",
             omit_order_label=output_format == "png_per_item",
             apply_color_to_artwork=output_format == "cs5_ai",
+            has_master=output_format != "png_per_item",
         )
 
     return DepartmentOutputRule(
@@ -140,8 +232,26 @@ def resolve_department_output(
         manufacturer=manufacturer_text,
         output_format=output_format,
         layout=layout,
-        per_order=name == "D_CONTAINS",
         apply_color_to_artwork=name == "H",
+        annotation_type=str(_setting(matched, config_defaults, "annotation_type", ANNOTATION_COLOR)),
+        single_order_ai=_bool_setting(matched, config_defaults, "single_order_ai", False),
+        has_master=_bool_setting(matched, config_defaults, "has_master", True),
+        master_group_by_color=_bool_setting(
+            matched,
+            config_defaults,
+            "master_group_by_color",
+            bool(layout.get("group_by_color")),
+        ),
+        master_frame_width_mm=_float_setting(
+            matched.get("master_frame_width_mm"),
+            layout.get("frame_width_mm"),
+            config_defaults.get("master_frame_width_mm"),
+        ),
+        master_frame_height_mm=_float_setting(
+            matched.get("master_frame_height_mm"),
+            layout.get("frame_height_mm"),
+            config_defaults.get("master_frame_height_mm"),
+        ),
     )
 
 
@@ -153,9 +263,9 @@ def build_department_deliveries(
 ) -> list[DepartmentDelivery]:
     """Split an input table into download-ready deliveries.
 
-    A delivery never mixes incompatible departments.  D and MY-W120 are
-    further split by order, so their mandated one-order/one-graphic output
-    cannot accidentally be combined into a whole AI file.
+    A delivery never mixes incompatible departments.  MY-W120 is further split
+    by order item, while reusable single-order AI output is handled by the
+    202508 renderer before any optional master delivery is created.
     """
 
     buckets: dict[tuple[str, str, str, str], list[Mapping[str, Any]]] = {}
@@ -225,7 +335,13 @@ def set_png_resolution(path: Path, dpi: int = 300) -> None:
 
 
 def _find_requirement(requirements: list[Any], department: str) -> Mapping[str, Any] | None:
-    # Manufacturer-dependent W must win even if configurations are reordered.
+    # Exact department families such as PW/EW must win before broad contains
+    # rules; then manufacturer-dependent W wins over other contains rules.
+    for requirement in requirements:
+        if not isinstance(requirement, Mapping):
+            continue
+        if str(requirement.get("match") or "exact").lower() == "exact" and _matches(requirement, department):
+            return requirement
     for requirement in requirements:
         if not isinstance(requirement, Mapping):
             continue
@@ -238,6 +354,8 @@ def _find_requirement(requirements: list[Any], department: str) -> Mapping[str, 
 
 
 def _matches(requirement: Mapping[str, Any], department: str) -> bool:
+    if str(requirement.get("name") or "") == "D_CONTAINS":
+        return is_department_d(department)
     match = str(requirement.get("match") or "exact").lower()
     candidates = [normalize_identifier(value) for value in requirement.get("departments", [])]
     if match == "contains":
@@ -303,3 +421,38 @@ def _png_chunk(kind: bytes, payload: bytes) -> bytes:
 
 def _mapping(value: Any) -> Mapping[str, Any]:
     return value if isinstance(value, Mapping) else {}
+
+
+def _setting(
+    source: Mapping[str, Any],
+    defaults: Mapping[str, Any],
+    key: str,
+    fallback: Any,
+) -> Any:
+    if key in source:
+        return source[key]
+    if key in defaults:
+        return defaults[key]
+    return fallback
+
+
+def _bool_setting(
+    source: Mapping[str, Any],
+    defaults: Mapping[str, Any],
+    key: str,
+    fallback: bool,
+) -> bool:
+    return bool(_setting(source, defaults, key, fallback))
+
+
+def _float_setting(*values: Any) -> float | None:
+    for value in values:
+        if value in (None, ""):
+            continue
+        try:
+            result = float(value)
+        except (TypeError, ValueError):
+            continue
+        if result > 0:
+            return result
+    return None

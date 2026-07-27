@@ -2,7 +2,15 @@ from __future__ import annotations
 
 import struct
 
-from src.service.department_output import build_department_deliveries, resolve_department_output, set_png_resolution
+from src.service.department_output import (
+    ANNOTATION_COLOR,
+    ANNOTATION_PRODUCT_NAME,
+    build_department_deliveries,
+    is_department_d,
+    resolve_department_output,
+    set_png_resolution,
+    translate_color_to_chinese,
+)
 
 
 def test_h_only_delivers_one_fixed_master_png():
@@ -21,7 +29,41 @@ def test_w_only_has_two_manufacturer_exceptions():
     assert resolve_department_output("W", "OTHER-FACTORY").output_format == "ai8"
 
 
-def test_department_deliveries_keep_d_and_w120_per_order_but_h_whole():
+def test_department_config_exposes_single_order_and_master_rules():
+    t_rule = resolve_department_output("T")
+    k_rule = resolve_department_output("K")
+    zk_rule = resolve_department_output("ZK")
+    pw_rule = resolve_department_output("PW")
+    d_rule = resolve_department_output("Dept_D")
+
+    assert t_rule.single_order_ai is True
+    assert t_rule.annotation_type == ANNOTATION_COLOR
+    assert t_rule.has_master is True
+    assert t_rule.master_group_by_color is True
+    assert t_rule.master_frame_width_mm == 580
+    assert k_rule.master_frame_width_mm == 480
+    assert zk_rule.master_frame_width_mm == 450
+    assert pw_rule.single_order_ai is True
+    assert pw_rule.annotation_type == ANNOTATION_PRODUCT_NAME
+    assert pw_rule.has_master is True
+    assert pw_rule.master_group_by_color is False
+    assert d_rule.single_order_ai is True
+    assert d_rule.annotation_type == ANNOTATION_PRODUCT_NAME
+    assert d_rule.has_master is False
+
+
+def test_department_d_matching_and_color_translation_are_standard():
+    assert is_department_d("Dept_D") is True
+    assert is_department_d("D_Group") is True
+    assert is_department_d("d-line") is True
+    assert is_department_d("ZK") is False
+    assert translate_color_to_chinese("Red") == "红色"
+    assert translate_color_to_chinese("Black") == "黑色"
+    assert translate_color_to_chinese("Rose Gold") == "玫瑰金"
+    assert translate_color_to_chinese("红色") == "红色"
+
+
+def test_department_deliveries_keep_d_whole_and_w120_per_order_but_h_whole():
     deliveries = build_department_deliveries(
         [
             {"生产部门": "H", "内部订单号": "H-001"},
@@ -37,15 +79,15 @@ def test_department_deliveries_keep_d_and_w120_per_order_but_h_whole():
 
     assert [(delivery.rule.output_format, len(delivery.rows)) for delivery in deliveries] == [
         ("png_master", 2),
-        ("ai8", 1),
-        ("ai8", 1),
+        ("ai8", 2),
         ("png_per_item", 1),
         ("png_per_item", 1),
         ("ai8", 1),
     ]
     assert deliveries[0].output_name == "batch-H-580x2000mm.png"
-    assert deliveries[3].output_name == "batch-W-W-001.png"
-    assert deliveries[4].output_name == "batch-W-W-002.png"
+    assert deliveries[1].output_name == "batch-D-A.ai"
+    assert deliveries[2].output_name == "batch-W-W-001.png"
+    assert deliveries[3].output_name == "batch-W-W-002.png"
 
 
 def test_set_png_resolution_writes_standard_phys_metadata(tmp_path):

@@ -12,6 +12,12 @@ from typing import Any, Dict, Iterable, List, Mapping, Sequence
 
 from .jjmb_order_parser import read_xlsx_rows, split_personalization
 from .renderer.illustrator_bridge import IllustratorBridge, IllustratorBridgeError
+from .service.department_output import (
+    ANNOTATION_COLOR,
+    ANNOTATION_PRODUCT_NAME,
+    is_department_d,
+    translate_color_to_chinese,
+)
 
 
 TEMPLATE_ID = "JJMB202508261001394920"
@@ -181,26 +187,31 @@ def build_production_label(
     color_option: str,
     rule: Dict[str, object] | None = None,
 ) -> str:
-    display_color = display_color_name(color_option)
+    color_label = translate_color_to_chinese(color_option)
     values = {
         "order_no": order_no,
         "department": department,
         "product_name": product_name,
         "text": text,
-        "color_option": display_color,
+        "color_option": color_label,
     }
+    annotation_type = str(rule.get("annotation_type") or "").upper() if rule else ""
+    if annotation_type == ANNOTATION_COLOR:
+        return compact_label(order_no, color_label)
+    if annotation_type == ANNOTATION_PRODUCT_NAME:
+        return compact_label(order_no, product_name)
     if rule and rule.get("label_fields"):
         return compact_label(*(values.get(str(field), "") for field in rule["label_fields"]))
     code = normalize_department(department)
     if code == "H":
         return compact_label(order_no, text)
-    if "D" in code:
+    if is_department_d(code):
         return compact_label(order_no, product_name)
     if code in {"K", "T", "FK", "ZK"}:
-        return compact_label(order_no, display_color, text)
+        return compact_label(order_no, color_label)
     if code in {"PW", "EW"}:
-        return compact_label(order_no, product_name, display_color)
-    return compact_label(order_no, display_color, text)
+        return compact_label(order_no, product_name)
+    return compact_label(order_no, color_label, text)
 
 
 def build_production_label_lines(
@@ -211,13 +222,19 @@ def build_production_label_lines(
     color_option: str,
     rule: Dict[str, object] | None = None,
 ) -> List[str]:
+    color_label = translate_color_to_chinese(color_option)
     values = {
         "order_no": order_no,
         "department": department,
         "product_name": product_name,
         "text": text,
-        "color_option": display_color_name(color_option),
+        "color_option": color_label,
     }
+    annotation_type = str(rule.get("annotation_type") or "").upper() if rule else ""
+    if annotation_type == ANNOTATION_COLOR:
+        return [part for part in [order_no, color_label] if part]
+    if annotation_type == ANNOTATION_PRODUCT_NAME:
+        return [part for part in [order_no, product_name] if part]
     label_lines = rule.get("label_lines") if rule else None
     if isinstance(label_lines, list) and label_lines:
         result: List[str] = []
