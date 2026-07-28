@@ -278,11 +278,19 @@ def test_service_dry_run_creates_job_and_render_task(tmp_path):
     assert task["output"]["pathfinder_merge"] is True
 
 
-def test_service_routes_h_to_one_fixed_master_png(tmp_path):
+def test_service_routes_h_to_per_graphic_pngs_and_cropped_master_png(tmp_path):
     config_path = tmp_path / "templates.json"
     order_path = tmp_path / "orders.xlsx"
     write_templates_config(config_path)
     write_order_xlsx(order_path, department="H")
+    workbook = load_workbook(order_path)
+    sheet = workbook.active
+    second = [cell.value for cell in sheet[2]]
+    second[8] = "DETAIL2"
+    second[11] = "Amy"
+    second[12] = "Black"
+    sheet.append(second)
+    workbook.save(order_path)
 
     record = RenderService(
         registry=TemplateRegistry(config_path),
@@ -293,11 +301,34 @@ def test_service_routes_h_to_one_fixed_master_png(tmp_path):
 
     assert record["status"] == "completed", record.get("error")
     assert "primary_output" not in record["outputs"]
-    assert record["outputs"]["delivery_plan"][0]["path"].endswith("-H-580x2000mm.png")
-    task = json.loads(Path(record["outputs"]["render_task_files"][0]).read_text(encoding="utf-8"))
-    assert task["output"]["format"] == "png"
-    assert task["output"]["fixed_canvas_mm"] == {"width_mm": 580.0, "height_mm": 2000.0}
-    assert task["output"]["dpi"] == 300
+    assert [item["name"] for item in record["outputs"]["graphic_files"]] == ["ORDER1-1.png", "ORDER1-2.png"]
+    assert record["outputs"]["delivery_plan"][-1]["path"].endswith("-H-580mm-master.png")
+    assert [member["arcname"] for member in record["outputs"]["bundle_plan"]] == [
+        "single-graphics/ORDER1-1.png",
+        "single-graphics/ORDER1-2.png",
+        f"summary/{Path(record['outputs']['delivery_plan'][-1]['path']).name}",
+        "manifest.json",
+    ]
+    graphic_task_path = next(
+        Path(path)
+        for path in record["outputs"]["render_task_files"]
+        if "single-graphic-tasks" in str(path)
+    )
+    master_task_path = next(
+        Path(path)
+        for path in record["outputs"]["render_task_files"]
+        if "single-graphic-tasks" not in str(path) and path.endswith("render-task-001.json")
+    )
+    graphic_task = json.loads(graphic_task_path.read_text(encoding="utf-8"))
+    master_task = json.loads(master_task_path.read_text(encoding="utf-8"))
+    assert graphic_task["output"]["format"] == "png"
+    assert graphic_task["output"]["color_mode"] == "CMYK"
+    assert graphic_task["groups"][0]["items"][0]["apply_color_to_artwork"] is True
+    assert graphic_task["groups"][0]["items"][0]["production_label_lines"] == ["ORDER1"]
+    assert master_task["output"]["format"] == "png"
+    assert master_task["output"]["fixed_canvas_mm"] == {"width_mm": 580.0, "height_mm": 2000.0}
+    assert master_task["output"]["crop_master_height"] is True
+    assert master_task["output"]["dpi"] == 300
 
 
 def test_service_dry_run_uses_template_text_output_flags(tmp_path):
@@ -584,7 +615,7 @@ def test_non_202508_pipeline_rejects_department_controlled_order(tmp_path):
     assert record["error_code"] == "department_output_pipeline_unsupported"
 
 
-def test_service_routes_w_manufacturers_to_cs5_and_no_label_pngs(tmp_path):
+def test_service_routes_w_manufacturers_to_cs5_standard_ai_and_graphic_pngs(tmp_path):
     config_path = tmp_path / "templates.json"
     order_path = tmp_path / "orders.xlsx"
     write_templates_config(config_path)
@@ -601,12 +632,24 @@ def test_service_routes_w_manufacturers_to_cs5_and_no_label_pngs(tmp_path):
     assert cs5_task["output"]["compatibility"] == "CS5"
     assert cs5_task["groups"][0]["items"][0]["apply_color_to_artwork"] is True
     assert cs5_task["groups"][0]["items"][0]["production_label_lines"] == ["ORDER1"]
-    assert cs5_record["outputs"]["delivery_plan"][0]["path"].endswith("-W-MY-W196.ai")
+    assert cs5_record["outputs"]["delivery_plan"][0]["path"].endswith("-W-ORDER1-MY-W196.ai")
 
+    write_order_xlsx(order_path, department="W", manufacturer="OTHER-W")
+    standard_record = RenderService(
+        registry=TemplateRegistry(config_path),
+        jobs=JobStore(tmp_path / "jobs-standard"),
+    ).submit(
+        {"template_id": "JJMB202508261001394920", "order_file": str(order_path), "dry_run": True}
+    )
+    standard_task = json.loads(Path(standard_record["outputs"]["render_task_files"][0]).read_text(encoding="utf-8"))
+    assert standard_task["output"]["format"] == "ai"
+    assert standard_task["output"]["compatibility"] == "AI_STANDARD"
+    assert standard_record["outputs"]["delivery_plan"][0]["path"].endswith("-W-ORDER1.ai")
+
+    write_order_xlsx(order_path, department="W", manufacturer="MY-W120")
     workbook = load_workbook(order_path)
     sheet = workbook.active
     sheet["C2"] = "W-120-001"
-    sheet["O2"] = "MY-W120"
     second = [cell.value for cell in sheet[2]]
     second[2] = "W-120-002"
     second[8] = "DETAIL2"
@@ -621,11 +664,18 @@ def test_service_routes_w_manufacturers_to_cs5_and_no_label_pngs(tmp_path):
         {"template_id": "JJMB202508261001394920", "order_file": str(order_path), "dry_run": True}
     )
     assert "output_bundle" not in png_record["outputs"]
-    assert [item["name"] for item in png_record["outputs"]["delivery_plan"]] == ["W-120-001.png", "W-120-002.png"]
+    assert [item["name"] for item in png_record["outputs"]["graphic_files"]] == ["W-120-001.png", "W-120-002.png"]
+    assert [member["arcname"] for member in png_record["outputs"]["bundle_plan"]] == [
+        "single-graphics/W-120-001.png",
+        "single-graphics/W-120-002.png",
+        "manifest.json",
+    ]
     for task_path in png_record["outputs"]["render_task_files"]:
         task = json.loads(Path(task_path).read_text(encoding="utf-8"))
         assert task["output"]["format"] == "png"
-        assert task["layout"]["suppress_labels"] is True
+        assert task["output"]["color_mode"] == "CMYK"
+        assert task["layout"]["suppress_labels"] is False
+        assert task["groups"][0]["items"][0]["apply_color_to_artwork"] is True
 
 
 def test_202508_task_receives_every_configured_font_boldness_mapping(tmp_path):

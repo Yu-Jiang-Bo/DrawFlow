@@ -5,7 +5,13 @@ import struct
 from src.service.department_output import (
     ANNOTATION_COLOR,
     ANNOTATION_PRODUCT_NAME,
+    EXPORT_UNIT_PER_GRAPHIC,
+    EXPORT_UNIT_PER_ORDER,
+    FILE_FORMAT_AI_CS5,
+    FILE_FORMAT_AI_STANDARD,
+    FILE_FORMAT_PNG_CMYK,
     build_department_deliveries,
+    finalize_cmyk_png,
     is_department_d,
     resolve_department_output,
     set_png_resolution,
@@ -13,20 +19,42 @@ from src.service.department_output import (
 )
 
 
-def test_h_only_delivers_one_fixed_master_png():
+def test_h_delivers_per_graphic_pngs_and_cropped_master_png():
     rule = resolve_department_output("H")
 
-    assert rule.output_format == "png_master"
+    assert rule.output_format == "png_cmyk"
+    assert rule.export_unit == EXPORT_UNIT_PER_GRAPHIC
+    assert rule.file_format == FILE_FORMAT_PNG_CMYK
     assert rule.extension == ".png"
+    assert rule.fill_actual_color is True
+    assert rule.apply_color_to_artwork is True
+    assert rule.has_master is True
+    assert rule.crop_master_height is True
     assert rule.layout["frame_width_mm"] == 580
     assert rule.layout["frame_height_mm"] == 2000
     assert rule.layout["dpi"] == 300
 
 
 def test_w_only_has_two_manufacturer_exceptions():
-    assert resolve_department_output("W", "MY-W196").output_format == "cs5_ai"
-    assert resolve_department_output("W", "my w120").output_format == "png_per_item"
-    assert resolve_department_output("W", "OTHER-FACTORY").output_format == "ai8"
+    w196 = resolve_department_output("W", "MY-W196")
+    w120 = resolve_department_output("W", "my w120")
+    other = resolve_department_output("W", "OTHER-FACTORY")
+
+    assert w196.output_format == "cs5_ai"
+    assert w196.export_unit == EXPORT_UNIT_PER_ORDER
+    assert w196.file_format == FILE_FORMAT_AI_CS5
+    assert w196.per_order is True
+    assert w196.fill_actual_color is True
+    assert w196.has_master is False
+    assert w120.output_format == "png_cmyk"
+    assert w120.export_unit == EXPORT_UNIT_PER_GRAPHIC
+    assert w120.file_format == FILE_FORMAT_PNG_CMYK
+    assert w120.fill_actual_color is True
+    assert w120.has_master is False
+    assert other.output_format == "ai_standard"
+    assert other.file_format == FILE_FORMAT_AI_STANDARD
+    assert other.ai_compatibility == FILE_FORMAT_AI_STANDARD
+    assert other.per_order is True
 
 
 def test_department_config_exposes_single_order_and_master_rules():
@@ -63,7 +91,7 @@ def test_department_d_matching_and_color_translation_are_standard():
     assert translate_color_to_chinese("红色") == "红色"
 
 
-def test_department_deliveries_keep_d_whole_and_w120_per_order_but_h_whole():
+def test_department_deliveries_split_h_and_w120_per_graphic_but_keep_d_whole():
     deliveries = build_department_deliveries(
         [
             {"生产部门": "H", "内部订单号": "H-001"},
@@ -78,16 +106,21 @@ def test_department_deliveries_keep_d_whole_and_w120_per_order_but_h_whole():
     )
 
     assert [(delivery.rule.output_format, len(delivery.rows)) for delivery in deliveries] == [
-        ("png_master", 2),
+        ("png_cmyk", 1),
+        ("png_cmyk", 1),
         ("ai8", 2),
-        ("png_per_item", 1),
-        ("png_per_item", 1),
-        ("ai8", 1),
+        ("png_cmyk", 1),
+        ("png_cmyk", 1),
+        ("ai_standard", 1),
     ]
-    assert deliveries[0].output_name == "batch-H-580x2000mm.png"
-    assert deliveries[1].output_name == "batch-D-A.ai"
-    assert deliveries[2].output_name == "batch-W-W-001.png"
-    assert deliveries[3].output_name == "batch-W-W-002.png"
+    assert [delivery.output_name for delivery in deliveries] == [
+        "H-001.png",
+        "H-002.png",
+        "batch-D-A.ai",
+        "W-001.png",
+        "W-002.png",
+        "batch-W-W-003.ai",
+    ]
 
 
 def test_set_png_resolution_writes_standard_phys_metadata(tmp_path):
@@ -104,6 +137,22 @@ def test_set_png_resolution_writes_standard_phys_metadata(tmp_path):
     phys_offset = data.index(b"pHYs")
     x_pixels_per_meter, y_pixels_per_meter, unit = struct.unpack(">IIB", data[phys_offset + 4 : phys_offset + 13])
     assert (x_pixels_per_meter, y_pixels_per_meter, unit) == (11811, 11811, 1)
+
+
+def test_finalize_cmyk_png_rejects_non_cmyk_policy(tmp_path):
+    png = tmp_path / "output.png"
+    png.write_bytes(
+        b"\x89PNG\r\n\x1a\n"
+        + _png_chunk(b"IHDR", struct.pack(">IIBBBBB", 10, 20, 8, 2, 0, 0, 0))
+        + _png_chunk(b"IEND", b"")
+    )
+
+    try:
+        finalize_cmyk_png(png, dpi=300, color_mode="RGB")
+    except Exception as exc:
+        assert "CMYK" in str(exc)
+    else:
+        raise AssertionError("non-CMYK PNG policy should be rejected")
 
 
 def _png_chunk(kind: bytes, payload: bytes) -> bytes:

@@ -9,7 +9,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
-from .department_output import DepartmentOutputRule, resolve_department_output, translate_color_to_chinese
+from .department_output import (
+    EXPORT_UNIT_PER_GRAPHIC,
+    FILE_FORMAT_AI_CS5,
+    FILE_FORMAT_PNG_CMYK,
+    DepartmentOutputRule,
+    resolve_department_output,
+    translate_color_to_chinese,
+)
 
 
 RENDER_BATCH_TASK_TYPE = "render_batch"
@@ -50,6 +57,13 @@ class SingleOrderOutput:
 
 
 @dataclass(frozen=True)
+class GraphicOutput:
+    unit: ProductionOutputUnit
+    output_path: Path
+    arcname: str
+
+
+@dataclass(frozen=True)
 class ColorFrame:
     color_option: str
     units: tuple[ProductionOutputUnit, ...]
@@ -64,7 +78,7 @@ def partition_output_units(units: Iterable[ProductionOutputUnit]) -> list[Produc
         rule = unit.rule or resolve_department_output(unit.department, unit.manufacturer)
         department = _key_part(unit.department) or "DEFAULT"
         manufacturer = _key_part(unit.manufacturer)
-        if rule.name == "W_CONTAINS" and rule.output_format == "ai8":
+        if rule.name == "W_CONTAINS" and rule.file_format not in {FILE_FORMAT_AI_CS5, FILE_FORMAT_PNG_CMYK}:
             manufacturer = "OTHER"
         scope = _batch_scope(rule, unit)
         key = (rule.name, department, manufacturer, scope)
@@ -77,8 +91,20 @@ def requires_single_order_ai(rule: DepartmentOutputRule) -> bool:
     return rule.output_format == "ai8" and bool(rule.single_order_ai)
 
 
+def requires_graphic_outputs(rule: DepartmentOutputRule) -> bool:
+    return rule.export_unit == EXPORT_UNIT_PER_GRAPHIC and rule.is_png
+
+
 def requires_master_output(rule: DepartmentOutputRule) -> bool:
-    return not (rule.single_order_ai and not rule.has_master)
+    if requires_graphic_outputs(rule):
+        return bool(rule.has_master)
+    if rule.single_order_ai:
+        return bool(rule.has_master)
+    return True
+
+
+def requires_cropped_master(rule: DepartmentOutputRule) -> bool:
+    return bool(rule.crop_master_height)
 
 
 def requires_color_master(rule: DepartmentOutputRule) -> bool:
@@ -93,14 +119,13 @@ def delivery_path(
 ) -> Path:
     rule = batch.rule
     department = _key_part(rule.department) or rule.name
-    if rule.output_format == "png_master":
-        candidate = f"{base_name}-{department}-580x2000mm.png"
-    elif rule.output_format == "png_per_item":
-        candidate = f"{safe_filename(batch.scope.split('|', 1)[0]) or 'ORDER'}.png"
+    if rule.is_png:
+        width = int(rule.master_frame_width_mm or rule.layout.get("frame_width_mm") or 580)
+        candidate = f"{base_name}-{department}-{width}mm-master.png"
+    elif rule.file_format == FILE_FORMAT_AI_CS5:
+        candidate = f"{base_name}-{department}-{_key_part(batch.scope) or 'ORDER'}-MY-W196.ai"
     elif rule.per_order:
         candidate = f"{base_name}-{department}-{_key_part(batch.scope) or 'ORDER'}.ai"
-    elif rule.output_format == "cs5_ai":
-        candidate = f"{base_name}-{department}-MY-W196.ai"
     else:
         candidate = f"{base_name}-{department}.ai"
     return job_dir / _unique_filename(candidate, occupied_names)
@@ -127,6 +152,30 @@ def single_order_outputs(
         candidate = f"{stem}({seen_by_order[order_no]}).ai" if counts[order_no] > 1 else f"{stem}.ai"
         filename = _unique_filename(candidate, occupied)
         result.append(SingleOrderOutput(unit=unit, output_path=output_dir / filename, arcname=f"single-orders/{filename}"))
+    return result
+
+
+def graphic_outputs(
+    units: Iterable[ProductionOutputUnit],
+    output_dir: Path,
+    occupied_names: set[str] | None = None,
+) -> list[GraphicOutput]:
+    unit_list = list(units)
+    counts: dict[str, int] = {}
+    for unit in unit_list:
+        order_no = unit.order_no or "ORDER"
+        counts[order_no] = counts.get(order_no, 0) + 1
+
+    seen_by_order: dict[str, int] = {}
+    occupied = occupied_names if occupied_names is not None else set()
+    result: list[GraphicOutput] = []
+    for unit in unit_list:
+        order_no = unit.order_no or "ORDER"
+        seen_by_order[order_no] = seen_by_order.get(order_no, 0) + 1
+        stem = safe_filename(order_no) or "ORDER"
+        candidate = f"{stem}-{seen_by_order[order_no]}.png" if counts[order_no] > 1 else f"{stem}.png"
+        filename = _unique_filename(candidate, occupied)
+        result.append(GraphicOutput(unit=unit, output_path=output_dir / filename, arcname=f"single-graphics/{filename}"))
     return result
 
 
@@ -269,8 +318,6 @@ def safe_filename(value: object) -> str:
 
 
 def _batch_scope(rule: DepartmentOutputRule, unit: ProductionOutputUnit) -> str:
-    if rule.output_format == "png_per_item":
-        return "|".join([unit.order_no or "ORDER", unit.detail_id, str(unit.quantity_index), unit.identity])
     return unit.order_no or "ORDER" if rule.per_order else ""
 
 

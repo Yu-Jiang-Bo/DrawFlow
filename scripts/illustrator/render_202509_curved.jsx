@@ -858,7 +858,7 @@
         var text = file.read();
         file.close();
         if (typeof JSON !== "undefined" && JSON.parse) return JSON.parse(text);
-        return eval("(" + text + ")");
+        throw new Error("JSON.parse is required to read render task JSON.");
     }
 
     function writeDebug(task, payload) {
@@ -912,7 +912,12 @@
 
     function saveAsAI(doc, file, compatibility) {
         var opts = new IllustratorSaveOptions();
-        opts.compatibility = String(compatibility).toLowerCase() === "cs5" ? Compatibility.ILLUSTRATOR15 : Compatibility.ILLUSTRATOR8;
+        var target = String(compatibility || "Illustrator 8").toLowerCase();
+        if (target === "cs5") {
+            opts.compatibility = Compatibility.ILLUSTRATOR15;
+        } else if (target !== "ai_standard" && target !== "standard" && target !== "current") {
+            opts.compatibility = Compatibility.ILLUSTRATOR8;
+        }
         opts.pdfCompatible = false;
         opts.compressed = false;
         doc.saveAs(file, opts);

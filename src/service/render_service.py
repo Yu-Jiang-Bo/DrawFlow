@@ -27,8 +27,8 @@ from .job_store import JobStore
 from .font_style_rules import font_style_by_option
 from .department_output import (
     DepartmentOutputRule,
+    finalize_cmyk_png,
     resolve_department_output,
-    set_png_resolution,
 )
 from .generic_rule_renderer import build_generic_render_task
 from .llm_rule_parser import normalize_option_list
@@ -38,9 +38,12 @@ from .production_output import (
     color_frames,
     delivery_path,
     fixed_canvas_mm,
+    graphic_outputs,
     master_packing_config,
     partition_output_units,
     requires_color_master,
+    requires_cropped_master,
+    requires_graphic_outputs,
     requires_master_output,
     requires_single_order_ai,
     single_order_outputs,
@@ -237,6 +240,7 @@ class RenderService:
             fixed_canvas: Mapping[str, float] | None,
             progress: Mapping[str, Any],
             color_summary: bool = False,
+            crop_master_height: bool = False,
             master_packing: Mapping[str, Any] | None = None,
         ) -> Dict[str, Any]:
             native_items = [unit.payload for unit in units]
@@ -257,7 +261,7 @@ class RenderService:
                 groups=native_groups,
                 columns=columns,
                 show_style_boxes=False if color_summary else not request["hide_boxes"],
-                color_mode=str(output_settings["color_mode"]),
+                color_mode="CMYK" if rule.is_png else str(output_settings["color_mode"]),
                 outline_text=bool(output_settings["outline_text"]),
                 pathfinder_merge=bool(output_settings["pathfinder_merge"]),
                 font_styles=_font_styles(template_rules),
@@ -265,6 +269,7 @@ class RenderService:
                 output_png=output_png,
                 fixed_canvas_mm=fixed_canvas,
                 output_compatibility=rule.ai_compatibility,
+                crop_master_height=crop_master_height,
                 suppress_labels=rule.omit_order_label
                 or bool(master_packing and master_packing.get("component_suppress_labels")),
                 master_packing=master_packing,
@@ -302,18 +307,22 @@ class RenderService:
         request = record["request"]
         job_dir = Path(record["job_dir"]).resolve()
         batches = partition_output_units(units)
+        graphic_work = sum(len(batch.units) for batch in batches if requires_graphic_outputs(batch.rule))
         single_order_work = sum(len(batch.units) for batch in batches if requires_single_order_ai(batch.rule))
         master_work = sum(len(batch.units) for batch in batches if requires_master_output(batch.rule))
-        total_work = single_order_work + master_work
-        self._update_progress(record, 0, total_work, "生成 AI 文件")
+        total_work = graphic_work + single_order_work + master_work
+        self._update_progress(record, 0, total_work, "生成部门成品")
 
         delivery_files: List[Dict[str, str]] = []
+        graphic_files: List[Dict[str, str]] = []
         single_order_files: List[Dict[str, str]] = []
+        summary_files: List[Dict[str, str]] = []
         bundle_members: List[Dict[str, str]] = []
         task_files: List[str] = []
         render_entries: List[Dict[str, str]] = []
-        png_outputs: List[tuple[Path, int]] = []
+        png_outputs: List[tuple[Path, int, str]] = []
         occupied_names: set[str] = set()
+        graphic_names: set[str] = set()
         single_order_names: set[str] = set()
         rendered_items = 0
         compose_script = Path(__file__).resolve().parents[2] / "scripts" / "illustrator" / "compose_color_frames.jsx"
@@ -324,6 +333,55 @@ class RenderService:
             intermediate_ai = job_dir / f".department-{index:03d}.ai"
             canvas = fixed_canvas_mm(rule)
             packing = master_packing_config(rule)
+
+            if requires_graphic_outputs(rule):
+                dpi = int(rule.layout.get("dpi") or 300)
+                color_mode = str(rule.layout.get("color_mode") or "CMYK")
+                for graphic_index, spec in enumerate(
+                    graphic_outputs(batch.units, job_dir / "single-graphics", graphic_names),
+                    start=1,
+                ):
+                    task = task_builder(
+                        units=(spec.unit,),
+                        output_ai=spec.output_path.with_suffix(".ai"),
+                        output_png=spec.output_path,
+                        columns=1,
+                        rule=rule,
+                        fixed_canvas=None,
+                        progress=self._task_progress(
+                            record,
+                            rendered_items + graphic_index - 1,
+                            total_work,
+                            "生成单图 PNG 文件",
+                        ),
+                    )
+                    task_file = job_dir / "single-graphic-tasks" / f"render-task-{index:03d}-{graphic_index:04d}.json"
+                    self._write_json(task_file, task)
+                    task_files.append(str(task_file))
+                    render_entries.append({"script": str(render_script), "task_file": str(task_file)})
+                    png_outputs.append((spec.output_path, dpi, color_mode))
+                    graphic_record = {
+                        "path": str(spec.output_path),
+                        "name": spec.output_path.name,
+                        "arcname": spec.arcname,
+                        "format": rule.file_format,
+                        "department": rule.department,
+                        "order_no": spec.unit.order_no,
+                        "detail_id": spec.unit.detail_id,
+                    }
+                    graphic_files.append(graphic_record)
+                    delivery_files.append(
+                        {
+                            "path": str(spec.output_path),
+                            "name": spec.output_path.name,
+                            "format": rule.file_format,
+                            "department": rule.department,
+                        }
+                    )
+                    bundle_members.append({"path": str(spec.output_path), "arcname": spec.arcname})
+                rendered_items += len(batch.units)
+                if request["dry_run"]:
+                    self._update_progress(record, rendered_items, total_work, "生成单图 PNG 文件")
 
             if requires_single_order_ai(rule):
                 for single_index, spec in enumerate(
@@ -473,33 +531,42 @@ class RenderService:
                     rule=rule,
                     fixed_canvas=canvas,
                     progress=self._task_progress(record, rendered_items, total_work, "生成总图 AI 文件"),
+                    crop_master_height=requires_cropped_master(rule),
                 )
                 task_file = job_dir / f"render-task-{index:03d}.json"
                 self._write_json(task_file, task)
                 task_files.append(str(task_file))
                 render_entries.append({"script": str(render_script), "task_file": str(task_file)})
                 if rule.is_png:
-                    png_outputs.append((target_path, int(rule.layout.get("dpi") or 300)))
+                    png_outputs.append(
+                        (
+                            target_path,
+                            int(rule.layout.get("dpi") or 300),
+                            str(rule.layout.get("color_mode") or "CMYK"),
+                        )
+                    )
                 rendered_items += len(batch.units)
                 if request["dry_run"]:
                     self._update_progress(record, rendered_items, total_work, "生成总图 AI 文件")
 
-            delivery_files.append(
-                {
-                    "path": str(target_path),
-                    "name": target_path.name,
-                    "format": rule.output_format,
-                    "department": rule.department,
-                }
-            )
+            summary_record = {
+                "path": str(target_path),
+                "name": target_path.name,
+                "format": rule.output_format,
+                "department": rule.department,
+            }
+            summary_files.append(summary_record)
+            delivery_files.append(summary_record)
             if requires_single_order_ai(rule):
+                bundle_members.append({"path": str(target_path), "arcname": f"summary/{target_path.name}"})
+            elif requires_graphic_outputs(rule):
                 bundle_members.append({"path": str(target_path), "arcname": f"summary/{target_path.name}"})
 
         batch_task_paths = write_batch_task_files(job_dir, render_entries, chunk_size=JJMB_202508_RENDER_CHUNK_SIZE)
         if not request["dry_run"]:
             _render_production_batch_files(batch_task_paths, request["visible"])
-            for png_path, dpi in png_outputs:
-                set_png_resolution(png_path, dpi)
+            for png_path, dpi, color_mode in png_outputs:
+                finalize_cmyk_png(png_path, dpi=dpi, color_mode=color_mode)
 
         manifest_path = job_dir / "manifest.json"
         self._write_json(
@@ -507,9 +574,10 @@ class RenderService:
             {
                 "job_id": record["job_id"],
                 "template_id": template.template_id,
+                "graphic_files": graphic_files,
                 "single_order_files": single_order_files,
-                "summary_files": delivery_files,
-                "file_count": len(single_order_files) + len(delivery_files),
+                "summary_files": summary_files,
+                "file_count": len(graphic_files) + len(single_order_files) + len(summary_files),
             },
         )
         if bundle_members:
@@ -523,6 +591,7 @@ class RenderService:
             bundle_name=f"{record['job_id']}_output_bundle.zip",
             extra_outputs={
                 "single_order_files": single_order_files,
+                "graphic_files": graphic_files,
                 "output_manifest": str(manifest_path),
                 "render_batch_files": [str(path) for path in batch_task_paths],
             },
@@ -535,6 +604,7 @@ class RenderService:
             "stats": {
                 "items": item_count,
                 "deliveries": len(delivery_files),
+                "graphic_files": len(graphic_files),
                 "single_order_files": len(single_order_files),
                 "dry_run": request["dry_run"],
             },
@@ -641,6 +711,7 @@ class RenderService:
                 fixed_canvas: Mapping[str, float] | None,
                 progress: Mapping[str, Any],
                 color_summary: bool = False,
+                crop_master_height: bool = False,
                 master_packing: Mapping[str, Any] | None = None,
             ) -> Dict[str, Any]:
                 if output_png is not None:

@@ -21,39 +21,63 @@ CONFIG_PATH = Path(__file__).resolve().parents[2] / "config" / "department_rules
 ANNOTATION_COLOR = "COLOR"
 ANNOTATION_PRODUCT_NAME = "PRODUCT_NAME"
 
-DEPARTMENT_CONFIG: Mapping[str, Mapping[str, Any]] = {
+EXPORT_UNIT_PER_ORDER = "PER_ORDER"
+EXPORT_UNIT_PER_GRAPHIC = "PER_GRAPHIC"
+
+FILE_FORMAT_AI8 = "AI8"
+FILE_FORMAT_AI_CS5 = "AI_CS5"
+FILE_FORMAT_AI_STANDARD = "AI_STANDARD"
+FILE_FORMAT_PNG_CMYK = "PNG_CMYK"
+
+DEPARTMENT_SPECS: Mapping[str, Mapping[str, Any]] = {
     "T": {
         "departments": ("T",),
+        "exportUnit": EXPORT_UNIT_PER_ORDER,
+        "fileFormat": FILE_FORMAT_AI8,
+        "fillActualColor": False,
         "annotation_type": ANNOTATION_COLOR,
         "single_order_ai": True,
-        "has_master": True,
+        "hasMaster": True,
+        "cropMasterHeight": True,
         "master_group_by_color": True,
         "master_frame_width_mm": 580.0,
         "master_frame_height_mm": 2000.0,
     },
     "K": {
         "departments": ("K",),
+        "exportUnit": EXPORT_UNIT_PER_ORDER,
+        "fileFormat": FILE_FORMAT_AI8,
+        "fillActualColor": False,
         "annotation_type": ANNOTATION_COLOR,
         "single_order_ai": True,
-        "has_master": True,
+        "hasMaster": True,
+        "cropMasterHeight": True,
         "master_group_by_color": True,
         "master_frame_width_mm": 480.0,
         "master_frame_height_mm": 2000.0,
     },
     "ZK_FK": {
         "departments": ("ZK", "FK"),
+        "exportUnit": EXPORT_UNIT_PER_ORDER,
+        "fileFormat": FILE_FORMAT_AI8,
+        "fillActualColor": False,
         "annotation_type": ANNOTATION_COLOR,
         "single_order_ai": True,
-        "has_master": True,
+        "hasMaster": True,
+        "cropMasterHeight": True,
         "master_group_by_color": True,
         "master_frame_width_mm": 450.0,
         "master_frame_height_mm": 2000.0,
     },
     "PW_EW": {
         "departments": ("PW", "EW"),
+        "exportUnit": EXPORT_UNIT_PER_ORDER,
+        "fileFormat": FILE_FORMAT_AI8,
+        "fillActualColor": False,
         "annotation_type": ANNOTATION_PRODUCT_NAME,
         "single_order_ai": True,
-        "has_master": True,
+        "hasMaster": True,
+        "cropMasterHeight": False,
         "master_group_by_color": False,
         "master_frame_width_mm": None,
         "master_frame_height_mm": None,
@@ -61,14 +85,19 @@ DEPARTMENT_CONFIG: Mapping[str, Mapping[str, Any]] = {
     "D_CONTAINS": {
         "match": "contains",
         "departments": ("D",),
+        "exportUnit": EXPORT_UNIT_PER_ORDER,
+        "fileFormat": FILE_FORMAT_AI8,
+        "fillActualColor": False,
         "annotation_type": ANNOTATION_PRODUCT_NAME,
         "single_order_ai": True,
-        "has_master": False,
+        "hasMaster": False,
+        "cropMasterHeight": False,
         "master_group_by_color": False,
         "master_frame_width_mm": None,
         "master_frame_height_mm": None,
     },
 }
+DEPARTMENT_CONFIG = DEPARTMENT_SPECS
 
 _COLOR_TRANSLATIONS = {
     "RED": "红色",
@@ -115,27 +144,35 @@ class DepartmentOutputRule:
     manufacturer: str
     output_format: str
     layout: Mapping[str, Any]
+    export_unit: str = EXPORT_UNIT_PER_ORDER
+    file_format: str = FILE_FORMAT_AI8
     per_order: bool = False
     omit_order_label: bool = False
     apply_color_to_artwork: bool = False
+    fill_actual_color: bool = False
     annotation_type: str = ANNOTATION_COLOR
     single_order_ai: bool = False
     has_master: bool = True
+    crop_master_height: bool = False
     master_group_by_color: bool = False
     master_frame_width_mm: float | None = None
     master_frame_height_mm: float | None = None
 
     @property
     def extension(self) -> str:
-        return ".png" if self.output_format in {"png_master", "png_per_item"} else ".ai"
+        return ".png" if self.is_png else ".ai"
 
     @property
     def is_png(self) -> bool:
-        return self.extension == ".png"
+        return self.file_format == FILE_FORMAT_PNG_CMYK or self.output_format in {"png_master", "png_per_item", "png_cmyk"}
 
     @property
     def ai_compatibility(self) -> str:
-        return "CS5" if self.output_format == "cs5_ai" else "Illustrator 8"
+        if self.file_format == FILE_FORMAT_AI_CS5 or self.output_format == "cs5_ai":
+            return "CS5"
+        if self.file_format == FILE_FORMAT_AI_STANDARD or self.output_format == "ai_standard":
+            return FILE_FORMAT_AI_STANDARD
+        return "Illustrator 8"
 
 
 @dataclass(frozen=True)
@@ -208,34 +245,84 @@ def resolve_department_output(
         )
 
     name = str(matched.get("name") or "DEFAULT")
-    output_format = str(matched.get("output_format") or "ai8")
+    output_format = _normalized_output_format(matched)
     layout = _mapping(matched.get("layout"))
-    config_defaults = _mapping(DEPARTMENT_CONFIG.get(name))
+    config_defaults = _mapping(DEPARTMENT_SPECS.get(name))
     if output_format == "manufacturer_specific":
         manufacturer_rule = _find_manufacturer_rule(matched, manufacturer_text)
-        output_format = str(manufacturer_rule.get("output_format") or "ai8")
+        output_format = _normalized_output_format(manufacturer_rule)
+        file_format = _resolved_file_format(manufacturer_rule, output_format)
+        export_unit = _resolved_export_unit(manufacturer_rule, matched)
+        fill_actual_color = _resolved_bool(
+            manufacturer_rule,
+            matched,
+            primary_keys=("fillActualColor", "fill_actual_color", "apply_color_to_artwork"),
+            fallback=output_format == "cs5_ai",
+        )
+        has_master = _resolved_bool(
+            manufacturer_rule,
+            matched,
+            primary_keys=("hasMaster", "has_master"),
+            fallback=False,
+        )
         return DepartmentOutputRule(
             name=name,
             department=department_text,
             manufacturer=manufacturer_text,
             output_format=output_format,
+            export_unit=export_unit,
+            file_format=file_format,
             layout=layout,
-            per_order=output_format == "png_per_item",
-            omit_order_label=output_format == "png_per_item",
-            apply_color_to_artwork=output_format == "cs5_ai",
-            has_master=output_format != "png_per_item",
+            per_order=export_unit == EXPORT_UNIT_PER_ORDER and output_format not in {"png_cmyk", "png_per_item"},
+            omit_order_label=_resolved_bool(
+                manufacturer_rule,
+                matched,
+                primary_keys=("omitOrderLabel", "omit_order_label"),
+                fallback=False,
+            ),
+            apply_color_to_artwork=fill_actual_color,
+            fill_actual_color=fill_actual_color,
+            has_master=has_master,
+            crop_master_height=_resolved_bool(
+                manufacturer_rule,
+                matched,
+                primary_keys=("cropMasterHeight", "crop_master_height"),
+                fallback=False,
+            ),
         )
 
+    file_format = _resolved_file_format(matched, output_format)
+    export_unit = _resolved_export_unit(matched, config_defaults)
+    fill_actual_color = _resolved_bool(
+        matched,
+        config_defaults,
+        primary_keys=("fillActualColor", "fill_actual_color", "apply_color_to_artwork"),
+        fallback=name == "H",
+    )
     return DepartmentOutputRule(
         name=name,
         department=department_text,
         manufacturer=manufacturer_text,
         output_format=output_format,
+        export_unit=export_unit,
+        file_format=file_format,
         layout=layout,
-        apply_color_to_artwork=name == "H",
+        apply_color_to_artwork=fill_actual_color,
+        fill_actual_color=fill_actual_color,
         annotation_type=str(_setting(matched, config_defaults, "annotation_type", ANNOTATION_COLOR)),
         single_order_ai=_bool_setting(matched, config_defaults, "single_order_ai", False),
-        has_master=_bool_setting(matched, config_defaults, "has_master", True),
+        has_master=_resolved_bool(
+            matched,
+            config_defaults,
+            primary_keys=("hasMaster", "has_master"),
+            fallback=True,
+        ),
+        crop_master_height=_resolved_bool(
+            matched,
+            config_defaults,
+            primary_keys=("cropMasterHeight", "crop_master_height"),
+            fallback=bool(layout.get("crop_master_height")),
+        ),
         master_group_by_color=_bool_setting(
             matched,
             config_defaults,
@@ -275,7 +362,12 @@ def build_department_deliveries(
         manufacturer = _row_value(row, _MANUFACTURER_KEYS)
         order_no = _row_value(row, _ORDER_KEYS) or f"ROW-{index}"
         rule = resolve_department_output(department, manufacturer, rules=rules)
-        identity = _delivery_identity(rule, order_no)
+        identity = (
+            rule.name,
+            normalize_identifier(rule.department) or "DEFAULT",
+            normalize_identifier(rule.manufacturer),
+            f"{order_no}|{index}",
+        ) if rule.export_unit == EXPORT_UNIT_PER_GRAPHIC else _delivery_identity(rule, order_no)
         buckets.setdefault(identity, []).append(row)
         plans[identity] = rule
 
@@ -334,6 +426,14 @@ def set_png_resolution(path: Path, dpi: int = 300) -> None:
     path.write_bytes(signature + b"".join(chunks))
 
 
+def finalize_cmyk_png(path: Path, *, dpi: int = 300, color_mode: str = "CMYK") -> None:
+    """Finalize a production PNG that was rendered from a CMYK Illustrator document."""
+
+    if str(color_mode or "").strip().upper() != "CMYK":
+        raise DepartmentOutputError(f"PNG 成品必须使用 CMYK 色彩模式配置：{path.name}")
+    set_png_resolution(path, dpi)
+
+
 def _find_requirement(requirements: list[Any], department: str) -> Mapping[str, Any] | None:
     # Exact department families such as PW/EW must win before broad contains
     # rules; then manufacturer-dependent W wins over other contains rules.
@@ -382,7 +482,7 @@ def _find_manufacturer_rule(requirement: Mapping[str, Any], manufacturer: str) -
 def _delivery_identity(rule: DepartmentOutputRule, order_no: str) -> tuple[str, str, str, str]:
     department = normalize_identifier(rule.department) or "DEFAULT"
     manufacturer = normalize_identifier(rule.manufacturer)
-    if rule.name == "W_CONTAINS" and rule.output_format not in {"cs5_ai", "png_per_item"}:
+    if rule.name == "W_CONTAINS" and rule.file_format not in {FILE_FORMAT_AI_CS5, FILE_FORMAT_PNG_CMYK}:
         manufacturer = "OTHER"
     scope = _safe_component(order_no) if rule.per_order else ""
     return rule.name, department, manufacturer, scope
@@ -390,11 +490,11 @@ def _delivery_identity(rule: DepartmentOutputRule, order_no: str) -> tuple[str, 
 
 def _delivery_base_name(base_name: str, rule: DepartmentOutputRule, scope: str) -> str:
     pieces = [_safe_component(base_name) or "output", _safe_component(rule.department) or rule.name]
-    if rule.output_format == "cs5_ai":
+    if rule.export_unit == EXPORT_UNIT_PER_GRAPHIC:
+        return _safe_component(scope.split("|", 1)[0]) or "ORDER"
+    if rule.file_format == FILE_FORMAT_AI_CS5:
         pieces.append("MY-W196")
-    elif rule.output_format == "png_per_item":
-        pieces.append(scope or "item")
-    elif rule.output_format == "png_master":
+    elif rule.is_png:
         pieces.append("580x2000mm")
     elif rule.per_order:
         pieces.append(scope or "order")
@@ -421,6 +521,64 @@ def _png_chunk(kind: bytes, payload: bytes) -> bytes:
 
 def _mapping(value: Any) -> Mapping[str, Any]:
     return value if isinstance(value, Mapping) else {}
+
+
+def _normalized_output_format(source: Mapping[str, Any]) -> str:
+    raw = str(source.get("output_format") or "").strip().lower()
+    if raw:
+        return raw
+    return _output_format_from_file_format(str(source.get("fileFormat") or source.get("file_format") or "AI8"))
+
+
+def _resolved_file_format(source: Mapping[str, Any], output_format: str) -> str:
+    value = str(source.get("fileFormat") or source.get("file_format") or "").strip().upper()
+    if value:
+        return value
+    if output_format == "cs5_ai":
+        return FILE_FORMAT_AI_CS5
+    if output_format == "ai_standard":
+        return FILE_FORMAT_AI_STANDARD
+    if output_format in {"png_master", "png_per_item", "png_cmyk"}:
+        return FILE_FORMAT_PNG_CMYK
+    return FILE_FORMAT_AI8
+
+
+def _output_format_from_file_format(value: str) -> str:
+    normalized = str(value or "").strip().upper()
+    if normalized == FILE_FORMAT_AI_CS5:
+        return "cs5_ai"
+    if normalized == FILE_FORMAT_AI_STANDARD:
+        return "ai_standard"
+    if normalized == FILE_FORMAT_PNG_CMYK:
+        return "png_cmyk"
+    return "ai8"
+
+
+def _resolved_export_unit(source: Mapping[str, Any], defaults: Mapping[str, Any]) -> str:
+    value = str(
+        source.get("exportUnit")
+        or source.get("export_unit")
+        or defaults.get("exportUnit")
+        or defaults.get("export_unit")
+        or EXPORT_UNIT_PER_ORDER
+    ).strip().upper()
+    return EXPORT_UNIT_PER_GRAPHIC if value == EXPORT_UNIT_PER_GRAPHIC else EXPORT_UNIT_PER_ORDER
+
+
+def _resolved_bool(
+    source: Mapping[str, Any],
+    defaults: Mapping[str, Any],
+    *,
+    primary_keys: tuple[str, ...],
+    fallback: bool,
+) -> bool:
+    for key in primary_keys:
+        if key in source:
+            return bool(source[key])
+    for key in primary_keys:
+        if key in defaults:
+            return bool(defaults[key])
+    return bool(fallback)
 
 
 def _setting(

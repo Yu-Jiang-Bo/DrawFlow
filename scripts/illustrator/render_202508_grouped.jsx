@@ -11,6 +11,7 @@
     var colorMode = outputColorMode(outputConfig.color_mode);
     var outlineText = outputConfig.outline_text !== false;
     var pathfinderMerge = outputConfig.pathfinder_merge !== false;
+    var cropMasterHeight = outputConfig.crop_master_height === true;
     var cleanupStats = { attempted: 0, failed: 0 };
     var fontStyles = task.font_styles || {};
 
@@ -78,7 +79,7 @@
         placements = fitting;
         maxColumnHeight = placementHeight(placements);
         docWidth = fixedWidth;
-        docHeight = fixedHeight;
+        docHeight = cropMasterHeight ? Math.min(fixedHeight, margin * 2 + maxColumnHeight) : fixedHeight;
     }
     var debugPayload = {
         groups: renderGroups.length,
@@ -87,6 +88,7 @@
         compactOutput: compactOutput,
         suppressLabels: suppressLabels,
         packOrderBlocks: packOrderBlocks,
+        cropMasterHeight: cropMasterHeight,
         docWidth: docWidth,
         docHeight: docHeight,
         productWidthPt: productSize.width,
@@ -178,6 +180,7 @@
     writeDebug(task, debugPayload);
     var output;
     if (String(outputConfig.format || "ai").toLowerCase() === "png") {
+        if (colorMode !== "CMYK") throw new Error("PNG 部门成品必须使用 CMYK 色彩模式");
         output = File(String(outputConfig.png_path || ""));
         if (!output.fsName) throw new Error("PNG 输出路径缺失");
         ensureFolder(output.parent);
@@ -245,7 +248,8 @@
             for (var j = 0; j < items.length; j++) {
                 var item = items[j];
                 var lines = labelLines(item, item.production_label || item.order_no || source.order_no || "");
-                var key = String(source.order_no || item.order_no || "") + "\u001f" + String(item.color_option || "") + "\u001f" + lines.join("\u001e");
+                var colorKey = item.show_color_label ? String(item.color_option || "") : "";
+                var key = String(source.order_no || item.order_no || "") + "\u001f" + colorKey + "\u001f" + lines.join("\u001e");
                 if (!buckets[key]) {
                     buckets[key] = {
                         order_no: source.order_no || item.order_no || "",
@@ -654,7 +658,7 @@
         var text = file.read();
         file.close();
         if (typeof JSON !== "undefined" && JSON.parse) return JSON.parse(text);
-        return eval("(" + text + ")");
+        throw new Error("JSON.parse is required to read render task JSON.");
     }
 
     function writeDebug(task, payload) {
@@ -707,7 +711,12 @@
 
     function saveAsAI(doc, file, compatibility) {
         var opts = new IllustratorSaveOptions();
-        opts.compatibility = String(compatibility).toLowerCase() === "cs5" ? Compatibility.ILLUSTRATOR15 : Compatibility.ILLUSTRATOR8;
+        var target = String(compatibility || "Illustrator 8").toLowerCase();
+        if (target === "cs5") {
+            opts.compatibility = Compatibility.ILLUSTRATOR15;
+        } else if (target !== "ai_standard" && target !== "standard" && target !== "current") {
+            opts.compatibility = Compatibility.ILLUSTRATOR8;
+        }
         opts.pdfCompatible = false;
         opts.compressed = false;
         doc.saveAs(file, opts);

@@ -374,6 +374,7 @@ def build_task(
     output_png: Path | None = None,
     fixed_canvas_mm: Mapping[str, float] | None = None,
     output_compatibility: str = "Illustrator 8",
+    crop_master_height: bool = False,
     suppress_labels: bool = False,
     master_packing: Mapping[str, object] | None = None,
     color_frames: Sequence[Mapping[str, object]] | None = None,
@@ -457,6 +458,7 @@ def build_task(
             "png_path": str(output_png) if output_png else "",
             "dpi": 300 if output_png else 0,
             "fixed_canvas_mm": dict(fixed_canvas_mm or {}),
+            "crop_master_height": bool(crop_master_height),
         },
         "debug": {
             "report_path": str(output_ai.with_suffix(".debug.json")),

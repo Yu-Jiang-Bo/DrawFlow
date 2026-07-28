@@ -9,8 +9,10 @@ from src.service.production_output import (
     ProductionOutputError,
     ProductionOutputUnit,
     color_frames,
+    graphic_outputs,
     master_packing_config,
     partition_output_units,
+    requires_graphic_outputs,
     single_order_outputs,
     write_batch_task_files,
 )
@@ -74,6 +76,26 @@ def test_shared_planner_uses_parenthesized_names_for_duplicate_order_artwork(tmp
         "single-orders/ORD-1(2).ai",
         "single-orders/ORD-2.ai",
     ]
+
+
+def test_per_graphic_png_outputs_use_hyphen_numbering_for_duplicate_order_artwork(tmp_path):
+    outputs = graphic_outputs(
+        [
+            make_unit(order_no="ORD-1", department="H", detail_id="1"),
+            make_unit(order_no="ORD-1", department="H", detail_id="2"),
+            make_unit(order_no="ORD-2", department="H", detail_id="3"),
+        ],
+        Path(tmp_path) / "single-graphics",
+    )
+
+    assert [output.output_path.name for output in outputs] == ["ORD-1-1.png", "ORD-1-2.png", "ORD-2.png"]
+    assert [output.arcname for output in outputs] == [
+        "single-graphics/ORD-1-1.png",
+        "single-graphics/ORD-1-2.png",
+        "single-graphics/ORD-2.png",
+    ]
+    assert requires_graphic_outputs(resolve_department_output("H")) is True
+    assert requires_graphic_outputs(resolve_department_output("W", "MY-W120")) is True
 
 
 def test_generic_batch_jsx_executes_child_tasks_by_script_path():

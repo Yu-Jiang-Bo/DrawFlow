@@ -467,15 +467,20 @@ def test_department_rules_are_loaded_from_config():
     assert shop_rules["global_requirements"]["size_frame_text_path_overlap"] is True
     assert "去重很重要" in shop_rules["global_requirements"]["outline_dedupe_note"]
     k_output = next(rule for rule in shop_rules["department_output_requirements"] if rule["name"] == "K")
+    h_output = next(rule for rule in shop_rules["department_output_requirements"] if rule["name"] == "H")
     pw_output = next(rule for rule in shop_rules["department_output_requirements"] if rule["name"] == "PW_EW")
     d_output = next(rule for rule in shop_rules["department_output_requirements"] if rule["name"] == "D_CONTAINS")
     assert k_output["layout"]["frame_width_mm"] == 480
     assert k_output["single_order_ai"] is True
     assert k_output["annotation_type"] == "COLOR"
+    assert h_output["exportUnit"] == "PER_GRAPHIC"
+    assert h_output["fileFormat"] == "PNG_CMYK"
+    assert h_output["fillActualColor"] is True
+    assert h_output["cropMasterHeight"] is True
     assert pw_output["annotation_type"] == "PRODUCT_NAME"
     assert pw_output["single_order_ai"] is True
-    assert pw_output["has_master"] is True
+    assert pw_output["hasMaster"] is True
     assert d_output["annotation_type"] == "PRODUCT_NAME"
     assert d_output["single_order_ai"] is True
-    assert d_output["has_master"] is False
+    assert d_output["hasMaster"] is False
     assert k_output["artwork_content"] == "订单号 + 字体颜色 + 效果图"
