@@ -366,15 +366,20 @@ def test_service_routes_t_to_one_ai_with_color_frame_artboards(tmp_path):
         "single-orders/ORDER1.ai",
         "single-orders/ORDER2.ai",
     ]
-    assert component_task["output"]["compatibility"] == "Illustrator 8"
+    assert component_task["output"]["compatibility"] == "CS5"
+    assert component_task["output"]["intermediate_component"] is True
     assert component_task["output"]["fixed_canvas_mm"] == {}
     assert component_task["layout"]["pack_order_blocks"] is True
+    assert component_task["layout"]["suppress_labels"] is True
     assert component_task["layout"]["master_packing"]["target_width_mm"] == 580.0
+    assert component_task["layout"]["master_packing"]["algorithm"] == "adaptive_column_grid"
     assert component_task["groups"][0]["items"][0]["production_label_lines"] == ["ORDER1"]
     assert compose_task["type"] == "compose_color_frames"
     assert compose_task["master_packing"]["target_width_mm"] == 580.0
+    assert compose_task["master_packing"]["component_suppress_labels"] is True
     assert compose_task["show_color_header"] is True
     assert [frame["color_option"] for frame in compose_task["inputs"]] == ["金色", "银色"]
+    assert compose_task["inputs"][0]["order_nos"] == ["ORDER1"]
 
 
 def test_curved_template_reuses_shared_department_output_pipeline(tmp_path):
@@ -418,7 +423,9 @@ def test_curved_template_reuses_shared_department_output_pipeline(tmp_path):
     d_task = json.loads(d_task_path.read_text(encoding="utf-8"))
     assert color_task["output"]["fixed_canvas_mm"] == {}
     assert color_task["layout"]["pack_order_blocks"] is True
+    assert color_task["layout"]["suppress_labels"] is True
     assert color_task["layout"]["master_packing"]["target_width_mm"] == 580.0
+    assert color_task["layout"]["master_packing"]["algorithm"] == "adaptive_column_grid"
     assert color_task["groups"][0]["production_label_lines"] == ["CURVED-T"]
     assert d_task["groups"][0]["production_label_lines"] == ["CURVED-D", "圣诞曲线标题挂件"]
 
@@ -480,7 +487,9 @@ def test_service_routes_color_master_widths_by_department(tmp_path, department, 
     compose_task = json.loads(compose_task_path.read_text(encoding="utf-8"))
     assert component_task["output"]["fixed_canvas_mm"] == {}
     assert component_task["layout"]["pack_order_blocks"] is True
+    assert component_task["layout"]["suppress_labels"] is True
     assert compose_task["master_packing"]["target_width_mm"] == width_mm
+    assert compose_task["master_packing"]["algorithm"] == "adaptive_column_grid"
 
 
 @pytest.mark.parametrize("department", ["PW", "EW"])
@@ -703,6 +712,70 @@ def test_202508_task_receives_compiled_segment_color_actions(tmp_path):
             "selector": {"type": "segments", "delimiter": "|"},
         }
     ]
+
+
+def test_202508_segment_color_rules_still_split_comma_name_lists(tmp_path):
+    config_path = tmp_path / "templates.json"
+    order_path = tmp_path / "orders.xlsx"
+    rules_path = tmp_path / "template.rules.json"
+    write_templates_config(config_path)
+    write_order_xlsx(order_path)
+    rules_path.write_text(
+        json.dumps(
+            {
+                "rule_ast": {
+                    "$schema": "custom-renderer/template-rule-ast",
+                    "version": 1,
+                    "source_hash": "0" * 64,
+                    "rules": [
+                        {
+                            "target": {"type": "text", "name": "Name"},
+                            "conditions": [],
+                            "selector": {"type": "segments", "delimiter": "|"},
+                            "operations": [
+                                {
+                                    "type": "fill_color",
+                                    "strategy": "cycle",
+                                    "values": ["#FF0000", "#FFFFFF"],
+                                }
+                            ],
+                        }
+                    ],
+                    "unresolved": [],
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    config["templates"][0]["template_rules_config"] = str(rules_path)
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+    workbook = load_workbook(order_path)
+    workbook.active["L2"] = "Alice|Bob,Cara|Dana"
+    workbook.save(order_path)
+
+    record = RenderService(
+        registry=TemplateRegistry(config_path),
+        jobs=JobStore(tmp_path / "jobs"),
+    ).submit(
+        {"template_id": "JJMB202508261001394920", "order_file": str(order_path), "dry_run": True}
+    )
+
+    task = json.loads(Path(record["outputs"]["render_task_files"][0]).read_text(encoding="utf-8"))
+    assert len(task["groups"]) == 1
+    assert [item["text"] for item in task["groups"][0]["items"]] == ["Alice|Bob", "Cara|Dana"]
+    assert all(
+        item["text_actions"]
+        == [
+            {
+                "type": "fill_color",
+                "strategy": "cycle",
+                "values": ["#FF0000", "#FFFFFF"],
+                "selector": {"type": "segments", "delimiter": "|"},
+            }
+        ]
+        for item in task["groups"][0]["items"]
+    )
 
 
 def test_202603_grouped_task_receives_every_configured_font_boldness_mapping(tmp_path):

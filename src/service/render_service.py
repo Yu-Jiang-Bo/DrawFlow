@@ -265,7 +265,8 @@ class RenderService:
                 output_png=output_png,
                 fixed_canvas_mm=fixed_canvas,
                 output_compatibility=rule.ai_compatibility,
-                suppress_labels=rule.omit_order_label,
+                suppress_labels=rule.omit_order_label
+                or bool(master_packing and master_packing.get("component_suppress_labels")),
                 master_packing=master_packing,
             ) | {"progress": dict(progress)}
 
@@ -392,11 +393,22 @@ class RenderService:
                             "生成颜色汇总 AI 文件",
                         ),
                     )
+                    _mark_composition_intermediate(task)
                     task_file = job_dir / f"render-task-{index:03d}-color-{frame_index:03d}.json"
                     self._write_json(task_file, task)
                     task_files.append(str(task_file))
                     render_entries.append({"script": str(render_script), "task_file": str(task_file)})
-                    component_paths.append({"path": str(component_path), "color_option": frame.color_option})
+                    component_paths.append(
+                        {
+                            "path": str(component_path),
+                            "color_option": frame.color_option,
+                            "order_nos": [
+                                str(group.get("order_no") or "")
+                                for group in task.get("groups", [])
+                                if isinstance(group, Mapping)
+                            ],
+                        }
+                    )
                     summary_item_count += len(frame.units)
 
                 compose_file = job_dir / f"compose-color-frames-{index:03d}.json"
@@ -428,6 +440,7 @@ class RenderService:
                     progress=self._task_progress(record, rendered_items, total_work, "生成总图 AI 文件"),
                     master_packing=packing,
                 )
+                _mark_composition_intermediate(task)
                 task_file = job_dir / f"render-task-{index:03d}-master-component.json"
                 self._write_json(task_file, task)
                 task_files.append(str(task_file))
@@ -649,7 +662,8 @@ class RenderService:
                     progress=progress,
                     fixed_canvas_mm=fixed_canvas,
                     output_compatibility=rule.ai_compatibility,
-                    suppress_labels=rule.omit_order_label,
+                    suppress_labels=rule.omit_order_label
+                    or bool(master_packing and master_packing.get("component_suppress_labels")),
                     master_packing=master_packing,
                 )
 
@@ -792,6 +806,17 @@ class RenderService:
             return
         if isinstance(progress, dict):
             record["progress"] = progress
+
+
+def _mark_composition_intermediate(task: Dict[str, Any]) -> None:
+    """Preserve order-group hierarchy in a non-delivery composition component."""
+
+    output = task.get("output")
+    if not isinstance(output, dict):
+        raise RenderServiceError("总图中间渲染任务缺少输出配置", code="department_component_output_missing")
+    # Only hidden color/master components use this format. Single-order and final files remain AI8.
+    output["compatibility"] = "CS5"
+    output["intermediate_component"] = True
 
 
 def _202508_output_units(items: Iterable[Any]) -> list[ProductionOutputUnit]:

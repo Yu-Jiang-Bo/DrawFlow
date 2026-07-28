@@ -8,40 +8,66 @@
     if (!task.inputs || task.inputs.length === 0) throw new Error("No color frame inputs");
 
     var packing = task.master_packing || {};
-    var algorithm = String(packing.algorithm || "best_fit_decreasing_height");
-    if (algorithm !== "best_fit_decreasing_height") throw new Error("Unsupported master packing algorithm: " + algorithm);
-    if (packing.allow_rotation === true) throw new Error("Compact master packing does not allow automatic rotation");
+    var algorithm = String(packing.algorithm || "adaptive_column_grid");
+    if (algorithm === "best_fit_decreasing_height") algorithm = "adaptive_column_grid";
+    if (algorithm !== "adaptive_column_grid") throw new Error("Unsupported master packing algorithm: " + algorithm);
+    if (packing.allow_rotation === true) throw new Error("Adaptive grid master packing does not allow automatic rotation");
 
     var frameWidth = mmToPt(Number(packing.target_width_mm || 0));
     var itemGap = mmToPt(Number(packing.item_gap_mm || 0));
+    var columnGap = mmToPt(Number(packing.column_gap_mm || packing.item_gap_mm || 0));
     var outerMargin = mmToPt(Number(packing.outer_margin_mm || 0));
     var configuredHeaderHeight = mmToPt(Number(packing.header_height_mm || 0));
     var colorGap = mmToPt(Number(packing.color_gap_mm || 0));
+    var labelHeight = mmToPt(Number(packing.label_height_mm || 4));
+    var labelGap = mmToPt(Number(packing.label_gap_mm || 0.8));
+    var cellWidthPadding = mmToPt(Number(packing.cell_width_padding_mm || 0.8));
+    var rowSlack = Math.max(Math.floor(Number(packing.row_slack || 1)), 0);
+    var labelFontSize = Number(packing.label_font_size_pt || 6);
+    var colorHeaderFontSize = Number(packing.color_header_font_size_pt || 7);
     var showColorHeader = task.show_color_header === true;
     var headerHeight = showColorHeader ? configuredHeaderHeight : 0;
-    if (frameWidth <= 0) throw new Error("Missing compact master target width");
-    if (outerMargin * 2 >= frameWidth) throw new Error("Compact master margins leave no usable width");
+    if (frameWidth <= 0) throw new Error("Missing adaptive grid target width");
+    if (outerMargin * 2 >= frameWidth) throw new Error("Adaptive grid margins leave no usable width");
 
     var usableWidth = frameWidth - outerMargin * 2;
     var plans = [];
     var finalHeight = 0;
     for (var inputIndex = 0; inputIndex < task.inputs.length; inputIndex++) {
         var input = task.inputs[inputIndex];
-        var blocks = readBlockMetrics(input);
-        var packed = packBlocks(blocks, usableWidth, itemGap, String(input.color_option || ""));
+        var orders = readOrderMetrics(input);
+        var packed = packAdaptiveGrid(
+            orders,
+            usableWidth,
+            itemGap,
+            columnGap,
+            labelHeight,
+            labelGap,
+            cellWidthPadding,
+            rowSlack,
+            String(input.color_option || "")
+        );
         var frameHeight = outerMargin + headerHeight + packed.height + outerMargin;
         var plan = {
             input: input,
             colorOption: String(input.color_option || ""),
-            blocks: packed.blocks,
+            placements: packed.placements,
+            columns: packed.columns,
+            orderBlockCount: orders.length,
+            subItemCount: packed.subItemCount,
             frameHeight: frameHeight,
             contentHeight: packed.height,
+            maxColumns: packed.maxColumns,
+            idealRows: packed.idealRows,
+            hardRows: packed.hardRows,
+            cellWidth: packed.cellWidth,
+            slotPitch: packed.slotPitch,
             frameLeft: inputIndex * (frameWidth + colorGap)
         };
         plans.push(plan);
         if (frameHeight > finalHeight) finalHeight = frameHeight;
     }
-    if (finalHeight <= 0) throw new Error("Compact master has no visible content");
+    if (finalHeight <= 0) throw new Error("Adaptive grid master has no visible content");
 
     var docWidth = frameWidth * plans.length + colorGap * Math.max(plans.length - 1, 0);
     var doc = app.documents.add(DocumentColorSpace.CMYK, docWidth, finalHeight);
@@ -49,9 +75,10 @@
     layer.name = "COLOR_FRAME_OUTPUT";
 
     for (var planIndex = 0; planIndex < plans.length; planIndex++) {
-        composePlan(doc, layer, plans[planIndex], finalHeight, frameWidth, outerMargin, headerHeight, usableWidth);
+        composePlan(layer, plans[planIndex], finalHeight, frameWidth, outerMargin, headerHeight);
     }
 
+    outlineAllTextFrames(doc);
     writeDebug(task, plans, docWidth, finalHeight, frameWidth, usableWidth, algorithm);
     var output = File(String(task.output_ai));
     ensureFolder(output.parent);
@@ -64,122 +91,442 @@
     doc.close(SaveOptions.DONOTSAVECHANGES);
     return output.fsName;
 
-    function composePlan(doc, layer, plan, docHeight, width, margin, labelHeight, availableWidth) {
+    function composePlan(layer, plan, docHeight, width, margin, labelBandHeight) {
         var boundary = layer.pathItems.rectangle(docHeight, plan.frameLeft, width, plan.frameHeight);
-        boundary.name = "COLOR_FRAME_" + safeName(plan.colorOption || "MASTER") + "_" + roundMm(width) + "mm_DYNAMIC";
+        boundary.name = "COLOR_FRAME_" + safeName(plan.colorOption || "MASTER") + "_" + roundMm(width) + "mm_GRID";
         boundary.filled = false;
         boundary.stroked = false;
-        if (showColorHeader) drawLabel(layer, plan.colorOption || "Unspecified", plan.frameLeft + margin, docHeight - margin, labelHeight);
+        if (showColorHeader) {
+            drawLabel(
+                layer,
+                plan.colorOption || "Unspecified",
+                plan.frameLeft + margin,
+                docHeight - margin,
+                plan.frameLeft + width - margin,
+                docHeight - margin - labelBandHeight,
+                colorHeaderFontSize
+            );
+        }
 
         var source = app.open(File(String(plan.input.path)));
         try {
-            var sourceBlocks = collectOrderBlocks(source);
-            if (sourceBlocks.length !== plan.blocks.length) {
-                throw new Error("Color component order block count changed while composing: " + plan.colorOption);
-            }
-            for (var blockIndex = 0; blockIndex < plan.blocks.length; blockIndex++) {
-                var block = plan.blocks[blockIndex];
-                var sourceBlock = sourceBlocks[block.sourceIndex];
-                if (!sourceBlock) throw new Error("Missing order pack block " + block.sourceIndex + " for " + plan.colorOption);
-                var copy = sourceBlock.item.duplicate(layer, ElementPlacement.PLACEATEND);
-                var copiedBounds = pageItemBounds(copy);
-                var destinationLeft = plan.frameLeft + margin + block.x;
-                var destinationTop = docHeight - margin - labelHeight - block.y;
-                if (destinationLeft < plan.frameLeft - 0.01 || destinationLeft + block.width > plan.frameLeft + width + 0.01) {
-                    throw new Error("Packed order block exceeds target width: " + plan.colorOption);
+            var sourceOrders = collectOrderBlocks(source);
+            assertSourceOrderCount(plan.input, sourceOrders);
+            for (var placementIndex = 0; placementIndex < plan.placements.length; placementIndex++) {
+                var placement = plan.placements[placementIndex];
+                var sourceOrder = sourceOrders[placement.sourceIndex];
+                if (!sourceOrder) throw new Error("Missing source order block " + placement.sourceIndex);
+                var sourceSubItems = sourceOrder.subItems && sourceOrder.subItems.length
+                    ? sourceOrder.subItems
+                    : (sourceOrder.item ? collectOrderSubItems(sourceOrder.item) : []);
+                if (!sourceSubItems.length && sourceOrder.item) sourceSubItems.push({ item: sourceOrder.item, sourceChildIndex: -1 });
+                if (!sourceSubItems.length) throw new Error("Missing source order artwork for " + placement.orderNo);
+
+                var labelLeft = plan.frameLeft + margin + placement.x;
+                var labelTop = docHeight - margin - labelBandHeight - placement.y;
+                drawLabel(layer, placement.orderNo, labelLeft, labelTop, labelLeft + placement.width, labelTop - labelHeight, labelFontSize);
+
+                for (var itemIndex = 0; itemIndex < placement.items.length; itemIndex++) {
+                    var item = placement.items[itemIndex];
+                    var sourceItem = item.sourceChildIndex < 0 ? sourceOrder.item : sourceSubItems[item.sourceChildIndex];
+                    if (!sourceItem) throw new Error("Missing source order sub-item " + item.sourceChildIndex);
+                    var copy = sourceItem.item ? sourceItem.item.duplicate(layer, ElementPlacement.PLACEATEND) : sourceItem.duplicate(layer, ElementPlacement.PLACEATEND);
+                    var copiedBounds = pageItemBounds(copy);
+                    var destinationLeft = plan.frameLeft + margin + placement.x + item.x;
+                    var destinationTop = docHeight - margin - labelBandHeight - placement.y - item.y;
+                    if (destinationLeft < plan.frameLeft + margin - 0.01 || destinationLeft + item.width > plan.frameLeft + width - margin + 0.01) {
+                        throw new Error("Packed order sub-item exceeds target width: " + plan.colorOption + " / " + placement.orderNo);
+                    }
+                    copy.translate(destinationLeft - copiedBounds[0], destinationTop - copiedBounds[1]);
                 }
-                copy.translate(destinationLeft - copiedBounds[0], destinationTop - copiedBounds[1]);
             }
         } finally {
             source.close(SaveOptions.DONOTSAVECHANGES);
         }
     }
 
-    function readBlockMetrics(input) {
+    function readOrderMetrics(input) {
         var source = app.open(File(String(input.path)));
         try {
-            var sourceBlocks = collectOrderBlocks(source);
-            if (!sourceBlocks.length) throw new Error("Color component has no ORDER_PACK_BLOCK groups: " + String(input.color_option || ""));
-            var metrics = [];
-            for (var i = 0; i < sourceBlocks.length; i++) {
-                var bounds = pageItemBounds(sourceBlocks[i].item);
-                var width = bounds[2] - bounds[0];
-                var height = bounds[1] - bounds[3];
-                if (width <= 0 || height <= 0) throw new Error("Order pack block has empty visible bounds: " + sourceBlocks[i].item.name);
-                metrics.push({
-                    sourceIndex: i,
-                    name: String(sourceBlocks[i].item.name || ""),
-                    width: width,
-                    height: height,
-                    x: 0,
-                    y: 0
+            var sourceOrders = collectOrderBlocks(source);
+            assertSourceOrderCount(input, sourceOrders);
+            var orderNos = input.order_nos || [];
+            var orders = [];
+            for (var orderIndex = 0; orderIndex < sourceOrders.length; orderIndex++) {
+                var sourceOrder = sourceOrders[orderIndex];
+                var sourceSubItems = sourceOrder.subItems && sourceOrder.subItems.length
+                    ? sourceOrder.subItems
+                    : (sourceOrder.item ? collectOrderSubItems(sourceOrder.item) : []);
+                if (!sourceSubItems.length && sourceOrder.item) sourceSubItems.push({ item: sourceOrder.item, sourceChildIndex: -1 });
+                if (!sourceSubItems.length) throw new Error("Missing source order artwork for " + sourceOrder.sourceIndex);
+                var orderItems = [];
+                for (var childIndex = 0; childIndex < sourceSubItems.length; childIndex++) {
+                    var sourceItem = sourceSubItems[childIndex].item;
+                    var bounds = pageItemBounds(sourceItem);
+                    var itemWidth = bounds[2] - bounds[0];
+                    var itemHeight = bounds[1] - bounds[3];
+                    if (itemWidth <= 0 || itemHeight <= 0) throw new Error("Order sub-item has empty visible bounds");
+                    orderItems.push({
+                        sourceChildIndex: sourceSubItems[childIndex].sourceChildIndex,
+                        width: itemWidth,
+                        height: itemHeight,
+                        sourceOrder: orderIndex
+                    });
+                }
+                orders.push({
+                    sourceIndex: orderIndex,
+                    orderNo: String(orderNos[orderIndex] || "ORDER_" + (orderIndex + 1)),
+                    items: orderItems
                 });
             }
-            return metrics;
+            return orders;
         } finally {
             source.close(SaveOptions.DONOTSAVECHANGES);
         }
+    }
+
+    function packAdaptiveGrid(orders, width, verticalGap, minColumnGap, segmentLabelHeight, segmentLabelGap, cellPadding, slackRows, colorOption) {
+        var subItemCount = 0;
+        var cellWidth = 0;
+        for (var orderIndex = 0; orderIndex < orders.length; orderIndex++) {
+            var order = orders[orderIndex];
+            subItemCount += order.items.length;
+            cellWidth = Math.max(cellWidth, estimateLabelWidth(order.orderNo, labelFontSize));
+            for (var itemIndex = 0; itemIndex < order.items.length; itemIndex++) {
+                cellWidth = Math.max(cellWidth, order.items[itemIndex].width);
+            }
+        }
+        if (subItemCount <= 0) throw new Error("Color component has no order artwork: " + colorOption);
+        cellWidth = Math.min(width, cellWidth + cellPadding);
+        if (cellWidth <= 0) throw new Error("Cannot derive adaptive grid cell width: " + colorOption);
+
+        var maxColumns = Math.floor((width + minColumnGap) / (cellWidth + minColumnGap));
+        maxColumns = Math.max(maxColumns, 1);
+        while (maxColumns > 1 && maxColumns * cellWidth + (maxColumns - 1) * minColumnGap > width + 0.01) {
+            maxColumns -= 1;
+        }
+        if (maxColumns < 1) throw new Error("Adaptive grid cannot fit one column in target width: " + colorOption);
+
+        var idealRows = Math.max(1, Math.ceil(subItemCount / maxColumns));
+        var hardRows = Math.max(idealRows, idealRows + slackRows);
+        var columns = [];
+        for (var columnIndex = 0; columnIndex < maxColumns; columnIndex++) {
+            columns.push({ index: columnIndex, segments: [], itemCount: 0, height: 0 });
+        }
+
+        var sortedOrders = orders.slice(0);
+        sortedOrders.sort(function (left, right) {
+            if (right.items.length !== left.items.length) return right.items.length - left.items.length;
+            return left.sourceIndex - right.sourceIndex;
+        });
+        for (var sortedIndex = 0; sortedIndex < sortedOrders.length; sortedIndex++) {
+            placeOrderIntoColumns(sortedOrders[sortedIndex], columns, idealRows, hardRows);
+        }
+
+        var slotPitch = maxColumns > 1 ? (width - cellWidth) / (maxColumns - 1) : 0;
+        var placements = [];
+        var contentHeight = 0;
+        for (var colIndex = 0; colIndex < columns.length; colIndex++) {
+            var column = columns[colIndex];
+            var columnY = 0;
+            for (var segmentIndex = 0; segmentIndex < column.segments.length; segmentIndex++) {
+                var segment = column.segments[segmentIndex];
+                finalizeSegment(segment, colIndex * slotPitch, columnY, cellWidth, verticalGap, segmentLabelHeight, segmentLabelGap);
+                placements.push(segment);
+                columnY += segment.height + verticalGap;
+            }
+            column.height = columnY > 0 ? columnY - verticalGap : 0;
+            contentHeight = Math.max(contentHeight, column.height);
+        }
+        updateFragmentMetadata(placements);
+        return {
+            placements: placements,
+            columns: columns,
+            height: contentHeight,
+            subItemCount: subItemCount,
+            maxColumns: maxColumns,
+            idealRows: idealRows,
+            hardRows: hardRows,
+            cellWidth: cellWidth,
+            slotPitch: slotPitch
+        };
+    }
+
+    function placeOrderIntoColumns(order, columns, idealRows, hardRows) {
+        var nextItem = 0;
+        var guard = 0;
+        while (nextItem < order.items.length) {
+            guard += 1;
+            if (guard > order.items.length + columns.length + 20) throw new Error("Adaptive grid failed to place order: " + order.orderNo);
+            var remaining = order.items.length - nextItem;
+            var desiredColumns = Math.min(columns.length, Math.max(1, Math.ceil(remaining / idealRows)));
+            var startColumn = findBestColumnWindow(columns, desiredColumns, idealRows, hardRows);
+            var placed = 0;
+            for (var offset = 0; offset < desiredColumns && nextItem < order.items.length; offset++) {
+                var column = columns[startColumn + offset];
+                var idealCapacity = Math.max(0, idealRows - column.itemCount);
+                var hardCapacity = Math.max(0, hardRows - column.itemCount);
+                var capacity = idealCapacity > 0 ? idealCapacity : hardCapacity;
+                if (capacity <= 0) capacity = 1;
+                var chunkSize = Math.min(order.items.length - nextItem, capacity);
+                addSegment(column, order, nextItem, chunkSize);
+                nextItem += chunkSize;
+                placed += chunkSize;
+            }
+            if (placed <= 0) {
+                var fallback = lowestColumn(columns);
+                addSegment(fallback, order, nextItem, 1);
+                nextItem += 1;
+            }
+        }
+    }
+
+    function findBestColumnWindow(columns, length, idealRows, hardRows) {
+        var bestStart = 0;
+        var bestScore = null;
+        for (var start = 0; start <= columns.length - length; start++) {
+            var maxCount = 0;
+            var totalCount = 0;
+            var overIdeal = 0;
+            var overHard = 0;
+            for (var offset = 0; offset < length; offset++) {
+                var count = columns[start + offset].itemCount;
+                maxCount = Math.max(maxCount, count);
+                totalCount += count;
+                overIdeal += Math.max(0, count - idealRows);
+                overHard += Math.max(0, count - hardRows);
+            }
+            var score = overHard * 100000 + overIdeal * 1000 + maxCount * 20 + totalCount + start * 0.01;
+            if (bestScore === null || score < bestScore - 0.01) {
+                bestScore = score;
+                bestStart = start;
+            }
+        }
+        return bestStart;
+    }
+
+    function lowestColumn(columns) {
+        var best = columns[0];
+        for (var index = 1; index < columns.length; index++) {
+            if (columns[index].itemCount < best.itemCount) best = columns[index];
+        }
+        return best;
+    }
+
+    function addSegment(column, order, start, count) {
+        var previous = column.segments.length ? column.segments[column.segments.length - 1] : null;
+        var segment = previous && previous.orderNo === order.orderNo ? previous : null;
+        if (!segment) {
+            segment = {
+                sourceIndex: order.sourceIndex,
+                orderNo: order.orderNo,
+                parentBlockId: "order-" + order.sourceIndex,
+                fragmentId: "order-" + order.sourceIndex + "-column-" + column.index + "-segment-" + column.segments.length,
+                fragmentIndex: 0,
+                fragmentCount: 1,
+                split: false,
+                columnIndex: column.index,
+                itemCount: 0,
+                width: 0,
+                height: 0,
+                x: 0,
+                y: 0,
+                items: []
+            };
+            column.segments.push(segment);
+        }
+        for (var index = 0; index < count; index++) {
+            var item = order.items[start + index];
+            segment.items.push({
+                sourceChildIndex: item.sourceChildIndex,
+                width: item.width,
+                height: item.height,
+                x: 0,
+                y: 0,
+                label_required: false
+            });
+        }
+        segment.itemCount += count;
+        column.itemCount += count;
+    }
+
+    function updateFragmentMetadata(placements) {
+        var counts = {};
+        var nextIndexes = {};
+        for (var countIndex = 0; countIndex < placements.length; countIndex++) {
+            var key = placements[countIndex].parentBlockId;
+            counts[key] = (counts[key] || 0) + 1;
+        }
+        for (var placementIndex = 0; placementIndex < placements.length; placementIndex++) {
+            var placement = placements[placementIndex];
+            var placementKey = placement.parentBlockId;
+            var nextIndex = nextIndexes[placementKey] || 0;
+            var total = counts[placementKey] || 1;
+            placement.fragmentIndex = nextIndex;
+            placement.fragmentCount = total;
+            placement.split = total > 1;
+            placement.fragmentId = placementKey + "-fragment-" + nextIndex;
+            nextIndexes[placementKey] = nextIndex + 1;
+        }
+    }
+
+    function finalizeSegment(segment, x, y, width, verticalGap, segmentLabelHeight, segmentLabelGap) {
+        segment.x = x;
+        segment.y = y;
+        segment.width = width;
+        var cursor = segmentLabelHeight + segmentLabelGap;
+        for (var itemIndex = 0; itemIndex < segment.items.length; itemIndex++) {
+            var item = segment.items[itemIndex];
+            item.x = Math.max((width - item.width) / 2, 0);
+            item.y = cursor;
+            cursor += item.height;
+            if (itemIndex < segment.items.length - 1) cursor += verticalGap;
+        }
+        segment.height = cursor;
+    }
+
+    function assertSourceOrderCount(input, sourceOrders) {
+        var expected = input.order_nos || [];
+        if (expected.length && sourceOrders.length !== expected.length) {
+            throw new Error("Color component order block count changed while composing");
+        }
+        if (!sourceOrders.length) throw new Error("Color component has no order groups");
     }
 
     function collectOrderBlocks(source) {
-        var result = [];
+        var byIndex = {};
+        var foundNamed = false;
         for (var layerIndex = 0; layerIndex < source.layers.length; layerIndex++) {
             var sourceLayer = source.layers[layerIndex];
             for (var itemIndex = 0; itemIndex < sourceLayer.pageItems.length; itemIndex++) {
                 var sourceItem = sourceLayer.pageItems[itemIndex];
                 if (sourceItem.parent !== sourceLayer) continue;
-                if (sourceItem.typename !== "GroupItem") continue;
-                // Illustrator 8 does not reliably preserve a newly created
-                // GroupItem name. The component contract is therefore one
-                // direct layer group per production order.
-                result.push({ item: sourceItem, sourceLayerIndex: layerIndex });
+                collectNamedPackItemsByOrder(sourceItem, byIndex);
             }
+        }
+        var result = [];
+        for (var key in byIndex) {
+            if (!byIndex.hasOwnProperty(key)) continue;
+            foundNamed = true;
+            var entry = byIndex[key];
+            entry.subItems = sortByStablePackIndex(entry.subItems || []);
+            for (var subIndex = 0; subIndex < entry.subItems.length; subIndex++) {
+                entry.subItems[subIndex].sourceChildIndex = subIndex;
+            }
+            result.push({
+                item: entry.block || null,
+                subItems: entry.subItems,
+                sourceLayerIndex: 0,
+                originalIndex: Number(key),
+                sortIndex: Number(key),
+                sourceIndex: Number(key)
+            });
+        }
+        if (foundNamed) return sortByStablePackIndex(result);
+
+        for (var fallbackLayerIndex = 0; fallbackLayerIndex < source.layers.length; fallbackLayerIndex++) {
+            var fallbackLayer = source.layers[fallbackLayerIndex];
+            for (var fallbackIndex = 0; fallbackIndex < fallbackLayer.pageItems.length; fallbackIndex++) {
+                var fallbackItem = fallbackLayer.pageItems[fallbackIndex];
+                if (fallbackItem.parent !== fallbackLayer) continue;
+                if (fallbackItem.typename !== "GroupItem") continue;
+                result.push({
+                    item: fallbackItem,
+                    subItems: [],
+                    sourceLayerIndex: fallbackLayerIndex,
+                    originalIndex: result.length,
+                    sortIndex: parseOrderBlockIndex(fallbackItem.name),
+                    sourceIndex: result.length
+                });
+            }
+        }
+        return sortByStablePackIndex(result);
+    }
+
+    function collectNamedPackItemsByOrder(item, byIndex) {
+        if (!item || item.typename !== "GroupItem") return;
+        var blockIndex = parseOrderBlockIndex(item.name);
+        if (blockIndex >= 0) {
+            ensureOrderEntry(byIndex, blockIndex).block = item;
+        }
+        var itemIndex = parseOrderItemName(item.name);
+        if (itemIndex) {
+            ensureOrderEntry(byIndex, itemIndex.orderIndex).subItems.push({
+                item: item,
+                sourceChildIndex: itemIndex.itemIndex,
+                originalIndex: itemIndex.itemIndex,
+                sortIndex: itemIndex.itemIndex
+            });
+        }
+        for (var childIndex = 0; childIndex < item.groupItems.length; childIndex++) {
+            collectNamedPackItemsByOrder(item.groupItems[childIndex], byIndex);
+        }
+    }
+
+    function ensureOrderEntry(byIndex, index) {
+        var key = String(index);
+        if (!byIndex[key]) byIndex[key] = { block: null, subItems: [] };
+        return byIndex[key];
+    }
+
+    function collectOrderSubItems(orderItem) {
+        var result = [];
+        for (var itemIndex = 0; itemIndex < orderItem.groupItems.length; itemIndex++) {
+            var item = orderItem.groupItems[itemIndex];
+            if (item.parent !== orderItem) continue;
+            result.push({
+                item: item,
+                sourceChildIndex: result.length,
+                originalIndex: result.length,
+                sortIndex: parseOrderItemIndex(item.name)
+            });
+        }
+        var namedItems = namedPackItems(result);
+        if (namedItems.length) {
+            result = namedItems;
+        } else if (parseOrderBlockIndex(orderItem.name) >= 0) {
+            if (result.length > 1) return sortByStablePackIndex(result);
+            return [];
+        }
+        result = sortByStablePackIndex(result);
+        for (var sortedIndex = 0; sortedIndex < result.length; sortedIndex++) {
+            result[sortedIndex].sourceChildIndex = sortedIndex;
         }
         return result;
     }
 
-    function packBlocks(blocks, width, gap, colorOption) {
-        var ordered = blocks.slice(0);
-        ordered.sort(function (left, right) {
-            if (Math.abs(right.height - left.height) > 0.01) return right.height - left.height;
-            if (Math.abs(right.width - left.width) > 0.01) return right.width - left.width;
-            return left.sourceIndex - right.sourceIndex;
+    function parseOrderBlockIndex(name) {
+        var match = /^ORDER_PACK_BLOCK_(\d+)$/.exec(String(name || ""));
+        return match ? Number(match[1]) : -1;
+    }
+
+    function parseOrderItemIndex(name) {
+        var parsed = parseOrderItemName(name);
+        return parsed ? parsed.itemIndex : -1;
+    }
+
+    function parseOrderItemName(name) {
+        var match = /^ORDER_PACK_ITEM_(\d+)_(\d+)$/.exec(String(name || ""));
+        return match ? { orderIndex: Number(match[1]), itemIndex: Number(match[2]) } : null;
+    }
+
+    function sortByStablePackIndex(items) {
+        items.sort(function (left, right) {
+            var leftNamed = left.sortIndex >= 0;
+            var rightNamed = right.sortIndex >= 0;
+            if (leftNamed && rightNamed && left.sortIndex !== right.sortIndex) return left.sortIndex - right.sortIndex;
+            if (leftNamed !== rightNamed) return leftNamed ? -1 : 1;
+            return left.originalIndex - right.originalIndex;
         });
-        var shelves = [];
-        var usedHeight = 0;
-        for (var blockIndex = 0; blockIndex < ordered.length; blockIndex++) {
-            var block = ordered[blockIndex];
-            if (block.width > width + 0.01) {
-                throw new Error("Order pack block is wider than " + roundMm(width) + "mm: " + colorOption + " / " + block.name);
-            }
-            var bestShelf = -1;
-            var bestScore = null;
-            for (var shelfIndex = 0; shelfIndex < shelves.length; shelfIndex++) {
-                var shelf = shelves[shelfIndex];
-                var candidateX = shelf.usedWidth > 0 ? shelf.usedWidth + gap : 0;
-                if (candidateX + block.width > width + 0.01 || block.height > shelf.height + 0.01) continue;
-                var residualWidth = width - candidateX - block.width;
-                var residualHeight = shelf.height - block.height;
-                var score = residualWidth + residualHeight * 0.2;
-                if (bestScore === null || score < bestScore - 0.01 || (Math.abs(score - bestScore) <= 0.01 && shelfIndex < bestShelf)) {
-                    bestShelf = shelfIndex;
-                    bestScore = score;
-                }
-            }
-            if (bestShelf >= 0) {
-                var targetShelf = shelves[bestShelf];
-                block.x = targetShelf.usedWidth > 0 ? targetShelf.usedWidth + gap : 0;
-                block.y = targetShelf.y;
-                targetShelf.usedWidth = block.x + block.width;
-                continue;
-            }
-            var y = shelves.length ? usedHeight + gap : 0;
-            block.x = 0;
-            block.y = y;
-            shelves.push({ y: y, height: block.height, usedWidth: block.width });
-            usedHeight = y + block.height;
+        return items;
+    }
+
+    function namedPackItems(items) {
+        var named = [];
+        for (var itemIndex = 0; itemIndex < items.length; itemIndex++) {
+            if (items[itemIndex].sortIndex >= 0) named.push(items[itemIndex]);
         }
-        return { blocks: ordered, height: usedHeight };
+        return named;
     }
 
     function pageItemBounds(item) {
@@ -188,34 +535,87 @@
         if (!bounds || bounds.length !== 4) {
             try { bounds = item.geometricBounds; } catch (e1) {}
         }
-        if (!bounds || bounds.length !== 4) throw new Error("Cannot read order pack block bounds");
+        if (!bounds || bounds.length !== 4) throw new Error("Cannot read order sub-item bounds");
         return [Number(bounds[0]), Number(bounds[1]), Number(bounds[2]), Number(bounds[3])];
     }
 
-    function drawLabel(layer, text, left, top, height) {
-        if (height <= 0) return null;
+    function drawLabel(layer, text, left, top, right, bottom, size) {
+        if (top <= bottom) return null;
         var frame = layer.textFrames.add();
-        frame.contents = text;
-        frame.textRange.characterAttributes.size = 12;
-        frame.position = [left, top - Math.min(mmToPt(2), Math.max(height - mmToPt(4), 0))];
+        frame.contents = String(text || "");
+        frame.textRange.characterAttributes.size = size;
+        applyBlack(frame);
+        fitLabelToRect(frame, [left, top, right, bottom], 3, size);
         return frame;
+    }
+
+    function fitLabelToRect(frame, rect, minSize, maxSize) {
+        var rectWidth = rect[2] - rect[0];
+        var rectHeight = rect[1] - rect[3];
+        var size = maxSize;
+        for (var attempt = 0; attempt < 12; attempt++) {
+            frame.textRange.characterAttributes.size = size;
+            var bounds = pageItemBounds(frame);
+            var width = Math.max(bounds[2] - bounds[0], 0.01);
+            var height = Math.max(bounds[1] - bounds[3], 0.01);
+            if ((width <= rectWidth + 0.01 && height <= rectHeight + 0.01) || size <= minSize) break;
+            size = Math.max(minSize, size * Math.min(rectWidth / width, rectHeight / height, 0.92));
+        }
+        var finalBounds = pageItemBounds(frame);
+        var finalWidth = finalBounds[2] - finalBounds[0];
+        var finalHeight = finalBounds[1] - finalBounds[3];
+        var targetLeft = rect[0] + Math.max((rectWidth - finalWidth) / 2, 0);
+        var targetTop = rect[1] - Math.max((rectHeight - finalHeight) / 2, 0);
+        frame.translate(targetLeft - finalBounds[0], targetTop - finalBounds[1]);
+    }
+
+    function applyBlack(frame) {
+        try {
+            var color = new CMYKColor();
+            color.cyan = 0;
+            color.magenta = 0;
+            color.yellow = 0;
+            color.black = 100;
+            frame.textRange.characterAttributes.fillColor = color;
+        } catch (e0) {}
+    }
+
+    function outlineAllTextFrames(doc) {
+        var frames = [];
+        for (var index = 0; index < doc.textFrames.length; index++) frames.push(doc.textFrames[index]);
+        for (var frameIndex = 0; frameIndex < frames.length; frameIndex++) {
+            try { frames[frameIndex].createOutline(); } catch (e0) {}
+        }
+    }
+
+    function estimateLabelWidth(text, size) {
+        return Math.max(String(text || "").length * Number(size || 6) * 0.55, mmToPt(8));
     }
 
     function writeDebug(task, plans, docWidth, docHeight, frameWidth, usableWidth, algorithm) {
         try {
             if (!task.debug || !task.debug.report_path) return;
             var frames = [];
-            for (var i = 0; i < plans.length; i++) {
-                var plan = plans[i];
+            for (var planIndex = 0; planIndex < plans.length; planIndex++) {
+                var plan = plans[planIndex];
                 frames.push({
                     color_option: plan.colorOption,
+                    frame_left_mm: roundMm(plan.frameLeft),
                     frame_width_mm: roundMm(frameWidth),
                     frame_height_mm: roundMm(plan.frameHeight),
                     content_height_mm: roundMm(plan.contentHeight),
-                    frame_left_mm: roundMm(plan.frameLeft),
-                    order_block_count: plan.blocks.length,
+                    max_columns: plan.maxColumns,
+                    ideal_rows: plan.idealRows,
+                    hard_rows: plan.hardRows,
+                    cell_width_mm: roundMm(plan.cellWidth),
+                    slot_pitch_mm: roundMm(plan.slotPitch),
+                    label_scope: "order_segment",
+                    order_block_count: plan.orderBlockCount,
+                    fragment_count: plan.placements.length,
+                    sub_item_count: plan.subItemCount,
                     horizontal_overflow: false,
-                    blocks: auditBlocks(plan.blocks)
+                    columns: auditColumns(plan.columns),
+                    fragments: auditFragments(plan.placements)
                 });
             }
             var file = File(String(task.debug.report_path));
@@ -224,27 +624,72 @@
             if (!file.open("w")) return;
             file.write(toJson({
                 algorithm: algorithm,
+                coordinate_unit: "mm",
                 target_width_mm: roundMm(frameWidth),
                 usable_width_mm: roundMm(usableWidth),
                 artboard_width_mm: roundMm(docWidth),
                 artboard_height_mm: roundMm(docHeight),
-                coordinate_unit: "mm",
                 frames: frames
             }));
             file.close();
         } catch (e) {}
     }
 
-    function auditBlocks(blocks) {
+    function auditColumns(columns) {
         var result = [];
-        for (var i = 0; i < blocks.length; i++) {
-            var block = blocks[i];
+        for (var columnIndex = 0; columnIndex < columns.length; columnIndex++) {
+            var column = columns[columnIndex];
+            var segments = [];
+            for (var segmentIndex = 0; segmentIndex < column.segments.length; segmentIndex++) {
+                var segment = column.segments[segmentIndex];
+                segments.push({
+                    order_no: segment.orderNo,
+                    item_count: segment.items.length,
+                    y_mm: roundMm(segment.y),
+                    height_mm: roundMm(segment.height)
+                });
+            }
             result.push({
-                source_index: block.sourceIndex,
-                width_mm: roundMm(block.width),
-                height_mm: roundMm(block.height),
-                x_mm: roundMm(block.x),
-                y_mm: roundMm(block.y)
+                index: column.index,
+                item_count: column.itemCount,
+                height_mm: roundMm(column.height),
+                segments: segments
+            });
+        }
+        return result;
+    }
+
+    function auditFragments(placements) {
+        var result = [];
+        for (var placementIndex = 0; placementIndex < placements.length; placementIndex++) {
+            var placement = placements[placementIndex];
+            var items = [];
+            for (var itemIndex = 0; itemIndex < placement.items.length; itemIndex++) {
+                var item = placement.items[itemIndex];
+                items.push({
+                    source_child_index: item.sourceChildIndex,
+                    x_mm: roundMm(placement.x + item.x),
+                    y_mm: roundMm(placement.y + item.y),
+                    width_mm: roundMm(item.width),
+                    height_mm: roundMm(item.height),
+                    label_required: false
+                });
+            }
+            result.push({
+                order_no: placement.orderNo,
+                parent_block_id: placement.parentBlockId,
+                fragment_id: placement.fragmentId,
+                fragment_index: placement.fragmentIndex,
+                fragment_count: placement.fragmentCount,
+                split: placement.split === true,
+                column_index: placement.columnIndex,
+                label_required: true,
+                item_count: placement.items.length,
+                x_mm: roundMm(placement.x),
+                y_mm: roundMm(placement.y),
+                width_mm: roundMm(placement.width),
+                height_mm: roundMm(placement.height),
+                items: items
             });
         }
         return result;
@@ -268,10 +713,10 @@
         if (value === null) return "null";
         var kind = typeof value;
         if (kind === "number" || kind === "boolean") return String(value);
-        if (kind === "string") return "\"" + value.replace(/\\\\/g, "\\\\\\\\").replace(/\"/g, "\\\\\"").replace(/\n/g, "\\n") + "\"";
+        if (kind === "string") return "\"" + value.replace(/\\/g, "\\\\").replace(/\"/g, "\\\"").replace(/\n/g, "\\n") + "\"";
         if (value instanceof Array) {
             var arrayValues = [];
-            for (var i = 0; i < value.length; i++) arrayValues.push(toJson(value[i]));
+            for (var arrayIndex = 0; arrayIndex < value.length; arrayIndex++) arrayValues.push(toJson(value[arrayIndex]));
             return "[" + arrayValues.join(",") + "]";
         }
         var values = [];

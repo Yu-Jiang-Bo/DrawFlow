@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Sequence
 
-from .jjmb_order_parser import read_xlsx_rows, split_personalization
+from .jjmb_order_parser import read_xlsx_rows, split_personalization, strip_list_marker
 from .renderer.illustrator_bridge import IllustratorBridge, IllustratorBridgeError
 from .service.department_output import (
     ANNOTATION_COLOR,
@@ -272,6 +272,28 @@ def row_value(row: Mapping[str, str], *names: str) -> str:
     return ""
 
 
+def split_202508_personalization(value: str, *, preserve: bool) -> List[str]:
+    """Split comma/newline name lists while optionally preserving pipe segments."""
+
+    raw = (value or "").strip()
+    if not raw:
+        return []
+
+    result: List[str] = []
+    if preserve:
+        lines = [
+            strip_list_marker(line.strip())
+            for line in raw.replace("\r\n", "\n").split("\n")
+            if line.strip()
+        ]
+    else:
+        lines = split_personalization(raw)
+
+    for line in lines:
+        result.extend(part.strip() for part in re.split(r",|\uFF0C", line) if part.strip())
+    return result
+
+
 def parse_items(
     rows: Iterable[Dict[str, str]], *, template_id: str = TEMPLATE_ID, preserve_personalization: bool = False
 ) -> List[ColorDesignOrderItem]:
@@ -293,7 +315,7 @@ def parse_items(
         apply_color = rule_bool(rule, "apply_color_to_artwork", is_h_department(department))
         show_frame = rule_bool(rule, "show_frame", "D" in normalize_department(department))
         raw_personalization = (row.get("定制信息") or "").strip()
-        values = [raw_personalization] if preserve_personalization and raw_personalization else split_personalization(raw_personalization)
+        values = split_202508_personalization(raw_personalization, preserve=preserve_personalization)
         for index, text in enumerate(values, start=1):
             result.append(
                 ColorDesignOrderItem(

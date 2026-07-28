@@ -47,12 +47,19 @@
           "color_label_outside_frame": true,
           "keep_same_order_together": true,
           "master_packing": {
-            "algorithm": "best_fit_decreasing_height",
+            "algorithm": "adaptive_column_grid",
             "target_width_mm": 580,
             "item_gap_mm": 2,
+            "column_gap_mm": 2,
             "outer_margin_mm": 2,
             "header_height_mm": 7,
             "color_gap_mm": 4,
+            "label_height_mm": 4,
+            "label_gap_mm": 0.8,
+            "row_slack": 1,
+            "cell_width_padding_mm": 0.8,
+            "component_suppress_labels": true,
+            "force_subitem_order_labels": false,
             "allow_rotation": false
           }
         },
@@ -77,12 +84,19 @@
           "color_label_outside_frame": true,
           "keep_same_order_together": true,
           "master_packing": {
-            "algorithm": "best_fit_decreasing_height",
+            "algorithm": "adaptive_column_grid",
             "target_width_mm": 480,
             "item_gap_mm": 2,
+            "column_gap_mm": 2,
             "outer_margin_mm": 2,
             "header_height_mm": 7,
             "color_gap_mm": 4,
+            "label_height_mm": 4,
+            "label_gap_mm": 0.8,
+            "row_slack": 1,
+            "cell_width_padding_mm": 0.8,
+            "component_suppress_labels": true,
+            "force_subitem_order_labels": false,
             "allow_rotation": false
           }
         },
@@ -107,12 +121,19 @@
           "color_label_outside_frame": true,
           "keep_same_order_together": true,
           "master_packing": {
-            "algorithm": "best_fit_decreasing_height",
+            "algorithm": "adaptive_column_grid",
             "target_width_mm": 450,
             "item_gap_mm": 2,
+            "column_gap_mm": 2,
             "outer_margin_mm": 2,
             "header_height_mm": 7,
             "color_gap_mm": 4,
+            "label_height_mm": 4,
+            "label_gap_mm": 0.8,
+            "row_slack": 1,
+            "cell_width_padding_mm": 0.8,
+            "component_suppress_labels": true,
+            "force_subitem_order_labels": false,
             "allow_rotation": false
           }
         },

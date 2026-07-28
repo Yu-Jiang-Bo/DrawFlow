@@ -136,6 +136,49 @@ def test_parse_items_uses_the_requested_template_id():
     assert [item.text for item in preserved] == ["Alice|Bob"]
 
 
+def test_parse_items_splits_comma_separated_202508_name_lists():
+    rows = [
+        {
+            "内部订单号": "ORDER-COMMAS",
+            "订单明细id": "10",
+            "生产部门": "K",
+            "模板": "JJMB202508261001394920",
+            "产品中文名称": "产品",
+            "字体": "F2",
+            "定制信息": "Alice,Beth，Cora",
+            "字体颜色": "Gold",
+            "设计": "Design 1",
+        }
+    ]
+
+    items = parse_items(rows)
+    preserved = parse_items(rows, preserve_personalization=True)
+
+    assert [item.text for item in items] == ["Alice", "Beth", "Cora"]
+    assert [item.quantity_index for item in items] == [1, 2, 3]
+    assert [item.text for item in preserved] == ["Alice", "Beth", "Cora"]
+
+
+def test_parse_items_preserves_pipe_segments_but_splits_comma_name_lists():
+    rows = [
+        {
+            "\u5185\u90e8\u8ba2\u5355\u53f7": "ORDER-SEGMENTS",
+            "\u8ba2\u5355\u660e\u7ec6id": "11",
+            "\u751f\u4ea7\u90e8\u95e8": "K",
+            "\u6a21\u677f": "JJMB202508261001394920",
+            "\u4ea7\u54c1\u4e2d\u6587\u540d\u79f0": "\u4ea7\u54c1",
+            "\u5b57\u4f53": "F2",
+            "\u5b9a\u5236\u4fe1\u606f": "Alice|Beth,Cora|Dana",
+            "\u5b57\u4f53\u989c\u8272": "Gold",
+            "\u8bbe\u8ba1": "Design 1",
+        }
+    ]
+
+    items = parse_items(rows, preserve_personalization=True)
+
+    assert [item.text for item in items] == ["Alice|Beth", "Cora|Dana"]
+
+
 def test_build_task_keeps_actions_for_each_202508_text_item(tmp_path):
     rows = [
         {
@@ -237,7 +280,10 @@ def test_202508_renderer_accepts_compiled_fill_color_actions():
     assert "COLOR_FRAME_" in compose_source
     assert "boundary.stroked = false;" in compose_source
     assert "COLOR_FRAME_OUTPUT" in compose_source
-    assert "function packBlocks(blocks, width, gap, colorOption)" in compose_source
+    assert "function packAdaptiveGrid(" in compose_source
+    assert "function placeOrderIntoColumns(" in compose_source
+    assert "function findBestColumnWindow(" in compose_source
+    assert "label_scope: \"order_segment\"" in compose_source
     assert "function collectOrderBlocks(source)" in compose_source
     assert "item.show_frame === true" not in source
     assert "var outlineText = outputConfig.outline_text !== false;" in source
@@ -248,6 +294,10 @@ def test_202508_renderer_accepts_compiled_fill_color_actions():
     assert "function collectTextFrames(container, result)" in source
     assert "function groupNewLayerItems(layer, previousItems, name)" in source
     assert "var packOrderBlocks = layout.pack_order_blocks === true;" in source
+    assert "var forceSubitemOrderLabels = packOrderBlocks" in source
+    assert "ORDER_PACK_ITEM_" in source
+    assert "outlineTextFrames(compactLabelFrames, pathfinderMerge);" in source
+    assert "function outlineTextFrames(frames, shouldCleanup)" in source
 
     node = shutil.which("node")
     if not node:

@@ -83,34 +83,68 @@ def test_generic_batch_jsx_executes_child_tasks_by_script_path():
     assert "$.evalFile(File(scriptPath))" in source
 
 
-def test_color_frame_composer_packs_only_top_level_order_blocks_by_visible_bounds():
+def test_color_frame_composer_packs_order_segments_by_adaptive_grid():
     source = Path("scripts/illustrator/compose_color_frames.jsx").read_text(encoding="utf-8")
 
     assert "source.pageItems.length" not in source
+    assert "adaptive_column_grid" in source
     assert "function collectOrderBlocks(source)" in source
-    assert 'sourceItem.typename !== "GroupItem"' in source
+    assert 'item.typename !== "GroupItem"' in source
     assert "if (sourceItem.parent !== sourceLayer) continue;" in source
+    assert "collectNamedPackItemsByOrder(sourceItem, byIndex)" in source
+    assert "function collectNamedPackItemsByOrder(item, byIndex)" in source
+    assert "parseOrderBlockIndex(item.name)" in source
+    assert "ensureOrderEntry(byIndex, blockIndex).block = item;" in source
+    assert "parseOrderItemName(item.name)" in source
+    assert "ensureOrderEntry(byIndex, itemIndex.orderIndex).subItems.push" in source
+    assert "function parseOrderBlockIndex(name)" in source
+    assert "ORDER_PACK_BLOCK_(\\d+)" in source
     assert "function pageItemBounds(item)" in source
     assert "item.visibleBounds" in source
     assert "item.geometricBounds" in source
-    assert "function packBlocks(blocks, width, gap, colorOption)" in source
-    assert "best_fit_decreasing_height" in source
-    assert "block.width > width + 0.01" in source
+    assert "function collectOrderSubItems(orderItem)" in source
+    assert "parseOrderItemIndex(item.name)" in source
+    assert "function parseOrderItemIndex(name)" in source
+    assert "function parseOrderItemName(name)" in source
+    assert "ORDER_PACK_ITEM_(\\d+)_(\\d+)" in source
+    assert "var namedItems = namedPackItems(result);" in source
+    assert "parseOrderBlockIndex(orderItem.name) >= 0" in source
+    assert "if (result.length > 1) return sortByStablePackIndex(result);" in source
+    assert "function namedPackItems(items)" in source
+    assert "function sortByStablePackIndex(items)" in source
+    assert "function packAdaptiveGrid(" in source
+    assert "function placeOrderIntoColumns(" in source
+    assert "function findBestColumnWindow(" in source
+    assert "var idealRows = Math.max(1, Math.ceil(subItemCount / maxColumns));" in source
+    assert "function updateFragmentMetadata(placements)" in source
+    assert "placement.fragmentCount = total;" in source
+    assert "placement.split = total > 1;" in source
+    assert "label_scope: \"order_segment\"" in source
     assert "copy.translate(destinationLeft - copiedBounds[0], destinationTop - copiedBounds[1]);" in source
     assert "coordinate_unit: \"mm\"" in source
-    assert "function auditBlocks(blocks)" in source
+    assert "function auditColumns(columns)" in source
+    assert "function auditFragments(placements)" in source
+    assert "split: placement.split === true" in source
+    assert "label_required: true" in source
 
 
 def test_master_packing_config_uses_department_width_and_configured_spacing():
     packing = master_packing_config(resolve_department_output("K"))
 
     assert packing == {
-        "algorithm": "best_fit_decreasing_height",
+        "algorithm": "adaptive_column_grid",
         "target_width_mm": 480.0,
         "item_gap_mm": 2.0,
+        "column_gap_mm": 2.0,
         "outer_margin_mm": 2.0,
         "header_height_mm": 7.0,
         "color_gap_mm": 4.0,
+        "label_height_mm": 4.0,
+        "label_gap_mm": 0.8,
+        "row_slack": 1,
+        "cell_width_padding_mm": 0.8,
+        "component_suppress_labels": True,
+        "force_subitem_order_labels": False,
         "allow_rotation": False,
     }
 

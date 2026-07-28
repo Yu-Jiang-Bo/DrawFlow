@@ -156,12 +156,19 @@ def master_packing_config(rule: DepartmentOutputRule) -> dict[str, Any] | None:
     if width is None:
         return None
     return {
-        "algorithm": str(options.get("algorithm") or "best_fit_decreasing_height"),
+        "algorithm": str(options.get("algorithm") or "adaptive_column_grid"),
         "target_width_mm": width,
         "item_gap_mm": _positive_float(options.get("item_gap_mm"), 2.0) or 2.0,
+        "column_gap_mm": _positive_float(options.get("column_gap_mm"), options.get("item_gap_mm"), 2.0) or 2.0,
         "outer_margin_mm": _positive_float(options.get("outer_margin_mm"), 2.0) or 2.0,
         "header_height_mm": _positive_float(options.get("header_height_mm"), 7.0) or 7.0,
         "color_gap_mm": _positive_float(options.get("color_gap_mm"), 4.0) or 4.0,
+        "label_height_mm": _positive_float(options.get("label_height_mm"), 4.0) or 4.0,
+        "label_gap_mm": _positive_float(options.get("label_gap_mm"), 0.8) or 0.8,
+        "row_slack": max(int(_positive_float(options.get("row_slack"), 1.0) or 1), 0),
+        "cell_width_padding_mm": _positive_float(options.get("cell_width_padding_mm"), 0.8) or 0.8,
+        "component_suppress_labels": bool(options.get("component_suppress_labels", True)),
+        "force_subitem_order_labels": bool(options.get("force_subitem_order_labels", False)),
         "allow_rotation": bool(options.get("allow_rotation", False)),
     }
 

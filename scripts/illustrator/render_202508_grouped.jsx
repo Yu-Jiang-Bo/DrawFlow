@@ -21,6 +21,7 @@
     var compactOutput = !showBoxes;
     var suppressLabels = layout.suppress_labels === true;
     var packOrderBlocks = layout.pack_order_blocks === true;
+    var forceSubitemOrderLabels = packOrderBlocks && (!layout.master_packing || layout.master_packing.force_subitem_order_labels !== false);
     var columns = Math.max(Number(layout.columns || 4), 1);
     var gap = mmToPt(Number(compactOutput ? (layout.compact_gap_mm || 4) : (layout.gap_mm || 8)));
     var margin = mmToPt(Number(compactOutput ? (layout.compact_margin_mm || 4) : (layout.margin_mm || 8)));
@@ -119,6 +120,7 @@
 
         for (var j = 0; j < group.items.length; j++) {
             var item = group.items[j];
+            var beforeItemItems = packOrderBlocks ? directLayerItems(layer) : null;
             var design = designConfig(config, item.design_option);
             var font = fontConfig(config, item.font_option);
             var productLeft = groupLeft + (maxGroupWidth - productSize.width) / 2;
@@ -129,11 +131,14 @@
             var drawFrame = !compactOutput && showBoxes;
 
             if (compactOutput) {
-                if (!suppressLabels && j === 0) {
-                    var labelLinesForGroup = group.production_label_lines || labelLines(item, itemLabel);
+                if (forceSubitemOrderLabels || (!suppressLabels && j === 0)) {
+                    var labelLinesForGroup = forceSubitemOrderLabels ? [String(item.order_no || item.production_label || "ORDER")] : (group.production_label_lines || labelLines(item, itemLabel));
                     var labelLeftForGroup = groupLeft + (maxGroupWidth - compactLabelWidth) / 2;
                     var labelRightForGroup = labelLeftForGroup + compactLabelWidth;
-                    drawLabelLines(layer, labelLinesForGroup, labelLeftForGroup, cursorTop, labelRightForGroup, cursorTop - itemLabelHeight, labelFontSize);
+                    var compactLabelFrames = drawLabelLines(layer, labelLinesForGroup, labelLeftForGroup, cursorTop, labelRightForGroup, cursorTop - itemLabelHeight, labelFontSize);
+                    // AI8 may flatten a group when its child label is outlined later.  Convert the
+                    // label before creating ORDER_PACK_ITEM so the item keeps one stable child group.
+                    if (packOrderBlocks && outlineText) outlineTextFrames(compactLabelFrames, pathfinderMerge);
                     cursorTop -= itemLabelHeight + itemGap;
                 }
                 var contentLeft = groupLeft + (maxGroupWidth - contentSize.width) / 2;
@@ -142,6 +147,9 @@
                 var contentBottom = contentTop - contentSize.height;
 
                 drawPersonalizedText(layer, item, font, design, [contentLeft + padding, contentTop - padding, contentRight - padding, contentBottom + padding], minFontSize, maxFontSize, item.text_actions || []);
+                if (packOrderBlocks) {
+                    groupNewLayerItems(layer, beforeItemItems, "ORDER_PACK_ITEM_" + i + "_" + j);
+                }
                 cursorTop = contentBottom - itemGap;
                 renderedItems += 1;
                 writeProgress(task, renderedItems, taskItemCount(renderGroups), "正在渲染条目");
@@ -567,6 +575,10 @@
     function outlineAllTextFrames(doc, shouldCleanup) {
         var frames = [];
         for (var l = 0; l < doc.layers.length; l++) collectTextFrames(doc.layers[l], frames);
+        outlineTextFrames(frames, shouldCleanup);
+    }
+
+    function outlineTextFrames(frames, shouldCleanup) {
         for (var i = frames.length - 1; i >= 0; i--) {
             try {
                 var outline = frames[i].createOutline();

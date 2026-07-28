@@ -25,6 +25,7 @@
     var keepTitleFrames = layout.keep_title_frames === true;
     var keepNameFrames = layout.keep_name_frames === true;
     var packOrderBlocks = layout.pack_order_blocks === true;
+    var forceSubitemOrderLabels = packOrderBlocks && (!layout.master_packing || layout.master_packing.force_subitem_order_labels !== false);
     var pathfinderMerge = outputConfig.pathfinder_merge !== false;
     var cleanupStats = { attempted: 0, failed: 0 };
     var OUTLINE_BATCH_SIZE = 25;
@@ -42,9 +43,10 @@
     var groupMetrics = [];
     var columnWidth = Math.max(titleWidth, nameWidth, mmToPt(35));
     for (var g = 0; g < groups.length; g++) {
-        var height = groupLabelHeight(groups[g]);
+        var height = packOrderBlocks ? 0 : groupLabelHeight(groups[g]);
         var items = groups[g].items || [];
         for (var i = 0; i < items.length; i++) {
+            if (packOrderBlocks && forceSubitemOrderLabels) height += groupLabelHeight(groups[g]);
             height += itemHeight(items[i]) + itemGap;
         }
         if (items.length > 0) height -= itemGap;
@@ -81,12 +83,22 @@
             var left = margin + col * (columnWidth + gap);
             var top = docHeight - margin - placements.items[gi].y;
             var cursorTop = top;
-            drawProductionOrderLabel(layer, group, left, cursorTop, left + columnWidth, orderLabelFontSize, textItems);
-            cursorTop -= groupLabelHeight(group);
+            if (!packOrderBlocks) {
+                drawProductionOrderLabel(layer, group, left, cursorTop, left + columnWidth, orderLabelFontSize, textItems);
+                cursorTop -= groupLabelHeight(group);
+            }
 
             var groupItems = group.items || [];
             for (var ii = 0; ii < groupItems.length; ii++) {
                 var item = groupItems[ii];
+                var beforeItemItems = packOrderBlocks ? directLayerItems(layer) : null;
+                // In packed output, outline this item's label and artwork before grouping it.
+                // Illustrator 8 otherwise flattens the child group during the later global outline pass.
+                var itemTextItems = packOrderBlocks && outputConfig.outline_text ? [] : textItems;
+                if (packOrderBlocks && forceSubitemOrderLabels) {
+                    drawProductionOrderLabel(layer, group, left, cursorTop, left + columnWidth, orderLabelFontSize, itemTextItems, true);
+                    cursorTop -= groupLabelHeight(group);
+                }
                 var font = fontConfig(task.font_map, item.font_option);
                 var width = item.text_type === "title" ? titleWidth : nameWidth;
                 var heightForItem = itemHeight(item);
@@ -94,12 +106,16 @@
                 var itemTop = cursorTop;
                 var itemBottom = itemTop - heightForItem;
                 if (item.text_type === "title") {
-                    if (!drawCurvedTitleFromTemplate(layer, String(item.text || ""), String(item.font_option || ""), itemLeft, itemTop, width, heightForItem, textItems, titleFrameItems)) {
+                    if (!drawCurvedTitleFromTemplate(layer, String(item.text || ""), String(item.font_option || ""), itemLeft, itemTop, width, heightForItem, itemTextItems, titleFrameItems)) {
                         titleTemplateStats.fallback += 1;
-                        drawCurvedTitle(layer, String(item.text || ""), font, itemLeft, itemTop, width, heightForItem, textItems, pathItems, titleFrameItems);
+                        drawCurvedTitle(layer, String(item.text || ""), font, itemLeft, itemTop, width, heightForItem, itemTextItems, pathItems, titleFrameItems);
                     }
                 } else {
-                    drawName(layer, String(item.text || ""), font, itemLeft, itemTop, width, heightForItem, textItems, nameFrameItems);
+                    drawName(layer, String(item.text || ""), font, itemLeft, itemTop, width, heightForItem, itemTextItems, nameFrameItems);
+                }
+                if (packOrderBlocks) {
+                    if (outputConfig.outline_text) outlineText(itemTextItems, false);
+                    groupNewLayerItems(layer, beforeItemItems, "ORDER_PACK_ITEM_" + gi + "_" + ii);
                 }
                 cursorTop = itemBottom - itemGap;
                 renderedItems += 1;
@@ -118,7 +134,7 @@
         renderProgress.stage = "outlining";
         writeProgress(task, renderedItems, totalItems, "正在转曲文字 0/" + textItems.length);
         writeRenderDebug("outlining", "", 0);
-        outlineText(textItems);
+        outlineText(textItems, true);
         writeProgress(task, renderedItems, totalItems, "正在清理辅助对象");
         removeItems(pathItems);
     }
@@ -138,7 +154,7 @@
         writeRenderDebug("saving", "", 0);
         ensureFolder(output.parent);
         if (output.exists) output.remove();
-        saveAsAI8(doc, output);
+        saveAsAI(doc, output, String(outputConfig.compatibility || "Illustrator 8"));
         writeProgress(task, renderedItems, totalItems, "正在关闭 Illustrator 文档");
         doc.close(SaveOptions.DONOTSAVECHANGES);
         doc = null;
@@ -190,8 +206,8 @@
         return Math.max(orderLabelHeight, Math.max(lines.length, 1) * orderLabelHeight);
     }
 
-    function drawProductionOrderLabel(layer, group, left, top, right, size, textItems) {
-        if (layout.suppress_labels === true) return;
+    function drawProductionOrderLabel(layer, group, left, top, right, size, textItems, force) {
+        if (layout.suppress_labels === true && force !== true) return;
         var lines = groupLabelLines(group);
         var height = groupLabelHeight(group);
         var lineCount = Math.max(lines.length, 1);
@@ -662,7 +678,7 @@
         return total;
     }
 
-    function outlineText(items) {
+    function outlineText(items, reportProgress) {
         renderProgress.stage = "outlining";
         renderProgress.totalTextItems = items.length;
         for (var i = 0; i < items.length; i++) {
@@ -679,7 +695,7 @@
                 }
                 if (pathfinderMerge) cleanupOutline(outline);
                 renderProgress.processedTextItems = i + 1;
-                if (shouldSettleOutlineBatch(i + 1, items.length)) {
+                if (reportProgress !== false && shouldSettleOutlineBatch(i + 1, items.length)) {
                     settleIllustrator();
                     writeProgress(task, renderedItems, totalItems, "正在转曲文字 " + (i + 1) + "/" + items.length);
                     writeRenderDebug("outlining", "", 0);
@@ -894,9 +910,9 @@
         return "{" + props.join(",") + "}";
     }
 
-    function saveAsAI8(doc, file) {
+    function saveAsAI(doc, file, compatibility) {
         var opts = new IllustratorSaveOptions();
-        opts.compatibility = Compatibility.ILLUSTRATOR8;
+        opts.compatibility = String(compatibility).toLowerCase() === "cs5" ? Compatibility.ILLUSTRATOR15 : Compatibility.ILLUSTRATOR8;
         opts.pdfCompatible = false;
         opts.compressed = false;
         doc.saveAs(file, opts);
