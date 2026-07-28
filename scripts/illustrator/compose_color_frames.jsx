@@ -1,6 +1,15 @@
 #target illustrator
 
 (function () {
+    if (typeof __COLOR_FRAME_PACK_TEST__ !== "undefined") {
+        __COLOR_FRAME_PACK_TEST__.result = packColorFrameBlocks(
+            __COLOR_FRAME_PACK_TEST__.plans,
+            __COLOR_FRAME_PACK_TEST__.width,
+            __COLOR_FRAME_PACK_TEST__.gap
+        );
+        return;
+    }
+
     var taskPath = $.getenv("CUSTOM_RENDER_TASK");
     if (!taskPath) throw new Error("CUSTOM_RENDER_TASK missing");
     var task = readJSON(File(taskPath));
@@ -27,12 +36,12 @@
     var colorHeaderFontSize = Number(packing.color_header_font_size_pt || 7);
     var showColorHeader = task.show_color_header === true;
     var headerHeight = showColorHeader ? configuredHeaderHeight : 0;
+    var colorFrameBoundary = showColorHeader || task.show_color_frame_boundary === true || packing.show_color_frame_boundary === true;
     if (frameWidth <= 0) throw new Error("Missing adaptive grid target width");
     if (outerMargin * 2 >= frameWidth) throw new Error("Adaptive grid margins leave no usable width");
 
     var usableWidth = frameWidth - outerMargin * 2;
     var plans = [];
-    var finalHeight = 0;
     for (var inputIndex = 0; inputIndex < task.inputs.length; inputIndex++) {
         var input = task.inputs[inputIndex];
         var orders = readOrderMetrics(input);
@@ -62,14 +71,17 @@
             hardRows: packed.hardRows,
             cellWidth: packed.cellWidth,
             slotPitch: packed.slotPitch,
-            frameLeft: inputIndex * (frameWidth + colorGap)
+            frameLeft: 0,
+            frameY: 0,
+            frameColumn: 0
         };
         plans.push(plan);
-        if (frameHeight > finalHeight) finalHeight = frameHeight;
     }
+    var frameLayout = packColorFrameBlocks(plans, frameWidth, colorGap);
+    var docWidth = frameLayout.width;
+    var finalHeight = frameLayout.height;
     if (finalHeight <= 0) throw new Error("Adaptive grid master has no visible content");
 
-    var docWidth = frameWidth * plans.length + colorGap * Math.max(plans.length - 1, 0);
     var doc = app.documents.add(DocumentColorSpace.CMYK, docWidth, finalHeight);
     var layer = doc.layers[0];
     layer.name = "COLOR_FRAME_OUTPUT";
@@ -79,7 +91,7 @@
     }
 
     outlineAllTextFrames(doc);
-    writeDebug(task, plans, docWidth, finalHeight, frameWidth, usableWidth, algorithm);
+    writeDebug(task, plans, docWidth, finalHeight, frameWidth, usableWidth, algorithm, frameLayout);
     var output = File(String(task.output_ai));
     ensureFolder(output.parent);
     if (output.exists) output.remove();
@@ -92,18 +104,23 @@
     return output.fsName;
 
     function composePlan(layer, plan, docHeight, width, margin, labelBandHeight) {
-        var boundary = layer.pathItems.rectangle(docHeight, plan.frameLeft, width, plan.frameHeight);
+        var frameTop = docHeight - plan.frameY;
+        var boundary = layer.pathItems.rectangle(frameTop, plan.frameLeft, width, plan.frameHeight);
         boundary.name = "COLOR_FRAME_" + safeName(plan.colorOption || "MASTER") + "_" + roundMm(width) + "mm_GRID";
         boundary.filled = false;
-        boundary.stroked = false;
+        boundary.stroked = colorFrameBoundary;
+        if (colorFrameBoundary) {
+            boundary.strokeWidth = 0.35;
+            boundary.strokeColor = redColor();
+        }
         if (showColorHeader) {
             drawLabel(
                 layer,
                 plan.colorOption || "Unspecified",
                 plan.frameLeft + margin,
-                docHeight - margin,
+                frameTop - margin,
                 plan.frameLeft + width - margin,
-                docHeight - margin - labelBandHeight,
+                frameTop - margin - labelBandHeight,
                 colorHeaderFontSize
             );
         }
@@ -123,7 +140,7 @@
                 if (!sourceSubItems.length) throw new Error("Missing source order artwork for " + placement.orderNo);
 
                 var labelLeft = plan.frameLeft + margin + placement.x;
-                var labelTop = docHeight - margin - labelBandHeight - placement.y;
+                var labelTop = frameTop - margin - labelBandHeight - placement.y;
                 drawLabel(layer, placement.orderNo, labelLeft, labelTop, labelLeft + placement.width, labelTop - labelHeight, labelFontSize);
 
                 for (var itemIndex = 0; itemIndex < placement.items.length; itemIndex++) {
@@ -133,7 +150,7 @@
                     var copy = sourceItem.item ? sourceItem.item.duplicate(layer, ElementPlacement.PLACEATEND) : sourceItem.duplicate(layer, ElementPlacement.PLACEATEND);
                     var copiedBounds = pageItemBounds(copy);
                     var destinationLeft = plan.frameLeft + margin + placement.x + item.x;
-                    var destinationTop = docHeight - margin - labelBandHeight - placement.y - item.y;
+                    var destinationTop = frameTop - margin - labelBandHeight - placement.y - item.y;
                     if (destinationLeft < plan.frameLeft + margin - 0.01 || destinationLeft + item.width > plan.frameLeft + width - margin + 0.01) {
                         throw new Error("Packed order sub-item exceeds target width: " + plan.colorOption + " / " + placement.orderNo);
                     }
@@ -143,6 +160,64 @@
         } finally {
             source.close(SaveOptions.DONOTSAVECHANGES);
         }
+    }
+
+    function packColorFrameBlocks(plans, width, gap) {
+        if (!plans.length) throw new Error("No color frames to pack");
+        var targetHeight = 0;
+        for (var planIndex = 0; planIndex < plans.length; planIndex++) {
+            targetHeight = Math.max(targetHeight, plans[planIndex].frameHeight);
+        }
+        if (targetHeight <= 0) throw new Error("Color frame packing target height is empty");
+
+        var columns = [];
+        var current = newColorFrameColumn(0);
+        columns.push(current);
+        for (var index = 0; index < plans.length; index++) {
+            var plan = plans[index];
+            current = findBestColorFrameColumn(columns, plan.frameHeight, targetHeight, gap);
+            if (!current) {
+                current = newColorFrameColumn(columns.length);
+                columns.push(current);
+            }
+            var needsGap = current.plans.length ? gap : 0;
+            plan.frameColumn = current.index;
+            plan.frameY = current.height + needsGap;
+            plan.frameLeft = current.index * (width + gap);
+            current.plans.push(plan);
+            current.height = plan.frameY + plan.frameHeight;
+        }
+
+        var docHeight = 0;
+        for (var columnIndex = 0; columnIndex < columns.length; columnIndex++) {
+            docHeight = Math.max(docHeight, columns[columnIndex].height);
+        }
+        return {
+            width: columns.length * width + Math.max(columns.length - 1, 0) * gap,
+            height: docHeight,
+            targetHeight: targetHeight,
+            columns: columns
+        };
+    }
+
+    function newColorFrameColumn(index) {
+        return { index: index, height: 0, plans: [] };
+    }
+
+    function findBestColorFrameColumn(columns, frameHeight, targetHeight, gap) {
+        var best = null;
+        var bestRemaining = null;
+        for (var index = 0; index < columns.length; index++) {
+            var column = columns[index];
+            var nextHeight = column.height + (column.plans.length ? gap : 0) + frameHeight;
+            if (nextHeight > targetHeight + 0.01) continue;
+            var remaining = targetHeight - nextHeight;
+            if (best === null || remaining < bestRemaining - 0.01 || (Math.abs(remaining - bestRemaining) <= 0.01 && column.index < best.index)) {
+                best = column;
+                bestRemaining = remaining;
+            }
+        }
+        return best;
     }
 
     function readOrderMetrics(input) {
@@ -592,7 +667,7 @@
         return Math.max(String(text || "").length * Number(size || 6) * 0.55, mmToPt(8));
     }
 
-    function writeDebug(task, plans, docWidth, docHeight, frameWidth, usableWidth, algorithm) {
+    function writeDebug(task, plans, docWidth, docHeight, frameWidth, usableWidth, algorithm, frameLayout) {
         try {
             if (!task.debug || !task.debug.report_path) return;
             var frames = [];
@@ -601,8 +676,11 @@
                 frames.push({
                     color_option: plan.colorOption,
                     frame_left_mm: roundMm(plan.frameLeft),
+                    frame_y_mm: roundMm(plan.frameY),
+                    frame_column: plan.frameColumn,
                     frame_width_mm: roundMm(frameWidth),
                     frame_height_mm: roundMm(plan.frameHeight),
+                    frame_boundary_stroked: colorFrameBoundary,
                     content_height_mm: roundMm(plan.contentHeight),
                     max_columns: plan.maxColumns,
                     ideal_rows: plan.idealRows,
@@ -629,10 +707,34 @@
                 usable_width_mm: roundMm(usableWidth),
                 artboard_width_mm: roundMm(docWidth),
                 artboard_height_mm: roundMm(docHeight),
+                color_frame_layout: auditColorFrameLayout(frameLayout),
                 frames: frames
             }));
             file.close();
         } catch (e) {}
+    }
+
+    function auditColorFrameLayout(frameLayout) {
+        var columns = [];
+        var layoutColumns = frameLayout.columns || [];
+        for (var columnIndex = 0; columnIndex < layoutColumns.length; columnIndex++) {
+            var column = layoutColumns[columnIndex];
+            var colorOptions = [];
+            for (var planIndex = 0; planIndex < column.plans.length; planIndex++) {
+                colorOptions.push(column.plans[planIndex].colorOption);
+            }
+            columns.push({
+                index: column.index,
+                height_mm: roundMm(column.height),
+                colors: colorOptions
+            });
+        }
+        return {
+            algorithm: "best_fit_color_frame_columns",
+            target_height_mm: roundMm(frameLayout.targetHeight),
+            column_count: columns.length,
+            columns: columns
+        };
     }
 
     function auditColumns(columns) {
@@ -695,6 +797,13 @@
         return result;
     }
 
+    function redColor() {
+        var color = new RGBColor();
+        color.red = 255;
+        color.green = 0;
+        color.blue = 0;
+        return color;
+    }
     function safeName(value) { return String(value).replace(/[^A-Za-z0-9_]+/g, "_"); }
     function roundMm(points) { return Math.round((points * 25.4 / 72) * 1000) / 1000; }
     function mmToPt(mm) { return Number(mm || 0) * 72 / 25.4; }

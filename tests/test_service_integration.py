@@ -378,6 +378,7 @@ def test_service_routes_t_to_one_ai_with_color_frame_artboards(tmp_path):
     assert compose_task["master_packing"]["target_width_mm"] == 580.0
     assert compose_task["master_packing"]["component_suppress_labels"] is True
     assert compose_task["show_color_header"] is True
+    assert compose_task["show_color_frame_boundary"] is True
     assert [frame["color_option"] for frame in compose_task["inputs"]] == ["金色", "银色"]
     assert compose_task["inputs"][0]["order_nos"] == ["ORDER1"]
 

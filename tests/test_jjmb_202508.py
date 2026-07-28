@@ -278,9 +278,11 @@ def test_202508_renderer_accepts_compiled_fill_color_actions():
     compose_source = Path("scripts/illustrator/compose_color_frames.jsx").read_text(encoding="utf-8")
     assert "task.type !== \"compose_color_frames\"" in compose_source
     assert "COLOR_FRAME_" in compose_source
-    assert "boundary.stroked = false;" in compose_source
+    assert "boundary.stroked = colorFrameBoundary;" in compose_source
+    assert "boundary.strokeColor = redColor();" in compose_source
     assert "COLOR_FRAME_OUTPUT" in compose_source
     assert "function packAdaptiveGrid(" in compose_source
+    assert "function packColorFrameBlocks(" in compose_source
     assert "function placeOrderIntoColumns(" in compose_source
     assert "function findBestColumnWindow(" in compose_source
     assert "label_scope: \"order_segment\"" in compose_source

@@ -1,4 +1,6 @@
 import json
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -113,9 +115,20 @@ def test_color_frame_composer_packs_order_segments_by_adaptive_grid():
     assert "function namedPackItems(items)" in source
     assert "function sortByStablePackIndex(items)" in source
     assert "function packAdaptiveGrid(" in source
+    assert "function packColorFrameBlocks(plans, width, gap)" in source
+    assert "targetHeight = Math.max(targetHeight, plans[planIndex].frameHeight);" in source
+    assert "function findBestColorFrameColumn(columns, frameHeight, targetHeight, gap)" in source
+    assert "current = findBestColorFrameColumn(columns, plan.frameHeight, targetHeight, gap);" in source
+    assert "if (nextHeight > targetHeight + 0.01) continue;" in source
+    assert "remaining < bestRemaining - 0.01" in source
+    assert "plan.frameY = current.height + needsGap;" in source
+    assert "plan.frameLeft = current.index * (width + gap);" in source
     assert "function placeOrderIntoColumns(" in source
     assert "function findBestColumnWindow(" in source
     assert "var idealRows = Math.max(1, Math.ceil(subItemCount / maxColumns));" in source
+    assert "boundary.stroked = colorFrameBoundary;" in source
+    assert "boundary.strokeColor = redColor();" in source
+    assert "function redColor()" in source
     assert "function updateFragmentMetadata(placements)" in source
     assert "placement.fragmentCount = total;" in source
     assert "placement.split = total > 1;" in source
@@ -124,8 +137,64 @@ def test_color_frame_composer_packs_order_segments_by_adaptive_grid():
     assert "coordinate_unit: \"mm\"" in source
     assert "function auditColumns(columns)" in source
     assert "function auditFragments(placements)" in source
+    assert "function auditColorFrameLayout(frameLayout)" in source
+    assert "algorithm: \"best_fit_color_frame_columns\"" in source
+    assert "frame_y_mm: roundMm(plan.frameY)" in source
+    assert "frame_column: plan.frameColumn" in source
+    assert "frame_boundary_stroked: colorFrameBoundary" in source
+    assert "color_frame_layout: auditColorFrameLayout(frameLayout)" in source
     assert "split: placement.split === true" in source
     assert "label_required: true" in source
+
+
+def test_color_frame_composer_best_fit_backfills_existing_frame_columns(tmp_path):
+    if not shutil.which("node"):
+        pytest.skip("node is required to execute the Illustrator packing helper")
+
+    source = Path("scripts/illustrator/compose_color_frames.jsx").read_text(encoding="utf-8")
+    source = "\n".join(
+        line
+        for index, line in enumerate(source.splitlines())
+        if not (index == 0 and line.startswith("#target"))
+    )
+    script = f"""
+const vm = require('vm');
+const context = {{
+  __COLOR_FRAME_PACK_TEST__: {{
+    width: 480,
+    gap: 4,
+    plans: [
+      {{ colorOption: 'A', frameHeight: 100 }},
+      {{ colorOption: 'B', frameHeight: 30 }},
+      {{ colorOption: 'C', frameHeight: 70 }},
+      {{ colorOption: 'D', frameHeight: 20 }},
+      {{ colorOption: 'E', frameHeight: 40 }}
+    ]
+  }}
+}};
+vm.runInNewContext({json.dumps(source)}, context);
+console.log(JSON.stringify(context.__COLOR_FRAME_PACK_TEST__.result));
+"""
+    script_path = tmp_path / "run-compose-color-frame-pack-test.js"
+    script_path.write_text(script, encoding="utf-8")
+
+    completed = subprocess.run(
+        ["node", str(script_path)],
+        check=True,
+        text=True,
+        capture_output=True,
+    )
+    result = json.loads(completed.stdout)
+
+    assert result["width"] == 1448
+    assert result["height"] == 100
+    assert [[plan["colorOption"] for plan in column["plans"]] for column in result["columns"]] == [
+        ["A"],
+        ["B", "E"],
+        ["C", "D"],
+    ]
+    assert [plan["frameColumn"] for plan in result["columns"][1]["plans"]] == [1, 1]
+    assert [plan["frameY"] for plan in result["columns"][1]["plans"]] == [0, 34]
 
 
 def test_master_packing_config_uses_department_width_and_configured_spacing():
