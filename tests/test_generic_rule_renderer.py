@@ -71,6 +71,38 @@ def base_rules():
     }
 
 
+def exact_box_rules(*, single_file=True):
+    rules = base_rules()
+    rules["order_bindings"] = {**rules["order_bindings"], "year": "Year"}
+    rules["slot_mappings"] = [
+        {"field": "text", "slot": "Name"},
+        {"field": "year", "slot": "Year", "optional": True},
+    ]
+    rules["dimensions"] = {
+        "Name": {"width_mm": 17, "height_mm": 10},
+        "Year": {"width_mm": 11, "height_mm": 5},
+    }
+    layout = {
+        "type": "name_columns",
+        "name": {"delimiter": "|", "segment_box_target": "Name", "fill_box_exactly": True},
+        "footer": {"box_target": "Year", "optional": True, "fill_box_exactly": True},
+        "default": {"group_by": ["row"], "footer_field": "year"},
+    }
+    if single_file:
+        layout["output_mode"] = "single_file"
+    rules["render_layout"] = layout
+    return rules
+
+
+def make_orders_with_year(path: Path, count=1):
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["Order", "Custom", "Font", "Design", "Style", "Color", "Year"])
+    for index in range(count):
+        sheet.append([f"A-{index + 1}", "Alice | Bob", "F2", "Design1", "Style3", "Gold", 2026])
+    workbook.save(path)
+
+
 def test_builds_generic_task_from_bindings_and_split_variables(tmp_path):
     _, template = make_template(tmp_path)
     order_path = tmp_path / "orders.xlsx"
@@ -602,6 +634,82 @@ def test_confirmed_jjmb_202510_template_enables_exact_box_fill_only_for_its_layo
         "fill_box_exactly": True,
     }
     assert rules["output"] == {"color_mode": "CMYK"}
+
+
+def test_generic_service_attaches_layout_audit_for_single_file_exact_boxes(tmp_path):
+    registry, template = make_template(tmp_path)
+    pack = {
+        "$schema": "custom-renderer/template-rule-pack",
+        "template": {"template_id": template.template_id, "profile": "composite"},
+        "rules": exact_box_rules(single_file=True),
+        "assets": {"items": [], "policy": {"mode": "inline"}},
+        "capabilities": ["replace_text", "scale_to_box"],
+        "validation": {"status": "confirmed", "unresolved_items": []},
+    }
+    template = registry.apply_confirmed_rule_pack(template.template_id, pack, activate=True)
+    order_path = tmp_path / "orders.xlsx"
+    make_orders_with_year(order_path)
+
+    result = RenderService(registry=registry, jobs=JobStore(tmp_path / "jobs")).submit(
+        {"template_id": template.template_id, "order_file": str(order_path), "dry_run": True}
+    )
+
+    assert result["status"] == "completed", result.get("error")
+    task = json.loads(Path(result["outputs"]["render_task"]).read_text(encoding="utf-8"))
+    assert Path(task["layout_audit_file"]).name == "layout-audit.tsv"
+    assert task["layout_audit_files"] == [task["layout_audit_file"]]
+    assert result["outputs"]["layout_audit_file"] == task["layout_audit_file"]
+    assert result["outputs"]["layout_audit_files"] == task["layout_audit_files"]
+    assert result["stats"]["exact_text_box_audit"] is True
+
+
+def test_generic_service_uses_separate_layout_audits_for_exact_box_chunks(tmp_path, monkeypatch):
+    registry, template = make_template(tmp_path)
+    pack = {
+        "$schema": "custom-renderer/template-rule-pack",
+        "template": {"template_id": template.template_id, "profile": "composite"},
+        "rules": exact_box_rules(single_file=False),
+        "assets": {"items": [], "policy": {"mode": "inline"}},
+        "capabilities": ["replace_text", "scale_to_box"],
+        "validation": {"status": "confirmed", "unresolved_items": []},
+    }
+    template = registry.apply_confirmed_rule_pack(template.template_id, pack, activate=True)
+    order_path = tmp_path / "many-orders.xlsx"
+    make_orders_with_year(order_path, count=17)
+    calls = []
+
+    class Bridge:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+        def render(self, script, task_path):
+            task = json.loads(Path(task_path).read_text(encoding="utf-8"))
+            calls.append((Path(task_path).name, len(task["orders"]), Path(task["layout_audit_file"]).name))
+            for output in task["output_ai_files"]:
+                Path(output).write_text("ai", encoding="utf-8")
+
+        def close(self):
+            return None
+
+    monkeypatch.setattr(render_service_module, "IllustratorBridge", Bridge)
+
+    result = RenderService(registry=registry, jobs=JobStore(tmp_path / "jobs")).submit(
+        {"template_id": template.template_id, "order_file": str(order_path), "dry_run": False}
+    )
+
+    assert result["status"] == "completed", result.get("error")
+    assert calls == [
+        ("render-task-001.json", 8, "layout-audit-001.tsv"),
+        ("render-task-002.json", 8, "layout-audit-002.tsv"),
+        ("render-task-003.json", 1, "layout-audit-003.tsv"),
+    ]
+    task = json.loads(Path(result["outputs"]["render_task"]).read_text(encoding="utf-8"))
+    assert [Path(path).name for path in task["layout_audit_files"]] == [
+        "layout-audit-001.tsv",
+        "layout-audit-002.tsv",
+        "layout-audit-003.tsv",
+    ]
+    assert result["outputs"]["layout_audit_files"] == task["layout_audit_files"]
 
 
 def test_passes_selected_font_boldness_to_every_text_variable(tmp_path):

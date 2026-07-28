@@ -8,6 +8,7 @@
     if (task.type !== "generic_template_rules") throw new Error("Unsupported task type: " + task.type);
     if (!task.orders || !task.orders.length) throw new Error("Generic task has no orders");
     var layoutAudit = createLayoutAudit(task);
+    var exactBoxTargets = [];
     try { app.userInteractionLevel = UserInteractionLevel.DONTDISPLAYALERTS; } catch (e0) {}
 
     var outputs = [];
@@ -21,6 +22,8 @@
             if (sheetOutput.exists) sheetOutput.remove();
             trace(task, "name_columns:before_save");
             applyOutputSettings(sheet, task.output || {}, []);
+            finalizeExactBoxTargets(sheet);
+            flushLayoutAudit();
             writeProgress(task, task.orders.length, task.orders.length, "正在保存 AI 文件");
             saveAsNativeAI(sheet, sheetOutput);
             trace(task, "name_columns:after_save");
@@ -46,8 +49,12 @@
                     writeProgress(task, orderIndex, task.orders.length, "正在转曲文字");
                 }
                 applyOutputSettings(doc, task.output || {}, order.variables || []);
+                finalizeExactBoxTargets(doc);
+                flushLayoutAudit();
             } else {
                 applyOutputSettings(doc, task.output || {}, []);
+                finalizeExactBoxTargets(doc);
+                flushLayoutAudit();
             }
             var output = File(String(order.output_ai));
             ensureFolder(output.parent);
@@ -143,7 +150,6 @@
                 }
             }
             removeFontPrototypes(fontCache);
-            flushLayoutAudit();
             return doc;
         } finally {
             source.close(SaveOptions.DONOTSAVECHANGES);
@@ -374,25 +380,18 @@
                 var footerDimension = configuredDimension(dimensions, footerTarget, "footer");
                 var footerAuditName = footerTarget + "Box_" + layoutAuditIdentity(members[0]);
                 var footerDiagnosticTarget = footerTarget + " row " + String(members[0].row_index || "unknown");
-                if (footerBox.fill_box_exactly === true) {
-                    fitTextToExactBox(footerFrame, footerDimension.width_mm, footerDimension.height_mm, footerDiagnosticTarget);
+                if (isEnabled(footerBox.fill_box_exactly)) {
                     var footerWidth = mmToPt(footerDimension.width_mm);
                     var footerHeightExact = mmToPt(footerDimension.height_mm);
                     var footerBoxTop = cardBottom + margin + footerHeight / 2 + footerHeightExact / 2;
-                    alignTextToExactBox(
-                        footerFrame,
+                    var footerRect = exactBoxRect(
                         left + width / 2 - footerWidth / 2,
                         footerBoxTop,
                         footerWidth,
-                        footerHeightExact,
-                        footerDiagnosticTarget
+                        footerHeightExact
                     );
-                    recordLayoutAudit("year", footerAuditName, footerFrame, {
-                        left: left + width / 2 - footerWidth / 2,
-                        top: footerBoxTop,
-                        right: left + width / 2 + footerWidth / 2,
-                        bottom: footerBoxTop - footerHeightExact
-                    });
+                    fitPageItemToExactBox(footerFrame, footerRect, footerDiagnosticTarget);
+                    registerExactBoxTarget("year", footerAuditName, footerDiagnosticTarget, footerRect);
                 } else {
                     fitTextStrict(footerFrame, footerDimension.width_mm, footerDimension.height_mm, footerDiagnosticTarget);
                     centerLayoutTextInBox(footerFrame, left + width / 2, cardBottom + margin + footerHeight, footerHeight);
@@ -447,25 +446,19 @@
         if (!variable.actions || !variable.actions.length) applyFontBoldness(frame, variable.font_style);
         var boxWidth = mmToPt(box.width_mm);
         var boxHeight = mmToPt(box.height_mm);
-        if (box.fill_box_exactly === true) {
-            fitTextToExactBox(frame, box.width_mm, box.height_mm, box.target);
-            alignTextToExactBox(frame, x - boxWidth / 2, top, boxWidth, boxHeight, box.target);
+        var boxRect = exactBoxRect(x - boxWidth / 2, top, boxWidth, boxHeight);
+        if (isEnabled(box.fill_box_exactly)) {
+            fitPageItemToExactBox(frame, boxRect, box.target);
         } else {
             fitTextStrict(frame, box.width_mm, box.height_mm, box.target);
             centerLayoutTextInBox(frame, x, top, height);
         }
         var auditName = box.target + "Box_" + layoutAuditIdentity(member) + "_" + String(index + 1);
-        recordLayoutAudit(
-            "name",
-            auditName,
-            frame,
-            box.fill_box_exactly === true ? {
-                left: x - boxWidth / 2,
-                top: top,
-                right: x + boxWidth / 2,
-                bottom: top - boxHeight
-            } : null
-        );
+        if (isEnabled(box.fill_box_exactly)) {
+            registerExactBoxTarget("name", auditName, box.target, boxRect);
+        } else {
+            recordLayoutAudit("name", auditName, frame, null);
+        }
         wrapGeneratedText(frame, auditName);
         return frame;
     }
@@ -600,6 +593,40 @@
         }
     }
 
+    function exactBoxRect(left, top, width, height) {
+        return {
+            left: Number(left),
+            top: Number(top),
+            right: Number(left) + Number(width),
+            bottom: Number(top) - Number(height)
+        };
+    }
+
+    function registerExactBoxTarget(kind, name, target, rect) {
+        exactBoxTargets.push({
+            kind: String(kind || ""),
+            name: String(name || ""),
+            target: String(target || ""),
+            rect: {
+                left: Number(rect.left),
+                top: Number(rect.top),
+                right: Number(rect.right),
+                bottom: Number(rect.bottom)
+            }
+        });
+    }
+
+    function finalizeExactBoxTargets(doc) {
+        for (var index = 0; index < exactBoxTargets.length; index++) {
+            var entry = exactBoxTargets[index];
+            var item = findPageItemByName(doc, entry.name);
+            if (!item) throw new Error("Exact text box target missing after final rendering: " + entry.name);
+            fitPageItemToExactBox(item, entry.rect, entry.target || entry.name);
+            recordLayoutAudit(entry.kind, entry.name, item, entry.rect);
+        }
+        exactBoxTargets = [];
+    }
+
     function createLayoutAudit(task) {
         var path = String(task.layout_audit_file || "");
         return path ? {file: File(path), lines: ["kind\tname\tleft_pt\ttop_pt\tright_pt\tbottom_pt\twidth_mm\theight_mm\tfill\texpected_left_pt\texpected_top_pt\texpected_right_pt\texpected_bottom_pt\tleft_delta_pt\ttop_delta_pt\tright_delta_pt\tbottom_delta_pt"]} : null;
@@ -608,7 +635,7 @@
     function recordLayoutAudit(kind, name, frame, expected) {
         if (!layoutAudit) return;
         try {
-            var bounds = frame.visibleBounds;
+            var bounds = measuredBounds(frame);
             var left = Number(bounds[0]);
             var top = Number(bounds[1]);
             var right = Number(bounds[2]);
@@ -740,7 +767,7 @@
         var target = String(name.segment_box_target || "");
         if (!target) return null;
         var box = configuredDimension(dimensions, target, "name segment");
-        box.fill_box_exactly = name.fill_box_exactly === true;
+        box.fill_box_exactly = isEnabled(name.fill_box_exactly);
         return box;
     }
 
@@ -752,6 +779,12 @@
             throw new Error("Configured " + label + " dimension is missing or invalid: " + target);
         }
         return {target: target, width_mm: width, height_mm: height};
+    }
+
+    function isEnabled(value) {
+        if (value === true) return true;
+        var text = String(value || "").replace(/^\s+|\s+$/g, "").toLowerCase();
+        return text === "1" || text === "true" || text === "yes" || text === "on";
     }
 
     function shouldDrawLayoutFooter(order, mode, layout) {
@@ -971,69 +1004,117 @@
         }
     }
 
-    function fitTextToExactBox(frame, widthMm, heightMm, target) {
-        if (widthMm <= 0 || heightMm <= 0) throw new Error("Invalid exact text dimensions: " + target);
-        var targetWidth = mmToPt(widthMm);
-        var targetHeight = mmToPt(heightMm);
+    function fitPageItemToExactBox(item, rect, target) {
+        var targetWidth = Number(rect.right) - Number(rect.left);
+        var targetHeight = Number(rect.top) - Number(rect.bottom);
+        if (targetWidth <= 0 || targetHeight <= 0) throw new Error("Invalid exact text dimensions: " + target);
         for (var index = 0; index < 12; index++) {
-            var bounds = frame.visibleBounds;
+            var bounds = measuredBounds(item);
             var width = Math.abs(Number(bounds[2]) - Number(bounds[0]));
             var height = Math.abs(Number(bounds[1]) - Number(bounds[3]));
             if (!width || !height) throw new Error("Text has no visible bounds for exact box: " + target);
-            if (boxDimensionsMatch(width, height, targetWidth, targetHeight)) return;
-            resizeTextToBounds(frame, targetWidth / width * 100, targetHeight / height * 100);
+            if (!boxExactFitMatches(width, height, targetWidth, targetHeight)) {
+                var horizontalScale = targetWidth / width;
+                var verticalScale = targetHeight / height;
+                if (
+                    !isFinite(horizontalScale) ||
+                    !isFinite(verticalScale) ||
+                    horizontalScale <= 0 ||
+                    verticalScale <= 0
+                ) {
+                    throw new Error("Invalid exact text scale: " + target);
+                }
+                resizePageItemToExactBox(item, horizontalScale * 100, verticalScale * 100);
+            }
+            centerPageItemInExactBox(item, rect);
+            if (boxExactFitMatchesSize(item, targetWidth, targetHeight)) {
+                validateExactBox(item, rect, target);
+                return;
+            }
         }
-        var finalBounds = frame.visibleBounds;
-        var finalWidth = Math.abs(Number(finalBounds[2]) - Number(finalBounds[0]));
-        var finalHeight = Math.abs(Number(finalBounds[1]) - Number(finalBounds[3]));
-        if (!boxDimensionsMatch(finalWidth, finalHeight, targetWidth, targetHeight)) {
-            throw new Error(
-                "Text cannot exactly fill the configured dimension: " + target +
-                " (actual=" + finalWidth + "x" + finalHeight + ", target=" + targetWidth + "x" + targetHeight + ")"
-            );
-        }
+        validateExactBox(item, rect, target);
     }
 
-    function resizeTextToBounds(frame, horizontalPercent, verticalPercent) {
+    function resizePageItemToExactBox(item, horizontalPercent, verticalPercent) {
         try {
-            frame.resize(horizontalPercent, verticalPercent, true, true, true, true, 100, Transformation.CENTER);
+            item.resize(horizontalPercent, verticalPercent, true, true, true, true, 100, Transformation.CENTER);
             return;
         } catch (e1) {}
         try {
-            frame.resize(horizontalPercent, verticalPercent, true, true, true, true, 100);
+            item.resize(horizontalPercent, verticalPercent, true, true, true, true, 100);
             return;
         } catch (e2) {}
+        try {
+            item.resize(horizontalPercent, verticalPercent);
+            return;
+        } catch (e3) {}
         throw new Error("Cannot independently scale text to exact bounds");
     }
 
-    function alignTextToExactBox(frame, left, top, width, height, target) {
-        var bounds = frame.visibleBounds;
-        frame.translate(left - Number(bounds[0]), top - Number(bounds[1]));
-        var finalBounds = frame.visibleBounds;
-        var finalLeft = Number(finalBounds[0]);
-        var finalTop = Number(finalBounds[1]);
-        var finalRight = Number(finalBounds[2]);
-        var finalBottom = Number(finalBounds[3]);
-        if (
-            !boxCoordinatesMatch(finalLeft, left) ||
-            !boxCoordinatesMatch(finalTop, top) ||
-            !boxCoordinatesMatch(finalRight, left + width) ||
-            !boxCoordinatesMatch(finalBottom, top - height)
-        ) {
+    function centerPageItemInExactBox(item, rect) {
+        var bounds = measuredBounds(item);
+        var targetCenterX = (Number(rect.left) + Number(rect.right)) / 2;
+        var targetCenterY = (Number(rect.top) + Number(rect.bottom)) / 2;
+        var ownCenterX = (Number(bounds[0]) + Number(bounds[2])) / 2;
+        var ownCenterY = (Number(bounds[1]) + Number(bounds[3])) / 2;
+        item.translate(targetCenterX - ownCenterX, targetCenterY - ownCenterY);
+    }
+
+    function boxExactFitMatchesSize(item, targetWidth, targetHeight) {
+        var bounds = measuredBounds(item);
+        return boxExactFitMatches(
+            Math.abs(Number(bounds[2]) - Number(bounds[0])),
+            Math.abs(Number(bounds[1]) - Number(bounds[3])),
+            targetWidth,
+            targetHeight
+        );
+    }
+
+    function boxExactFitMatches(width, height, targetWidth, targetHeight) {
+        return (
+            Math.abs(targetWidth - width) <= EXACT_BOX_MAX_DELTA_PT &&
+            Math.abs(targetHeight - height) <= EXACT_BOX_MAX_DELTA_PT
+        );
+    }
+
+    function validateExactBox(item, rect, target) {
+        var bounds = measuredBounds(item);
+        var width = Math.abs(Number(bounds[2]) - Number(bounds[0]));
+        var height = Math.abs(Number(bounds[1]) - Number(bounds[3]));
+        var targetWidth = Number(rect.right) - Number(rect.left);
+        var targetHeight = Number(rect.top) - Number(rect.bottom);
+        if (!boxExactFitMatches(width, height, targetWidth, targetHeight)) {
             throw new Error(
-                "Text cannot align to the configured dimension corners: " + target +
-                " (actual=" + finalLeft + "," + finalTop + "," + finalRight + "," + finalBottom +
-                "; expected=" + left + "," + top + "," + (left + width) + "," + (top - height) + ")"
+                "Text cannot exactly fill the configured dimension: " + target +
+                " (actual=" + width + "x" + height + ", target=" + targetWidth + "x" + targetHeight + ")"
             );
+        }
+        var centerX = (Number(bounds[0]) + Number(bounds[2])) / 2;
+        var centerY = (Number(bounds[1]) + Number(bounds[3])) / 2;
+        var targetCenterX = (Number(rect.left) + Number(rect.right)) / 2;
+        var targetCenterY = (Number(rect.top) + Number(rect.bottom)) / 2;
+        if (
+            Math.abs(centerX - targetCenterX) > EXACT_BOX_MAX_DELTA_PT ||
+            Math.abs(centerY - targetCenterY) > EXACT_BOX_MAX_DELTA_PT
+        ) {
+            throw new Error("Text cannot center in the configured dimension: " + target);
         }
     }
 
-    function boxDimensionsMatch(width, height, targetWidth, targetHeight) {
-        return boxCoordinatesMatch(width, targetWidth) && boxCoordinatesMatch(height, targetHeight);
+    function measuredBounds(item) {
+        try {
+            var visible = item.visibleBounds;
+            if (validBounds(visible)) return visible;
+        } catch (e1) {}
+        try {
+            var geometric = item.geometricBounds;
+            if (validBounds(geometric)) return geometric;
+        } catch (e2) {}
+        throw new Error("Cannot measure item bounds");
     }
 
-    function boxCoordinatesMatch(actual, expected) {
-        return Math.abs(Number(actual) - Number(expected)) <= EXACT_BOX_MAX_DELTA_PT;
+    function validBounds(bounds) {
+        return bounds && bounds.length >= 4 && isFinite(Number(bounds[0])) && isFinite(Number(bounds[1])) && isFinite(Number(bounds[2])) && isFinite(Number(bounds[3]));
     }
 
     function applyTextColor(frame, name) {

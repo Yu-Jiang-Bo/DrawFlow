@@ -41,10 +41,15 @@ def test_generic_renderer_cycles_configured_name_colors_only():
     assert "segment_box_target" in source
     assert "function splitBoxedNameParts(value, name)" in source
     assert "function fitTextStrict(frame, widthMm, heightMm, target)" in source
-    assert "function fitTextToExactBox(frame, widthMm, heightMm, target)" in source
-    assert "function resizeTextToBounds(frame, horizontalPercent, verticalPercent)" in source
-    assert "function alignTextToExactBox(frame, left, top, width, height, target)" in source
-    assert "fill_box_exactly === true" in source
+    assert "function fitPageItemToExactBox(item, rect, target)" in source
+    assert "function resizePageItemToExactBox(item, horizontalPercent, verticalPercent)" in source
+    assert "function centerPageItemInExactBox(item, rect)" in source
+    assert "function boxExactFitMatches(width, height, targetWidth, targetHeight)" in source
+    assert "function validateExactBox(item, rect, target)" in source
+    assert "function finalizeExactBoxTargets(doc)" in source
+    assert "function registerExactBoxTarget(kind, name, target, rect)" in source
+    assert "function isEnabled(value)" in source
+    assert "box.fill_box_exactly = isEnabled(name.fill_box_exactly);" in source
     assert "function centerLayoutTextInBox(frame, x, top, height)" in source
     assert "function wrapGeneratedText(frame, name)" in source
     assert "holder.name = name;" in source
@@ -107,6 +112,10 @@ def test_generic_renderer_cycles_configured_name_colors_only():
     assert "options.compressed = false;" in source
     assert "options.compressed = true;" not in source
     assert "doc.pathItems.rectangle(height, 0, width, height)" not in source
+    single_file_body = source[source.index('if (usesNameColumnsLayout(task) && String(task.render_layout.output_mode || "") === "single_file")'):source.index("for (var orderIndex = 0;")]
+    assert "applyOutputSettings(sheet, task.output || {}, []);" in single_file_body
+    assert "finalizeExactBoxTargets(sheet);" in single_file_body
+    assert single_file_body.index("applyOutputSettings(sheet, task.output || {}, []);") < single_file_body.index("finalizeExactBoxTargets(sheet);")
     outline_body = source[source.index("if (transforms.outline_text)"):source.index("function applyOutputSettings")]
     assert "outlineAllTextFrames(doc, transforms.pathfinder_merge === true)" in outline_body
     assert "findPageItemsByName" not in outline_body
@@ -146,7 +155,7 @@ def test_generic_renderer_javascript_parses_in_node(tmp_path):
     assert result.returncode == 0, result.stderr
 
 
-def test_exact_box_geometry_uses_independent_scaling_and_corner_alignment():
+def test_exact_box_geometry_uses_independent_scaling_and_center_alignment():
     node = shutil.which("node")
     if not node:
         pytest.skip("Node.js is unavailable")
@@ -157,7 +166,7 @@ let source = fs.readFileSync({json.dumps(str(script_path))}, 'utf8').replace(/^#
 source = source.replace('var EXACT_BOX_MAX_DELTA_PT = 0.02;', '');
 source = source.replace(
   '(function () {{',
-  '(function () {{ var EXACT_BOX_MAX_DELTA_PT = 0.02; global.__exactBox = {{ fit: fitTextToExactBox, align: alignTextToExactBox, mmToPt: mmToPt }}; return;'
+  '(function () {{ var EXACT_BOX_MAX_DELTA_PT = 0.02; global.__exactBox = {{ fit: fitPageItemToExactBox, rect: exactBoxRect, mmToPt: mmToPt }}; return;'
 );
 new Function(source)();
 const frame = {{
@@ -184,12 +193,102 @@ const frame = {{
 }};
 const width = global.__exactBox.mmToPt(17);
 const height = global.__exactBox.mmToPt(10);
-global.__exactBox.fit(frame, 17, 10, 'Name');
-global.__exactBox.align(frame, 100, 200, width, height, 'Name');
+const rect = global.__exactBox.rect(100, 200, width, height);
+global.__exactBox.fit(frame, rect, 'Name');
 const actual = frame.visibleBounds;
-for (const [value, expected] of [[actual[0], 100], [actual[1], 200], [actual[2], 100 + width], [actual[3], 200 - height]]) {{
-  if (Math.abs(value - expected) > 0.02) throw new Error('exact box mismatch');
-}}
+const actualWidth = actual[2] - actual[0];
+const actualHeight = actual[1] - actual[3];
+if (Math.abs(actualWidth - width) > 0.02) throw new Error('width should fill target');
+if (Math.abs(actualHeight - height) > 0.02) throw new Error('height should fill target');
+const centerX = (actual[0] + actual[2]) / 2;
+const centerY = (actual[1] + actual[3]) / 2;
+if (Math.abs(centerX - (100 + width / 2)) > 0.02) throw new Error('center x mismatch');
+if (Math.abs(centerY - (200 - height / 2)) > 0.02) throw new Error('center y mismatch');
+"""
+
+    result = subprocess.run([node, "-e", harness], capture_output=True, text=True, check=False)
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_exact_box_retries_independent_scaling_after_illustrator_rounding():
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node.js is unavailable")
+    script_path = SCRIPT.resolve()
+    harness = f"""
+const fs = require('fs');
+let source = fs.readFileSync({json.dumps(str(script_path))}, 'utf8').replace(/^#target.*\\r?\\n/, '');
+source = source.replace('var EXACT_BOX_MAX_DELTA_PT = 0.02;', '');
+source = source.replace(
+  '(function () {{',
+  '(function () {{ var EXACT_BOX_MAX_DELTA_PT = 0.02; global.__exactBox = {{ fit: fitPageItemToExactBox, rect: exactBoxRect, mmToPt: mmToPt }}; return;'
+);
+new Function(source)();
+const frame = {{
+  visibleBounds: [0, 20, 30, 0],
+  resizeCalls: 0,
+  resize: function(horizontalPercent, verticalPercent) {{
+    this.resizeCalls++;
+    const left = this.visibleBounds[0];
+    const top = this.visibleBounds[1];
+    const right = this.visibleBounds[2];
+    const bottom = this.visibleBounds[3];
+    const centerX = (left + right) / 2;
+    const centerY = (top + bottom) / 2;
+    const illustratorOvershoot = this.resizeCalls === 1 ? 1.001 : 1;
+    const width = (right - left) * horizontalPercent / 100 * illustratorOvershoot;
+    const height = (top - bottom) * verticalPercent / 100 * illustratorOvershoot;
+    this.visibleBounds = [centerX - width / 2, centerY + height / 2, centerX + width / 2, centerY - height / 2];
+  }},
+  translate: function(dx, dy) {{
+    this.visibleBounds = [
+      this.visibleBounds[0] + dx,
+      this.visibleBounds[1] + dy,
+      this.visibleBounds[2] + dx,
+      this.visibleBounds[3] + dy,
+    ];
+  }},
+}};
+const width = global.__exactBox.mmToPt(17);
+const height = global.__exactBox.mmToPt(10);
+const rect = global.__exactBox.rect(100, 200, width, height);
+global.__exactBox.fit(frame, rect, 'Name');
+const actual = frame.visibleBounds;
+const actualWidth = actual[2] - actual[0];
+const actualHeight = actual[1] - actual[3];
+if (frame.resizeCalls < 2) throw new Error('exact resize retry did not run');
+if (Math.abs(actualWidth - width) > 0.02) throw new Error('width was not corrected');
+if (Math.abs(actualHeight - height) > 0.02) throw new Error('height was not corrected');
+const centerX = (actual[0] + actual[2]) / 2;
+const centerY = (actual[1] + actual[3]) / 2;
+if (Math.abs(centerX - (100 + width / 2)) > 0.02) throw new Error('center x mismatch');
+if (Math.abs(centerY - (200 - height / 2)) > 0.02) throw new Error('center y mismatch');
+"""
+
+    result = subprocess.run([node, "-e", harness], capture_output=True, text=True, check=False)
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_exact_box_fill_accepts_string_boolean_from_rules():
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node.js is unavailable")
+    script_path = SCRIPT.resolve()
+    harness = f"""
+const fs = require('fs');
+let source = fs.readFileSync({json.dumps(str(script_path))}, 'utf8').replace(/^#target.*\\r?\\n/, '');
+source = source.replace(
+  '(function () {{',
+  '(function () {{ global.__box = configuredNameSegmentBox; return;'
+);
+new Function(source)();
+const box = global.__box(
+  {{ name: {{ segment_box_target: 'Name', fill_box_exactly: ' true ' }} }},
+  {{ Name: {{ width_mm: 17, height_mm: 10 }} }}
+);
+if (box.fill_box_exactly !== true) throw new Error('trimmed string boolean did not enable exact fill');
 """
 
     result = subprocess.run([node, "-e", harness], capture_output=True, text=True, check=False)
@@ -203,10 +302,16 @@ def test_exact_box_rendering_remains_explicitly_opt_in():
     footer_body = source[source.index("if (drawFooter)"):source.index("function drawCardBackground")]
 
     assert "var EXACT_BOX_MAX_DELTA_PT = 0.02;" in source
-    assert "frame.resize(horizontalPercent, verticalPercent" in source
-    assert "if (box.fill_box_exactly === true)" in boxed_name_body
+    assert "resizePageItemToExactBox(item, horizontalScale * 100, verticalScale * 100)" in source
+    assert "fitPageItemProportionallyToExactBox" not in source
+    assert "resizePageItemUniform" not in source
+    assert "boxProportionalFitMatches" not in source
+    assert "shrinkPageItemToExactBoxIfNeeded" not in source
+    assert "resizeTextToBounds" not in source
+    assert "alignTextToExactBox" not in source
+    assert "if (isEnabled(box.fill_box_exactly))" in boxed_name_body
     assert "else {\n            fitTextStrict(frame" in boxed_name_body
-    assert "if (footerBox.fill_box_exactly === true)" in footer_body
+    assert "if (isEnabled(footerBox.fill_box_exactly))" in footer_body
     assert "else {\n                    fitTextStrict(footerFrame" in footer_body
 
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import time
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Mapping
+from typing import Any, Dict, Iterable, List, Mapping, Sequence
 
 from ..jjmb_202508_main import (
     build_task as build_202508_task,
@@ -129,6 +129,15 @@ class RenderService:
             sheet_name=request["sheet_name"],
             columns=request["columns"],
         )
+        order_chunks = (
+            [task["orders"]]
+            if task["render_layout"].get("output_mode") == "single_file"
+            else list(_chunked(task["orders"], GENERIC_RULE_RENDER_CHUNK_SIZE))
+        )
+        layout_audit_files = _generic_layout_audit_files(job_dir, task, order_chunks)
+        if layout_audit_files:
+            task["layout_audit_file"] = str(layout_audit_files[0])
+            task["layout_audit_files"] = [str(path) for path in layout_audit_files]
         task_file = job_dir / "render-task.json"
         total_orders = len(task["orders"])
         self._update_progress(record, 0, total_orders, "?? AI ??")
@@ -138,13 +147,14 @@ class RenderService:
             script = Path(__file__).resolve().parents[2] / "scripts" / "illustrator" / "render_generic_rule_pack.jsx"
             bridge = IllustratorBridge(visible=request["visible"], fresh_instance=True, reuse_instance=True)
             try:
-                chunks = [task["orders"]] if task["render_layout"].get("output_mode") == "single_file" else _chunked(task["orders"], GENERIC_RULE_RENDER_CHUNK_SIZE)
                 rendered_orders = 0
-                for chunk_index, orders in enumerate(chunks, start=1):
+                for chunk_index, orders in enumerate(order_chunks, start=1):
                     chunk_task = dict(task)
                     chunk_task["orders"] = orders
                     chunk_task["output_ai_files"] = [order["output_ai"] for order in orders]
-                    chunk_task["progress"] = self._task_progress(record, rendered_orders, total_orders, "?? AI ??")
+                    chunk_task["progress"] = self._task_progress(record, rendered_orders, total_orders, "生成 AI 文件")
+                    if layout_audit_files:
+                        chunk_task["layout_audit_file"] = str(layout_audit_files[chunk_index - 1])
                     chunk_file = (
                         task_file
                         if len(orders) == len(task["orders"])
@@ -163,12 +173,21 @@ class RenderService:
                 "output_ai": task["output_ai_files"][0],
                 "output_ai_files": task["output_ai_files"],
                 "render_task": str(task_file),
+                **(
+                    {
+                        "layout_audit_file": str(layout_audit_files[0]),
+                        "layout_audit_files": [str(path) for path in layout_audit_files],
+                    }
+                    if layout_audit_files
+                    else {}
+                ),
             },
             "stats": {
                 "orders": len(task["orders"]),
                 "variables": sum(len(order["variables"]) for order in task["orders"]),
                 "assets": sum(len(order["assets"]) for order in task["orders"]),
                 "dry_run": request["dry_run"],
+                **({"exact_text_box_audit": True} if layout_audit_files else {}),
             },
         }
 
@@ -463,6 +482,65 @@ def _effective_pipeline(template: TemplateDefinition) -> str:
     if isinstance(bindings, Mapping) and bindings and has_targets:
         return "generic_rules_only"
     return template.pipeline
+
+
+def _rules_with_effective_output(template: TemplateDefinition, rules: Dict[str, Any]) -> Dict[str, Any]:
+    merged = dict(rules or {})
+    merged["output"] = _effective_output_settings(template, merged)
+    return merged
+
+
+def _effective_output_settings(template: TemplateDefinition, rules: Mapping[str, Any]) -> Dict[str, Any]:
+    output = rules.get("output") if isinstance(rules, Mapping) else {}
+    output = dict(output) if isinstance(output, Mapping) else {}
+    return {
+        **output,
+        "color_mode": output_color_mode(dict(rules or {})),
+        "outline_text": _to_bool(getattr(template, "outline_text", output.get("outline_text", True))),
+        "pathfinder_merge": _to_bool(
+            getattr(template, "pathfinder_merge", output.get("pathfinder_merge", True))
+        ),
+    }
+
+
+def _generic_layout_audit_files(
+    job_dir: Path,
+    task: Mapping[str, Any],
+    order_chunks: Sequence[Sequence[Any]],
+) -> List[Path]:
+    if not _generic_task_requires_exact_text_audit(task):
+        return []
+    if len(order_chunks) <= 1:
+        return [job_dir / "layout-audit.tsv"]
+    return [job_dir / f"layout-audit-{index:03d}.tsv" for index in range(1, len(order_chunks) + 1)]
+
+
+def _generic_task_requires_exact_text_audit(task: Mapping[str, Any]) -> bool:
+    layout = task.get("render_layout")
+    dimensions = task.get("dimensions")
+    if not isinstance(layout, Mapping) or not isinstance(dimensions, Mapping):
+        return False
+    targets: List[Any] = []
+    name = layout.get("name")
+    if isinstance(name, Mapping) and _to_bool(name.get("fill_box_exactly", False)):
+        targets.append(name.get("segment_box_target"))
+    footer = layout.get("footer")
+    if isinstance(footer, Mapping) and _to_bool(footer.get("fill_box_exactly", False)):
+        targets.append(footer.get("box_target"))
+    return any(_dimension_has_physical_size(dimensions, target) for target in targets)
+
+
+def _dimension_has_physical_size(dimensions: Mapping[str, Any], target: Any) -> bool:
+    target_name = str(target or "").strip()
+    if not target_name:
+        return False
+    dimension = dimensions.get(target_name)
+    if not isinstance(dimension, Mapping):
+        return False
+    try:
+        return float(dimension.get("width_mm") or 0) > 0 and float(dimension.get("height_mm") or 0) > 0
+    except (TypeError, ValueError):
+        return False
 
 
 def _chunked(items: List[Any], size: int) -> Iterable[List[Any]]:
