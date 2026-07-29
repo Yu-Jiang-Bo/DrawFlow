@@ -360,6 +360,7 @@
             outlineTextFrames(copy);
             if (pathfinderMerge) cleanupOutline(copy);
         }
+        try { copy.zOrder(ZOrderMethod.BRINGTOFRONT); } catch (eZ0) {}
         recordFitDelta(fitPageItemToRect(copy, rect));
         return copy;
     }

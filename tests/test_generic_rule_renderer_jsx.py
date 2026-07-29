@@ -160,6 +160,14 @@ def test_grouped_single_graphic_initializes_fit_stats_before_early_return():
     assert single_graphic_index < record_fit_index
 
 
+def test_grouped_design_assets_are_brought_above_single_graphic_background():
+    source = GROUPED_SCRIPT.read_text(encoding="utf-8")
+    body = source[source.index("function renderDesignAssetItem"):source.index("function normalizeDesignInstances")]
+
+    assert "copy.zOrder(ZOrderMethod.BRINGTOFRONT)" in body
+    assert body.index("copy.zOrder(ZOrderMethod.BRINGTOFRONT)") < body.index("recordFitDelta(")
+
+
 def test_exact_box_geometry_uses_independent_scaling_and_corner_alignment():
     node = shutil.which("node")
     if not node:
