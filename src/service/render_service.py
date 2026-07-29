@@ -663,6 +663,7 @@ class RenderService:
                     font_styles=task.font_styles,
                     color_mode=color_mode,
                     dpi=dpi,
+                    label_layout=rule.layout,
                     outline_text=bool(output_settings["outline_text"]),
                     pathfinder_merge=bool(output_settings["pathfinder_merge"]),
                     progress=self._task_progress(
@@ -697,7 +698,7 @@ class RenderService:
                     }
                 )
                 bundle_members.append({"path": str(spec.output_path), "arcname": spec.arcname})
-                compose_items.append(_202603_master_png_item(spec.unit, spec.output_path, structure_config))
+                compose_items.append(_202603_master_png_item(spec.unit, spec.output_path, structure_config, rule))
             rendered_items += len(batch.units)
             if request["dry_run"]:
                 self._update_progress(record, rendered_items, total_work, "生成 H 单图 PNG 文件")
@@ -1203,8 +1204,10 @@ def _build_202603_single_graphic_task(
     outline_text: bool,
     pathfinder_merge: bool,
     progress: Mapping[str, Any],
+    label_layout: Mapping[str, Any] | None = None,
 ) -> Dict[str, Any]:
     item_payload = item.to_json_dict() if hasattr(item, "to_json_dict") else dict(item)
+    layout = label_layout if isinstance(label_layout, Mapping) else {}
     return {
         "type": "config_grouped_text_sheet",
         "template_config": str(template_config),
@@ -1219,6 +1222,16 @@ def _build_202603_single_graphic_task(
         "layout": {
             "columns": 1,
             "single_graphic_exact": True,
+            "embed_order_label": True,
+            "single_graphic_label_height_mm": float(
+                layout.get("single_graphic_label_height_mm") or layout.get("label_height_mm") or 6.0
+            ),
+            "single_graphic_label_width_mm": float(
+                layout.get("single_graphic_label_width_mm") or layout.get("label_width_mm") or 42.0
+            ),
+            "single_graphic_label_gap_mm": float(
+                layout.get("single_graphic_label_gap_mm") or layout.get("label_gap_mm") or 0.8
+            ),
             "show_style_boxes": False,
         },
         "fit": {
@@ -1246,17 +1259,36 @@ def _202603_master_png_item(
     unit: ProductionOutputUnit,
     png_path: Path,
     structure_config: Mapping[str, Any],
+    rule: DepartmentOutputRule,
 ) -> Dict[str, Any]:
     item = unit.payload
     style_option = str(getattr(item, "style_option", "") or "")
     dimensions = _202603_style_dimensions(structure_config, style_option)
+    layout = rule.layout if isinstance(rule.layout, Mapping) else {}
+    label_height_mm = float(layout.get("single_graphic_label_height_mm") or layout.get("label_height_mm") or 6)
+    label_gap_mm = float(layout.get("single_graphic_label_gap_mm") or layout.get("label_gap_mm") or 0.8)
+    label_width_mm = float(layout.get("single_graphic_label_width_mm") or layout.get("label_width_mm") or 42)
+    graphic_width_mm = float(dimensions["width_mm"])
+    graphic_height_mm = float(dimensions["height_mm"])
+    width_mm = max(graphic_width_mm, label_width_mm)
+    height_mm = graphic_height_mm + label_gap_mm + label_height_mm
     return {
         "order_no": unit.order_no,
         "detail_id": unit.detail_id,
         "sequence": int(unit.quantity_index or 1),
         "style_option": style_option,
         "png_path": str(png_path),
-        **dimensions,
+        "label_embedded": True,
+        "width_pt": width_mm * 72.0 / 25.4,
+        "height_pt": height_mm * 72.0 / 25.4,
+        "width_mm": width_mm,
+        "height_mm": height_mm,
+        "graphic_width_pt": dimensions["width_pt"],
+        "graphic_height_pt": dimensions["height_pt"],
+        "graphic_width_mm": graphic_width_mm,
+        "graphic_height_mm": graphic_height_mm,
+        "label_height_mm": label_height_mm,
+        "label_gap_mm": label_gap_mm,
     }
 
 
@@ -1311,8 +1343,9 @@ def _plan_png_master_pages(items: Sequence[Mapping[str, Any]], rule: DepartmentO
     for item in items:
         image_width = float(item.get("width_mm") or 0)
         image_height = float(item.get("height_mm") or 0)
+        label_embedded = bool(item.get("label_embedded"))
         block_width = max(image_width, label_width)
-        block_height = label_height + label_gap + image_height
+        block_height = image_height if label_embedded else label_height + label_gap + image_height
         if row_items and x + block_width > max_right + 0.01:
             rows.append({"items": row_items, "height": row_height})
             row_items = 0

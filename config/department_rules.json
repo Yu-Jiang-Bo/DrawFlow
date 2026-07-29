@@ -230,13 +230,15 @@
         "manufacturer_rules": [
           {
             "manufacturer": "MY-W196",
-            "output_format": "cs5_ai",
-            "exportUnit": "PER_ORDER",
-            "fileFormat": "AI_CS5",
+            "output_format": "png_cmyk",
+            "exportUnit": "PER_GRAPHIC",
+            "fileFormat": "PNG_CMYK",
             "fillActualColor": true,
             "hasMaster": false,
-            "artwork_content": "订单号 + 效果图；字体颜色填充到名字本身",
-            "save_strategy": "保存为整体 CS5 AI 文件"
+            "cropMasterHeight": false,
+            "dpi": 300,
+            "artwork_content": "每张效果图单独输出 CMYK PNG；PNG 顶部标注订单号；字体颜色填充到名字本身",
+            "file_naming": "单图为订单号.png；同一订单多图为订单号-1.png、订单号-2.png"
           },
           {
             "manufacturer": "MY-W120",

@@ -702,6 +702,9 @@ def test_service_routes_202603_h_to_exact_pngs_and_paginated_master_ai(tmp_path)
     single_task = json.loads(single_task_path.read_text(encoding="utf-8"))
     compose_task = json.loads(compose_task_path.read_text(encoding="utf-8"))
     assert single_task["layout"]["single_graphic_exact"] is True
+    assert single_task["layout"]["embed_order_label"] is True
+    assert single_task["layout"]["single_graphic_label_height_mm"] == 6.0
+    assert single_task["layout"]["single_graphic_label_gap_mm"] == 0.8
     assert single_task["export"]["format"] == "png"
     assert single_task["export"]["png_path"].endswith("ORDER1.png")
     assert "fixed_canvas_mm" not in single_task["export"]
@@ -709,7 +712,10 @@ def test_service_routes_202603_h_to_exact_pngs_and_paginated_master_ai(tmp_path)
     assert compose_task["frame_width_mm"] == 580.0
     assert compose_task["frame_height_mm"] == 2000.0
     assert compose_task["items"][0]["width_mm"] == 80.0
-    assert compose_task["items"][0]["height_mm"] == 50.0
+    assert compose_task["items"][0]["height_mm"] == 56.8
+    assert compose_task["items"][0]["graphic_width_mm"] == 80.0
+    assert compose_task["items"][0]["graphic_height_mm"] == 50.0
+    assert compose_task["items"][0]["label_embedded"] is True
     render_batches = [str(path) for path in record["outputs"]["render_batch_files"]]
     assert any("single-render-batches" in path for path in render_batches)
     assert any("compose-render-batches" in path for path in render_batches)
@@ -730,24 +736,25 @@ def test_202603_h_master_planner_paginates_without_scaling():
     assert sum(page["items"] for page in plan["pages"]) == 300
 
 
-def test_service_routes_w_manufacturers_to_cs5_standard_ai_and_graphic_pngs(tmp_path):
+def test_service_routes_w_manufacturers_to_graphic_pngs_and_standard_ai(tmp_path):
     config_path = tmp_path / "templates.json"
     order_path = tmp_path / "orders.xlsx"
     write_templates_config(config_path)
     write_order_xlsx(order_path, department="W", manufacturer="MY-W196")
 
-    cs5_record = RenderService(
+    w196_record = RenderService(
         registry=TemplateRegistry(config_path),
-        jobs=JobStore(tmp_path / "jobs-cs5"),
+        jobs=JobStore(tmp_path / "jobs-w196-png"),
     ).submit(
         {"template_id": "JJMB202508261001394920", "order_file": str(order_path), "dry_run": True}
     )
-    cs5_task = json.loads(Path(cs5_record["outputs"]["render_task_files"][0]).read_text(encoding="utf-8"))
-    assert cs5_task["output"]["format"] == "ai"
-    assert cs5_task["output"]["compatibility"] == "CS5"
-    assert cs5_task["groups"][0]["items"][0]["apply_color_to_artwork"] is True
-    assert cs5_task["groups"][0]["items"][0]["production_label_lines"] == ["ORDER1"]
-    assert cs5_record["outputs"]["delivery_plan"][0]["path"].endswith("-W-ORDER1-MY-W196.ai")
+    w196_task = json.loads(Path(w196_record["outputs"]["render_task_files"][0]).read_text(encoding="utf-8"))
+    assert w196_task["output"]["format"] == "png"
+    assert w196_task["output"]["color_mode"] == "CMYK"
+    assert w196_task["groups"][0]["items"][0]["apply_color_to_artwork"] is True
+    assert w196_task["groups"][0]["items"][0]["production_label_lines"] == ["ORDER1"]
+    assert [item["name"] for item in w196_record["outputs"]["graphic_files"]] == ["ORDER1.png"]
+    assert "output_bundle" not in w196_record["outputs"]
 
     write_order_xlsx(order_path, department="W", manufacturer="OTHER-W")
     standard_record = RenderService(
@@ -788,6 +795,7 @@ def test_service_routes_w_manufacturers_to_cs5_standard_ai_and_graphic_pngs(tmp_
     for task_path in png_record["outputs"]["render_task_files"]:
         task = json.loads(Path(task_path).read_text(encoding="utf-8"))
         assert task["output"]["format"] == "png"
+        assert task["groups"][0]["items"][0]["production_label_lines"] == [task["groups"][0]["order_no"]]
         assert task["output"]["color_mode"] == "CMYK"
         assert task["layout"]["suppress_labels"] is False
         assert task["groups"][0]["items"][0]["apply_color_to_artwork"] is True

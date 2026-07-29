@@ -48,8 +48,9 @@
         for (var i = 0; i < items.length; i++) {
             var imageWidth = Number(items[i].width_pt || 1);
             var imageHeight = Number(items[i].height_pt || 1);
+            var labelEmbedded = items[i].label_embedded === true;
             var blockWidth = Math.max(imageWidth, labelWidth);
-            var blockHeight = labelHeight + labelGap + imageHeight;
+            var blockHeight = labelEmbedded ? imageHeight : labelHeight + labelGap + imageHeight;
             if (row.placements.length && x + blockWidth > maxRight + 0.01) {
                 rows.push(row);
                 row = newRow();
@@ -62,7 +63,8 @@
                 width: blockWidth,
                 imageWidth: imageWidth,
                 imageHeight: imageHeight,
-                height: blockHeight
+                height: blockHeight,
+                labelEmbedded: labelEmbedded
             });
             row.height = Math.max(row.height, blockHeight);
             x += blockWidth + columnGap;
@@ -120,7 +122,8 @@
             width: source.width,
             imageWidth: source.imageWidth,
             imageHeight: source.imageHeight,
-            height: source.height
+            height: source.height,
+            labelEmbedded: source.labelEmbedded
         };
     }
 
@@ -139,10 +142,14 @@
             placed.width = placement.imageWidth;
             placed.height = placement.imageHeight;
             placed.left = placement.x + (placement.width - placement.imageWidth) / 2;
-            placed.top = pageHeight - placement.y - labelHeight - labelGap;
+            placed.top = placement.labelEmbedded
+                ? pageHeight - placement.y
+                : pageHeight - placement.y - labelHeight - labelGap;
         }
         for (var l = 0; l < page.placements.length; l++) {
-            drawLabel(layer, String(items[page.placements[l].index].order_no || ""), page.placements[l], pageHeight);
+            if (!page.placements[l].labelEmbedded) {
+                drawLabel(layer, String(items[page.placements[l].index].order_no || ""), page.placements[l], pageHeight);
+            }
         }
         drawFrame(layer, 0, pageHeight, frameWidth, pageHeight);
 

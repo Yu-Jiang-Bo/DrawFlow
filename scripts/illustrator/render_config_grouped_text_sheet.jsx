@@ -184,11 +184,18 @@
         var style = styleConfig(config, item.style_option);
         var styleWidth = styleWidthPt(style);
         var styleHeight = styleHeightPt(style);
-        var doc = app.documents.add(documentColorSpace(colorMode), styleWidth, styleHeight);
+        var labelHeight = mmToPt(Number(layout.single_graphic_label_height_mm || layout.label_height_mm || 6));
+        var labelGap = mmToPt(Number(layout.single_graphic_label_gap_mm || layout.label_gap_mm || 0.8));
+        var labelWidth = mmToPt(Number(layout.single_graphic_label_width_mm || layout.label_width_mm || 42));
+        var docWidth = Math.max(styleWidth, labelWidth);
+        var docHeight = styleHeight + labelGap + labelHeight;
+        var effectLeft = (docWidth - styleWidth) / 2;
+        var doc = app.documents.add(documentColorSpace(colorMode), docWidth, docHeight);
         var layer = doc.layers[0];
         layer.name = "SINGLE_GRAPHIC_EXACT";
-        drawWhiteBackground(layer, 0, styleHeight, styleWidth, styleHeight);
-        var rect = [padding, styleHeight - padding, styleWidth - padding, padding];
+        drawWhiteBackground(layer, 0, docHeight, docWidth, docHeight);
+        drawSingleGraphicOrderLabel(layer, String(item.order_no || ""), 0, docHeight, docWidth, styleHeight + labelGap);
+        var rect = [effectLeft + padding, styleHeight - padding, effectLeft + styleWidth - padding, padding];
         if (String(item.render_kind || "text") === "design_asset") {
             var designItem = renderDesignAssetItem(layer, item, rect, fontStyles[String(item.font_option || "")]);
             try { designItem.name = String(item.order_no || "") + "_" + String(item.quantity_index || 1) + "_DESIGN"; } catch (eD0) {}
@@ -210,10 +217,15 @@
             single_graphic_exact: true,
             order_no: String(item.order_no || ""),
             style_option: String(item.style_option || ""),
-            width_pt: styleWidth,
-            height_pt: styleHeight,
-            width_mm: ptToMm(styleWidth),
-            height_mm: ptToMm(styleHeight),
+            label_embedded: true,
+            width_pt: docWidth,
+            height_pt: docHeight,
+            width_mm: ptToMm(docWidth),
+            height_mm: ptToMm(docHeight),
+            effect_width_pt: styleWidth,
+            effect_height_pt: styleHeight,
+            effect_width_mm: ptToMm(styleWidth),
+            effect_height_mm: ptToMm(styleHeight),
             output_png: png.fsName
         });
         try {
@@ -222,6 +234,48 @@
             try { doc.close(); } catch (ignoredCloseError) {}
         }
         return png.fsName;
+    }
+
+    function drawSingleGraphicOrderLabel(layer, text, left, top, right, bottom) {
+        var tf = layer.textFrames.pointText([left, top - mmToPt(0.5)]);
+        tf.contents = String(text || "");
+        try { tf.textRange.contents = String(text || ""); } catch (e0) {}
+        tf.textRange.characterAttributes.size = 8;
+        var color = cmykColor(0, 0, 0, 100);
+        tf.textRange.characterAttributes.fillColor = color;
+        fitLabelTextToRect(tf, [left, top, right, bottom], 5, 8);
+        return tf;
+    }
+
+    function fitLabelTextToRect(tf, rect, minSize, maxSize) {
+        var left = rect[0], top = rect[1], right = rect[2], bottom = rect[3];
+        var maxW = right - left;
+        var maxH = top - bottom;
+        var size = maxSize;
+        tf.textRange.characterAttributes.size = size;
+        for (var i = 0; i < 8; i++) {
+            try { app.redraw(); } catch (e0) {}
+            var b = tf.visibleBounds;
+            var w = Math.abs(b[2] - b[0]);
+            var h = Math.abs(b[1] - b[3]);
+            if (w <= 0 || h <= 0) break;
+            var next = Math.min(Math.max(size * Math.min(maxW / w, maxH / h) * 0.96, minSize), maxSize);
+            if (Math.abs(next - size) < 0.05) break;
+            size = next;
+            tf.textRange.characterAttributes.size = size;
+        }
+        try { app.redraw(); } catch (e1) {}
+        var bounds = tf.visibleBounds;
+        tf.translate((left + right) / 2 - (bounds[0] + bounds[2]) / 2, (top + bottom) / 2 - (bounds[1] + bounds[3]) / 2);
+    }
+
+    function cmykColor(cyan, magenta, yellow, black) {
+        var color = new CMYKColor();
+        color.cyan = cyan;
+        color.magenta = magenta;
+        color.yellow = yellow;
+        color.black = black;
+        return color;
     }
 
     function compactPlacements(metrics, columnCount, gapValue) {
