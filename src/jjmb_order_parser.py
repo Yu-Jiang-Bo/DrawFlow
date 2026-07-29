@@ -17,7 +17,7 @@ FIELD_ALIASES = {
     "template": ["模板"],
     "custom_info": ["定制信息"],
     "department": ["生产部门", "部门", "department", "production department"],
-    "manufacturer": ["厂家", "厂商", "生产厂家", "供应商", "manufacturer", "factory", "supplier"],
+    "manufacturer": ["外协厂家代码", "厂家代码", "厂家", "厂商", "生产厂家", "供应商", "manufacturer", "factory", "supplier"],
     "product_name": ["产品中文名称", "产品名称", "product name", "product_name"],
     "color_option": ["字体颜色", "颜色", "color", "font color", "color_option"],
 }

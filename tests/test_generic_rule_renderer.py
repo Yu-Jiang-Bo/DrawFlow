@@ -293,9 +293,9 @@ def test_generic_task_resolves_case_and_common_chinese_order_columns(tmp_path):
     order_path = tmp_path / "orders.xlsx"
     workbook = Workbook()
     sheet = workbook.active
-    sheet.append(["\u5185\u90e8\u8ba2\u5355\u53f7", "\u6a21\u677f", "\u5b57\u4f53", "Name"])
-    sheet.append(["A-1", template.template_id, "F5", "Alice|Bob"])
-    sheet.append(["B-1", "OTHER_TEMPLATE", "F7", "Skip Me"])
+    sheet.append(["\u5185\u90e8\u8ba2\u5355\u53f7", "\u6a21\u677f", "\u5b57\u4f53", "\u5916\u534f\u5382\u5bb6\u4ee3\u7801", "Name"])
+    sheet.append(["A-1", template.template_id, "F5", "MY-W196", "Alice|Bob"])
+    sheet.append(["B-1", "OTHER_TEMPLATE", "F7", "OTHER", "Skip Me"])
     workbook.save(order_path)
     rules = base_rules()
     rules["order_bindings"] = {"text": "name"}
@@ -306,6 +306,7 @@ def test_generic_task_resolves_case_and_common_chinese_order_columns(tmp_path):
 
     assert len(task["orders"]) == 1
     assert task["orders"][0]["order_no"] == "A-1"
+    assert task["orders"][0]["values"]["manufacturer"] == "MY-W196"
     assert task["orders"][0]["selections"]["font"] == "F5"
     assert task["orders"][0]["variables"] == [
         {"target": "Name", "field": "text", "value": "Alice|Bob", "font_style": {"boldness": 0.5}}

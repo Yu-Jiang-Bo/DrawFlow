@@ -43,7 +43,7 @@ def test_parse_order_items_normalizes_options():
             "生产部门": "H",
             "产品中文名称": "测试产品",
             "字体颜色": "Gold",
-            "厂家": "MY-H",
+            "外协厂家代码": "MY-H",
             "模板": "JJMB202603281027102517",
             "定制信息": "Style Option:Style 2\nFont Option:F3\nPersonalization:Mr Clarke\nMrs Clarke",
         }

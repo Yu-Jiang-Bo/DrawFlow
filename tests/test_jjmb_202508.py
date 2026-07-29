@@ -75,6 +75,29 @@ def test_parse_items_applies_department_color_rule():
     assert items[1].show_frame is False
 
 
+def test_parse_items_reads_external_factory_code_column():
+    rows = [
+        {
+            "内部订单号": "ORDER-W196",
+            "订单明细id": "1",
+            "生产部门": "ZW",
+            "模板": "JJMB202508261001394920",
+            "产品中文名称": "产品",
+            "字体": "F7",
+            "定制信息": "Meg",
+            "字体颜色": "Gold",
+            "设计": "Design 3",
+            "外协厂家代码": "MY-W196",
+        },
+    ]
+
+    items = parse_items(rows)
+
+    assert len(items) == 1
+    assert items[0].department == "ZW"
+    assert items[0].manufacturer == "MY-W196"
+
+
 def test_parse_items_sets_department_labels_and_frames():
     rows = [
         {

@@ -102,6 +102,9 @@ def test_generic_renderer_cycles_configured_name_colors_only():
     assert "settings.rotation_deg" in source
     assert "settings.scale_percent" in source
     assert "settings.offset_x_mm" in source
+    assert 'task.output && task.output.compatibility' in source
+    assert 'String(compatibility || "Illustrator 8").toLowerCase()' in source
+    assert "Compatibility.ILLUSTRATOR15" in source
     assert "options.compatibility = Compatibility.ILLUSTRATOR8;" in source
     assert "options.pdfCompatible = false;" in source
     assert "options.compressed = false;" in source

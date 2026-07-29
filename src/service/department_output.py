@@ -123,6 +123,8 @@ _MANUFACTURER_KEYS = (
     "manufacturer",
     "factory",
     "supplier",
+    "外协厂家代码",
+    "厂家代码",
     "厂家",
     "厂商",
     "生产厂家",
@@ -235,6 +237,9 @@ def resolve_department_output(
     manufacturer_text = str(manufacturer or "").strip()
     normalized_department = normalize_identifier(department_text)
     matched = _find_requirement(requirements, normalized_department)
+    matched = _maybe_override_zw_with_explicit_w_manufacturer(
+        requirements, matched, normalized_department, manufacturer_text
+    )
     if matched is None:
         return DepartmentOutputRule(
             name="DEFAULT",
@@ -471,6 +476,33 @@ def _find_requirement(requirements: list[Any], department: str) -> Mapping[str, 
         if isinstance(requirement, Mapping) and _matches(requirement, department):
             return requirement
     return None
+
+
+def _maybe_override_zw_with_explicit_w_manufacturer(
+    requirements: list[Any],
+    matched: Mapping[str, Any] | None,
+    department: str,
+    manufacturer: str,
+) -> Mapping[str, Any] | None:
+    if not isinstance(matched, Mapping) or str(matched.get("name") or "") != "ZW":
+        return matched
+    for requirement in requirements:
+        if not isinstance(requirement, Mapping):
+            continue
+        if str(requirement.get("name") or "") != "W_CONTAINS":
+            continue
+        if not _matches(requirement, department):
+            return matched
+        normalized_manufacturer = normalize_identifier(manufacturer)
+        for item in requirement.get("manufacturer_rules", []):
+            if not isinstance(item, Mapping):
+                continue
+            candidate = str(item.get("manufacturer") or "")
+            if candidate.lower() == "other":
+                continue
+            if normalize_identifier(candidate) == normalized_manufacturer:
+                return requirement
+    return matched
 
 
 def _matches(requirement: Mapping[str, Any], department: str) -> bool:

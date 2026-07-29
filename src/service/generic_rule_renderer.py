@@ -47,6 +47,8 @@ IMPLICIT_ORDER_BINDINGS = {
         "manufacturer",
         "factory",
         "supplier",
+        "\u5916\u534f\u5382\u5bb6\u4ee3\u7801",
+        "\u5382\u5bb6\u4ee3\u7801",
         "\u5382\u5bb6",
         "\u5382\u5546",
         "\u751f\u4ea7\u5382\u5bb6",

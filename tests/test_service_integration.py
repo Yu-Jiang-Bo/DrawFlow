@@ -790,6 +790,33 @@ def test_service_routes_w_manufacturers_to_cs5_master_ai_pngs_and_standard_ai(tm
     assert w196_record["outputs"]["graphic_files"] == []
     assert "output_bundle" not in w196_record["outputs"]
 
+    write_order_xlsx(order_path, department="ZW")
+    workbook = load_workbook(order_path)
+    sheet = workbook.active
+    sheet["O1"] = "外协厂家代码"
+    sheet["O2"] = "MY-W196"
+    second = [cell.value for cell in sheet[2]]
+    second[8] = "DETAIL2"
+    second[11] = "Amy"
+    sheet.append(second)
+    workbook.save(order_path)
+    zw_w196_record = RenderService(
+        registry=TemplateRegistry(config_path),
+        jobs=JobStore(tmp_path / "jobs-zw-w196-cs5-master"),
+    ).submit(
+        {"template_id": "JJMB202508261001394920", "order_file": str(order_path), "dry_run": True}
+    )
+    zw_component_path = next(
+        Path(path)
+        for path in zw_w196_record["outputs"]["render_task_files"]
+        if "master-component" in str(path)
+    )
+    zw_task = json.loads(zw_component_path.read_text(encoding="utf-8"))
+    assert zw_task["output"]["compatibility"] == "CS5"
+    assert zw_task["groups"][0]["items"][0]["department"] == "ZW"
+    assert all(item["apply_color_to_artwork"] is True for item in zw_task["groups"][0]["items"])
+    assert zw_w196_record["outputs"]["delivery_plan"][0]["path"].endswith("-ZW-MY-W196.ai")
+
     write_order_xlsx(order_path, department="W", manufacturer="OTHER-W")
     standard_record = RenderService(
         registry=TemplateRegistry(config_path),

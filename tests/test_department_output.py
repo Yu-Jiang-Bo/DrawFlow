@@ -51,6 +51,12 @@ def test_w_only_has_two_manufacturer_exceptions():
     assert w196.layout["master_packing"]["force_subitem_order_labels"] is False
     assert w196.layout["master_packing"]["component_suppress_labels"] is True
     assert w196.layout["master_packing"]["keep_order_items_together"] is True
+    zw_w196 = resolve_department_output("ZW", "MY-W196")
+    assert zw_w196.name == "W_CONTAINS"
+    assert zw_w196.file_format == FILE_FORMAT_AI_CS5
+    assert zw_w196.manufacturer == "MY-W196"
+    assert resolve_department_output("PW", "MY-W196").name == "PW_EW"
+    assert resolve_department_output("EW", "MY-W196").name == "PW_EW"
     assert w120.output_format == "png_cmyk"
     assert w120.export_unit == EXPORT_UNIT_PER_GRAPHIC
     assert w120.file_format == FILE_FORMAT_PNG_CMYK

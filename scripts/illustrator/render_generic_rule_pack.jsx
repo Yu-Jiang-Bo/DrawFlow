@@ -22,7 +22,7 @@
             trace(task, "name_columns:before_save");
             applyOutputSettings(sheet, task.output || {}, []);
             writeProgress(task, task.orders.length, task.orders.length, "正在保存 AI 文件");
-            saveAsNativeAI(sheet, sheetOutput);
+            saveAsNativeAI(sheet, sheetOutput, task.output && task.output.compatibility);
             trace(task, "name_columns:after_save");
             outputs.push(sheetOutput.fsName);
         } finally {
@@ -53,7 +53,7 @@
             ensureFolder(output.parent);
             if (output.exists) output.remove();
             writeProgress(task, orderIndex, task.orders.length, "正在保存 AI 文件");
-            saveAsNativeAI(doc, output);
+            saveAsNativeAI(doc, output, task.output && task.output.compatibility);
             outputs.push(output.fsName);
             writeProgress(task, orderIndex + 1, task.orders.length, "已保存 AI 文件");
         } finally {
@@ -1323,9 +1323,14 @@
         );
     }
 
-    function saveAsNativeAI(doc, file) {
+    function saveAsNativeAI(doc, file, compatibility) {
         var options = new IllustratorSaveOptions();
-        options.compatibility = Compatibility.ILLUSTRATOR8;
+        var targetCompatibility = String(compatibility || "Illustrator 8").toLowerCase();
+        if (targetCompatibility === "cs5") {
+            options.compatibility = Compatibility.ILLUSTRATOR15;
+        } else if (targetCompatibility !== "ai_standard" && targetCompatibility !== "standard" && targetCompatibility !== "current") {
+            options.compatibility = Compatibility.ILLUSTRATOR8;
+        }
         options.pdfCompatible = false;
         options.compressed = false;
         doc.saveAs(file, options);

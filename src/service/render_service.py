@@ -1469,7 +1469,10 @@ def _require_department_output_pipeline(rows: Iterable[Mapping[str, Any]], *, pi
     unsupported: List[str] = []
     for row in rows:
         department = _row_value(row, ("department", "production department", "生产部门", "部门"))
-        manufacturer = _row_value(row, ("manufacturer", "factory", "supplier", "厂家", "厂商", "生产厂家", "供应商"))
+        manufacturer = _row_value(
+            row,
+            ("manufacturer", "factory", "supplier", "外协厂家代码", "厂家代码", "厂家", "厂商", "生产厂家", "供应商"),
+        )
         if _output_key_part(department) == "ZW":
             continue
         rule = resolve_department_output(department, manufacturer)
