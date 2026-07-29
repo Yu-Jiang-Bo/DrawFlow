@@ -476,6 +476,7 @@ class RenderService:
                         "type": "compose_color_frames",
                         "output_ai": str(target_path),
                         "master_packing": packing,
+                        "compatibility": rule.ai_compatibility,
                         "show_color_header": True,
                         "show_color_frame_boundary": True,
                         "inputs": component_paths,
@@ -511,6 +512,7 @@ class RenderService:
                         "type": "compose_color_frames",
                         "output_ai": str(target_path),
                         "master_packing": packing,
+                        "compatibility": rule.ai_compatibility,
                         "show_color_header": False,
                         "show_color_frame_boundary": False,
                         "inputs": [{"path": str(component_path), "color_option": ""}],
@@ -592,6 +594,7 @@ class RenderService:
             extra_outputs={
                 "single_order_files": single_order_files,
                 "graphic_files": graphic_files,
+                "summary_files": summary_files,
                 "output_manifest": str(manifest_path),
                 "render_batch_files": [str(path) for path in batch_task_paths],
             },

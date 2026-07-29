@@ -253,6 +253,7 @@ def resolve_department_output(
         output_format = _normalized_output_format(manufacturer_rule)
         file_format = _resolved_file_format(manufacturer_rule, output_format)
         export_unit = _resolved_export_unit(manufacturer_rule, matched)
+        layout = {**layout, **_mapping(manufacturer_rule.get("layout"))}
         fill_actual_color = _resolved_bool(
             manufacturer_rule,
             matched,
@@ -273,12 +274,19 @@ def resolve_department_output(
             export_unit=export_unit,
             file_format=file_format,
             layout=layout,
-            per_order=export_unit == EXPORT_UNIT_PER_ORDER and output_format not in {"png_cmyk", "png_per_item"},
             omit_order_label=_resolved_bool(
                 manufacturer_rule,
                 matched,
                 primary_keys=("omitOrderLabel", "omit_order_label"),
                 fallback=False,
+            ),
+            per_order=_resolved_bool(
+                manufacturer_rule,
+                matched,
+                primary_keys=("perOrder", "per_order", "single_order_ai"),
+                fallback=export_unit == EXPORT_UNIT_PER_ORDER
+                and output_format not in {"png_cmyk", "png_per_item"}
+                and not has_master,
             ),
             apply_color_to_artwork=fill_actual_color,
             fill_actual_color=fill_actual_color,
@@ -288,6 +296,18 @@ def resolve_department_output(
                 matched,
                 primary_keys=("cropMasterHeight", "crop_master_height"),
                 fallback=False,
+            ),
+            master_frame_width_mm=_resolved_float(
+                manufacturer_rule,
+                matched,
+                primary_keys=("master_frame_width_mm", "masterFrameWidthMm"),
+                fallback=_positive_float(layout.get("frame_width_mm"), layout.get("target_width_mm")),
+            ),
+            master_frame_height_mm=_resolved_float(
+                manufacturer_rule,
+                matched,
+                primary_keys=("master_frame_height_mm", "masterFrameHeightMm"),
+                fallback=_positive_float(layout.get("frame_height_mm"), layout.get("target_height_mm")),
             ),
         )
 
@@ -579,6 +599,35 @@ def _resolved_bool(
         if key in defaults:
             return bool(defaults[key])
     return bool(fallback)
+
+
+def _resolved_float(
+    source: Mapping[str, Any],
+    defaults: Mapping[str, Any],
+    *,
+    primary_keys: tuple[str, ...],
+    fallback: float | None,
+) -> float | None:
+    for key in primary_keys:
+        value = _positive_float(source.get(key))
+        if value is not None:
+            return value
+    for key in primary_keys:
+        value = _positive_float(defaults.get(key))
+        if value is not None:
+            return value
+    return fallback
+
+
+def _positive_float(*values: object) -> float | None:
+    for value in values:
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            continue
+        if number > 0:
+            return number
+    return None
 
 
 def _setting(

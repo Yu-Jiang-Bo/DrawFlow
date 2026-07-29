@@ -96,6 +96,7 @@ def test_per_graphic_png_outputs_use_hyphen_numbering_for_duplicate_order_artwor
     ]
     assert requires_graphic_outputs(resolve_department_output("H")) is True
     assert requires_graphic_outputs(resolve_department_output("W", "MY-W120")) is True
+    assert requires_graphic_outputs(resolve_department_output("W", "MY-W196")) is False
 
 
 def test_generic_batch_jsx_executes_child_tasks_by_script_path():
@@ -113,6 +114,8 @@ def test_color_frame_composer_packs_order_segments_by_adaptive_grid():
     assert "source.pageItems.length" not in source
     assert "adaptive_column_grid" in source
     assert "function collectOrderBlocks(source)" in source
+    assert 'task.compatibility || "Illustrator 8"' in source
+    assert "Compatibility.ILLUSTRATOR15" in source
     assert 'item.typename !== "GroupItem"' in source
     assert "if (sourceItem.parent !== sourceLayer) continue;" in source
     assert "collectNamedPackItemsByOrder(sourceItem, byIndex)" in source
@@ -137,6 +140,9 @@ def test_color_frame_composer_packs_order_segments_by_adaptive_grid():
     assert "function namedPackItems(items)" in source
     assert "function sortByStablePackIndex(items)" in source
     assert "function packAdaptiveGrid(" in source
+    assert "var keepOrderItemsTogether = packing.keep_order_items_together === true;" in source
+    assert "function placeWholeOrderIntoColumn(" in source
+    assert "if (keepOrderItemsTogether === true)" in source
     assert "function packColorFrameBlocks(plans, width, gap)" in source
     assert "targetHeight = Math.max(targetHeight, plans[planIndex].frameHeight);" in source
     assert "function findBestColorFrameColumn(columns, frameHeight, targetHeight, gap)" in source
@@ -219,6 +225,72 @@ console.log(JSON.stringify(context.__COLOR_FRAME_PACK_TEST__.result));
     assert [plan["frameY"] for plan in result["columns"][1]["plans"]] == [0, 34]
 
 
+def test_color_frame_adaptive_grid_can_keep_order_items_in_one_column(tmp_path):
+    if not shutil.which("node"):
+        pytest.skip("node is required to execute the Illustrator packing helper")
+
+    source = Path("scripts/illustrator/compose_color_frames.jsx").read_text(encoding="utf-8")
+    source = "\n".join(
+        line
+        for index, line in enumerate(source.splitlines())
+        if not (index == 0 and line.startswith("#target"))
+    )
+    script = f"""
+const vm = require('vm');
+const context = {{
+  __COLOR_FRAME_PACK_TEST__: {{
+    mode: 'adaptive_grid',
+    width: 240,
+    verticalGap: 6,
+    columnGap: 4,
+    labelHeight: 10,
+    labelGap: 2,
+    cellPadding: 0,
+    slackRows: 0,
+    colorOption: 'W196',
+    keepOrderItemsTogether: true,
+    orders: [
+      {{
+        sourceIndex: 0,
+        orderNo: 'ORDER1',
+        items: [
+          {{ sourceChildIndex: 0, width: 40, height: 20 }},
+          {{ sourceChildIndex: 1, width: 40, height: 20 }}
+        ]
+      }},
+      {{
+        sourceIndex: 1,
+        orderNo: 'ORDER2',
+        items: [
+          {{ sourceChildIndex: 0, width: 40, height: 20 }}
+        ]
+      }}
+    ]
+  }}
+}};
+vm.runInNewContext({json.dumps(source)}, context);
+console.log(JSON.stringify(context.__COLOR_FRAME_PACK_TEST__.result));
+"""
+    script_path = tmp_path / "run-compose-adaptive-grid-pack-test.js"
+    script_path.write_text(script, encoding="utf-8")
+
+    completed = subprocess.run(
+        ["node", str(script_path)],
+        check=True,
+        text=True,
+        capture_output=True,
+    )
+    result = json.loads(completed.stdout)
+    order1_fragments = [
+        placement for placement in result["placements"] if placement["orderNo"] == "ORDER1"
+    ]
+
+    assert len(order1_fragments) == 1
+    assert order1_fragments[0]["itemCount"] == 2
+    assert order1_fragments[0]["split"] is False
+    assert [item["sourceChildIndex"] for item in order1_fragments[0]["items"]] == [0, 1]
+
+
 def test_master_packing_config_uses_department_width_and_configured_spacing():
     packing = master_packing_config(resolve_department_output("K"))
 
@@ -236,6 +308,7 @@ def test_master_packing_config_uses_department_width_and_configured_spacing():
         "cell_width_padding_mm": 0.8,
         "component_suppress_labels": True,
         "force_subitem_order_labels": False,
+        "keep_order_items_together": False,
         "allow_rotation": False,
     }
 

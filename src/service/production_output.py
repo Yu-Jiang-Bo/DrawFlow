@@ -122,8 +122,11 @@ def delivery_path(
     if rule.is_png:
         width = int(rule.master_frame_width_mm or rule.layout.get("frame_width_mm") or 580)
         candidate = f"{base_name}-{department}-{width}mm-master.png"
-    elif rule.file_format == FILE_FORMAT_AI_CS5:
+    elif rule.file_format == FILE_FORMAT_AI_CS5 and rule.per_order:
         candidate = f"{base_name}-{department}-{_key_part(batch.scope) or 'ORDER'}-MY-W196.ai"
+    elif rule.file_format == FILE_FORMAT_AI_CS5:
+        manufacturer = safe_filename(rule.manufacturer) or "MY-W196"
+        candidate = f"{base_name}-{department}-{manufacturer}.ai"
     elif rule.per_order:
         candidate = f"{base_name}-{department}-{_key_part(batch.scope) or 'ORDER'}.ai"
     else:
@@ -218,6 +221,7 @@ def master_packing_config(rule: DepartmentOutputRule) -> dict[str, Any] | None:
         "cell_width_padding_mm": _positive_float(options.get("cell_width_padding_mm"), 0.8) or 0.8,
         "component_suppress_labels": bool(options.get("component_suppress_labels", True)),
         "force_subitem_order_labels": bool(options.get("force_subitem_order_labels", False)),
+        "keep_order_items_together": bool(options.get("keep_order_items_together", False)),
         "allow_rotation": bool(options.get("allow_rotation", False)),
     }
 

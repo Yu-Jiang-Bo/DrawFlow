@@ -230,15 +230,37 @@
         "manufacturer_rules": [
           {
             "manufacturer": "MY-W196",
-            "output_format": "png_cmyk",
-            "exportUnit": "PER_GRAPHIC",
-            "fileFormat": "PNG_CMYK",
+            "output_format": "cs5_ai",
+            "exportUnit": "PER_ORDER",
+            "fileFormat": "AI_CS5",
             "fillActualColor": true,
-            "hasMaster": false,
-            "cropMasterHeight": false,
-            "dpi": 300,
-            "artwork_content": "每张效果图单独输出 CMYK PNG；PNG 顶部标注订单号；字体颜色填充到名字本身",
-            "file_naming": "单图为订单号.png；同一订单多图为订单号-1.png、订单号-2.png"
+            "single_order_ai": false,
+            "hasMaster": true,
+            "cropMasterHeight": true,
+            "master_frame_width_mm": 580,
+            "artwork_content": "订单号 + 效果图；同订单多图竖向共用顶部订单号；字体颜色填充到名字本身",
+            "save_strategy": "直接汇总为一个 Illustrator CS5 兼容 AI 文件",
+            "layout": {
+              "master_packing": {
+                "algorithm": "adaptive_column_grid",
+                "target_width_mm": 580,
+                "item_gap_mm": 2,
+                "column_gap_mm": 4,
+                "outer_margin_mm": 2,
+                "header_height_mm": 0,
+                "color_gap_mm": 0,
+                "label_height_mm": 6,
+                "label_gap_mm": 0.8,
+                "label_font_size_pt": 8,
+                "cell_width_padding_mm": 0.8,
+                "row_slack": 1,
+                "component_suppress_labels": true,
+                "force_subitem_order_labels": false,
+                "keep_order_items_together": true,
+                "show_color_frame_boundary": false,
+                "allow_rotation": false
+              }
+            }
           },
           {
             "manufacturer": "MY-W120",

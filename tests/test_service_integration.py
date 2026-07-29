@@ -736,24 +736,58 @@ def test_202603_h_master_planner_paginates_without_scaling():
     assert sum(page["items"] for page in plan["pages"]) == 300
 
 
-def test_service_routes_w_manufacturers_to_graphic_pngs_and_standard_ai(tmp_path):
+def test_service_routes_w_manufacturers_to_cs5_master_ai_pngs_and_standard_ai(tmp_path):
     config_path = tmp_path / "templates.json"
     order_path = tmp_path / "orders.xlsx"
     write_templates_config(config_path)
     write_order_xlsx(order_path, department="W", manufacturer="MY-W196")
+    workbook = load_workbook(order_path)
+    sheet = workbook.active
+    second = [cell.value for cell in sheet[2]]
+    second[8] = "DETAIL2"
+    second[11] = "Amy"
+    second[12] = "Black"
+    sheet.append(second)
+    workbook.save(order_path)
 
     w196_record = RenderService(
         registry=TemplateRegistry(config_path),
-        jobs=JobStore(tmp_path / "jobs-w196-png"),
+        jobs=JobStore(tmp_path / "jobs-w196-cs5-master"),
     ).submit(
         {"template_id": "JJMB202508261001394920", "order_file": str(order_path), "dry_run": True}
     )
-    w196_task = json.loads(Path(w196_record["outputs"]["render_task_files"][0]).read_text(encoding="utf-8"))
-    assert w196_task["output"]["format"] == "png"
+    component_path = next(
+        Path(path)
+        for path in w196_record["outputs"]["render_task_files"]
+        if "master-component" in str(path)
+    )
+    compose_path = next(
+        Path(path)
+        for path in w196_record["outputs"]["render_task_files"]
+        if "compose-color-frames" in str(path)
+    )
+    w196_task = json.loads(component_path.read_text(encoding="utf-8"))
+    compose_task = json.loads(compose_path.read_text(encoding="utf-8"))
+    assert w196_task["output"]["format"] == "ai"
+    assert w196_task["output"]["compatibility"] == "CS5"
     assert w196_task["output"]["color_mode"] == "CMYK"
-    assert w196_task["groups"][0]["items"][0]["apply_color_to_artwork"] is True
-    assert w196_task["groups"][0]["items"][0]["production_label_lines"] == ["ORDER1"]
-    assert [item["name"] for item in w196_record["outputs"]["graphic_files"]] == ["ORDER1.png"]
+    assert w196_task["layout"]["pack_order_blocks"] is True
+    assert w196_task["layout"]["suppress_labels"] is True
+    assert w196_task["layout"]["master_packing"]["force_subitem_order_labels"] is False
+    assert w196_task["layout"]["master_packing"]["component_suppress_labels"] is True
+    assert len(w196_task["groups"]) == 1
+    assert len(w196_task["groups"][0]["items"]) == 2
+    assert [item["color_option"] for item in w196_task["groups"][0]["items"]] == ["Gold", "Black"]
+    assert all(item["apply_color_to_artwork"] is True for item in w196_task["groups"][0]["items"])
+    assert all(item["production_label_lines"] == ["ORDER1"] for item in w196_task["groups"][0]["items"])
+    assert compose_task["compatibility"] == "CS5"
+    assert compose_task["show_color_header"] is False
+    assert compose_task["master_packing"]["keep_order_items_together"] is True
+    assert [item["name"] for item in w196_record["outputs"]["summary_files"]] == [
+        "JJMB202508261001394920-3col-W-MY-W196.ai"
+    ]
+    assert w196_record["outputs"]["delivery_plan"][0]["path"].endswith("-W-MY-W196.ai")
+    assert w196_record["outputs"]["graphic_files"] == []
     assert "output_bundle" not in w196_record["outputs"]
 
     write_order_xlsx(order_path, department="W", manufacturer="OTHER-W")

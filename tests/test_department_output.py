@@ -6,6 +6,8 @@ from src.service.department_output import (
     ANNOTATION_COLOR,
     ANNOTATION_PRODUCT_NAME,
     EXPORT_UNIT_PER_GRAPHIC,
+    EXPORT_UNIT_PER_ORDER,
+    FILE_FORMAT_AI_CS5,
     FILE_FORMAT_AI_STANDARD,
     FILE_FORMAT_PNG_CMYK,
     build_department_deliveries,
@@ -38,12 +40,17 @@ def test_w_only_has_two_manufacturer_exceptions():
     w120 = resolve_department_output("W", "my w120")
     other = resolve_department_output("W", "OTHER-FACTORY")
 
-    assert w196.output_format == "png_cmyk"
-    assert w196.export_unit == EXPORT_UNIT_PER_GRAPHIC
-    assert w196.file_format == FILE_FORMAT_PNG_CMYK
-    assert w196.extension == ".png"
+    assert w196.output_format == "cs5_ai"
+    assert w196.export_unit == EXPORT_UNIT_PER_ORDER
+    assert w196.file_format == FILE_FORMAT_AI_CS5
+    assert w196.extension == ".ai"
+    assert w196.ai_compatibility == "CS5"
+    assert w196.per_order is False
     assert w196.fill_actual_color is True
-    assert w196.has_master is False
+    assert w196.has_master is True
+    assert w196.layout["master_packing"]["force_subitem_order_labels"] is False
+    assert w196.layout["master_packing"]["component_suppress_labels"] is True
+    assert w196.layout["master_packing"]["keep_order_items_together"] is True
     assert w120.output_format == "png_cmyk"
     assert w120.export_unit == EXPORT_UNIT_PER_GRAPHIC
     assert w120.file_format == FILE_FORMAT_PNG_CMYK

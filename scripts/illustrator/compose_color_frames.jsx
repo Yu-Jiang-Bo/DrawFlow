@@ -2,11 +2,26 @@
 
 (function () {
     if (typeof __COLOR_FRAME_PACK_TEST__ !== "undefined") {
-        __COLOR_FRAME_PACK_TEST__.result = packColorFrameBlocks(
-            __COLOR_FRAME_PACK_TEST__.plans,
-            __COLOR_FRAME_PACK_TEST__.width,
-            __COLOR_FRAME_PACK_TEST__.gap
-        );
+        if (String(__COLOR_FRAME_PACK_TEST__.mode || "") === "adaptive_grid") {
+            __COLOR_FRAME_PACK_TEST__.result = packAdaptiveGrid(
+                __COLOR_FRAME_PACK_TEST__.orders,
+                __COLOR_FRAME_PACK_TEST__.width,
+                __COLOR_FRAME_PACK_TEST__.verticalGap,
+                __COLOR_FRAME_PACK_TEST__.columnGap,
+                __COLOR_FRAME_PACK_TEST__.labelHeight,
+                __COLOR_FRAME_PACK_TEST__.labelGap,
+                __COLOR_FRAME_PACK_TEST__.cellPadding,
+                __COLOR_FRAME_PACK_TEST__.slackRows,
+                __COLOR_FRAME_PACK_TEST__.colorOption,
+                __COLOR_FRAME_PACK_TEST__.keepOrderItemsTogether === true
+            );
+        } else {
+            __COLOR_FRAME_PACK_TEST__.result = packColorFrameBlocks(
+                __COLOR_FRAME_PACK_TEST__.plans,
+                __COLOR_FRAME_PACK_TEST__.width,
+                __COLOR_FRAME_PACK_TEST__.gap
+            );
+        }
         return;
     }
 
@@ -34,6 +49,7 @@
     var rowSlack = Math.max(Math.floor(Number(packing.row_slack || 1)), 0);
     var labelFontSize = Number(packing.label_font_size_pt || 6);
     var colorHeaderFontSize = Number(packing.color_header_font_size_pt || 7);
+    var keepOrderItemsTogether = packing.keep_order_items_together === true;
     var showColorHeader = task.show_color_header === true;
     var headerHeight = showColorHeader ? configuredHeaderHeight : 0;
     var colorFrameBoundary = showColorHeader || task.show_color_frame_boundary === true || packing.show_color_frame_boundary === true;
@@ -54,7 +70,8 @@
             labelGap,
             cellWidthPadding,
             rowSlack,
-            String(input.color_option || "")
+            String(input.color_option || ""),
+            keepOrderItemsTogether
         );
         var frameHeight = outerMargin + headerHeight + packed.height + outerMargin;
         var plan = {
@@ -96,7 +113,12 @@
     ensureFolder(output.parent);
     if (output.exists) output.remove();
     var options = new IllustratorSaveOptions();
-    options.compatibility = Compatibility.ILLUSTRATOR8;
+    var targetCompatibility = String(task.compatibility || "Illustrator 8").toLowerCase();
+    if (targetCompatibility === "cs5") {
+        options.compatibility = Compatibility.ILLUSTRATOR15;
+    } else if (targetCompatibility !== "ai_standard" && targetCompatibility !== "standard" && targetCompatibility !== "current") {
+        options.compatibility = Compatibility.ILLUSTRATOR8;
+    }
     options.pdfCompatible = false;
     options.compressed = false;
     doc.saveAs(output, options);
@@ -260,7 +282,7 @@
         }
     }
 
-    function packAdaptiveGrid(orders, width, verticalGap, minColumnGap, segmentLabelHeight, segmentLabelGap, cellPadding, slackRows, colorOption) {
+    function packAdaptiveGrid(orders, width, verticalGap, minColumnGap, segmentLabelHeight, segmentLabelGap, cellPadding, slackRows, colorOption, keepOrderItemsTogether) {
         var subItemCount = 0;
         var cellWidth = 0;
         for (var orderIndex = 0; orderIndex < orders.length; orderIndex++) {
@@ -290,12 +312,18 @@
         }
 
         var sortedOrders = orders.slice(0);
-        sortedOrders.sort(function (left, right) {
-            if (right.items.length !== left.items.length) return right.items.length - left.items.length;
-            return left.sourceIndex - right.sourceIndex;
-        });
+        if (keepOrderItemsTogether !== true) {
+            sortedOrders.sort(function (left, right) {
+                if (right.items.length !== left.items.length) return right.items.length - left.items.length;
+                return left.sourceIndex - right.sourceIndex;
+            });
+        }
         for (var sortedIndex = 0; sortedIndex < sortedOrders.length; sortedIndex++) {
-            placeOrderIntoColumns(sortedOrders[sortedIndex], columns, idealRows, hardRows);
+            if (keepOrderItemsTogether === true) {
+                placeWholeOrderIntoColumn(sortedOrders[sortedIndex], columns, idealRows, hardRows);
+            } else {
+                placeOrderIntoColumns(sortedOrders[sortedIndex], columns, idealRows, hardRows);
+            }
         }
 
         var slotPitch = maxColumns > 1 ? (width - cellWidth) / (maxColumns - 1) : 0;
@@ -325,6 +353,11 @@
             cellWidth: cellWidth,
             slotPitch: slotPitch
         };
+    }
+
+    function placeWholeOrderIntoColumn(order, columns, idealRows, hardRows) {
+        var startColumn = findBestColumnWindow(columns, 1, idealRows, hardRows);
+        addSegment(columns[startColumn], order, 0, order.items.length);
     }
 
     function placeOrderIntoColumns(order, columns, idealRows, hardRows) {
