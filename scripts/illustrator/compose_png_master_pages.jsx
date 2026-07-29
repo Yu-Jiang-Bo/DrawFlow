@@ -145,6 +145,11 @@
             placed.top = placement.labelEmbedded
                 ? pageHeight - placement.y
                 : pageHeight - placement.y - labelHeight - labelGap;
+            try {
+                placed.embed();
+            } catch (embedError) {
+                throw new Error("Failed to embed PNG in H master AI: " + String(item.png_path) + " - " + embedError);
+            }
         }
         for (var l = 0; l < page.placements.length; l++) {
             if (!page.placements[l].labelEmbedded) {

@@ -108,6 +108,15 @@ def test_generic_batch_jsx_executes_child_tasks_by_script_path():
     assert "$.evalFile(File(scriptPath))" in source
 
 
+def test_h_png_master_composer_embeds_placed_pngs():
+    source = Path("scripts/illustrator/compose_png_master_pages.jsx").read_text(encoding="utf-8")
+
+    assert "var placed = layer.placedItems.add();" in source
+    assert "placed.file = File(String(item.png_path));" in source
+    assert "placed.embed();" in source
+    assert "Failed to embed PNG in H master AI" in source
+
+
 def test_color_frame_composer_packs_order_segments_by_adaptive_grid():
     source = Path("scripts/illustrator/compose_color_frames.jsx").read_text(encoding="utf-8")
 
