@@ -149,6 +149,17 @@ def test_generic_renderer_javascript_parses_in_node(tmp_path):
     assert result.returncode == 0, result.stderr
 
 
+def test_grouped_single_graphic_initializes_fit_stats_before_early_return():
+    source = GROUPED_SCRIPT.read_text(encoding="utf-8")
+
+    fit_stats_index = source.index("var fitStats = { count: 0, maxDeltaPt: 0, f11HeartFitCount: 0 };")
+    single_graphic_index = source.index("if (layout.single_graphic_exact === true")
+    record_fit_index = source.index("function recordFitDelta")
+
+    assert fit_stats_index < single_graphic_index
+    assert single_graphic_index < record_fit_index
+
+
 def test_exact_box_geometry_uses_independent_scaling_and_corner_alignment():
     node = shutil.which("node")
     if not node:

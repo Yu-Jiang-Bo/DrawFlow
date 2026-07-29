@@ -30,6 +30,7 @@
     var padding = mmToPt(numberOrDefault(task.fit && task.fit.padding_mm, 1));
     var minFontSize = numberOrDefault(task.fit && task.fit.min_font_size_pt, 4);
     var maxFontSize = numberOrDefault(task.fit && task.fit.max_font_size_pt, 300);
+    var fitStats = { count: 0, maxDeltaPt: 0, f11HeartFitCount: 0 };
 
     if (layout.single_graphic_exact === true && String(exportConfig.format || "").toLowerCase() === "png") {
         return renderSingleGraphicExactPng(task, config);
@@ -52,7 +53,6 @@
     if (maxColumnHeight > 0) maxColumnHeight -= gap;
     var docWidth = margin * 2 + columns * maxGroupWidth + (columns - 1) * gap;
     var docHeight = margin * 2 + maxColumnHeight;
-    var fitStats = { count: 0, maxDeltaPt: 0, f11HeartFitCount: 0 };
     var debugPayload = {
         groups: task.groups.length,
         columns: columns,
