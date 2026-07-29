@@ -218,12 +218,27 @@ def _positive_layout_int(value: Any, *, default: int) -> int:
 
 def _layout_mode(order: Mapping[str, Any], layout: Mapping[str, Any]) -> Dict[str, Any]:
     base = _mapping(layout.get("default"))
-    department = str(_mapping(order.get("values")).get("department") or "").strip().casefold()
-    overrides = _mapping(layout.get("department_overrides"))
-    for name, override in overrides.items():
-        if str(name).strip().casefold() == department and isinstance(override, Mapping):
-            return {**base, **dict(override)}
-    return base
+    values = _mapping(order.get("values"))
+    mode = dict(base)
+    department = str(values.get("department") or "").strip()
+    department_key = _layout_override_key(department)
+    for name, override in _mapping(layout.get("department_overrides")).items():
+        override_key = _layout_override_key(name)
+        if override_key and override_key == department_key and isinstance(override, Mapping):
+            mode.update(dict(override))
+            break
+    manufacturer = str(values.get("manufacturer") or "").strip()
+    manufacturer_key = _layout_override_key(manufacturer)
+    for name, override in _mapping(layout.get("manufacturer_overrides")).items():
+        override_key = _layout_override_key(name)
+        if override_key and override_key == manufacturer_key and isinstance(override, Mapping):
+            mode.update(dict(override))
+            break
+    return mode
+
+
+def _layout_override_key(value: Any) -> str:
+    return "".join(char for char in str(value or "").casefold() if char.isalnum())
 
 
 def _layout_group_value(order: Mapping[str, Any], field: Any) -> str:
@@ -418,6 +433,7 @@ def _optional_order_binding_fields(rules: Mapping[str, Any]) -> set[str]:
     layout = _mapping(rules.get("render_layout"))
     modes = [_mapping(layout.get("default"))]
     modes.extend(_mapping(mode) for mode in _mapping(layout.get("department_overrides")).values())
+    modes.extend(_mapping(mode) for mode in _mapping(layout.get("manufacturer_overrides")).values())
     return {
         _normalize_column(mode.get("footer_field"))
         for mode in modes

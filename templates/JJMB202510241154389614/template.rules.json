@@ -173,6 +173,17 @@
             "color"
           ]
         }
+      },
+      "manufacturer_overrides": {
+        "MY-W196": {
+          "group_by": [
+            "row"
+          ],
+          "header_fields": [
+            "order_no"
+          ],
+          "footer_field": "year"
+        }
       }
     },
     "name_color_cycle": {},
