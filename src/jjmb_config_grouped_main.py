@@ -83,6 +83,10 @@ def build_grouped_task(
                         text_parts=text_parts,
                         design_asset=mapped_asset,
                         design_group=design_group,
+                        department=order_item.department,
+                        manufacturer=order_item.manufacturer,
+                        product_name=order_item.product_name,
+                        color_option=order_item.color_option,
                     )
                 )
             continue
@@ -97,6 +101,10 @@ def build_grouped_task(
                     font_option=order_item.font_option,
                     style_option=order_item.style_option,
                     quantity_index=index,
+                    department=order_item.department,
+                    manufacturer=order_item.manufacturer,
+                    product_name=order_item.product_name,
+                    color_option=order_item.color_option,
                 )
             )
     groups = [

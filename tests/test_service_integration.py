@@ -19,11 +19,13 @@ from src.service.render_service import (
     _design_font_options,
     _merge_202508_template_config,
     _missing_202508_font_configs,
+    _plan_png_master_pages,
 )
 from src.service.template_registry import TemplateRegistry
 from src.service.template_inspector import TemplateInspector
 from src.service.template_onboarding import TemplateOnboardingStore
 from src.service.template_publication import TemplatePublicationService
+from src.service.department_output import resolve_department_output
 
 
 def test_http_server_uses_exclusive_windows_port(monkeypatch):
@@ -584,35 +586,148 @@ def test_service_routes_d_department_to_single_orders_without_master(tmp_path):
     assert item["production_label_lines"] == ["ORDER1", "平纹方形皮质首饰盒"]
 
 
-def test_non_202508_pipeline_rejects_department_controlled_order(tmp_path):
+def test_202603_pipeline_rejects_non_graphic_department_output(tmp_path):
     config_path = tmp_path / "templates.json"
     order_path = tmp_path / "orders.xlsx"
     write_templates_config(config_path)
     config = json.loads(config_path.read_text(encoding="utf-8"))
     structure_path = tmp_path / "template.config.json"
     structure_path.write_text(
-        json.dumps({"font_options": {"F7": {}}, "slots": [{"name": "text_fit_box"}]}),
+        json.dumps(
+            {
+                "font_options": {"F7": {"type": "text"}},
+                "style_options": {"Style1": {"width_mm": 80, "height_mm": 50}},
+                "slots": [{"name": "text_fit_box"}],
+            }
+        ),
         encoding="utf-8",
     )
     config["templates"][0].update(
         {
             "pipeline": "jjmb_202603_grouped",
             "template_type": "pure_text",
+            "template_id": "JJMB202603281027102517",
             "template_config": str(structure_path),
         }
     )
     config_path.write_text(json.dumps(config, ensure_ascii=False), encoding="utf-8")
-    write_order_xlsx(order_path, department="H")
+    write_order_xlsx(order_path, template_id="JJMB202603281027102517", department="T")
+    workbook = load_workbook(order_path)
+    workbook.active["N1"] = "Style Option"
+    workbook.active["N2"] = "Style 1"
+    workbook.save(order_path)
 
     record = RenderService(
         registry=TemplateRegistry(config_path),
         jobs=JobStore(tmp_path / "jobs"),
     ).submit(
-        {"template_id": "JJMB202508261001394920", "order_file": str(order_path), "dry_run": True}
+        {"template_id": "JJMB202603281027102517", "order_file": str(order_path), "dry_run": True}
     )
 
     assert record["status"] == "failed"
     assert record["error_code"] == "department_output_pipeline_unsupported"
+
+
+def test_service_routes_202603_h_to_exact_pngs_and_paginated_master_ai(tmp_path):
+    config_path = tmp_path / "templates.json"
+    order_path = tmp_path / "orders.xlsx"
+    structure_path = tmp_path / "template.config.json"
+    rules_path = tmp_path / "template.rules.json"
+    write_templates_config(config_path)
+    structure_path.write_text(
+        json.dumps(
+            {
+                "font_options": {
+                    "F7": {
+                        "type": "text",
+                        "font_name": "TestFont",
+                        "font_size_pt": 48,
+                    }
+                },
+                "style_options": {
+                    "Style1": {
+                        "width_pt": 226.7716535433,
+                        "height_pt": 141.7322834646,
+                        "width_mm": 80,
+                        "height_mm": 50,
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    rules_path.write_text(json.dumps({"font_options": ["F7"], "style_options": ["Style1"]}), encoding="utf-8")
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    config["templates"][0].update(
+        {
+            "template_id": "JJMB202603281027102517",
+            "template_type": "pure_text_style",
+            "pipeline": "jjmb_202603_grouped",
+            "template_config": str(structure_path),
+            "template_rules_config": str(rules_path),
+        }
+    )
+    config_path.write_text(json.dumps(config, ensure_ascii=False), encoding="utf-8")
+    write_order_xlsx(order_path, template_id="JJMB202603281027102517", department="H")
+    workbook = load_workbook(order_path)
+    workbook.active["N1"] = "Style Option"
+    workbook.active["N2"] = "Style 1"
+    workbook.save(order_path)
+
+    record = RenderService(
+        registry=TemplateRegistry(config_path),
+        jobs=JobStore(tmp_path / "jobs-h-202603"),
+    ).submit(
+        {"template_id": "JJMB202603281027102517", "order_file": str(order_path), "dry_run": True}
+    )
+
+    assert record["status"] == "completed", record.get("error")
+    assert [item["name"] for item in record["outputs"]["graphic_files"]] == ["ORDER1.png"]
+    assert record["outputs"]["summary_files"][0]["name"].endswith("-H-580mm-master.ai")
+    assert [member["arcname"] for member in record["outputs"]["bundle_plan"]] == [
+        "single-graphics/ORDER1.png",
+        f"summary/{record['outputs']['summary_files'][0]['name']}",
+        "manifest.json",
+    ]
+    single_task_path = next(
+        Path(path)
+        for path in record["outputs"]["render_task_files"]
+        if "single-graphic-tasks" in str(path)
+    )
+    compose_task_path = next(
+        Path(path)
+        for path in record["outputs"]["render_task_files"]
+        if "compose-png-master-pages" in str(path)
+    )
+    single_task = json.loads(single_task_path.read_text(encoding="utf-8"))
+    compose_task = json.loads(compose_task_path.read_text(encoding="utf-8"))
+    assert single_task["layout"]["single_graphic_exact"] is True
+    assert single_task["export"]["format"] == "png"
+    assert single_task["export"]["png_path"].endswith("ORDER1.png")
+    assert "fixed_canvas_mm" not in single_task["export"]
+    assert compose_task["type"] == "compose_png_master_pages"
+    assert compose_task["frame_width_mm"] == 580.0
+    assert compose_task["frame_height_mm"] == 2000.0
+    assert compose_task["items"][0]["width_mm"] == 80.0
+    assert compose_task["items"][0]["height_mm"] == 50.0
+    render_batches = [str(path) for path in record["outputs"]["render_batch_files"]]
+    assert any("single-render-batches" in path for path in render_batches)
+    assert any("compose-render-batches" in path for path in render_batches)
+
+
+def test_202603_h_master_planner_paginates_without_scaling():
+    rule = resolve_department_output("H")
+    items = [
+        {"order_no": f"ORDER-{index:03d}", "width_mm": 80, "height_mm": 50}
+        for index in range(300)
+    ]
+
+    plan = _plan_png_master_pages(items, rule)
+
+    assert plan["scale"] == 1
+    assert len(plan["pages"]) > 1
+    assert all(page["artboard_height_mm"] <= 2000 for page in plan["pages"])
+    assert sum(page["items"] for page in plan["pages"]) == 300
 
 
 def test_service_routes_w_manufacturers_to_cs5_standard_ai_and_graphic_pngs(tmp_path):

@@ -153,6 +153,10 @@ class TemplateTextSheetItem:
     design_instances: List[List[str]] | None = None
     design_asset: str = ""
     design_group: str = ""
+    department: str = ""
+    manufacturer: str = ""
+    product_name: str = ""
+    color_option: str = ""
 
     def to_json_dict(self) -> Dict[str, Any]:
         if not self.text:
@@ -169,6 +173,10 @@ class TemplateTextSheetItem:
             "font_option": self.font_option,
             "style_option": self.style_option,
             "render_kind": self.render_kind,
+            "department": self.department,
+            "manufacturer": self.manufacturer,
+            "product_name": self.product_name,
+            "color_option": self.color_option,
         }
         if self.text_parts:
             payload["text_parts"] = list(self.text_parts)

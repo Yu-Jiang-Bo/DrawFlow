@@ -31,6 +31,10 @@
     var minFontSize = numberOrDefault(task.fit && task.fit.min_font_size_pt, 4);
     var maxFontSize = numberOrDefault(task.fit && task.fit.max_font_size_pt, 300);
 
+    if (layout.single_graphic_exact === true && String(exportConfig.format || "").toLowerCase() === "png") {
+        return renderSingleGraphicExactPng(task, config);
+    }
+
     var groupMetrics = [];
     var maxGroupWidth = 0;
     for (var g = 0; g < task.groups.length; g++) {
@@ -170,6 +174,54 @@
         color.blue = 153;
         rect.strokeColor = color;
         return rect;
+    }
+
+    function renderSingleGraphicExactPng(task, config) {
+        if (!task.groups || task.groups.length !== 1 || !task.groups[0].items || task.groups[0].items.length !== 1) {
+            throw new Error("single_graphic_exact requires exactly one item");
+        }
+        var item = task.groups[0].items[0];
+        var style = styleConfig(config, item.style_option);
+        var styleWidth = styleWidthPt(style);
+        var styleHeight = styleHeightPt(style);
+        var doc = app.documents.add(documentColorSpace(colorMode), styleWidth, styleHeight);
+        var layer = doc.layers[0];
+        layer.name = "SINGLE_GRAPHIC_EXACT";
+        drawWhiteBackground(layer, 0, styleHeight, styleWidth, styleHeight);
+        var rect = [padding, styleHeight - padding, styleWidth - padding, padding];
+        if (String(item.render_kind || "text") === "design_asset") {
+            var designItem = renderDesignAssetItem(layer, item, rect, fontStyles[String(item.font_option || "")]);
+            try { designItem.name = String(item.order_no || "") + "_" + String(item.quantity_index || 1) + "_DESIGN"; } catch (eD0) {}
+        } else {
+            var font = fontConfig(config, item.font_option);
+            var tf = layer.textFrames.add();
+            tf.contents = String(item.text || "");
+            applyFontConfig(tf, font);
+            applyColor(tf, String(item.color_option || task.style && task.style.color_name || "black"));
+            applyFontBoldness(tf, fontStyles[String(item.font_option || "")]);
+            var outline = renderOutlinedTextToRect(tf, rect, minFontSize, maxFontSize);
+            try { outline.name = String(item.order_no || "") + "_" + String(item.quantity_index || 1) + "_TEXT"; } catch (e0) {}
+        }
+        var pngPath = String(exportConfig.png_path || "");
+        if (!pngPath) throw new Error("single_graphic_exact missing export.png_path");
+        var png = File(pngPath);
+        exportPng(doc, png, Number(exportConfig.dpi || 300));
+        writeDebug(task, {
+            single_graphic_exact: true,
+            order_no: String(item.order_no || ""),
+            style_option: String(item.style_option || ""),
+            width_pt: styleWidth,
+            height_pt: styleHeight,
+            width_mm: ptToMm(styleWidth),
+            height_mm: ptToMm(styleHeight),
+            output_png: png.fsName
+        });
+        try {
+            doc.close(SaveOptions.DONOTSAVECHANGES);
+        } catch (closeError) {
+            try { doc.close(); } catch (ignoredCloseError) {}
+        }
+        return png.fsName;
     }
 
     function compactPlacements(metrics, columnCount, gapValue) {
@@ -825,6 +877,36 @@
         doc.saveAs(file, opts);
     }
 
+    function exportPng(doc, file, dpi) {
+        ensureFolder(file.parent);
+        if (file.exists) file.remove();
+        var opts = new ExportOptionsPNG24();
+        var scale = Math.max(1, Number(dpi || 300) / 72 * 100 + 0.02);
+        opts.antiAliasing = true;
+        opts.artBoardClipping = true;
+        opts.transparency = false;
+        opts.horizontalScale = scale;
+        opts.verticalScale = scale;
+        doc.exportFile(file, ExportType.PNG24, opts);
+    }
+
+    function drawWhiteBackground(layer, left, top, width, height) {
+        var rect = layer.pathItems.rectangle(top, left, width, height);
+        rect.filled = true;
+        rect.stroked = false;
+        if (colorMode === "CMYK") {
+            var cmyk = new CMYKColor();
+            cmyk.cyan = 0; cmyk.magenta = 0; cmyk.yellow = 0; cmyk.black = 0;
+            rect.fillColor = cmyk;
+        } else {
+            var rgb = new RGBColor();
+            rgb.red = 255; rgb.green = 255; rgb.blue = 255;
+            rect.fillColor = rgb;
+        }
+        try { rect.zOrder(ZOrderMethod.SENDTOBACK); } catch (e0) {}
+        return rect;
+    }
+
     function ensureFolder(folder) {
         if (!folder.exists) {
             ensureFolder(folder.parent);
@@ -834,6 +916,10 @@
 
     function mmToPt(mm) {
         return mm * 72 / 25.4;
+    }
+
+    function ptToMm(pt) {
+        return pt * 25.4 / 72;
     }
 
     function outputColorMode(value) {

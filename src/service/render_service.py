@@ -610,16 +610,203 @@ class RenderService:
             },
         }
 
+    def _run_202603_graphic_output_pipeline(
+        self,
+        record: Dict[str, Any],
+        template: TemplateDefinition,
+        output_ai: Path,
+        template_config: Path,
+        structure_config: Mapping[str, Any],
+        task: Any,
+        units: Sequence[ProductionOutputUnit],
+        output_settings: Mapping[str, Any],
+    ) -> Dict[str, Any]:
+        request = record["request"]
+        job_dir = Path(record["job_dir"]).resolve()
+        batches = partition_output_units(units)
+        total_work = sum(len(batch.units) for batch in batches if requires_graphic_outputs(batch.rule))
+        total_work += sum(len(batch.units) for batch in batches if requires_master_output(batch.rule))
+        self._update_progress(record, 0, total_work, "生成 H 部门 PNG 和分页总图")
+
+        render_script = Path(__file__).resolve().parents[2] / "scripts" / "illustrator" / "render_config_grouped_text_sheet.jsx"
+        compose_script = Path(__file__).resolve().parents[2] / "scripts" / "illustrator" / "compose_png_master_pages.jsx"
+        delivery_files: List[Dict[str, str]] = []
+        graphic_files: List[Dict[str, str]] = []
+        summary_files: List[Dict[str, str]] = []
+        bundle_members: List[Dict[str, str]] = []
+        task_files: List[str] = []
+        single_render_entries: List[Dict[str, str]] = []
+        compose_render_entries: List[Dict[str, str]] = []
+        png_outputs: List[tuple[Path, int, str]] = []
+        occupied_names: set[str] = set()
+        graphic_names: set[str] = set()
+        rendered_items = 0
+
+        for index, batch in enumerate(batches, start=1):
+            rule = batch.rule
+            if not requires_graphic_outputs(rule):
+                raise RenderServiceError(
+                    f"202603 模板暂不支持 {rule.department or rule.name} 部门的非 PNG 单图交付",
+                    code="department_output_pipeline_unsupported",
+                )
+            dpi = int(rule.layout.get("dpi") or 300)
+            color_mode = str(rule.layout.get("color_mode") or "CMYK")
+            graphic_specs = graphic_outputs(batch.units, job_dir / "single-graphics", graphic_names)
+            compose_items: List[Dict[str, Any]] = []
+            for graphic_index, spec in enumerate(graphic_specs, start=1):
+                item = spec.unit.payload
+                single_task = _build_202603_single_graphic_task(
+                    template_config=template_config,
+                    output_ai=spec.output_path.with_suffix(".ai"),
+                    output_png=spec.output_path,
+                    item=item,
+                    font_styles=task.font_styles,
+                    color_mode=color_mode,
+                    dpi=dpi,
+                    outline_text=bool(output_settings["outline_text"]),
+                    pathfinder_merge=bool(output_settings["pathfinder_merge"]),
+                    progress=self._task_progress(
+                        record,
+                        rendered_items + graphic_index - 1,
+                        total_work,
+                        "生成 H 单图 PNG 文件",
+                    ),
+                )
+                task_file = job_dir / "single-graphic-tasks" / f"render-task-{index:03d}-{graphic_index:04d}.json"
+                self._write_json(task_file, single_task)
+                task_files.append(str(task_file))
+                single_render_entries.append({"script": str(render_script), "task_file": str(task_file)})
+                png_outputs.append((spec.output_path, dpi, color_mode))
+                graphic_files.append(
+                    {
+                        "path": str(spec.output_path),
+                        "name": spec.output_path.name,
+                        "arcname": spec.arcname,
+                        "format": rule.file_format,
+                        "department": rule.department,
+                        "order_no": spec.unit.order_no,
+                        "detail_id": spec.unit.detail_id,
+                    }
+                )
+                delivery_files.append(
+                    {
+                        "path": str(spec.output_path),
+                        "name": spec.output_path.name,
+                        "format": rule.file_format,
+                        "department": rule.department,
+                    }
+                )
+                bundle_members.append({"path": str(spec.output_path), "arcname": spec.arcname})
+                compose_items.append(_202603_master_png_item(spec.unit, spec.output_path, structure_config))
+            rendered_items += len(batch.units)
+            if request["dry_run"]:
+                self._update_progress(record, rendered_items, total_work, "生成 H 单图 PNG 文件")
+
+            if not requires_master_output(rule):
+                continue
+
+            target_path = _202603_master_ai_path(job_dir, output_ai.stem, batch.rule, occupied_names)
+            master_plan = _plan_png_master_pages(compose_items, rule)
+            master_paths = _numbered_master_paths(target_path, len(master_plan["pages"]))
+            compose_task = {
+                "type": "compose_png_master_pages",
+                "output_ai": str(target_path),
+                "items": compose_items,
+                "frame_width_mm": master_plan["frame_width_mm"],
+                "frame_height_mm": master_plan["frame_height_limit_mm"],
+                "margin_mm": master_plan["margin_mm"],
+                "column_gap_mm": master_plan["column_gap_mm"],
+                "row_gap_mm": master_plan["row_gap_mm"],
+                "label_height_mm": master_plan["label_height_mm"],
+                "label_width_mm": master_plan["label_width_mm"],
+                "label_gap_mm": master_plan["label_gap_mm"],
+                "debug": {"report_path": str(target_path.with_suffix(".debug.json"))},
+            }
+            compose_file = job_dir / f"compose-png-master-pages-{index:03d}.json"
+            self._write_json(compose_file, compose_task)
+            task_files.append(str(compose_file))
+            compose_render_entries.append({"script": str(compose_script), "task_file": str(compose_file)})
+            for page_index, page_path in enumerate(master_paths, start=1):
+                page_info = master_plan["pages"][page_index - 1]
+                summary_record = {
+                    "path": str(page_path),
+                    "name": page_path.name,
+                    "format": "ai8",
+                    "department": rule.department,
+                    "page": str(page_index),
+                    "artboard_height_mm": str(page_info["artboard_height_mm"]),
+                }
+                summary_files.append(summary_record)
+                delivery_files.append(summary_record)
+                bundle_members.append({"path": str(page_path), "arcname": f"summary/{page_path.name}"})
+            rendered_items += len(batch.units)
+            if request["dry_run"]:
+                self._update_progress(record, rendered_items, total_work, "生成 H 分页总图 AI 文件")
+
+        single_batch_task_paths = write_batch_task_files(
+            job_dir / "single-render-batches",
+            single_render_entries,
+            chunk_size=JJMB_202508_RENDER_CHUNK_SIZE,
+        )
+        compose_batch_task_paths = write_batch_task_files(
+            job_dir / "compose-render-batches",
+            compose_render_entries,
+            chunk_size=JJMB_202508_RENDER_CHUNK_SIZE,
+        )
+        batch_task_paths = single_batch_task_paths + compose_batch_task_paths
+        if not request["dry_run"]:
+            _render_production_batch_files(single_batch_task_paths, request["visible"])
+            for png_path, dpi, color_mode in png_outputs:
+                finalize_cmyk_png(png_path, dpi=dpi, color_mode=color_mode)
+            _render_production_batch_files(compose_batch_task_paths, request["visible"])
+
+        manifest_path = job_dir / "manifest.json"
+        self._write_json(
+            manifest_path,
+            {
+                "job_id": record["job_id"],
+                "template_id": template.template_id,
+                "graphic_files": graphic_files,
+                "summary_files": summary_files,
+                "file_count": len(graphic_files) + len(summary_files),
+            },
+        )
+        if bundle_members:
+            bundle_members.append({"path": str(manifest_path), "arcname": "manifest.json"})
+        outputs = build_delivery_outputs(
+            delivery_files,
+            task_files,
+            request["dry_run"],
+            bundle_members=bundle_members,
+            bundle_dir=job_dir,
+            bundle_name=f"{record['job_id']}_output_bundle.zip",
+            extra_outputs={
+                "graphic_files": graphic_files,
+                "summary_files": summary_files,
+                "output_manifest": str(manifest_path),
+                "render_batch_files": [str(path) for path in batch_task_paths],
+            },
+        )
+        if batch_task_paths:
+            outputs["render_task"] = str(batch_task_paths[0])
+        self._update_progress(record, total_work, total_work, "完成收尾")
+        return {
+            "outputs": outputs,
+            "stats": {
+                "items": sum(len(group.items) for group in task.groups),
+                "deliveries": len(delivery_files),
+                "graphic_files": len(graphic_files),
+                "summary_files": len(summary_files),
+                "dry_run": request["dry_run"],
+            },
+        }
+
     def _run_202603_grouped(self, record: Dict[str, Any], template: TemplateDefinition) -> Dict[str, Any]:
         request = record["request"]
         job_dir = Path(record["job_dir"]).resolve()
         order_file = Path(request["order_file"])
         output_ai = self._output_ai_path(job_dir, request, template)
         template_config = template.template_config or (job_dir / "template.config.json")
-        _require_department_output_pipeline(
-            read_202508_rows(Path(request["order_file"]), sheet_name=request["sheet_name"] or None),
-            pipeline="jjmb_202603_grouped",
-        )
 
         if not template_config.exists():
             if request["dry_run"]:
@@ -649,6 +836,31 @@ class RenderService:
             ),
             font_styles=_font_styles(template_rules),
         )
+        department_units = _202603_output_units(task.groups)
+        department_controlled = [unit for unit in department_units if unit.rule and unit.rule.name != "DEFAULT"]
+        if department_controlled:
+            unsupported = [
+                unit.department or (unit.rule.name if unit.rule else "")
+                for unit in department_units
+                if not unit.rule or not requires_graphic_outputs(unit.rule)
+            ]
+            if unsupported:
+                raise RenderServiceError(
+                    f"Pipeline jjmb_202603_grouped does not support department-specific delivery: {', '.join(dict.fromkeys(unsupported))}",
+                    code="department_output_pipeline_unsupported",
+                )
+            result = self._run_202603_graphic_output_pipeline(
+                record,
+                template,
+                output_ai,
+                template_config,
+                structure_config,
+                task,
+                department_units,
+                output_settings,
+            )
+            result["outputs"]["template_config"] = str(template_config)
+            return result
         task_file = job_dir / "render-task.json"
         task_payload = task.to_json_dict()
         total_items = sum(len(group.items) for group in task.groups)
@@ -950,6 +1162,245 @@ def _202509_output_units(groups: Iterable[Any]) -> list[ProductionOutputUnit]:
             )
         )
     return result
+
+
+def _202603_output_units(groups: Iterable[Any]) -> list[ProductionOutputUnit]:
+    """Adapt 202603 per-graphic text items to the shared delivery contract."""
+
+    result: list[ProductionOutputUnit] = []
+    for group in groups:
+        for item in getattr(group, "items", []):
+            rule = resolve_department_output(
+                getattr(item, "department", ""),
+                getattr(item, "manufacturer", ""),
+            )
+            result.append(
+                ProductionOutputUnit(
+                    order_no=str(getattr(item, "order_no", "") or ""),
+                    detail_id=str(getattr(item, "detail_id", "") or ""),
+                    department=str(getattr(item, "department", "") or ""),
+                    manufacturer=str(getattr(item, "manufacturer", "") or ""),
+                    product_name=str(getattr(item, "product_name", "") or ""),
+                    color_option=str(getattr(item, "color_option", "") or ""),
+                    quantity_index=int(getattr(item, "quantity_index", 1) or 1),
+                    identity=str(getattr(item, "text", "") or ""),
+                    payload=item,
+                    rule=rule,
+                )
+            )
+    return result
+
+
+def _build_202603_single_graphic_task(
+    *,
+    template_config: Path,
+    output_ai: Path,
+    output_png: Path,
+    item: Any,
+    font_styles: Mapping[str, Mapping[str, float]],
+    color_mode: str,
+    dpi: int,
+    outline_text: bool,
+    pathfinder_merge: bool,
+    progress: Mapping[str, Any],
+) -> Dict[str, Any]:
+    item_payload = item.to_json_dict() if hasattr(item, "to_json_dict") else dict(item)
+    return {
+        "type": "config_grouped_text_sheet",
+        "template_config": str(template_config),
+        "output_ai": str(output_ai),
+        "groups": [{"order_no": str(item_payload.get("order_no") or ""), "items": [item_payload]}],
+        "font_styles": {
+            str(option).strip(): dict(style)
+            for option, style in (font_styles or {}).items()
+            if str(option).strip() and isinstance(style, Mapping)
+        },
+        "style": {"color_name": str(item_payload.get("color_option") or "black")},
+        "layout": {
+            "columns": 1,
+            "single_graphic_exact": True,
+            "show_style_boxes": False,
+        },
+        "fit": {
+            "padding_mm": 0.0,
+            "min_font_size_pt": 4.0,
+            "max_font_size_pt": 300.0,
+        },
+        "export": {
+            "format": "png",
+            "compatibility": "Illustrator 8",
+            "color_mode": color_mode,
+            "outline_text": bool(outline_text),
+            "pathfinder_merge": bool(pathfinder_merge),
+            "png_path": str(output_png),
+            "dpi": int(dpi),
+        },
+        "debug": {
+            "report_path": str(output_png.with_suffix(".debug.json")),
+        },
+        "progress": dict(progress),
+    }
+
+
+def _202603_master_png_item(
+    unit: ProductionOutputUnit,
+    png_path: Path,
+    structure_config: Mapping[str, Any],
+) -> Dict[str, Any]:
+    item = unit.payload
+    style_option = str(getattr(item, "style_option", "") or "")
+    dimensions = _202603_style_dimensions(structure_config, style_option)
+    return {
+        "order_no": unit.order_no,
+        "detail_id": unit.detail_id,
+        "sequence": int(unit.quantity_index or 1),
+        "style_option": style_option,
+        "png_path": str(png_path),
+        **dimensions,
+    }
+
+
+def _202603_style_dimensions(structure_config: Mapping[str, Any], style_option: str) -> Dict[str, float]:
+    styles = structure_config.get("style_options") if isinstance(structure_config, Mapping) else None
+    style = styles.get(style_option) if isinstance(styles, Mapping) else None
+    if not isinstance(style, Mapping):
+        raise RenderServiceError(f"202603 模板缺少尺寸框配置: {style_option}", code="template_style_config_missing")
+    bounds = style.get("bounds_pt")
+    width_pt = _positive_number(style.get("width_pt"))
+    height_pt = _positive_number(style.get("height_pt"))
+    if (width_pt is None or height_pt is None) and isinstance(bounds, (list, tuple)) and len(bounds) == 4:
+        try:
+            width_pt = abs(float(bounds[2]) - float(bounds[0])) if width_pt is None else width_pt
+            height_pt = abs(float(bounds[1]) - float(bounds[3])) if height_pt is None else height_pt
+        except (TypeError, ValueError):
+            pass
+    width_mm = _positive_number(style.get("width_mm"))
+    height_mm = _positive_number(style.get("height_mm"))
+    if width_pt is None and width_mm is not None:
+        width_pt = width_mm * 72.0 / 25.4
+    if height_pt is None and height_mm is not None:
+        height_pt = height_mm * 72.0 / 25.4
+    if width_pt is None or height_pt is None or width_pt <= 0 or height_pt <= 0:
+        raise RenderServiceError(f"202603 模板尺寸框无效: {style_option}", code="template_style_config_invalid")
+    width_mm = width_mm if width_mm is not None else width_pt * 25.4 / 72.0
+    height_mm = height_mm if height_mm is not None else height_pt * 25.4 / 72.0
+    return {
+        "width_pt": float(width_pt),
+        "height_pt": float(height_pt),
+        "width_mm": float(width_mm),
+        "height_mm": float(height_mm),
+    }
+
+
+def _plan_png_master_pages(items: Sequence[Mapping[str, Any]], rule: DepartmentOutputRule) -> Dict[str, Any]:
+    layout = rule.layout if isinstance(rule.layout, Mapping) else {}
+    frame_width = float(rule.master_frame_width_mm or layout.get("frame_width_mm") or 580)
+    frame_height = float(rule.master_frame_height_mm or layout.get("frame_height_mm") or 2000)
+    margin = float(layout.get("margin_mm") or 2)
+    column_gap = float(layout.get("column_gap_mm") or layout.get("item_gap_mm") or 2)
+    row_gap = float(layout.get("row_gap_mm") or layout.get("item_gap_mm") or 2)
+    label_height = float(layout.get("label_height_mm") or 6)
+    label_width = float(layout.get("label_width_mm") or 42)
+    label_gap = float(layout.get("label_gap_mm") or 0.8)
+
+    rows: list[dict[str, Any]] = []
+    row_items = 0
+    row_height = 0.0
+    x = margin
+    max_right = frame_width - margin
+    for item in items:
+        image_width = float(item.get("width_mm") or 0)
+        image_height = float(item.get("height_mm") or 0)
+        block_width = max(image_width, label_width)
+        block_height = label_height + label_gap + image_height
+        if row_items and x + block_width > max_right + 0.01:
+            rows.append({"items": row_items, "height": row_height})
+            row_items = 0
+            row_height = 0.0
+            x = margin
+        row_items += 1
+        row_height = max(row_height, block_height)
+        x += block_width + column_gap
+    if row_items:
+        rows.append({"items": row_items, "height": row_height})
+
+    pages: list[dict[str, Any]] = []
+    page_rows = 0
+    page_items = 0
+    cursor_y = margin
+    overflow = False
+    for row in rows:
+        would_use = cursor_y + row["height"] + margin
+        if page_rows and would_use > frame_height + 0.01:
+            pages.append(
+                {
+                    "items": page_items,
+                    "rows": page_rows,
+                    "artboard_height_mm": max(min(cursor_y - row_gap + margin, frame_height), margin * 2 + 1),
+                    "overflow": False,
+                }
+            )
+            page_rows = 0
+            page_items = 0
+            cursor_y = margin
+        row_overflow = cursor_y + row["height"] + margin > frame_height + 0.01
+        overflow = overflow or row_overflow
+        page_rows += 1
+        page_items += int(row["items"])
+        cursor_y += row["height"] + row_gap
+    pages.append(
+        {
+            "items": page_items,
+            "rows": page_rows,
+            "artboard_height_mm": max(min(cursor_y - row_gap + margin, frame_height), margin * 2 + 1),
+            "overflow": overflow,
+        }
+    )
+    return {
+        "frame_width_mm": frame_width,
+        "frame_height_limit_mm": frame_height,
+        "margin_mm": margin,
+        "column_gap_mm": column_gap,
+        "row_gap_mm": row_gap,
+        "label_height_mm": label_height,
+        "label_width_mm": label_width,
+        "label_gap_mm": label_gap,
+        "scale": 1,
+        "pages": pages,
+    }
+
+
+def _numbered_master_paths(path: Path, page_count: int) -> list[Path]:
+    if page_count <= 1:
+        return [path]
+    return [path.with_name(f"{path.stem}-{index:02d}{path.suffix}") for index in range(1, page_count + 1)]
+
+
+def _202603_master_ai_path(
+    job_dir: Path,
+    base_name: str,
+    rule: DepartmentOutputRule,
+    occupied_names: set[str],
+) -> Path:
+    department = _output_key_part(rule.department) or rule.name
+    width = int(rule.master_frame_width_mm or rule.layout.get("frame_width_mm") or 580)
+    candidate = f"{base_name}-{department}-{width}mm-master.ai"
+    path = Path(candidate)
+    unique = candidate
+    sequence = 1
+    while unique.casefold() in occupied_names:
+        sequence += 1
+        unique = f"{path.stem}-{sequence}{path.suffix}"
+    occupied_names.add(unique.casefold())
+    return job_dir / unique
+
+
+def _positive_number(value: object) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if number > 0 else None
 
 
 def _validate_curved_department_outputs(groups: Iterable[Any]) -> None:

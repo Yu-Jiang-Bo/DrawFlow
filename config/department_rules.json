@@ -201,7 +201,7 @@
         "master_frame_width_mm": 580,
         "master_frame_height_mm": 2000,
         "artwork_content": "订单号 + 效果图；字体颜色填充到名字本身",
-        "save_strategy": "每张效果图单独保存 CMYK PNG，并额外生成一张 580mm 宽、按内容高度裁剪的总 PNG",
+        "save_strategy": "每张效果图单独保存 CMYK PNG，并额外生成 580mm 宽、最高 2000mm 的分页总 AI；每页按实际内容高度裁剪，不缩放尺寸框和效果图比例",
         "layout": {
           "frame_width_mm": 580,
           "frame_height_mm": 2000,
@@ -209,7 +209,16 @@
           "dpi": 300,
           "color_mode": "CMYK",
           "keep_same_order_together": true,
-          "crop_master_height": true
+          "crop_master_height": true,
+          "paginate_master": true,
+          "scale": 1,
+          "allow_master_scaling": false,
+          "margin_mm": 2,
+          "item_gap_mm": 2,
+          "row_gap_mm": 2,
+          "label_height_mm": 6,
+          "label_width_mm": 42,
+          "label_gap_mm": 0.8
         }
       },
       {
