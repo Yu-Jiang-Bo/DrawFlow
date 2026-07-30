@@ -274,7 +274,7 @@ def write_batch_task_files(
     for index, start in enumerate(range(0, len(entry_list), size), start=1):
         path = job_dir / ("render-batch.json" if index == 1 else f"render-batch-chunk-{index:03d}.json")
         path.write_text(
-            json.dumps({"type": RENDER_BATCH_TASK_TYPE, "tasks": entry_list[start : start + size]}, ensure_ascii=False, indent=2),
+            json.dumps({"type": RENDER_BATCH_TASK_TYPE, "tasks": entry_list[start : start + size]}, ensure_ascii=True, indent=2),
             encoding="utf-8",
         )
         paths.append(path)

@@ -186,7 +186,7 @@ class RenderService:
         total_orders = len(task["orders"])
         self._update_progress(record, 0, total_orders, "生成 AI 文件")
         task["progress"] = self._task_progress(record, 0, total_orders, "生成 AI 文件")
-        self._write_json(task_file, task)
+        self._write_render_task_json(task_file, task)
         if not request["dry_run"]:
             script = Path(__file__).resolve().parents[2] / "scripts" / "illustrator" / "render_generic_rule_pack.jsx"
             bridge = IllustratorBridge(visible=request["visible"], fresh_instance=True, reuse_instance=True)
@@ -205,7 +205,7 @@ class RenderService:
                         else job_dir / f"render-task-{chunk_index:03d}.json"
                     )
                     if chunk_file != task_file:
-                        self._write_json(chunk_file, chunk_task)
+                        self._write_render_task_json(chunk_file, chunk_task)
                     _render_generic_chunk(bridge, script, chunk_file)
                     rendered_orders += len(orders)
                     self._update_progress(record, rendered_orders, total_orders, "生成 AI 文件")
@@ -302,7 +302,7 @@ class RenderService:
         task["output_ai_files"] = [str(spec.output_path.with_suffix(".ai")) for spec in graphics]
         task["output_png_files"] = [str(spec.output_path) for spec in graphics]
         task["progress"] = self._task_progress(record, 0, total_orders, "生成单图 PNG 文件")
-        self._write_json(task_file, task)
+        self._write_render_task_json(task_file, task)
         task_files = [str(task_file)]
 
         if not request["dry_run"]:
@@ -321,7 +321,7 @@ class RenderService:
                         else job_dir / f"render-task-{chunk_index:03d}.json"
                     )
                     if chunk_file != task_file:
-                        self._write_json(chunk_file, chunk_task)
+                        self._write_render_task_json(chunk_file, chunk_task)
                         task_files.append(str(chunk_file))
                     _render_generic_chunk(bridge, script, chunk_file)
                     rendered_orders += len(orders)
@@ -527,7 +527,7 @@ class RenderService:
                         ),
                     )
                     task_file = job_dir / "single-graphic-tasks" / f"render-task-{index:03d}-{graphic_index:04d}.json"
-                    self._write_json(task_file, task)
+                    self._write_render_task_json(task_file, task)
                     task_files.append(str(task_file))
                     render_entries.append({"script": str(render_script), "task_file": str(task_file)})
                     png_outputs.append((spec.output_path, dpi, color_mode))
@@ -574,7 +574,7 @@ class RenderService:
                         ),
                     )
                     task_file = job_dir / "single-order-tasks" / f"render-task-{index:03d}-{single_index:04d}.json"
-                    self._write_json(task_file, task)
+                    self._write_render_task_json(task_file, task)
                     task_files.append(str(task_file))
                     render_entries.append({"script": str(render_script), "task_file": str(task_file)})
                     detail_ids = [unit.detail_id for unit in spec.units if unit.detail_id]
@@ -627,7 +627,7 @@ class RenderService:
                     )
                     _mark_composition_intermediate(task)
                     task_file = job_dir / f"render-task-{index:03d}-color-{frame_index:03d}.json"
-                    self._write_json(task_file, task)
+                    self._write_render_task_json(task_file, task)
                     task_files.append(str(task_file))
                     render_entries.append({"script": str(render_script), "task_file": str(task_file)})
                     component_paths.append(
@@ -644,7 +644,7 @@ class RenderService:
                     summary_item_count += len(frame.units)
 
                 compose_file = job_dir / f"compose-color-frames-{index:03d}.json"
-                self._write_json(
+                self._write_render_task_json(
                     compose_file,
                     {
                         "type": "compose_color_frames",
@@ -676,11 +676,11 @@ class RenderService:
                 )
                 _mark_composition_intermediate(task)
                 task_file = job_dir / f"render-task-{index:03d}-master-component.json"
-                self._write_json(task_file, task)
+                self._write_render_task_json(task_file, task)
                 task_files.append(str(task_file))
                 render_entries.append({"script": str(render_script), "task_file": str(task_file)})
                 compose_file = job_dir / f"compose-color-frames-{index:03d}.json"
-                self._write_json(
+                self._write_render_task_json(
                     compose_file,
                     {
                         "type": "compose_color_frames",
@@ -710,7 +710,7 @@ class RenderService:
                     crop_master_height=requires_cropped_master(rule),
                 )
                 task_file = job_dir / f"render-task-{index:03d}.json"
-                self._write_json(task_file, task)
+                self._write_render_task_json(task_file, task)
                 task_files.append(str(task_file))
                 render_entries.append({"script": str(render_script), "task_file": str(task_file)})
                 if rule.is_png:
@@ -848,7 +848,7 @@ class RenderService:
                     ),
                 )
                 task_file = job_dir / "single-graphic-tasks" / f"render-task-{index:03d}-{graphic_index:04d}.json"
-                self._write_json(task_file, single_task)
+                self._write_render_task_json(task_file, single_task)
                 task_files.append(str(task_file))
                 single_render_entries.append({"script": str(render_script), "task_file": str(task_file)})
                 png_outputs.append((spec.output_path, dpi, color_mode))
@@ -899,7 +899,7 @@ class RenderService:
                 "debug": {"report_path": str(target_path.with_suffix(".debug.json"))},
             }
             compose_file = job_dir / f"compose-png-master-pages-{index:03d}.json"
-            self._write_json(compose_file, compose_task)
+            self._write_render_task_json(compose_file, compose_task)
             task_files.append(str(compose_file))
             compose_render_entries.append({"script": str(compose_script), "task_file": str(compose_file)})
             for page_index, page_path in enumerate(master_paths, start=1):
@@ -1042,7 +1042,7 @@ class RenderService:
         total_items = sum(len(group.items) for group in task.groups)
         self._update_progress(record, 0, total_items, "生成 AI 文件")
         task_payload["progress"] = self._task_progress(record, 0, total_items, "生成 AI 文件")
-        self._write_json(task_file, task_payload)
+        self._write_render_task_json(task_file, task_payload)
 
         if not request["dry_run"]:
             script = Path(__file__).resolve().parents[2] / "scripts" / "illustrator" / "render_config_grouped_text_sheet.jsx"
@@ -1160,7 +1160,7 @@ class RenderService:
         }
         task_file = job_dir / "render-task.json"
         task = build_202509_curved_task(output_ai=output_ai, **task_options)
-        self._write_json(task_file, task)
+        self._write_render_task_json(task_file, task)
 
         if not request["dry_run"]:
             script = Path(__file__).resolve().parents[2] / "scripts" / "illustrator" / "render_202509_curved.jsx"
@@ -1196,7 +1196,7 @@ class RenderService:
         visible: bool,
     ) -> None:
         task_file = output_json.parent / "export-template-config-task.json"
-        self._write_json(
+        self._write_render_task_json(
             task_file,
             {
                 "input_ai": str(template_ai),
@@ -1236,9 +1236,12 @@ class RenderService:
                 code="template_font_config_missing",
             )
 
-    def _write_json(self, path: Path, payload: Any) -> None:
+    def _write_json(self, path: Path, payload: Any, *, ensure_ascii: bool = False) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        path.write_text(json.dumps(payload, ensure_ascii=ensure_ascii, indent=2), encoding="utf-8")
+
+    def _write_render_task_json(self, path: Path, payload: Any) -> None:
+        self._write_json(path, payload, ensure_ascii=True)
 
     def _progress_path(self, record: Mapping[str, Any]) -> Path:
         return Path(str(record["job_dir"])).resolve() / "progress.json"

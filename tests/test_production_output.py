@@ -33,6 +33,19 @@ def make_unit(*, order_no: str, department: str, color: str = "Gold", detail_id:
     )
 
 
+def test_batch_task_json_is_ascii_escaped_for_illustrator(tmp_path):
+    paths = write_batch_task_files(
+        tmp_path,
+        [{"script": str(tmp_path / "渲染.jsx"), "task_file": str(tmp_path / "任务.json")}],
+        chunk_size=1,
+    )
+
+    text = paths[0].read_text(encoding="utf-8")
+    assert "渲染" not in text
+    assert "任务" not in text
+    assert json.loads(text)["tasks"][0]["script"].endswith("渲染.jsx")
+
+
 def test_shared_planner_partitions_by_department_rule_and_color():
     batches = partition_output_units(
         [

@@ -71,6 +71,29 @@ def test_bridge_does_not_retry_after_first_success(tmp_path, monkeypatch):
     assert app.calls == 1
 
 
+def test_bridge_bootstrap_uses_safe_jsx_error_text(tmp_path, monkeypatch):
+    class App:
+        Visible = False
+
+        def __init__(self):
+            self.bootstrap = ""
+
+        def DoJavaScript(self, bootstrap):
+            self.bootstrap = bootstrap
+            return "done.ai"
+
+    app = App()
+    install_fake_com(monkeypatch, app)
+    script, task = make_inputs(tmp_path)
+
+    IllustratorBridge().render(script, task)
+
+    assert "function safeErrorText(error)" in app.bootstrap
+    assert "report.write(safeErrorText(e));" in app.bootstrap
+    assert "Script: " in app.bootstrap
+    assert "String(e && e.message ? e.message : e)" not in app.bootstrap
+
+
 def test_bridge_retries_remote_server_unavailable_then_explains_recovery(tmp_path, monkeypatch):
     class App:
         Visible = False

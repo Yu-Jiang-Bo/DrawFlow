@@ -1800,6 +1800,27 @@ def test_confirmed_pack_strips_top_level_template_text_output_flags(tmp_path):
     assert saved_pack["output"] == {"color_mode": "RGB"}
 
 
+def test_render_task_json_is_ascii_escaped_for_illustrator(tmp_path):
+    service = object.__new__(RenderService)
+    task_file = tmp_path / "render-task.json"
+
+    service._write_render_task_json(task_file, {"product_name": "单件定制-红色挂件"})
+
+    text = task_file.read_text(encoding="utf-8")
+    assert "单件定制" not in text
+    assert "\\u5355\\u4ef6\\u5b9a\\u5236" in text
+    assert json.loads(text)["product_name"] == "单件定制-红色挂件"
+
+
+def test_non_render_json_keeps_readable_unicode(tmp_path):
+    service = object.__new__(RenderService)
+    job_file = tmp_path / "job.json"
+
+    service._write_json(job_file, {"stage": "生成 AI 文件"})
+
+    assert "生成 AI 文件" in job_file.read_text(encoding="utf-8")
+
+
 def test_shared_output_settings_reject_mixed_department_policies(monkeypatch):
     from dataclasses import replace
 

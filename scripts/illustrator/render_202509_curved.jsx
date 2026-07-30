@@ -5,6 +5,7 @@
     if (!taskPath) throw new Error("CUSTOM_RENDER_TASK missing");
     var task = readJSON(File(taskPath));
     if (task.type !== "jjmb_202509_curved") throw new Error("Unsupported task type: " + task.type);
+    traceStartup("task-read");
 
     try { app.userInteractionLevel = UserInteractionLevel.DONTDISPLAYALERTS; } catch (e0) {}
 
@@ -34,12 +35,13 @@
     var minFontSize = Number(fit.min_font_size_pt || 4);
     var maxFontSize = Number(fit.max_font_size_pt || 80);
     var padding = mmToPt(Number(fit.padding_mm || 0.2));
+    traceStartup("settings-ready");
 
     var groups = task.groups || [];
     if (groups.length === 0) throw new Error("No groups");
     var renderedItems = 0;
     var totalItems = totalTaskItems(groups);
-    writeProgress(task, renderedItems, totalItems, "正在渲染条目");
+    writeProgress(task, renderedItems, totalItems, "rendering items");
     var groupMetrics = [];
     var columnWidth = Math.max(titleWidth, nameWidth, mmToPt(35));
     for (var g = 0; g < groups.length; g++) {
@@ -63,20 +65,27 @@
     var docHeight = margin * 2 + maxColumnHeight;
     docWidth = fixedCanvasWidth(outputConfig, docWidth);
     docHeight = fixedCanvasHeight(outputConfig, docHeight);
+    traceStartup("canvas-ready " + docWidth + "x" + docHeight);
 
+    traceStartup("before-doc-add");
     var doc = app.documents.add(documentColorSpace(colorMode), docWidth, docHeight);
+    traceStartup("after-doc-add");
     var layer = doc.layers[0];
     layer.name = "JJMB202509231236046265_OUTPUT";
     var textItems = [];
     var pathItems = [];
     var nameFrameItems = [];
     var titleFrameItems = [];
+    traceStartup("before-title-template");
     var titleTemplateInfo = loadTitleTemplate(task.title_template || {});
+    traceStartup("after-title-template");
     var titleTemplateStats = { loaded: titleTemplateInfo ? true : false, used: 0, fallback: 0 };
     try { app.activeDocument = doc; } catch (e0) {}
+    traceStartup("document-ready");
 
     try {
         for (var gi = 0; gi < groups.length; gi++) {
+            traceStartup("group " + (gi + 1) + "/" + groups.length);
             var group = groups[gi];
             var beforeGroupItems = packOrderBlocks ? directLayerItems(layer) : null;
             var col = placements.items[gi].column;
@@ -90,6 +99,7 @@
 
             var groupItems = group.items || [];
             for (var ii = 0; ii < groupItems.length; ii++) {
+                traceStartup("item " + (gi + 1) + "/" + groups.length + " " + (ii + 1) + "/" + groupItems.length);
                 var item = groupItems[ii];
                 var beforeItemItems = packOrderBlocks ? directLayerItems(layer) : null;
                 // In packed output, outline this item's label and artwork before grouping it.
@@ -119,7 +129,7 @@
                 }
                 cursorTop = itemBottom - itemGap;
                 renderedItems += 1;
-                writeProgress(task, renderedItems, totalItems, "正在渲染条目");
+                writeProgress(task, renderedItems, totalItems, "rendering items");
             }
             if (packOrderBlocks) {
                 groupNewLayerItems(layer, beforeGroupItems, "ORDER_PACK_BLOCK_" + gi);
@@ -131,31 +141,35 @@
 
     renderProgress.totalTextItems = textItems.length;
     if (outputConfig.outline_text) {
+        traceStartup("outline-start " + textItems.length);
         renderProgress.stage = "outlining";
-        writeProgress(task, renderedItems, totalItems, "正在转曲文字 0/" + textItems.length);
+        writeProgress(task, renderedItems, totalItems, "outlining text 0/" + textItems.length);
         writeRenderDebug("outlining", "", 0);
         outlineText(textItems, true);
-        writeProgress(task, renderedItems, totalItems, "正在清理辅助对象");
+        writeProgress(task, renderedItems, totalItems, "cleaning helper objects");
         removeItems(pathItems);
     }
     if (!keepNameFrames) {
-        writeProgress(task, renderedItems, totalItems, "正在清理姓名辅助框");
+        traceStartup("remove-name-frames " + nameFrameItems.length);
+        writeProgress(task, renderedItems, totalItems, "cleaning name helper frames");
         removeItems(nameFrameItems);
     }
     if (!keepTitleFrames) {
-        writeProgress(task, renderedItems, totalItems, "正在清理标题辅助框");
+        traceStartup("remove-title-frames " + titleFrameItems.length);
+        writeProgress(task, renderedItems, totalItems, "cleaning title helper frames");
         removeItems(titleFrameItems);
     }
 
     var output = File(String(task.output_ai));
     try {
+        traceStartup("save-start");
         renderProgress.stage = "saving";
-        writeProgress(task, renderedItems, totalItems, "正在保存 AI 文件");
+        writeProgress(task, renderedItems, totalItems, "saving AI file");
         writeRenderDebug("saving", "", 0);
         ensureFolder(output.parent);
         if (output.exists) output.remove();
         saveAsAI(doc, output, String(outputConfig.compatibility || "Illustrator 8"));
-        writeProgress(task, renderedItems, totalItems, "正在关闭 Illustrator 文档");
+        writeProgress(task, renderedItems, totalItems, "closing Illustrator document");
         doc.close(SaveOptions.DONOTSAVECHANGES);
         doc = null;
         closeTitleTemplate();
@@ -170,19 +184,19 @@
             var previewExport = File(previewPath.replace(/\.png$/i, ""));
             var savedDoc = null;
             try {
-                writeProgress(task, renderedItems, totalItems, "正在导出预览 PNG");
+                writeProgress(task, renderedItems, totalItems, "exporting preview PNG");
                 savedDoc = app.open(output);
                 exportPreviewPNG(savedDoc, previewExport, Number(outputConfig.preview_dpi || 300));
             } finally {
                 if (savedDoc) {
-                    writeProgress(task, renderedItems, totalItems, "正在关闭预览文档");
+                    writeProgress(task, renderedItems, totalItems, "closing preview document");
                     try { savedDoc.close(SaveOptions.DONOTSAVECHANGES); } catch (e0) {}
                 }
             }
             if (!preview.exists) throw new Error("Preview PNG was not generated.");
         }
         renderProgress.stage = "completed";
-        writeProgress(task, renderedItems, totalItems, "正在完成收尾");
+        writeProgress(task, renderedItems, totalItems, "finishing");
         writeRenderDebug("completed", "", 0);
         closeTitleTemplate();
     } catch (e1) {
@@ -688,7 +702,7 @@
                 renderProgress.processedTextItems = i + 1;
                 if (reportProgress !== false && shouldSettleOutlineBatch(i + 1, items.length)) {
                     settleIllustrator();
-                    writeProgress(task, renderedItems, totalItems, "正在转曲文字 " + (i + 1) + "/" + items.length);
+                    writeProgress(task, renderedItems, totalItems, "outlining text " + (i + 1) + "/" + items.length);
                     writeRenderDebug("outlining", "", 0);
                 }
             } catch (e0) {
@@ -928,8 +942,26 @@
         if (!file.open("r")) throw new Error("Cannot open render task JSON.");
         var text = file.read();
         file.close();
-        if (typeof JSON !== "undefined" && JSON.parse) return JSON.parse(text);
-        throw new Error("JSON.parse is required to read render task JSON.");
+        return parseJSONText(text);
+    }
+
+    function parseJSONText(text) {
+        var jsonError = null;
+        if (typeof JSON !== "undefined" && JSON.parse) {
+            try {
+                return JSON.parse(text);
+            } catch (e0) {
+                jsonError = e0;
+            }
+        }
+        try {
+            return eval("(" + text + ")");
+        } catch (e1) {
+            var message = "Cannot parse render task JSON.";
+            if (jsonError) message += " JSON.parse: " + safeErrorText(jsonError) + ".";
+            message += " eval: " + safeErrorText(e1) + ".";
+            throw new Error(message);
+        }
     }
 
     function writeDebug(task, payload) {
@@ -940,6 +972,18 @@
             file.encoding = "UTF-8";
             if (!file.open("w")) return;
             file.write(toJson(payload));
+            file.close();
+        } catch (e0) {}
+    }
+
+    function traceStartup(message) {
+        try {
+            if (!task.debug || !task.debug.report_path) return;
+            var file = File(String(task.debug.report_path) + ".trace.txt");
+            ensureFolder(file.parent);
+            file.encoding = "UTF-8";
+            if (!file.open("a")) return;
+            file.write(String(new Date().getTime()) + " " + String(message || "") + "\n");
             file.close();
         } catch (e0) {}
     }

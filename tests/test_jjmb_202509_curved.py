@@ -305,6 +305,7 @@ def test_curved_renderer_outlines_and_merges_each_text_item_independently():
     assert 'failRender("Layout failed: " + safeErrorText(error), 0);' in source
     assert 'failRender("Failed to save AI or export preview: " + safeErrorText(e1), 0);' in source
     assert "function drawCurvedTitleFromTemplate(layer, text, fontOption" in source
+    assert all(ord(char) < 128 for char in source)
     assert "TITLE_{font}_TEXT" in source
     assert "sourceText.duplicate(layer, ElementPlacement.PLACEATEND)" in source
     assert "titleTemplateStats.used += 1;" in source
@@ -320,6 +321,9 @@ def test_curved_renderer_outlines_and_merges_each_text_item_independently():
     assert "function clampPageItemToRect(item, rect)" in source
     assert "preview.fsName" not in source
     assert "Cannot open render task JSON." in source
+    assert "function parseJSONText(text)" in source
+    assert "return eval(\"(\" + text + \")\");" in source
+    assert "JSON.parse: \" + safeErrorText(jsonError)" in source
     assert '"Cannot open JSON: " + file.fsName' not in source
     assert source.index("saveAsAI(doc, output, String(outputConfig.compatibility || \"Illustrator 8\"));") < source.index("savedDoc = app.open(output);")
     assert source.index("savedDoc = app.open(output);") < source.index("exportPreviewPNG(savedDoc")
