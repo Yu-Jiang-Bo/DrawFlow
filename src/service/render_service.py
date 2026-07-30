@@ -61,6 +61,18 @@ GENERIC_RULE_RENDER_CHUNK_SIZE = 8
 GENERIC_RULE_COM_RETRY_ATTEMPTS = 3
 GENERIC_RULE_COM_RETRY_DELAY_SECONDS = 3.0
 JJMB_202508_RENDER_CHUNK_SIZE = 20
+_DEPARTMENT_ROW_ALIASES = ("department", "production department", "\u751f\u4ea7\u90e8\u95e8", "\u90e8\u95e8")
+_MANUFACTURER_ROW_ALIASES = (
+    "manufacturer",
+    "factory",
+    "supplier",
+    "\u5916\u534f\u5382\u5bb6\u4ee3\u7801",
+    "\u5382\u5bb6\u4ee3\u7801",
+    "\u5382\u5bb6",
+    "\u5382\u5546",
+    "\u751f\u4ea7\u5382\u5bb6",
+    "\u4f9b\u5e94\u5546",
+)
 
 
 class RenderServiceError(RuntimeError):
@@ -143,11 +155,14 @@ class RenderService:
         request = record["request"]
         job_dir = Path(record["job_dir"])
         output_ai = self._output_ai_path(job_dir, request, template)
+        rows = read_202508_rows(Path(request["order_file"]), sheet_name=request["sheet_name"] or None)
         rules = _rules_with_effective_output(template, read_template_rule_config(template.template_rules_config))
-        _require_department_output_pipeline(
-            read_202508_rows(Path(request["order_file"]), sheet_name=request["sheet_name"] or None),
-            pipeline="generic_rules_only",
-        )
+        generic_png_rule = _generic_png_output_rule(rows)
+        if generic_png_rule:
+            rules = _apply_generic_png_output_settings(rules, generic_png_rule)
+        else:
+            rules = _apply_generic_department_output_settings(rows, rules)
+        _require_department_output_pipeline(rows, pipeline="generic_rules_only")
         task = build_generic_render_task(
             template,
             rules,
@@ -156,6 +171,8 @@ class RenderService:
             sheet_name=request["sheet_name"],
             columns=request["columns"],
         )
+        if generic_png_rule:
+            return self._run_generic_graphic_outputs(record, template, task, generic_png_rule)
         task_file = job_dir / "render-task.json"
         total_orders = len(task["orders"])
         self._update_progress(record, 0, total_orders, "生成 AI 文件")
@@ -195,6 +212,137 @@ class RenderService:
                 "orders": len(task["orders"]),
                 "variables": sum(len(order["variables"]) for order in task["orders"]),
                 "assets": sum(len(order["assets"]) for order in task["orders"]),
+                "dry_run": request["dry_run"],
+            },
+        }
+
+    def _run_generic_graphic_outputs(
+        self,
+        record: Dict[str, Any],
+        template: TemplateDefinition,
+        task: Dict[str, Any],
+        rule: DepartmentOutputRule,
+    ) -> Dict[str, Any]:
+        request = record["request"]
+        job_dir = Path(record["job_dir"]).resolve()
+        task_file = job_dir / "render-task.json"
+        script = Path(__file__).resolve().parents[2] / "scripts" / "illustrator" / "render_generic_rule_pack.jsx"
+        total_orders = len(task["orders"])
+        self._update_progress(record, 0, total_orders, "生成单图 PNG 文件")
+
+        units: list[ProductionOutputUnit] = []
+        for order in task["orders"]:
+            values = order.get("values") if isinstance(order.get("values"), Mapping) else {}
+            units.append(
+                ProductionOutputUnit(
+                    order_no=str(order.get("order_no") or ""),
+                    detail_id=str(values.get("detail_id") or ""),
+                    department=rule.department,
+                    manufacturer=rule.manufacturer,
+                    product_name=str(values.get("product_name") or ""),
+                    color_option=str(values.get("color") or ""),
+                    quantity_index=int(order.get("quantity_index", 1) or 1),
+                    identity=str(values.get("text") or order.get("order_no") or ""),
+                    payload=order,
+                    rule=rule,
+                )
+            )
+
+        graphics = graphic_outputs(units, job_dir / "single-graphics")
+        graphic_files: list[dict[str, str]] = []
+        delivery_files: list[dict[str, str]] = []
+        bundle_members: list[dict[str, str]] = []
+        png_outputs: list[tuple[Path, int, str]] = []
+        dpi = int(rule.layout.get("dpi") or 300)
+        color_mode = str(rule.layout.get("color_mode") or "CMYK")
+        for spec in graphics:
+            order = spec.unit.payload
+            order["output_ai"] = str(spec.output_path.with_suffix(".ai"))
+            order["output_png"] = str(spec.output_path)
+            graphic_record = {
+                "path": str(spec.output_path),
+                "name": spec.output_path.name,
+                "arcname": spec.arcname,
+                "format": rule.file_format,
+                "department": rule.department,
+                "order_no": spec.unit.order_no,
+                "detail_id": spec.unit.detail_id,
+            }
+            graphic_files.append(graphic_record)
+            delivery_files.append(
+                {
+                    "path": str(spec.output_path),
+                    "name": spec.output_path.name,
+                    "format": rule.file_format,
+                    "department": rule.department,
+                }
+            )
+            bundle_members.append({"path": str(spec.output_path), "arcname": spec.arcname})
+            png_outputs.append((spec.output_path, dpi, color_mode))
+
+        task["output_ai_files"] = [str(spec.output_path.with_suffix(".ai")) for spec in graphics]
+        task["output_png_files"] = [str(spec.output_path) for spec in graphics]
+        task["progress"] = self._task_progress(record, 0, total_orders, "生成单图 PNG 文件")
+        self._write_json(task_file, task)
+        task_files = [str(task_file)]
+
+        if not request["dry_run"]:
+            bridge = IllustratorBridge(visible=request["visible"], fresh_instance=True, reuse_instance=True)
+            try:
+                rendered_orders = 0
+                for chunk_index, orders in enumerate(_chunked(task["orders"], GENERIC_RULE_RENDER_CHUNK_SIZE), start=1):
+                    chunk_task = dict(task)
+                    chunk_task["orders"] = orders
+                    chunk_task["output_ai_files"] = [order["output_ai"] for order in orders]
+                    chunk_task["output_png_files"] = [order["output_png"] for order in orders]
+                    chunk_task["progress"] = self._task_progress(record, rendered_orders, total_orders, "生成单图 PNG 文件")
+                    chunk_file = (
+                        task_file
+                        if len(orders) == len(task["orders"])
+                        else job_dir / f"render-task-{chunk_index:03d}.json"
+                    )
+                    if chunk_file != task_file:
+                        self._write_json(chunk_file, chunk_task)
+                        task_files.append(str(chunk_file))
+                    _render_generic_chunk(bridge, script, chunk_file)
+                    rendered_orders += len(orders)
+                    self._update_progress(record, rendered_orders, total_orders, "生成单图 PNG 文件")
+            finally:
+                bridge.close()
+            for png_path, png_dpi, png_color_mode in png_outputs:
+                finalize_cmyk_png(png_path, dpi=png_dpi, color_mode=png_color_mode)
+
+        manifest_path = job_dir / "manifest.json"
+        self._write_json(
+            manifest_path,
+            {
+                "job_id": record["job_id"],
+                "template_id": template.template_id,
+                "graphic_files": graphic_files,
+                "summary_files": [],
+                "file_count": len(graphic_files),
+            },
+        )
+        self._update_progress(record, total_orders, total_orders, "完成收尾")
+        return {
+            "outputs": build_delivery_outputs(
+                delivery_files,
+                task_files,
+                request["dry_run"],
+                bundle_members=bundle_members,
+                bundle_dir=job_dir,
+                bundle_name=f"{record['job_id']}_output_bundle.zip",
+                extra_outputs={
+                    "graphic_files": graphic_files,
+                    "summary_files": [],
+                    "output_manifest": str(manifest_path),
+                },
+            ),
+            "stats": {
+                "orders": len(task["orders"]),
+                "variables": sum(len(order["variables"]) for order in task["orders"]),
+                "assets": sum(len(order["assets"]) for order in task["orders"]),
+                "graphic_files": len(graphic_files),
                 "dry_run": request["dry_run"],
             },
         }
@@ -389,7 +537,7 @@ class RenderService:
                     start=1,
                 ):
                     task = task_builder(
-                        units=(spec.unit,),
+                        units=spec.units,
                         output_ai=spec.output_path,
                         output_png=None,
                         columns=1,
@@ -406,6 +554,7 @@ class RenderService:
                     self._write_json(task_file, task)
                     task_files.append(str(task_file))
                     render_entries.append({"script": str(render_script), "task_file": str(task_file)})
+                    detail_ids = [unit.detail_id for unit in spec.units if unit.detail_id]
                     single_order_files.append(
                         {
                             "path": str(spec.output_path),
@@ -414,7 +563,9 @@ class RenderService:
                             "format": "ai8",
                             "department": rule.department,
                             "order_no": spec.unit.order_no,
-                            "detail_id": spec.unit.detail_id,
+                            "detail_id": detail_ids[0] if len(detail_ids) == 1 else "",
+                            "detail_ids": detail_ids,
+                            "item_count": len(spec.units),
                         }
                     )
                     bundle_members.append({"path": str(spec.output_path), "arcname": spec.arcname})
@@ -582,8 +733,6 @@ class RenderService:
                 "file_count": len(graphic_files) + len(single_order_files) + len(summary_files),
             },
         )
-        if bundle_members:
-            bundle_members.append({"path": str(manifest_path), "arcname": "manifest.json"})
         outputs = build_delivery_outputs(
             delivery_files,
             task_files,
@@ -715,6 +864,7 @@ class RenderService:
             compose_task = {
                 "type": "compose_png_master_pages",
                 "output_ai": str(target_path),
+                "compatibility": "CS5",
                 "items": compose_items,
                 "frame_width_mm": master_plan["frame_width_mm"],
                 "frame_height_mm": master_plan["frame_height_limit_mm"],
@@ -735,7 +885,7 @@ class RenderService:
                 summary_record = {
                     "path": str(page_path),
                     "name": page_path.name,
-                    "format": "ai8",
+                    "format": "ai_cs5",
                     "department": rule.department,
                     "page": str(page_index),
                     "artboard_height_mm": str(page_info["artboard_height_mm"]),
@@ -775,8 +925,6 @@ class RenderService:
                 "file_count": len(graphic_files) + len(summary_files),
             },
         )
-        if bundle_members:
-            bundle_members.append({"path": str(manifest_path), "arcname": "manifest.json"})
         outputs = build_delivery_outputs(
             delivery_files,
             task_files,
@@ -1235,6 +1383,9 @@ def _build_202603_single_graphic_task(
             "single_graphic_label_gap_mm": float(
                 layout.get("single_graphic_label_gap_mm") or layout.get("label_gap_mm") or 0.8
             ),
+            "single_graphic_bleed_mm": float(
+                layout.get("single_graphic_bleed_mm") or layout.get("png_bleed_mm") or 2.0
+            ),
             "show_style_boxes": False,
         },
         "fit": {
@@ -1271,10 +1422,11 @@ def _202603_master_png_item(
     label_height_mm = float(layout.get("single_graphic_label_height_mm") or layout.get("label_height_mm") or 6)
     label_gap_mm = float(layout.get("single_graphic_label_gap_mm") or layout.get("label_gap_mm") or 0.8)
     label_width_mm = float(layout.get("single_graphic_label_width_mm") or layout.get("label_width_mm") or 42)
+    bleed_mm = float(layout.get("single_graphic_bleed_mm") or layout.get("png_bleed_mm") or 2)
     graphic_width_mm = float(dimensions["width_mm"])
     graphic_height_mm = float(dimensions["height_mm"])
-    width_mm = max(graphic_width_mm, label_width_mm)
-    height_mm = graphic_height_mm + label_gap_mm + label_height_mm
+    width_mm = max(graphic_width_mm, label_width_mm) + bleed_mm * 2
+    height_mm = graphic_height_mm + label_gap_mm + label_height_mm + bleed_mm * 2
     return {
         "order_no": unit.order_no,
         "detail_id": unit.detail_id,
@@ -1292,6 +1444,7 @@ def _202603_master_png_item(
         "graphic_height_mm": graphic_height_mm,
         "label_height_mm": label_height_mm,
         "label_gap_mm": label_gap_mm,
+        "bleed_mm": bleed_mm,
     }
 
 
@@ -1473,9 +1626,11 @@ def _require_department_output_pipeline(rows: Iterable[Mapping[str, Any]], *, pi
             row,
             ("manufacturer", "factory", "supplier", "外协厂家代码", "厂家代码", "厂家", "厂商", "生产厂家", "供应商"),
         )
-        if _output_key_part(department) == "ZW":
-            continue
         rule = resolve_department_output(department, manufacturer)
+        if _output_key_part(department) == "ZW" and rule.name != "W_CONTAINS":
+            continue
+        if _generic_pipeline_can_apply_department_rule(pipeline, rule) or _generic_pipeline_can_apply_png_rule(pipeline, rule):
+            continue
         if rule.name != "DEFAULT":
             label = department or rule.name
             if label not in unsupported:
@@ -1494,6 +1649,86 @@ def _row_value(row: Mapping[str, Any], keys: Iterable[str]) -> str:
         if value not in (None, ""):
             return str(value).strip()
     return ""
+
+
+def _apply_generic_department_output_settings(
+    rows: Iterable[Mapping[str, Any]],
+    rules: Mapping[str, Any],
+) -> Dict[str, Any]:
+    """Apply W196's CS5 delivery requirement to generic-rule templates."""
+
+    merged = dict(rules or {})
+    output = dict(merged.get("output")) if isinstance(merged.get("output"), Mapping) else {}
+    changed = False
+    for row in rows:
+        rule = resolve_department_output(
+            _row_value(row, _DEPARTMENT_ROW_ALIASES),
+            _row_value(row, _MANUFACTURER_ROW_ALIASES),
+        )
+        if not _generic_pipeline_can_apply_department_rule("generic_rules_only", rule):
+            continue
+        if rule.ai_compatibility == "CS5":
+            output["compatibility"] = "CS5"
+            output.setdefault("color_mode", "CMYK")
+            changed = True
+    if changed:
+        merged["output"] = output
+    return merged
+
+
+def _generic_png_output_rule(rows: Iterable[Mapping[str, Any]]) -> DepartmentOutputRule | None:
+    matched: list[DepartmentOutputRule] = []
+    for row in rows:
+        if not any(value not in (None, "") for value in row.values()):
+            continue
+        rule = resolve_department_output(
+            _row_value(row, _DEPARTMENT_ROW_ALIASES),
+            _row_value(row, _MANUFACTURER_ROW_ALIASES),
+        )
+        if not _generic_pipeline_can_apply_png_rule("generic_rules_only", rule):
+            return None
+        matched.append(rule)
+    return matched[0] if matched else None
+
+
+def _apply_generic_png_output_settings(
+    rules: Mapping[str, Any],
+    rule: DepartmentOutputRule,
+) -> Dict[str, Any]:
+    merged = dict(rules or {})
+    layout = dict(merged.get("render_layout")) if isinstance(merged.get("render_layout"), Mapping) else {}
+    layout["output_mode"] = "per_graphic"
+    merged["render_layout"] = layout
+    output = dict(merged.get("output")) if isinstance(merged.get("output"), Mapping) else {}
+    output.update(
+        {
+            "format": "png",
+            "color_mode": str(rule.layout.get("color_mode") or "CMYK"),
+            "dpi": int(rule.layout.get("dpi") or 300),
+            "transparent_background": True,
+        }
+    )
+    merged["output"] = output
+    return merged
+
+
+def _generic_pipeline_can_apply_department_rule(pipeline: str, rule: DepartmentOutputRule) -> bool:
+    return (
+        pipeline == "generic_rules_only"
+        and rule.name == "W_CONTAINS"
+        and rule.ai_compatibility == "CS5"
+        and not rule.is_png
+    )
+
+
+def _generic_pipeline_can_apply_png_rule(pipeline: str, rule: DepartmentOutputRule) -> bool:
+    return (
+        pipeline == "generic_rules_only"
+        and rule.name == "W_CONTAINS"
+        and rule.is_png
+        and requires_graphic_outputs(rule)
+        and not rule.has_master
+    )
 
 
 def _output_key_part(value: object) -> str:

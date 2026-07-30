@@ -309,8 +309,8 @@ def test_service_routes_h_to_per_graphic_pngs_and_cropped_master_png(tmp_path):
         "single-graphics/ORDER1-1.png",
         "single-graphics/ORDER1-2.png",
         f"summary/{Path(record['outputs']['delivery_plan'][-1]['path']).name}",
-        "manifest.json",
     ]
+    assert "output_manifest" in record["outputs"]
     graphic_task_path = next(
         Path(path)
         for path in record["outputs"]["render_task_files"]
@@ -368,6 +368,11 @@ def test_service_routes_t_to_one_ai_with_color_frame_artboards(tmp_path):
     second[11] = "Beth"
     second[12] = "Silver"
     sheet.append(second)
+    third = [cell.value for cell in sheet[2]]
+    third[8] = "DETAIL3"
+    third[11] = "Mia"
+    third[12] = "Gold"
+    sheet.append(third)
     workbook.save(order_path)
 
     record = RenderService(
@@ -395,10 +400,22 @@ def test_service_routes_t_to_one_ai_with_color_frame_artboards(tmp_path):
     assert master_task["type"] == "render_batch"
     assert len(master_task["tasks"]) == len(record["outputs"]["render_task_files"])
     assert [item["name"] for item in record["outputs"]["single_order_files"]] == ["ORDER1.ai", "ORDER2.ai"]
+    assert record["outputs"]["single_order_files"][0]["item_count"] == 2
+    assert record["outputs"]["single_order_files"][0]["detail_ids"] == ["DETAIL1", "DETAIL3"]
+    assert record["outputs"]["single_order_files"][1]["item_count"] == 1
     assert [item["arcname"] for item in record["outputs"]["bundle_plan"][:2]] == [
         "single-orders/ORDER1.ai",
         "single-orders/ORDER2.ai",
     ]
+    single_order_task_path = next(
+        Path(task_path)
+        for task_path in record["outputs"]["render_task_files"]
+        if "single-order-tasks" in str(task_path)
+        and json.loads(Path(task_path).read_text(encoding="utf-8"))["groups"][0]["order_no"] == "ORDER1"
+    )
+    single_order_task = json.loads(single_order_task_path.read_text(encoding="utf-8"))
+    assert len(single_order_task["groups"]) == 1
+    assert len(single_order_task["groups"][0]["items"]) == 2
     assert component_task["output"]["compatibility"] == "CS5"
     assert component_task["output"]["intermediate_component"] is True
     assert component_task["output"]["fixed_canvas_mm"] == {}
@@ -438,7 +455,8 @@ def test_curved_template_reuses_shared_department_output_pipeline(tmp_path):
     assert record["status"] == "completed", record.get("error")
     assert [item["name"] for item in record["outputs"]["single_order_files"]] == ["CURVED-T.ai", "CURVED-D.ai"]
     assert [item["department"] for item in record["outputs"]["delivery_plan"]] == ["T"]
-    assert record["outputs"]["bundle_plan"][-1]["arcname"] == "manifest.json"
+    assert all(member["arcname"] != "manifest.json" for member in record["outputs"]["bundle_plan"])
+    assert "output_manifest" in record["outputs"]
     batch_task = json.loads(Path(record["outputs"]["render_task"]).read_text(encoding="utf-8"))
     assert batch_task["type"] == "render_batch"
 
@@ -547,7 +565,6 @@ def test_service_routes_pw_ew_to_single_orders_and_one_master(tmp_path, departme
     assert arcnames[0] == "single-orders/ORDER1.ai"
     assert arcnames[1].startswith("summary/")
     assert arcnames[1].endswith(f"-{department}.ai")
-    assert arcnames[2] == "manifest.json"
     master_task_path = next(
         Path(task_path)
         for task_path in record["outputs"]["render_task_files"]
@@ -578,8 +595,8 @@ def test_service_routes_d_department_to_single_orders_without_master(tmp_path):
     assert [item["name"] for item in record["outputs"]["single_order_files"]] == ["ORDER1.ai"]
     assert [member["arcname"] for member in record["outputs"]["bundle_plan"]] == [
         "single-orders/ORDER1.ai",
-        "manifest.json",
     ]
+    assert "output_manifest" in record["outputs"]
     single_task_path = Path(record["outputs"]["render_task_files"][0])
     single_task = json.loads(single_task_path.read_text(encoding="utf-8"))
     item = single_task["groups"][0]["items"][0]
@@ -687,8 +704,8 @@ def test_service_routes_202603_h_to_exact_pngs_and_paginated_master_ai(tmp_path)
     assert [member["arcname"] for member in record["outputs"]["bundle_plan"]] == [
         "single-graphics/ORDER1.png",
         f"summary/{record['outputs']['summary_files'][0]['name']}",
-        "manifest.json",
     ]
+    assert "output_manifest" in record["outputs"]
     single_task_path = next(
         Path(path)
         for path in record["outputs"]["render_task_files"]
@@ -705,17 +722,20 @@ def test_service_routes_202603_h_to_exact_pngs_and_paginated_master_ai(tmp_path)
     assert single_task["layout"]["embed_order_label"] is True
     assert single_task["layout"]["single_graphic_label_height_mm"] == 6.0
     assert single_task["layout"]["single_graphic_label_gap_mm"] == 0.8
+    assert single_task["layout"]["single_graphic_bleed_mm"] == 2.0
     assert single_task["export"]["format"] == "png"
     assert single_task["export"]["png_path"].endswith("ORDER1.png")
     assert "fixed_canvas_mm" not in single_task["export"]
     assert compose_task["type"] == "compose_png_master_pages"
+    assert compose_task["compatibility"] == "CS5"
     assert compose_task["frame_width_mm"] == 580.0
     assert compose_task["frame_height_mm"] == 2000.0
-    assert compose_task["items"][0]["width_mm"] == 80.0
-    assert compose_task["items"][0]["height_mm"] == 56.8
+    assert compose_task["items"][0]["width_mm"] == 84.0
+    assert compose_task["items"][0]["height_mm"] == 60.8
     assert compose_task["items"][0]["graphic_width_mm"] == 80.0
     assert compose_task["items"][0]["graphic_height_mm"] == 50.0
     assert compose_task["items"][0]["label_embedded"] is True
+    assert compose_task["items"][0]["bleed_mm"] == 2.0
     render_batches = [str(path) for path in record["outputs"]["render_batch_files"]]
     assert any("single-render-batches" in path for path in render_batches)
     assert any("compose-render-batches" in path for path in render_batches)
@@ -851,8 +871,8 @@ def test_service_routes_w_manufacturers_to_cs5_master_ai_pngs_and_standard_ai(tm
     assert [member["arcname"] for member in png_record["outputs"]["bundle_plan"]] == [
         "single-graphics/W-120-001.png",
         "single-graphics/W-120-002.png",
-        "manifest.json",
     ]
+    assert "output_manifest" in png_record["outputs"]
     for task_path in png_record["outputs"]["render_task_files"]:
         task = json.loads(Path(task_path).read_text(encoding="utf-8"))
         assert task["output"]["format"] == "png"
@@ -860,6 +880,157 @@ def test_service_routes_w_manufacturers_to_cs5_master_ai_pngs_and_standard_ai(tm
         assert task["output"]["color_mode"] == "CMYK"
         assert task["layout"]["suppress_labels"] is False
         assert task["groups"][0]["items"][0]["apply_color_to_artwork"] is True
+
+
+def test_generic_w196_applies_cs5_and_quantity_split(tmp_path):
+    config_path = tmp_path / "templates.json"
+    rules_path = tmp_path / "template.rules.json"
+    order_path = tmp_path / "orders.xlsx"
+    fake_ai = tmp_path / "template.ai"
+    fake_ai.write_text("fake ai", encoding="utf-8")
+    rules_path.write_text(
+        json.dumps(
+            {
+                "status": "confirmed",
+                "order_bindings": {
+                    "order_no": "Order",
+                    "text": "Name",
+                    "quantity": "Quantity",
+                },
+                "slot_mappings": [{"field": "text", "slot": "Name"}],
+                "multi_name_customization": {"enabled": True},
+                "render_layout": {
+                    "type": "name_columns",
+                    "output_mode": "single_file",
+                    "default": {"group_by": ["order_no"], "header_fields": ["order_no"]},
+                    "manufacturer_overrides": {
+                        "MY-W196": {"group_by": ["row"], "header_fields": ["order_no"]}
+                    },
+                },
+                "output": {"color_mode": "CMYK"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    config_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "templates": [
+                    {
+                        "template_id": "GENERIC-W196",
+                        "name": "Generic W196",
+                        "template_type": "pure_text_color_design",
+                        "pipeline": "generic_rules_only",
+                        "status": "active",
+                        "template_ai": str(fake_ai),
+                        "template_rules_config": str(rules_path),
+                        "default_columns": 4,
+                        "default_hide_boxes": True,
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["Order", "Name", "Quantity", "Department", "Manufacturer"])
+    sheet.append(["ORDER-W196", "Alice|Bob", 3, "ZW", "MY-W196"])
+    workbook.save(order_path)
+
+    record = RenderService(
+        registry=TemplateRegistry(config_path),
+        jobs=JobStore(tmp_path / "jobs"),
+    ).submit(
+        {"template_id": "GENERIC-W196", "order_file": str(order_path), "dry_run": True}
+    )
+
+    task = json.loads(Path(record["outputs"]["render_task"]).read_text(encoding="utf-8"))
+    assert record["status"] == "completed"
+    assert task["output"]["compatibility"] == "CS5"
+    assert len(task["orders"]) == 3
+    assert [order["quantity_index"] for order in task["orders"]] == [1, 2, 3]
+    assert [len(order["layout_members"]) for order in task["orders"]] == [1, 1, 1]
+
+
+def test_generic_w120_outputs_per_graphic_png_bundle_plan(tmp_path):
+    config_path = tmp_path / "templates.json"
+    rules_path = tmp_path / "template.rules.json"
+    order_path = tmp_path / "orders.xlsx"
+    fake_ai = tmp_path / "template.ai"
+    fake_ai.write_text("fake ai", encoding="utf-8")
+    rules_path.write_text(
+        json.dumps(
+            {
+                "status": "confirmed",
+                "order_bindings": {
+                    "order_no": "Order",
+                    "text": "Name",
+                    "quantity": "Quantity",
+                },
+                "slot_mappings": [{"field": "text", "slot": "Name"}],
+                "multi_name_customization": {"enabled": True},
+                "render_layout": {
+                    "type": "name_columns",
+                    "output_mode": "single_file",
+                    "default": {"group_by": ["row"], "header_fields": ["order_no"]},
+                },
+                "output": {"color_mode": "CMYK"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    config_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "templates": [
+                    {
+                        "template_id": "GENERIC-W120",
+                        "name": "Generic W120",
+                        "template_type": "pure_text_color_design",
+                        "pipeline": "generic_rules_only",
+                        "status": "active",
+                        "template_ai": str(fake_ai),
+                        "template_rules_config": str(rules_path),
+                        "default_columns": 4,
+                        "default_hide_boxes": True,
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["Order", "Name", "Quantity", "Department", "Manufacturer"])
+    sheet.append(["ORDER-W120", "Alice|Bob", 2, "ZW", "MY-W120"])
+    workbook.save(order_path)
+
+    record = RenderService(
+        registry=TemplateRegistry(config_path),
+        jobs=JobStore(tmp_path / "jobs"),
+    ).submit(
+        {"template_id": "GENERIC-W120", "order_file": str(order_path), "dry_run": True}
+    )
+
+    task = json.loads(Path(record["outputs"]["render_task"]).read_text(encoding="utf-8"))
+    assert record["status"] == "completed"
+    assert task["output"]["format"] == "png"
+    assert task["output"]["transparent_background"] is True
+    assert task["render_layout"]["output_mode"] == "per_graphic"
+    assert [Path(item["path"]).name for item in record["outputs"]["graphic_files"]] == [
+        "ORDER-W120-1.png",
+        "ORDER-W120-2.png",
+    ]
+    assert [member["arcname"] for member in record["outputs"]["bundle_plan"]] == [
+        "single-graphics/ORDER-W120-1.png",
+        "single-graphics/ORDER-W120-2.png",
+    ]
+    assert "output_manifest" in record["outputs"]
 
 
 def test_202508_task_receives_every_configured_font_boldness_mapping(tmp_path):

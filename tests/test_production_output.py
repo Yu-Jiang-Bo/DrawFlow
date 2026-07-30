@@ -60,7 +60,7 @@ def test_shared_planner_groups_equivalent_color_aliases_under_one_chinese_header
     assert [unit.order_no for unit in frames[0].units] == ["GOLD-EN", "GOLD-ZH"]
 
 
-def test_shared_planner_uses_parenthesized_names_for_duplicate_order_artwork(tmp_path):
+def test_shared_planner_groups_duplicate_order_artwork_into_one_ai(tmp_path):
     outputs = single_order_outputs(
         [
             make_unit(order_no="ORD-1", department="T", detail_id="1"),
@@ -70,12 +70,12 @@ def test_shared_planner_uses_parenthesized_names_for_duplicate_order_artwork(tmp
         Path(tmp_path) / "single-orders",
     )
 
-    assert [output.output_path.name for output in outputs] == ["ORD-1(1).ai", "ORD-1(2).ai", "ORD-2.ai"]
+    assert [output.output_path.name for output in outputs] == ["ORD-1.ai", "ORD-2.ai"]
     assert [output.arcname for output in outputs] == [
-        "single-orders/ORD-1(1).ai",
-        "single-orders/ORD-1(2).ai",
+        "single-orders/ORD-1.ai",
         "single-orders/ORD-2.ai",
     ]
+    assert [[unit.detail_id for unit in output.units] for output in outputs] == [["1", "2"], ["3"]]
 
 
 def test_per_graphic_png_outputs_use_hyphen_numbering_for_duplicate_order_artwork(tmp_path):
@@ -110,11 +110,15 @@ def test_generic_batch_jsx_executes_child_tasks_by_script_path():
 
 def test_h_png_master_composer_embeds_placed_pngs():
     source = Path("scripts/illustrator/compose_png_master_pages.jsx").read_text(encoding="utf-8")
+    compose_body = source[source.index("function composePage"):source.index("function drawLabel")]
 
     assert "var placed = layer.placedItems.add();" in source
     assert "placed.file = File(String(item.png_path));" in source
     assert "placed.embed();" in source
     assert "Failed to embed PNG in H master AI" in source
+    assert 'String(task.compatibility || "CS5")' in source
+    assert "Compatibility.ILLUSTRATOR15" in source
+    assert "drawWhiteBackground(" not in compose_body
 
 
 def test_color_frame_composer_packs_order_segments_by_adaptive_grid():

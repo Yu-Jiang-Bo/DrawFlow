@@ -51,9 +51,13 @@ class ProductionOutputBatch:
 
 @dataclass(frozen=True)
 class SingleOrderOutput:
-    unit: ProductionOutputUnit
+    units: tuple[ProductionOutputUnit, ...]
     output_path: Path
     arcname: str
+
+    @property
+    def unit(self) -> ProductionOutputUnit:
+        return self.units[0]
 
 
 @dataclass(frozen=True)
@@ -139,22 +143,27 @@ def single_order_outputs(
     output_dir: Path,
     occupied_names: set[str] | None = None,
 ) -> list[SingleOrderOutput]:
-    unit_list = list(units)
-    counts: dict[str, int] = {}
-    for unit in unit_list:
+    grouped: dict[str, list[ProductionOutputUnit]] = {}
+    order_sequence: list[str] = []
+    for unit in units:
         order_no = unit.order_no or "ORDER"
-        counts[order_no] = counts.get(order_no, 0) + 1
+        if order_no not in grouped:
+            grouped[order_no] = []
+            order_sequence.append(order_no)
+        grouped[order_no].append(unit)
 
-    seen_by_order: dict[str, int] = {}
     occupied = occupied_names if occupied_names is not None else set()
     result: list[SingleOrderOutput] = []
-    for unit in unit_list:
-        order_no = unit.order_no or "ORDER"
-        seen_by_order[order_no] = seen_by_order.get(order_no, 0) + 1
+    for order_no in order_sequence:
         stem = safe_filename(order_no) or "ORDER"
-        candidate = f"{stem}({seen_by_order[order_no]}).ai" if counts[order_no] > 1 else f"{stem}.ai"
-        filename = _unique_filename(candidate, occupied)
-        result.append(SingleOrderOutput(unit=unit, output_path=output_dir / filename, arcname=f"single-orders/{filename}"))
+        filename = _unique_filename(f"{stem}.ai", occupied)
+        result.append(
+            SingleOrderOutput(
+                units=tuple(grouped[order_no]),
+                output_path=output_dir / filename,
+                arcname=f"single-orders/{filename}",
+            )
+        )
     return result
 
 

@@ -132,7 +132,6 @@
         var doc = app.documents.add(DocumentColorSpace.CMYK, frameWidth, pageHeight);
         var layer = doc.layers[0];
         layer.name = "PNG_MASTER_" + pad(pageIndex + 1, 2);
-        drawWhiteBackground(layer, 0, pageHeight, frameWidth, pageHeight);
 
         for (var i = 0; i < page.placements.length; i++) {
             var placement = page.placements[i];
@@ -161,7 +160,7 @@
         var aiFile = numberedFile(String(task.output_ai), pageIndex, pageCount);
         ensureFolder(aiFile.parent);
         if (aiFile.exists) aiFile.remove();
-        saveAsAI8(doc, aiFile);
+        saveAsAI(doc, aiFile, String(task.compatibility || "CS5"));
         doc.close(SaveOptions.DONOTSAVECHANGES);
         return aiFile.fsName;
     }
@@ -225,9 +224,14 @@
         rect.strokeColor = color;
     }
 
-    function saveAsAI8(doc, file) {
+    function saveAsAI(doc, file, compatibility) {
         var opts = new IllustratorSaveOptions();
-        opts.compatibility = Compatibility.ILLUSTRATOR8;
+        var target = String(compatibility || "CS5").toLowerCase();
+        if (target.indexOf("cs5") >= 0 || target.indexOf("illustrator 15") >= 0) {
+            opts.compatibility = Compatibility.ILLUSTRATOR15;
+        } else {
+            opts.compatibility = Compatibility.ILLUSTRATOR8;
+        }
         opts.pdfCompatible = false;
         opts.compressed = false;
         doc.saveAs(file, opts);

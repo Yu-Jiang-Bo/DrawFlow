@@ -168,6 +168,15 @@ def test_grouped_design_assets_are_brought_above_single_graphic_background():
     assert body.index("copy.zOrder(ZOrderMethod.BRINGTOFRONT)") < body.index("recordFitDelta(")
 
 
+def test_single_graphic_png_uses_transparency_and_no_white_background():
+    source = GROUPED_SCRIPT.read_text(encoding="utf-8")
+    single_body = source[source.index("function renderSingleGraphicExactPng"):source.index("function drawSingleGraphicOrderLabel")]
+    export_body = source[source.index("function exportPng"):source.index("function drawWhiteBackground")]
+
+    assert "drawWhiteBackground(" not in single_body
+    assert "opts.transparency = true;" in export_body
+
+
 def test_exact_box_geometry_uses_independent_scaling_and_corner_alignment():
     node = shutil.which("node")
     if not node:
@@ -316,7 +325,8 @@ def test_grouped_renderer_applies_each_task_font_style_before_outlining():
     assert "var outlineText = exportConfig.outline_text !== false;" in source
     assert "if (!outlineText)" in source
     assert "if (outlineText)" in design_body
-    assert design_body.index("duplicateDesignInstance") < design_body.index("outlineTextFrames(copy);")
+    assert design_body.index("duplicateDesignInstance") < design_body.index("outlineTextFrames(copy, false);")
+    assert "if (pathfinderMerge) cleanupOutline(copy);" not in design_body
     assert "function applyFontBoldnessToTextFrames(root, style)" in source
     assert "var showStyleBoxes = layout.show_style_boxes === true;" in source
 

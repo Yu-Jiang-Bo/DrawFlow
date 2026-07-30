@@ -218,7 +218,8 @@
           "row_gap_mm": 2,
           "label_height_mm": 6,
           "label_width_mm": 42,
-          "label_gap_mm": 0.8
+          "label_gap_mm": 0.8,
+          "single_graphic_bleed_mm": 2
         }
       },
       {

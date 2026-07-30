@@ -187,15 +187,29 @@
         var labelHeight = mmToPt(Number(layout.single_graphic_label_height_mm || layout.label_height_mm || 6));
         var labelGap = mmToPt(Number(layout.single_graphic_label_gap_mm || layout.label_gap_mm || 0.8));
         var labelWidth = mmToPt(Number(layout.single_graphic_label_width_mm || layout.label_width_mm || 42));
-        var docWidth = Math.max(styleWidth, labelWidth);
-        var docHeight = styleHeight + labelGap + labelHeight;
-        var effectLeft = (docWidth - styleWidth) / 2;
+        var bleed = mmToPt(Number(layout.single_graphic_bleed_mm || layout.png_bleed_mm || 0));
+        var contentWidth = Math.max(styleWidth, labelWidth);
+        var docWidth = contentWidth + bleed * 2;
+        var docHeight = styleHeight + labelGap + labelHeight + bleed * 2;
+        var contentLeft = bleed;
+        var effectLeft = contentLeft + (contentWidth - styleWidth) / 2;
         var doc = app.documents.add(documentColorSpace(colorMode), docWidth, docHeight);
         var layer = doc.layers[0];
         layer.name = "SINGLE_GRAPHIC_EXACT";
-        drawWhiteBackground(layer, 0, docHeight, docWidth, docHeight);
-        drawSingleGraphicOrderLabel(layer, String(item.order_no || ""), 0, docHeight, docWidth, styleHeight + labelGap);
-        var rect = [effectLeft + padding, styleHeight - padding, effectLeft + styleWidth - padding, padding];
+        drawSingleGraphicOrderLabel(
+            layer,
+            String(item.order_no || ""),
+            contentLeft,
+            bleed + styleHeight + labelGap + labelHeight,
+            contentLeft + contentWidth,
+            bleed + styleHeight + labelGap
+        );
+        var rect = [
+            effectLeft + padding,
+            bleed + styleHeight - padding,
+            effectLeft + styleWidth - padding,
+            bleed + padding
+        ];
         if (String(item.render_kind || "text") === "design_asset") {
             var designItem = renderDesignAssetItem(layer, item, rect, fontStyles[String(item.font_option || "")]);
             try { designItem.name = String(item.order_no || "") + "_" + String(item.quantity_index || 1) + "_DESIGN"; } catch (eD0) {}
@@ -226,6 +240,8 @@
             effect_height_pt: styleHeight,
             effect_width_mm: ptToMm(styleWidth),
             effect_height_mm: ptToMm(styleHeight),
+            transparent_background: true,
+            bleed_mm: ptToMm(bleed),
             output_png: png.fsName
         });
         try {
@@ -357,8 +373,7 @@
         designDoc.close(SaveOptions.DONOTSAVECHANGES);
         fitPageItemToRect(copy, rect);
         if (outlineText) {
-            outlineTextFrames(copy);
-            if (pathfinderMerge) cleanupOutline(copy);
+            outlineTextFrames(copy, false);
         }
         try { copy.zOrder(ZOrderMethod.BRINGTOFRONT); } catch (eZ0) {}
         recordFitDelta(fitPageItemToRect(copy, rect));
@@ -673,13 +688,13 @@
         for (var i = 0; i < item.pageItems.length; i++) collectTextFrames(item.pageItems[i], out);
     }
 
-    function outlineTextFrames(item) {
+    function outlineTextFrames(item, mergeOutlines) {
         var frames = [];
         collectTextFrames(item, frames);
         for (var i = frames.length - 1; i >= 0; i--) {
             try {
                 var outlined = frames[i].createOutline();
-                if (pathfinderMerge) cleanupOutline(outlined);
+                if (mergeOutlines === true && pathfinderMerge) cleanupOutline(outlined);
             } catch (e) {}
         }
     }
@@ -939,7 +954,7 @@
         var scale = Math.max(1, Number(dpi || 300) / 72 * 100 + 0.02);
         opts.antiAliasing = true;
         opts.artBoardClipping = true;
-        opts.transparency = false;
+        opts.transparency = true;
         opts.horizontalScale = scale;
         opts.verticalScale = scale;
         doc.exportFile(file, ExportType.PNG24, opts);
