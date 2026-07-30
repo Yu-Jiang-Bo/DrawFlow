@@ -269,6 +269,9 @@ def test_build_task_includes_named_title_template_ai(tmp_path):
 def test_curved_renderer_outlines_and_merges_each_text_item_independently():
     source = Path("scripts/illustrator/render_202509_curved.jsx").read_text(encoding="utf-8")
     outline_body = source[source.index("function outlineText(items, reportProgress)"):source.index("function failRender")]
+    outline_loop = source[
+        source.index("function outlineText(items, reportProgress)") : source.index("function outlineTextEntry")
+    ]
     fit_body = source[source.index("function fitPageItemToRect"):source.index("function alignPageItemToRect")]
 
     assert "cleanupOutline(outline);" in source
@@ -291,6 +294,16 @@ def test_curved_renderer_outlines_and_merges_each_text_item_independently():
     assert 'previewPath.replace(/\\.png$/i, "")' in source
     assert "Preview PNG was not generated." in source
     assert 'textItems.push({ item: tf, rect: frameRect, fitMode: "contain" });' in source
+    assert 'outlineChildren: !isTextFrame(clonedText)' in source
+    assert "function outlineTextEntry(entry, itemIndex)" in source
+    assert "function collectTextFrames(container)" in source
+    assert "function addTextFrame(frames, frame)" in source
+    assert "var outline = source.createOutline();" in source
+    assert "outlineTextEntry(entry, i + 1);" in outline_loop
+    assert "source.createOutline();" not in outline_loop
+    assert "safeErrorText(e0)" in outline_loop
+    assert 'failRender("Layout failed: " + safeErrorText(error), 0);' in source
+    assert 'failRender("Failed to save AI or export preview: " + safeErrorText(e1), 0);' in source
     assert "function drawCurvedTitleFromTemplate(layer, text, fontOption" in source
     assert "TITLE_{font}_TEXT" in source
     assert "sourceText.duplicate(layer, ElementPlacement.PLACEATEND)" in source
@@ -299,7 +312,8 @@ def test_curved_renderer_outlines_and_merges_each_text_item_independently():
     assert "abortRenderUnexpected(eLayout);" in source
     assert "function abortRenderUnexpected(error)" in source
     assert "function pageItemBounds(item)" in source
-    assert "fitPageItemWithinRect(outline, entry.rect);" in source
+    assert "function fitOutlinedEntry(item, entry)" in source
+    assert "fitPageItemWithinRect(item, entry.rect);" in source
     assert "function fitPageItemWithinRect(item, rect)" in source
     assert "Math.min(targetW / w, targetH / h)" in source
     assert "Math.min(1, targetW / w, targetH / h)" not in source

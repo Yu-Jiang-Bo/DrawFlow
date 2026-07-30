@@ -186,7 +186,7 @@
         writeRenderDebug("completed", "", 0);
         closeTitleTemplate();
     } catch (e1) {
-        failRender("Failed to save AI or export preview: " + String(e1), 0);
+        failRender("Failed to save AI or export preview: " + safeErrorText(e1), 0);
     }
     return output.fsName;
 
@@ -311,7 +311,7 @@
             }
             applyBlackToPageItem(clonedText);
             fitPageItemWithinRect(clonedText, fitRect);
-            textItems.push({ item: clonedText, rect: frameRect, fitMode: "contain" });
+            textItems.push({ item: clonedText, rect: frameRect, fitMode: "contain", outlineChildren: !isTextFrame(clonedText) });
             titleTemplateStats.used += 1;
             return true;
         } catch (e3) {
@@ -374,7 +374,7 @@
     function setTextContents(item, text) {
         if (!item) return false;
         try {
-            if (item.typename === "TextFrame") {
+            if (isTextFrame(item)) {
                 item.contents = text;
                 return true;
             }
@@ -397,7 +397,7 @@
     function applyBlackToPageItem(item) {
         if (!item) return;
         try {
-            if (item.typename === "TextFrame") {
+            if (isTextFrame(item)) {
                 applyBlack(item);
                 return;
             }
@@ -683,17 +683,8 @@
         renderProgress.totalTextItems = items.length;
         for (var i = 0; i < items.length; i++) {
             var entry = items[i];
-            var source = entry.item || entry;
-            if (!source) failRender("Text outline failed: missing item " + (i + 1), i + 1);
             try {
-                var outline = source.createOutline();
-                if (!outline) throw new Error("createOutline returned nothing");
-                if (entry.exactFit && entry.rect) {
-                    fitPageItemToRect(outline, entry.rect);
-                } else if (entry.fitMode === "contain" && entry.rect) {
-                    fitPageItemWithinRect(outline, entry.rect);
-                }
-                if (pathfinderMerge) cleanupOutline(outline);
+                outlineTextEntry(entry, i + 1);
                 renderProgress.processedTextItems = i + 1;
                 if (reportProgress !== false && shouldSettleOutlineBatch(i + 1, items.length)) {
                     settleIllustrator();
@@ -701,9 +692,78 @@
                     writeRenderDebug("outlining", "", 0);
                 }
             } catch (e0) {
-                failRender("Text outline failed at item " + (i + 1) + ": " + String(e0), i + 1);
+                failRender("Text outline failed at item " + (i + 1) + ": " + safeErrorText(e0), i + 1);
             }
         }
+    }
+
+    function outlineTextEntry(entry, itemIndex) {
+        var source = entry.item || entry;
+        if (!source) failRender("Text outline failed: missing item " + itemIndex, itemIndex);
+        if (isTextFrame(source)) {
+            var outline = outlineSingleTextFrame(source);
+            fitOutlinedEntry(outline, entry);
+            return outline;
+        }
+
+        var frames = collectTextFrames(source);
+        for (var i = 0; i < frames.length; i++) {
+            outlineSingleTextFrame(frames[i]);
+        }
+        if (frames.length > 0) fitOutlinedEntry(source, entry);
+        return source;
+    }
+
+    function outlineSingleTextFrame(source) {
+        var outline = source.createOutline();
+        if (!outline) throw new Error("createOutline returned nothing");
+        if (pathfinderMerge) cleanupOutline(outline);
+        return outline;
+    }
+
+    function fitOutlinedEntry(item, entry) {
+        if (entry.exactFit && entry.rect) {
+            fitPageItemToRect(item, entry.rect);
+        } else if (entry.fitMode === "contain" && entry.rect) {
+            fitPageItemWithinRect(item, entry.rect);
+        }
+    }
+
+    function collectTextFrames(container) {
+        var frames = [];
+        collectTextFramesInto(container, frames);
+        return frames;
+    }
+
+    function collectTextFramesInto(container, frames) {
+        if (!container) return;
+        if (isTextFrame(container)) {
+            addTextFrame(frames, container);
+            return;
+        }
+        try {
+            for (var i = 0; i < container.textFrames.length; i++) {
+                addTextFrame(frames, container.textFrames[i]);
+            }
+        } catch (e0) {}
+        try {
+            for (var g = 0; g < container.groupItems.length; g++) {
+                collectTextFramesInto(container.groupItems[g], frames);
+            }
+        } catch (e1) {}
+    }
+
+    function addTextFrame(frames, frame) {
+        if (!frame) return;
+        for (var i = 0; i < frames.length; i++) {
+            if (frames[i] === frame) return;
+        }
+        frames.push(frame);
+    }
+
+    function isTextFrame(item) {
+        try { return item && item.typename === "TextFrame"; } catch (e0) {}
+        return false;
     }
 
     function shouldSettleOutlineBatch(processed, total) {
@@ -718,9 +778,20 @@
     }
 
     function abortRenderUnexpected(error) {
-        closeTitleTemplate();
-        try { if (doc) doc.close(SaveOptions.DONOTSAVECHANGES); } catch (e0) {}
-        throw error;
+        failRender("Layout failed: " + safeErrorText(error), 0);
+    }
+
+    function safeErrorText(error) {
+        try {
+            if (error && error.message) return String(error.message);
+        } catch (e0) {}
+        try {
+            return String(error);
+        } catch (e1) {}
+        try {
+            if (error && error.number) return "Illustrator error " + error.number;
+        } catch (e2) {}
+        return "Unknown Illustrator error";
     }
 
     function writeRenderDebug(status, errorMessage, failedItemIndex) {
