@@ -324,6 +324,10 @@ def test_202508_renderer_accepts_compiled_fill_color_actions():
     assert "ORDER_PACK_ITEM_" in source
     assert "outlineTextFrames(compactLabelFrames, pathfinderMerge);" in source
     assert "function outlineTextFrames(frames, shouldCleanup)" in source
+    assert "shouldPreserveTextAspect" not in source
+    assert "function fitPageItemToRect(item, rect)" in source
+    assert "var scale = Math.min(scaleX, scaleY)" not in source
+    assert "validatePageItemRect(item, rect);" in source
 
     node = shutil.which("node")
     if not node:
@@ -339,6 +343,147 @@ def test_202508_renderer_accepts_compiled_fill_color_actions():
         text=True,
         check=False,
     )
+    assert result.returncode == 0, result.stderr
+
+
+def test_202508_long_text_outlines_fill_width_and_height_independently():
+    node = shutil.which("node")
+    if not node:
+        return
+    script_path = Path("scripts/illustrator/render_202508_grouped.jsx").resolve()
+    task = {
+        "type": "jjmb_202508_grouped",
+        "template_config": "config.json",
+        "output_ai": "out.ai",
+        "groups": [
+            {
+                "order_no": "4076796025",
+                "items": [
+                    {
+                        "text": "Amy Bridesmaid",
+                        "font_option": "F7",
+                        "color_option": "Black",
+                        "design_option": "Design1",
+                        "show_color_label": False,
+                        "show_frame": False,
+                        "production_label": "4076796025",
+                        "production_label_lines": ["4076796025"],
+                    }
+                ],
+            }
+        ],
+        "layout": {"columns": 1, "show_style_boxes": False, "suppress_labels": True},
+        "fit": {"min_font_size_pt": 4, "max_font_size_pt": 48},
+        "output": {"color_mode": "RGB", "pathfinder_merge": False},
+        "debug": {"report_path": "debug.json"},
+    }
+    config = {
+        "font_options": {"F7": {"font_size_pt": 12, "tracking": 0}},
+        "design_options": {
+            "Design1": {
+                "product_bounds_pt": [0, 40, 100, 0],
+                "anchor_bounds_pt": [0, 40, 100, 0],
+                "rotation_deg": 0,
+            }
+        },
+        "color_options": {"Black": {"rgb": [0, 0, 0]}},
+        "defaults": {"design_option": "Design1"},
+    }
+    harness = f"""
+const fs = require('fs');
+const source = fs.readFileSync({json.dumps(str(script_path))}, 'utf8').replace(/^#target.*\\r?\\n/, '');
+const task = {json.dumps(task)};
+const config = {json.dumps(config)};
+const outlines = [];
+const folder = {{ exists: true, parent: null, create: () => true }};
+function json(value) {{ return JSON.stringify(value); }}
+function setBounds(item, bounds) {{
+  item.visibleBounds = bounds.slice();
+  item.geometricBounds = bounds.slice();
+}}
+function boundsSize(item) {{
+  const b = item.visibleBounds;
+  return {{ width: Math.abs(b[2] - b[0]), height: Math.abs(b[1] - b[3]) }};
+}}
+global.$ = {{ getenv: () => 'task.json' }};
+global.File = function(path) {{
+  return {{
+    fsName: path,
+    exists: path === 'task.json' || path === 'config.json',
+    parent: folder,
+    open: () => true,
+    read: () => path === 'task.json' ? json(task) : json(config),
+    write: () => undefined,
+    close: () => undefined,
+    remove: () => undefined
+  }};
+}};
+global.RGBColor = function() {{ this.red = 0; this.green = 0; this.blue = 0; }};
+global.IllustratorSaveOptions = function() {{}};
+global.Compatibility = {{ ILLUSTRATOR8: 8 }};
+global.SaveOptions = {{ DONOTSAVECHANGES: 0 }};
+global.DocumentColorSpace = {{ RGB: 'RGB', CMYK: 'CMYK' }};
+global.UserInteractionLevel = {{ DONTDISPLAYALERTS: 0 }};
+function makeOutline(text) {{
+  const outline = {{
+    text,
+    resizeCalls: [],
+    resize: function(scaleX, scaleY) {{
+      this.resizeCalls.push([scaleX, scaleY]);
+      const b = this.visibleBounds;
+      const cx = (b[0] + b[2]) / 2;
+      const cy = (b[1] + b[3]) / 2;
+      const width = Math.abs(b[2] - b[0]) * scaleX / 100;
+      const height = Math.abs(b[1] - b[3]) * scaleY / 100;
+      setBounds(this, [cx - width / 2, cy + height / 2, cx + width / 2, cy - height / 2]);
+    }},
+    translate: function(dx, dy) {{
+      const b = this.visibleBounds;
+      setBounds(this, [b[0] + dx, b[1] + dy, b[2] + dx, b[3] + dy]);
+    }},
+    rotate: () => undefined
+  }};
+  setBounds(outline, [0, 8, 120, 0]);
+  outlines.push(outline);
+  return outline;
+}}
+function makeFrame() {{
+  let contents = '';
+  const frame = {{
+    textRange: {{ characterAttributes: {{ size: 12 }}, paragraphAttributes: {{}} }},
+    visibleBounds: [0, 8, 120, 0],
+    characters: [],
+    translate: () => undefined,
+    createOutline: function() {{ return makeOutline(contents); }}
+  }};
+  Object.defineProperty(frame, 'contents', {{
+    get: () => contents,
+    set: value => {{
+      contents = String(value);
+      frame.characters = Array.from(contents, () => ({{ characterAttributes: {{}} }}));
+    }}
+  }});
+  return frame;
+}}
+const layer = {{
+  textFrames: {{ add: () => makeFrame() }},
+  pathItems: {{ rectangle: () => ({{ filled: false, stroked: false }}) }}
+}};
+const doc = {{ layers: [layer], saveAs: () => undefined, close: () => undefined }};
+global.app = {{ documents: {{ add: () => doc }}, textFonts: [], redraw: () => undefined, executeMenuCommand: () => undefined }};
+new Function(source)();
+const outline = outlines.find(item => item.text === 'Amy Bridesmaid');
+if (!outline) throw new Error('personalized outline missing');
+const size = boundsSize(outline);
+if (Math.abs(size.width - 100) > 0.02) throw new Error('width not filled: ' + size.width);
+if (Math.abs(size.height - 40) > 0.02) throw new Error('height not filled: ' + size.height);
+if (!outline.resizeCalls.some(call => Math.abs(call[0] - call[1]) > 1)) {{
+  throw new Error('long text was still scaled proportionally: ' + JSON.stringify(outline.resizeCalls));
+}}
+"""
+
+    result = subprocess.run([node, "-e", harness], capture_output=True, text=True, check=False)
+
     assert result.returncode == 0, result.stderr
 
 
@@ -421,6 +566,29 @@ global.Compatibility = {{ ILLUSTRATOR8: 8 }};
 global.SaveOptions = {{ DONOTSAVECHANGES: 0 }};
 global.DocumentColorSpace = {{ RGB: 'RGB', CMYK: 'CMYK' }};
 global.UserInteractionLevel = {{ DONTDISPLAYALERTS: 0 }};
+function setBounds(item, bounds) {{
+  item.visibleBounds = bounds.slice();
+  item.geometricBounds = bounds.slice();
+}}
+function makeOutline() {{
+  const outline = {{
+    resize: function(scaleX, scaleY) {{
+      const b = this.visibleBounds;
+      const cx = (b[0] + b[2]) / 2;
+      const cy = (b[1] + b[3]) / 2;
+      const width = Math.abs(b[2] - b[0]) * scaleX / 100;
+      const height = Math.abs(b[1] - b[3]) * scaleY / 100;
+      setBounds(this, [cx - width / 2, cy + height / 2, cx + width / 2, cy - height / 2]);
+    }},
+    translate: function(dx, dy) {{
+      const b = this.visibleBounds;
+      setBounds(this, [b[0] + dx, b[1] + dy, b[2] + dx, b[3] + dy]);
+    }},
+    rotate: () => undefined
+  }};
+  setBounds(outline, [0, 10, 20, 0]);
+  return outline;
+}}
 function makeFrame() {{
   let contents = '';
   const frame = {{
@@ -428,7 +596,7 @@ function makeFrame() {{
     visibleBounds: [0, 10, 20, 0],
     characters: [],
     translate: () => undefined,
-    createOutline: () => ({{ geometricBounds: [0, 10, 20, 0], resize: () => undefined, translate: () => undefined, rotate: () => undefined }})
+    createOutline: () => makeOutline()
   }};
   Object.defineProperty(frame, 'contents', {{
     get: () => contents,

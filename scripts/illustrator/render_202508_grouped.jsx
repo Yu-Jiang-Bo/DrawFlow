@@ -344,11 +344,7 @@
         applyColor(tf, item.apply_color_to_artwork ? colorConfig(config, item.color_option) : [0, 0, 0]);
         applyTextActions(tf, actions || []);
         applyFontBoldness(tf, fontStyles[String(item.font_option || "")]);
-        return renderOutlinedTextToRect(tf, rect, minSize, maxSize, Number(design.rotation_deg || 0), shouldPreserveTextAspect(String(item.text || "")));
-    }
-
-    function shouldPreserveTextAspect(text) {
-        return /\s/.test(text) || text.length > 10;
+        return renderOutlinedTextToRect(tf, rect, minSize, maxSize, Number(design.rotation_deg || 0));
     }
 
     function designConfig(config, name) {
@@ -480,7 +476,7 @@
         tf.translate((left + right) / 2 - (b[0] + b[2]) / 2, (top + bottom) / 2 - (b[1] + b[3]) / 2);
     }
 
-    function renderOutlinedTextToRect(tf, rect, minSize, maxSize, rotationDeg, preserveAspect) {
+    function renderOutlinedTextToRect(tf, rect, minSize, maxSize, rotationDeg) {
         var left = rect[0], top = rect[1], right = rect[2], bottom = rect[3];
         var maxW = right - left;
         var maxH = top - bottom;
@@ -497,10 +493,10 @@
         if (rotationDeg) {
             try { outline.rotate(rotationDeg, true, true, true, true, Transformation.CENTER); } catch (e1) {}
         }
-        fitPageItemToRect(outline, rect, preserveAspect);
+        fitPageItemToRect(outline, rect);
         if (pathfinderMerge) {
             cleanupOutline(outline);
-            fitPageItemToRect(outline, rect, preserveAspect);
+            fitPageItemToRect(outline, rect);
         }
         return outline;
     }
@@ -523,42 +519,68 @@
         return size;
     }
 
-    function fitPageItemToRect(item, rect, preserveAspect) {
+    function fitPageItemToRect(item, rect) {
         var left = rect[0], top = rect[1], right = rect[2], bottom = rect[3];
-        for (var i = 0; i < 4; i++) {
+        for (var i = 0; i < 8; i++) {
             try { app.redraw(); } catch (e0) {}
-            var b = item.geometricBounds;
+            var b = measuredPageItemBounds(item);
             var w = Math.abs(b[2] - b[0]);
             var h = Math.abs(b[1] - b[3]);
-            if (w <= 0 || h <= 0) return;
+            if (w <= 0 || h <= 0) throw new Error("Cannot fit empty personalized text bounds");
             var scaleX = ((right - left) / w) * 100;
             var scaleY = ((top - bottom) / h) * 100;
-            if (preserveAspect) {
-                var scale = Math.min(scaleX, scaleY);
-                scaleX = scale;
-                scaleY = scale;
-            }
             try {
                 item.resize(scaleX, scaleY, true, true, true, true, 100, Transformation.CENTER);
             } catch (e1) {
                 try { item.resize(scaleX, scaleY); } catch (e2) {}
             }
-            if (preserveAspect) {
-                centerPageItemInRect(item, rect);
-            } else {
-                alignPageItemToRect(item, rect);
-            }
+            alignPageItemToRect(item, rect);
+            if (pageItemRectMatches(item, rect)) return;
         }
+        validatePageItemRect(item, rect);
     }
 
     function alignPageItemToRect(item, rect) {
-        var b = item.geometricBounds;
+        var b = measuredPageItemBounds(item);
         item.translate(rect[0] - b[0], rect[1] - b[1]);
     }
 
-    function centerPageItemInRect(item, rect) {
-        var b = item.geometricBounds;
-        item.translate((rect[0] + rect[2]) / 2 - (b[0] + b[2]) / 2, (rect[1] + rect[3]) / 2 - (b[1] + b[3]) / 2);
+    function pageItemRectMatches(item, rect) {
+        var b = measuredPageItemBounds(item);
+        return Math.abs((b[2] - b[0]) - (rect[2] - rect[0])) <= 0.02 &&
+            Math.abs((b[1] - b[3]) - (rect[1] - rect[3])) <= 0.02 &&
+            Math.abs(b[0] - rect[0]) <= 0.02 &&
+            Math.abs(b[1] - rect[1]) <= 0.02;
+    }
+
+    function validatePageItemRect(item, rect) {
+        if (pageItemRectMatches(item, rect)) return;
+        var b = measuredPageItemBounds(item);
+        throw new Error(
+            "定制文字未达到尺寸框：actual=" +
+            Math.abs(b[2] - b[0]) + "x" + Math.abs(b[1] - b[3]) +
+            ", target=" + Math.abs(rect[2] - rect[0]) + "x" + Math.abs(rect[1] - rect[3])
+        );
+    }
+
+    function measuredPageItemBounds(item) {
+        try {
+            var visible = item.visibleBounds;
+            if (validBounds(visible)) return visible;
+        } catch (e1) {}
+        try {
+            var geometric = item.geometricBounds;
+            if (validBounds(geometric)) return geometric;
+        } catch (e2) {}
+        throw new Error("Cannot measure personalized text bounds");
+    }
+
+    function validBounds(bounds) {
+        return bounds && bounds.length >= 4 &&
+            isFinite(Number(bounds[0])) &&
+            isFinite(Number(bounds[1])) &&
+            isFinite(Number(bounds[2])) &&
+            isFinite(Number(bounds[3]));
     }
 
     function cleanupOutline(item) {
