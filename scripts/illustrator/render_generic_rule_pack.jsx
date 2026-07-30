@@ -25,7 +25,7 @@
             finalizeExactBoxTargets(sheet);
             flushLayoutAudit();
             writeProgress(task, task.orders.length, task.orders.length, "正在保存 AI 文件");
-            saveAsNativeAI(sheet, sheetOutput);
+            saveAsNativeAI(sheet, sheetOutput, task.output && task.output.compatibility);
             trace(task, "name_columns:after_save");
             outputs.push(sheetOutput.fsName);
         } finally {
@@ -57,10 +57,20 @@
                 flushLayoutAudit();
             }
             var output = File(String(order.output_ai));
+            if (String(task.output && task.output.format || "").toLowerCase() === "png") {
+                var pngOutput = File(String(order.output_png || order.output_ai));
+                ensureFolder(pngOutput.parent);
+                if (pngOutput.exists) pngOutput.remove();
+                writeProgress(task, orderIndex, task.orders.length, "正在保存 PNG 文件");
+                exportPng(doc, pngOutput, Number(task.output && task.output.dpi || 300));
+                outputs.push(pngOutput.fsName);
+                writeProgress(task, orderIndex + 1, task.orders.length, "已保存 PNG 文件");
+                continue;
+            }
             ensureFolder(output.parent);
             if (output.exists) output.remove();
             writeProgress(task, orderIndex, task.orders.length, "正在保存 AI 文件");
-            saveAsNativeAI(doc, output);
+            saveAsNativeAI(doc, output, task.output && task.output.compatibility);
             outputs.push(output.fsName);
             writeProgress(task, orderIndex + 1, task.orders.length, "已保存 AI 文件");
         } finally {
@@ -311,7 +321,7 @@
         var cardBottom = cardTop - height;
         var innerTop = cardTop - margin;
         var cardBackground = rgbColor(String(layout.background_color || ""));
-        if (cardBackground) drawCardBackground(doc, left, cardTop, width, height, cardBackground);
+        if (cardBackground && !(task.output && task.output.transparent_background === true && String(task.output.format || "").toLowerCase() === "png")) drawCardBackground(doc, left, cardTop, width, height, cardBackground);
         var headerFields = mode.header_fields || [];
         if (headerFields.length) {
             addLayoutText(doc, joinFields(members[0], headerFields), left + width / 2, innerTop, Number(layout.header_font_size_pt || 16), rgbColor(layout.header_color || "#000000"), null, true);
@@ -1404,12 +1414,28 @@
         );
     }
 
-    function saveAsNativeAI(doc, file) {
+    function saveAsNativeAI(doc, file, compatibility) {
         var options = new IllustratorSaveOptions();
-        options.compatibility = Compatibility.ILLUSTRATOR8;
+        var targetCompatibility = String(compatibility || "Illustrator 8").toLowerCase();
+        if (targetCompatibility === "cs5") {
+            options.compatibility = Compatibility.ILLUSTRATOR15;
+        } else if (targetCompatibility !== "ai_standard" && targetCompatibility !== "standard" && targetCompatibility !== "current") {
+            options.compatibility = Compatibility.ILLUSTRATOR8;
+        }
         options.pdfCompatible = false;
         options.compressed = false;
         doc.saveAs(file, options);
+    }
+
+    function exportPng(doc, file, dpi) {
+        var opts = new ExportOptionsPNG24();
+        var scale = Math.max(1, Number(dpi || 300) / 72 * 100 + 0.02);
+        opts.antiAliasing = true;
+        opts.artBoardClipping = true;
+        opts.transparency = true;
+        opts.horizontalScale = scale;
+        opts.verticalScale = scale;
+        doc.exportFile(file, ExportType.PNG24, opts);
     }
 
     function ensureFolder(folder) {

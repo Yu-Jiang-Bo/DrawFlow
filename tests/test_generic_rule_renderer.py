@@ -325,9 +325,9 @@ def test_generic_task_resolves_case_and_common_chinese_order_columns(tmp_path):
     order_path = tmp_path / "orders.xlsx"
     workbook = Workbook()
     sheet = workbook.active
-    sheet.append(["\u5185\u90e8\u8ba2\u5355\u53f7", "\u6a21\u677f", "\u5b57\u4f53", "Name"])
-    sheet.append(["A-1", template.template_id, "F5", "Alice|Bob"])
-    sheet.append(["B-1", "OTHER_TEMPLATE", "F7", "Skip Me"])
+    sheet.append(["\u5185\u90e8\u8ba2\u5355\u53f7", "\u6a21\u677f", "\u5b57\u4f53", "\u5916\u534f\u5382\u5bb6\u4ee3\u7801", "Name"])
+    sheet.append(["A-1", template.template_id, "F5", "MY-W196", "Alice|Bob"])
+    sheet.append(["B-1", "OTHER_TEMPLATE", "F7", "OTHER", "Skip Me"])
     workbook.save(order_path)
     rules = base_rules()
     rules["order_bindings"] = {"text": "name"}
@@ -338,6 +338,7 @@ def test_generic_task_resolves_case_and_common_chinese_order_columns(tmp_path):
 
     assert len(task["orders"]) == 1
     assert task["orders"][0]["order_no"] == "A-1"
+    assert task["orders"][0]["values"]["manufacturer"] == "MY-W196"
     assert task["orders"][0]["selections"]["font"] == "F5"
     assert task["orders"][0]["variables"] == [
         {"target": "Name", "field": "text", "value": "Alice|Bob", "font_style": {"boldness": 0.5}}
@@ -488,6 +489,52 @@ def test_name_columns_layout_groups_t_department_by_order_and_color(tmp_path):
     assert task["orders"][0]["layout_mode"]["header_fields"] == ["order_no", "color"]
 
 
+def test_name_columns_layout_manufacturer_override_keeps_w196_rows_separate(tmp_path):
+    _, template = make_template(tmp_path)
+    order_path = tmp_path / "orders.xlsx"
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["Order", "Custom", "Department", "Manufacturer"])
+    sheet.append(["A-1", "Alice|Bob", "ZW", "MY-W196"])
+    sheet.append(["A-1", "Carol|Dan", "ZW", "MY-W196"])
+    sheet.append(["B-1", "Eve", "ZW", "OTHER"])
+    sheet.append(["B-1", "Frank", "ZW", "OTHER"])
+    workbook.save(order_path)
+    rules = {
+        **base_rules(),
+        "order_bindings": {
+            "order_no": "Order",
+            "text": "Custom",
+            "department": "Department",
+            "manufacturer": "Manufacturer",
+        },
+        "slot_mappings": [{"field": "text", "slot": "Name"}],
+        "render_layout": {
+            "type": "name_columns",
+            "default": {"group_by": ["row"], "header_fields": ["order_no"]},
+            "department_overrides": {
+                "ZW": {"group_by": ["order_no"], "header_fields": ["order_no"]}
+            },
+            "manufacturer_overrides": {
+                "MY-W196": {"group_by": ["row"], "header_fields": ["order_no"]}
+            },
+        },
+    }
+
+    task = build_generic_render_task(template, rules, order_path, tmp_path / "output.ai")
+
+    assert [len(order["layout_members"]) for order in task["orders"]] == [1, 1, 2]
+    assert [order["layout_members"][0]["values"]["text"] for order in task["orders"]] == [
+        "Alice|Bob",
+        "Carol|Dan",
+        "Eve",
+    ]
+    assert [member["values"]["text"] for member in task["orders"][2]["layout_members"]] == [
+        "Eve",
+        "Frank",
+    ]
+
+
 def test_boxed_name_columns_validate_one_to_seven_names_and_keep_year_optional(tmp_path):
     _, template = make_template(tmp_path)
     order_path = tmp_path / "orders-with-year.xlsx"
@@ -633,6 +680,7 @@ def test_confirmed_jjmb_202510_template_enables_exact_box_fill_only_for_its_layo
         "optional": True,
         "fill_box_exactly": True,
     }
+    assert rules["render_layout"]["manufacturer_overrides"]["MY-W196"]["group_by"] == ["row"]
     assert rules["output"] == {"color_mode": "CMYK"}
 
 

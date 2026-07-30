@@ -24,6 +24,8 @@
     var titleHeight = mmToPt(Number(layout.title_height_mm || 7));
     var keepTitleFrames = layout.keep_title_frames === true;
     var keepNameFrames = layout.keep_name_frames === true;
+    var packOrderBlocks = layout.pack_order_blocks === true;
+    var forceSubitemOrderLabels = packOrderBlocks && (!layout.master_packing || layout.master_packing.force_subitem_order_labels !== false);
     var pathfinderMerge = outputConfig.pathfinder_merge !== false;
     var cleanupStats = { attempted: 0, failed: 0 };
     var OUTLINE_BATCH_SIZE = 25;
@@ -41,9 +43,10 @@
     var groupMetrics = [];
     var columnWidth = Math.max(titleWidth, nameWidth, mmToPt(35));
     for (var g = 0; g < groups.length; g++) {
-        var height = orderLabelHeight;
+        var height = packOrderBlocks ? 0 : groupLabelHeight(groups[g]);
         var items = groups[g].items || [];
         for (var i = 0; i < items.length; i++) {
+            if (packOrderBlocks && forceSubitemOrderLabels) height += groupLabelHeight(groups[g]);
             height += itemHeight(items[i]) + itemGap;
         }
         if (items.length > 0) height -= itemGap;
@@ -58,6 +61,8 @@
     if (maxColumnHeight > 0) maxColumnHeight -= gap;
     var docWidth = margin * 2 + columns * columnWidth + (columns - 1) * gap;
     var docHeight = margin * 2 + maxColumnHeight;
+    docWidth = fixedCanvasWidth(outputConfig, docWidth);
+    docHeight = fixedCanvasHeight(outputConfig, docHeight);
 
     var doc = app.documents.add(documentColorSpace(colorMode), docWidth, docHeight);
     var layer = doc.layers[0];
@@ -73,16 +78,27 @@
     try {
         for (var gi = 0; gi < groups.length; gi++) {
             var group = groups[gi];
+            var beforeGroupItems = packOrderBlocks ? directLayerItems(layer) : null;
             var col = placements.items[gi].column;
             var left = margin + col * (columnWidth + gap);
             var top = docHeight - margin - placements.items[gi].y;
             var cursorTop = top;
-            drawOrderLabel(layer, String(group.order_no || ""), left, cursorTop, left + columnWidth, cursorTop - orderLabelHeight, orderLabelFontSize, textItems);
-            cursorTop -= orderLabelHeight;
+            if (!packOrderBlocks) {
+                drawProductionOrderLabel(layer, group, left, cursorTop, left + columnWidth, orderLabelFontSize, textItems);
+                cursorTop -= groupLabelHeight(group);
+            }
 
             var groupItems = group.items || [];
             for (var ii = 0; ii < groupItems.length; ii++) {
                 var item = groupItems[ii];
+                var beforeItemItems = packOrderBlocks ? directLayerItems(layer) : null;
+                // In packed output, outline this item's label and artwork before grouping it.
+                // Illustrator 8 otherwise flattens the child group during the later global outline pass.
+                var itemTextItems = packOrderBlocks && outputConfig.outline_text ? [] : textItems;
+                if (packOrderBlocks && forceSubitemOrderLabels) {
+                    drawProductionOrderLabel(layer, group, left, cursorTop, left + columnWidth, orderLabelFontSize, itemTextItems, true);
+                    cursorTop -= groupLabelHeight(group);
+                }
                 var font = fontConfig(task.font_map, item.font_option);
                 var width = item.text_type === "title" ? titleWidth : nameWidth;
                 var heightForItem = itemHeight(item);
@@ -90,16 +106,23 @@
                 var itemTop = cursorTop;
                 var itemBottom = itemTop - heightForItem;
                 if (item.text_type === "title") {
-                    if (!drawCurvedTitleFromTemplate(layer, String(item.text || ""), String(item.font_option || ""), itemLeft, itemTop, width, heightForItem, textItems, titleFrameItems)) {
+                    if (!drawCurvedTitleFromTemplate(layer, String(item.text || ""), String(item.font_option || ""), itemLeft, itemTop, width, heightForItem, itemTextItems, titleFrameItems)) {
                         titleTemplateStats.fallback += 1;
-                        drawCurvedTitle(layer, String(item.text || ""), font, itemLeft, itemTop, width, heightForItem, textItems, pathItems, titleFrameItems);
+                        drawCurvedTitle(layer, String(item.text || ""), font, itemLeft, itemTop, width, heightForItem, itemTextItems, pathItems, titleFrameItems);
                     }
                 } else {
-                    drawName(layer, String(item.text || ""), font, itemLeft, itemTop, width, heightForItem, textItems, nameFrameItems);
+                    drawName(layer, String(item.text || ""), font, itemLeft, itemTop, width, heightForItem, itemTextItems, nameFrameItems);
+                }
+                if (packOrderBlocks) {
+                    if (outputConfig.outline_text) outlineText(itemTextItems, false);
+                    groupNewLayerItems(layer, beforeItemItems, "ORDER_PACK_ITEM_" + gi + "_" + ii);
                 }
                 cursorTop = itemBottom - itemGap;
                 renderedItems += 1;
                 writeProgress(task, renderedItems, totalItems, "正在渲染条目");
+            }
+            if (packOrderBlocks) {
+                groupNewLayerItems(layer, beforeGroupItems, "ORDER_PACK_BLOCK_" + gi);
             }
         }
     } catch (eLayout) {
@@ -111,7 +134,7 @@
         renderProgress.stage = "outlining";
         writeProgress(task, renderedItems, totalItems, "正在转曲文字 0/" + textItems.length);
         writeRenderDebug("outlining", "", 0);
-        outlineText(textItems);
+        outlineText(textItems, true);
         writeProgress(task, renderedItems, totalItems, "正在清理辅助对象");
         removeItems(pathItems);
     }
@@ -131,7 +154,7 @@
         writeRenderDebug("saving", "", 0);
         ensureFolder(output.parent);
         if (output.exists) output.remove();
-        saveAsAI8(doc, output);
+        saveAsAI(doc, output, String(outputConfig.compatibility || "Illustrator 8"));
         writeProgress(task, renderedItems, totalItems, "正在关闭 Illustrator 文档");
         doc.close(SaveOptions.DONOTSAVECHANGES);
         doc = null;
@@ -171,13 +194,77 @@
         return item.text_type === "title" ? titleHeight : nameHeight;
     }
 
-    function drawOrderLabel(layer, text, left, top, right, bottom, size, textItems) {
-        var tf = layer.textFrames.add();
-        tf.contents = text;
-        tf.textRange.characterAttributes.size = size;
-        applyBlack(tf);
-        fitTextToRect(tf, [left, top, right, bottom], 5, size);
-        textItems.push({ item: tf });
+    function groupLabelLines(group) {
+        var lines = group.production_label_lines || [];
+        if (lines.length === 0 && group.order_no) lines = [String(group.order_no)];
+        return lines;
+    }
+
+    function groupLabelHeight(group) {
+        if (layout.suppress_labels === true) return 0;
+        var lines = groupLabelLines(group);
+        return Math.max(orderLabelHeight, Math.max(lines.length, 1) * orderLabelHeight);
+    }
+
+    function drawProductionOrderLabel(layer, group, left, top, right, size, textItems, force) {
+        if (layout.suppress_labels === true && force !== true) return;
+        var lines = groupLabelLines(group);
+        var height = groupLabelHeight(group);
+        var lineCount = Math.max(lines.length, 1);
+        var lineHeight = height / lineCount;
+        for (var i = 0; i < lineCount; i++) {
+            var tf = layer.textFrames.add();
+            tf.contents = String(lines[i] || "");
+            tf.textRange.characterAttributes.size = size;
+            applyBlack(tf);
+            var lineTop = top - i * lineHeight;
+            fitTextToRect(tf, [left, lineTop, right, lineTop - lineHeight], 5, size);
+            textItems.push({ item: tf });
+        }
+    }
+
+    function fixedCanvasWidth(output, fallback) {
+        var canvas = output.fixed_canvas_mm || {};
+        var width = mmToPt(Number(canvas.width_mm || 0));
+        return width > 0 ? width : fallback;
+    }
+
+    function fixedCanvasHeight(output, fallback) {
+        var canvas = output.fixed_canvas_mm || {};
+        var height = mmToPt(Number(canvas.height_mm || 0));
+        return height > 0 ? height : fallback;
+    }
+
+    function directLayerItems(layer) {
+        var result = [];
+        for (var i = 0; i < layer.pageItems.length; i++) {
+            if (layer.pageItems[i].parent === layer) result.push(layer.pageItems[i]);
+        }
+        return result;
+    }
+
+    function groupNewLayerItems(layer, previousItems, name) {
+        var additions = [];
+        var currentItems = directLayerItems(layer);
+        for (var i = 0; i < currentItems.length; i++) {
+            var known = false;
+            for (var j = 0; j < previousItems.length; j++) {
+                if (currentItems[i] === previousItems[j]) { known = true; break; }
+            }
+            if (!known) additions.push(currentItems[i]);
+        }
+        if (!additions.length) throw new Error("Order pack block has no artwork");
+        var doc = app.activeDocument;
+        doc.selection = null;
+        for (var selectionIndex = 0; selectionIndex < additions.length; selectionIndex++) {
+            additions[selectionIndex].selected = true;
+        }
+        app.executeMenuCommand("group");
+        var block = doc.selection.length ? doc.selection[0] : null;
+        if (!block || block.typename !== "GroupItem") throw new Error("Cannot create order pack block");
+        block.name = name;
+        doc.selection = null;
+        return block;
     }
 
     function drawName(layer, text, font, left, top, width, height, textItems, nameFrameItems) {
@@ -591,7 +678,7 @@
         return total;
     }
 
-    function outlineText(items) {
+    function outlineText(items, reportProgress) {
         renderProgress.stage = "outlining";
         renderProgress.totalTextItems = items.length;
         for (var i = 0; i < items.length; i++) {
@@ -608,7 +695,7 @@
                 }
                 if (pathfinderMerge) cleanupOutline(outline);
                 renderProgress.processedTextItems = i + 1;
-                if (shouldSettleOutlineBatch(i + 1, items.length)) {
+                if (reportProgress !== false && shouldSettleOutlineBatch(i + 1, items.length)) {
                     settleIllustrator();
                     writeProgress(task, renderedItems, totalItems, "正在转曲文字 " + (i + 1) + "/" + items.length);
                     writeRenderDebug("outlining", "", 0);
@@ -771,7 +858,7 @@
         var text = file.read();
         file.close();
         if (typeof JSON !== "undefined" && JSON.parse) return JSON.parse(text);
-        return eval("(" + text + ")");
+        throw new Error("JSON.parse is required to read render task JSON.");
     }
 
     function writeDebug(task, payload) {
@@ -823,9 +910,14 @@
         return "{" + props.join(",") + "}";
     }
 
-    function saveAsAI8(doc, file) {
+    function saveAsAI(doc, file, compatibility) {
         var opts = new IllustratorSaveOptions();
-        opts.compatibility = Compatibility.ILLUSTRATOR8;
+        var target = String(compatibility || "Illustrator 8").toLowerCase();
+        if (target === "cs5") {
+            opts.compatibility = Compatibility.ILLUSTRATOR15;
+        } else if (target !== "ai_standard" && target !== "standard" && target !== "current") {
+            opts.compatibility = Compatibility.ILLUSTRATOR8;
+        }
         opts.pdfCompatible = false;
         opts.compressed = false;
         doc.saveAs(file, opts);

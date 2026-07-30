@@ -107,6 +107,9 @@ def test_generic_renderer_cycles_configured_name_colors_only():
     assert "settings.rotation_deg" in source
     assert "settings.scale_percent" in source
     assert "settings.offset_x_mm" in source
+    assert 'task.output && task.output.compatibility' in source
+    assert 'String(compatibility || "Illustrator 8").toLowerCase()' in source
+    assert "Compatibility.ILLUSTRATOR15" in source
     assert "options.compatibility = Compatibility.ILLUSTRATOR8;" in source
     assert "options.pdfCompatible = false;" in source
     assert "options.compressed = false;" in source
@@ -153,6 +156,34 @@ def test_generic_renderer_javascript_parses_in_node(tmp_path):
     result = assert_javascript_parses_in_node(node, source, tmp_path)
 
     assert result.returncode == 0, result.stderr
+
+
+def test_grouped_single_graphic_initializes_fit_stats_before_early_return():
+    source = GROUPED_SCRIPT.read_text(encoding="utf-8")
+
+    fit_stats_index = source.index("var fitStats = { count: 0, maxDeltaPt: 0, f11HeartFitCount: 0 };")
+    single_graphic_index = source.index("if (layout.single_graphic_exact === true")
+    record_fit_index = source.index("function recordFitDelta")
+
+    assert fit_stats_index < single_graphic_index
+    assert single_graphic_index < record_fit_index
+
+
+def test_grouped_design_assets_are_brought_above_single_graphic_background():
+    source = GROUPED_SCRIPT.read_text(encoding="utf-8")
+    body = source[source.index("function renderDesignAssetItem"):source.index("function normalizeDesignInstances")]
+
+    assert "copy.zOrder(ZOrderMethod.BRINGTOFRONT)" in body
+    assert body.index("copy.zOrder(ZOrderMethod.BRINGTOFRONT)") < body.index("recordFitDelta(")
+
+
+def test_single_graphic_png_uses_transparency_and_no_white_background():
+    source = GROUPED_SCRIPT.read_text(encoding="utf-8")
+    single_body = source[source.index("function renderSingleGraphicExactPng"):source.index("function drawSingleGraphicOrderLabel")]
+    export_body = source[source.index("function exportPng"):source.index("function drawWhiteBackground")]
+
+    assert "drawWhiteBackground(" not in single_body
+    assert "opts.transparency = true;" in export_body
 
 
 def test_exact_box_geometry_uses_independent_scaling_and_center_alignment():
@@ -399,7 +430,8 @@ def test_grouped_renderer_applies_each_task_font_style_before_outlining():
     assert "var outlineText = exportConfig.outline_text !== false;" in source
     assert "if (!outlineText)" in source
     assert "if (outlineText)" in design_body
-    assert design_body.index("duplicateDesignInstance") < design_body.index("outlineTextFrames(copy);")
+    assert design_body.index("duplicateDesignInstance") < design_body.index("outlineTextFrames(copy, false);")
+    assert "if (pathfinderMerge) cleanupOutline(copy);" not in design_body
     assert "function applyFontBoldnessToTextFrames(root, style)" in source
     assert "var showStyleBoxes = layout.show_style_boxes === true;" in source
 

@@ -16,6 +16,10 @@ FIELD_ALIASES = {
     "quantity": ["购买数量", "数量"],
     "template": ["模板"],
     "custom_info": ["定制信息"],
+    "department": ["生产部门", "部门", "department", "production department"],
+    "manufacturer": ["外协厂家代码", "厂家代码", "厂家", "厂商", "生产厂家", "供应商", "manufacturer", "factory", "supplier"],
+    "product_name": ["产品中文名称", "产品名称", "product name", "product_name"],
+    "color_option": ["字体颜色", "颜色", "color", "font color", "color_option"],
 }
 
 SPLIT_CUSTOM_FIELD_ALIASES = {
@@ -34,6 +38,10 @@ class JJMBOrderItem:
     style_option: str
     font_option: str
     personalization_values: List[str]
+    department: str = ""
+    manufacturer: str = ""
+    product_name: str = ""
+    color_option: str = ""
 
 
 def read_xlsx_rows(path: Path | str, sheet_name: str | None = None) -> List[Dict[str, str]]:
@@ -169,6 +177,10 @@ def parse_order_items(rows: Iterable[Dict[str, str]], template_id: str | None = 
                 style_option=style,
                 font_option=font,
                 personalization_values=values,
+                department=normalized["department"],
+                manufacturer=normalized["manufacturer"],
+                product_name=normalized["product_name"],
+                color_option=normalized["color_option"],
             )
         )
     return items

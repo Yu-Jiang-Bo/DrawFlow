@@ -19,11 +19,13 @@ from src.service.render_service import (
     _design_font_options,
     _merge_202508_template_config,
     _missing_202508_font_configs,
+    _plan_png_master_pages,
 )
 from src.service.template_registry import TemplateRegistry
 from src.service.template_inspector import TemplateInspector
 from src.service.template_onboarding import TemplateOnboardingStore
 from src.service.template_publication import TemplatePublicationService
+from src.service.department_output import resolve_department_output
 
 
 def test_http_server_uses_exclusive_windows_port(monkeypatch):
@@ -90,7 +92,13 @@ def test_http_render_releases_lock_after_failure():
     FailingHandler.render_lock.release()
 
 
-def write_order_xlsx(path: Path, *, template_id: str = "JJMB202508261001394920") -> None:
+def write_order_xlsx(
+    path: Path,
+    *,
+    template_id: str = "JJMB202508261001394920",
+    department: str = "",
+    manufacturer: str = "",
+) -> None:
     workbook = Workbook()
     sheet = workbook.active
     sheet.append(
@@ -109,6 +117,7 @@ def write_order_xlsx(path: Path, *, template_id: str = "JJMB202508261001394920")
             "定制信息",
             "字体颜色",
             "设计",
+            "厂家",
         ]
     )
     sheet.append(
@@ -119,7 +128,7 @@ def write_order_xlsx(path: Path, *, template_id: str = "JJMB202508261001394920")
             "SKU1",
             "平纹方形皮质首饰盒",
             "1",
-            "K",
+            department,
             template_id,
             "DETAIL1",
             "SPU1",
@@ -127,6 +136,7 @@ def write_order_xlsx(path: Path, *, template_id: str = "JJMB202508261001394920")
             "Meg",
             "Gold",
             "Design 3",
+            manufacturer,
         ]
     )
     workbook.save(path)
@@ -147,6 +157,81 @@ def write_templates_config(path: Path) -> None:
                         "pipeline": "jjmb_202508",
                         "status": "active",
                         "template_ai": str(fake_ai),
+                        "default_columns": 3,
+                        "default_hide_boxes": True,
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+
+def write_curved_order_xlsx(path: Path, rows: list[tuple[str, str, str, str]]) -> None:
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["内部订单号", "订单明细id", "生产部门", "产品中文名称", "字体颜色", "模板", "定制信息"])
+    for order_no, detail_id, department, color in rows:
+        sheet.append(
+            [
+                order_no,
+                detail_id,
+                department,
+                "圣诞曲线标题挂件",
+                color,
+                "JJMB202509231236046265",
+                "Font Options:F1\nTitle:Family\nName:1. Kai",
+            ]
+        )
+    workbook.save(path)
+
+
+def write_curved_templates_config(path: Path) -> None:
+    fake_ai = path.parent / "curved-template.ai"
+    font_report = path.parent / "curved-font-report.json"
+    rules_path = path.parent / "curved.rules.json"
+    fake_ai.write_text("fake ai", encoding="utf-8")
+    font_report.write_text(
+        json.dumps(
+            {
+                "entries": [
+                    {
+                        "status": "ok",
+                        "font_option": "F1",
+                        "font_name": "Test Font",
+                        "baseline_ratio": {},
+                        "bounds_shape_ratio": {},
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    rules_path.write_text(
+        json.dumps(
+            {
+                "mode": "annotated_ai",
+                "capabilities": ["text_on_curve"],
+                "slots": [{"name": "Title", "type": "text_on_curve"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "templates": [
+                    {
+                        "template_id": "JJMB202509231236046265",
+                        "name": "曲线标题测试模板",
+                        "template_type": "curved_title_text",
+                        "pipeline": "jjmb_202509_curved",
+                        "status": "active",
+                        "template_ai": str(fake_ai),
+                        "template_config": str(font_report),
+                        "template_rules_config": str(rules_path),
                         "default_columns": 3,
                         "default_hide_boxes": True,
                     }
@@ -182,13 +267,770 @@ def test_service_dry_run_creates_job_and_render_task(tmp_path):
     assert record["stats"]["groups"] == 1
     assert record["stats"]["items"] == 1
     assert record["stats"]["dry_run"] is True
+    assert "primary_output" not in record["outputs"]
+    assert "delivery_plan" in record["outputs"]
     task_path = Path(record["outputs"]["render_task"])
     assert task_path.exists()
+    assert json.loads(task_path.read_text(encoding="utf-8"))["type"] == "render_batch"
+    task_path = Path(record["outputs"]["render_task_files"][0])
     task = json.loads(task_path.read_text(encoding="utf-8"))
     assert task["groups"][0]["items"][0]["production_label_lines"] == ["ORDER1", "金色"]
     assert task["output"]["color_mode"] == "CMYK"
     assert task["output"]["outline_text"] is True
     assert task["output"]["pathfinder_merge"] is True
+
+
+def test_service_routes_h_to_per_graphic_pngs_and_cropped_master_png(tmp_path):
+    config_path = tmp_path / "templates.json"
+    order_path = tmp_path / "orders.xlsx"
+    write_templates_config(config_path)
+    write_order_xlsx(order_path, department="H")
+    workbook = load_workbook(order_path)
+    sheet = workbook.active
+    second = [cell.value for cell in sheet[2]]
+    second[8] = "DETAIL2"
+    second[11] = "Amy"
+    second[12] = "Black"
+    sheet.append(second)
+    workbook.save(order_path)
+
+    record = RenderService(
+        registry=TemplateRegistry(config_path),
+        jobs=JobStore(tmp_path / "jobs"),
+    ).submit(
+        {"template_id": "JJMB202508261001394920", "order_file": str(order_path), "dry_run": True}
+    )
+
+    assert record["status"] == "completed", record.get("error")
+    assert "primary_output" not in record["outputs"]
+    assert [item["name"] for item in record["outputs"]["graphic_files"]] == ["ORDER1-1.png", "ORDER1-2.png"]
+    assert record["outputs"]["delivery_plan"][-1]["path"].endswith("-H-580mm-master.png")
+    assert [member["arcname"] for member in record["outputs"]["bundle_plan"]] == [
+        "single-graphics/ORDER1-1.png",
+        "single-graphics/ORDER1-2.png",
+        f"summary/{Path(record['outputs']['delivery_plan'][-1]['path']).name}",
+    ]
+    assert "output_manifest" in record["outputs"]
+    graphic_task_path = next(
+        Path(path)
+        for path in record["outputs"]["render_task_files"]
+        if "single-graphic-tasks" in str(path)
+    )
+    master_task_path = next(
+        Path(path)
+        for path in record["outputs"]["render_task_files"]
+        if "single-graphic-tasks" not in str(path) and path.endswith("render-task-001.json")
+    )
+    graphic_task = json.loads(graphic_task_path.read_text(encoding="utf-8"))
+    master_task = json.loads(master_task_path.read_text(encoding="utf-8"))
+    assert graphic_task["output"]["format"] == "png"
+    assert graphic_task["output"]["color_mode"] == "CMYK"
+    assert graphic_task["groups"][0]["items"][0]["apply_color_to_artwork"] is True
+    assert graphic_task["groups"][0]["items"][0]["production_label_lines"] == ["ORDER1"]
+    assert master_task["output"]["format"] == "png"
+    assert master_task["output"]["fixed_canvas_mm"] == {"width_mm": 580.0, "height_mm": 2000.0}
+    assert master_task["output"]["crop_master_height"] is True
+    assert master_task["output"]["dpi"] == 300
+
+
+def test_service_dry_run_uses_template_text_output_flags(tmp_path):
+    config_path = tmp_path / "templates.json"
+    order_path = tmp_path / "orders.xlsx"
+    write_templates_config(config_path)
+    write_order_xlsx(order_path)
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    config["templates"][0]["outline_text"] = True
+    config["templates"][0]["pathfinder_merge"] = False
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+
+    record = RenderService(
+        registry=TemplateRegistry(config_path),
+        jobs=JobStore(tmp_path / "jobs"),
+    ).submit(
+        {"template_id": "JJMB202508261001394920", "order_file": str(order_path), "dry_run": True}
+    )
+
+    task = json.loads(Path(record["outputs"]["render_task_files"][0]).read_text(encoding="utf-8"))
+    assert task["output"]["outline_text"] is True
+    assert task["output"]["pathfinder_merge"] is False
+
+
+def test_service_routes_t_to_one_ai_with_color_frame_artboards(tmp_path):
+    config_path = tmp_path / "templates.json"
+    order_path = tmp_path / "orders.xlsx"
+    write_templates_config(config_path)
+    write_order_xlsx(order_path, department="T")
+    workbook = load_workbook(order_path)
+    sheet = workbook.active
+    second = [cell.value for cell in sheet[2]]
+    second[2] = "ORDER2"
+    second[8] = "DETAIL2"
+    second[11] = "Beth"
+    second[12] = "Silver"
+    sheet.append(second)
+    third = [cell.value for cell in sheet[2]]
+    third[8] = "DETAIL3"
+    third[11] = "Mia"
+    third[12] = "Gold"
+    sheet.append(third)
+    workbook.save(order_path)
+
+    record = RenderService(
+        registry=TemplateRegistry(config_path),
+        jobs=JobStore(tmp_path / "jobs"),
+    ).submit(
+        {"template_id": "JJMB202508261001394920", "order_file": str(order_path), "dry_run": True}
+    )
+
+    assert record["status"] == "completed", record.get("error")
+    assert record["outputs"]["delivery_plan"][0]["path"].endswith("-T.ai")
+    master_task = json.loads(Path(record["outputs"]["render_task"]).read_text(encoding="utf-8"))
+    component_task_path = next(
+        Path(task_path)
+        for task_path in record["outputs"]["render_task_files"]
+        if "-color-" in Path(task_path).name
+    )
+    compose_task_path = next(
+        Path(task_path)
+        for task_path in record["outputs"]["render_task_files"]
+        if "compose-color-frames" in Path(task_path).name
+    )
+    component_task = json.loads(component_task_path.read_text(encoding="utf-8"))
+    compose_task = json.loads(compose_task_path.read_text(encoding="utf-8"))
+    assert master_task["type"] == "render_batch"
+    assert len(master_task["tasks"]) == len(record["outputs"]["render_task_files"])
+    assert [item["name"] for item in record["outputs"]["single_order_files"]] == ["ORDER1.ai", "ORDER2.ai"]
+    assert record["outputs"]["single_order_files"][0]["item_count"] == 2
+    assert record["outputs"]["single_order_files"][0]["detail_ids"] == ["DETAIL1", "DETAIL3"]
+    assert record["outputs"]["single_order_files"][1]["item_count"] == 1
+    assert [item["arcname"] for item in record["outputs"]["bundle_plan"][:2]] == [
+        "single-orders/ORDER1.ai",
+        "single-orders/ORDER2.ai",
+    ]
+    single_order_task_path = next(
+        Path(task_path)
+        for task_path in record["outputs"]["render_task_files"]
+        if "single-order-tasks" in str(task_path)
+        and json.loads(Path(task_path).read_text(encoding="utf-8"))["groups"][0]["order_no"] == "ORDER1"
+    )
+    single_order_task = json.loads(single_order_task_path.read_text(encoding="utf-8"))
+    assert len(single_order_task["groups"]) == 1
+    assert len(single_order_task["groups"][0]["items"]) == 2
+    assert component_task["output"]["compatibility"] == "CS5"
+    assert component_task["output"]["intermediate_component"] is True
+    assert component_task["output"]["fixed_canvas_mm"] == {}
+    assert component_task["layout"]["pack_order_blocks"] is True
+    assert component_task["layout"]["suppress_labels"] is True
+    assert component_task["layout"]["master_packing"]["target_width_mm"] == 580.0
+    assert component_task["layout"]["master_packing"]["algorithm"] == "adaptive_column_grid"
+    assert component_task["groups"][0]["items"][0]["production_label_lines"] == ["ORDER1"]
+    assert compose_task["type"] == "compose_color_frames"
+    assert compose_task["master_packing"]["target_width_mm"] == 580.0
+    assert compose_task["master_packing"]["component_suppress_labels"] is True
+    assert compose_task["show_color_header"] is True
+    assert compose_task["show_color_frame_boundary"] is True
+    assert [frame["color_option"] for frame in compose_task["inputs"]] == ["金色", "银色"]
+    assert compose_task["inputs"][0]["order_nos"] == ["ORDER1"]
+
+
+def test_curved_template_reuses_shared_department_output_pipeline(tmp_path):
+    config_path = tmp_path / "templates.json"
+    order_path = tmp_path / "curved-orders.xlsx"
+    write_curved_templates_config(config_path)
+    write_curved_order_xlsx(
+        order_path,
+        [
+            ("CURVED-T", "DETAIL-T", "T", "Red"),
+            ("CURVED-D", "DETAIL-D", "Dept_D", "Black"),
+        ],
+    )
+
+    record = RenderService(
+        registry=TemplateRegistry(config_path),
+        jobs=JobStore(tmp_path / "jobs"),
+    ).submit(
+        {"template_id": "JJMB202509231236046265", "order_file": str(order_path), "dry_run": True}
+    )
+
+    assert record["status"] == "completed", record.get("error")
+    assert [item["name"] for item in record["outputs"]["single_order_files"]] == ["CURVED-T.ai", "CURVED-D.ai"]
+    assert [item["department"] for item in record["outputs"]["delivery_plan"]] == ["T"]
+    assert all(member["arcname"] != "manifest.json" for member in record["outputs"]["bundle_plan"])
+    assert "output_manifest" in record["outputs"]
+    batch_task = json.loads(Path(record["outputs"]["render_task"]).read_text(encoding="utf-8"))
+    assert batch_task["type"] == "render_batch"
+
+    color_task_path = next(
+        Path(path)
+        for path in record["outputs"]["render_task_files"]
+        if "-color-" in Path(path).name
+    )
+    d_task_path = next(
+        Path(path)
+        for path in record["outputs"]["render_task_files"]
+        if "single-order-tasks" in str(path)
+        and json.loads(Path(path).read_text(encoding="utf-8"))["groups"][0]["order_no"] == "CURVED-D"
+    )
+    color_task = json.loads(color_task_path.read_text(encoding="utf-8"))
+    d_task = json.loads(d_task_path.read_text(encoding="utf-8"))
+    assert color_task["output"]["fixed_canvas_mm"] == {}
+    assert color_task["layout"]["pack_order_blocks"] is True
+    assert color_task["layout"]["suppress_labels"] is True
+    assert color_task["layout"]["master_packing"]["target_width_mm"] == 580.0
+    assert color_task["layout"]["master_packing"]["algorithm"] == "adaptive_column_grid"
+    assert color_task["groups"][0]["production_label_lines"] == ["CURVED-T"]
+    assert d_task["groups"][0]["production_label_lines"] == ["CURVED-D", "圣诞曲线标题挂件"]
+
+
+def test_curved_zw_keeps_its_existing_single_ai_delivery(tmp_path):
+    config_path = tmp_path / "templates.json"
+    order_path = tmp_path / "curved-zw-orders.xlsx"
+    write_curved_templates_config(config_path)
+    write_curved_order_xlsx(order_path, [("CURVED-ZW", "DETAIL-ZW", "ZW", "Gold")])
+
+    record = RenderService(
+        registry=TemplateRegistry(config_path),
+        jobs=JobStore(tmp_path / "jobs"),
+    ).submit(
+        {"template_id": "JJMB202509231236046265", "order_file": str(order_path), "dry_run": True}
+    )
+
+    assert record["status"] == "completed", record.get("error")
+    assert record["outputs"]["output_ai"].endswith("JJMB202509231236046265-3col.ai")
+    assert "output_bundle" not in record["outputs"]
+    task = json.loads(Path(record["outputs"]["render_task"]).read_text(encoding="utf-8"))
+    assert task["type"] == "jjmb_202509_curved"
+    assert task["groups"][0]["production_label_lines"] == ["CURVED-ZW"]
+
+
+@pytest.mark.parametrize(
+    ("department", "width_mm"),
+    [
+        ("K", 480.0),
+        ("ZK", 450.0),
+        ("FK", 450.0),
+    ],
+)
+def test_service_routes_color_master_widths_by_department(tmp_path, department, width_mm):
+    config_path = tmp_path / f"templates-{department}.json"
+    order_path = tmp_path / f"orders-{department}.xlsx"
+    write_templates_config(config_path)
+    write_order_xlsx(order_path, department=department)
+
+    record = RenderService(
+        registry=TemplateRegistry(config_path),
+        jobs=JobStore(tmp_path / f"jobs-{department}"),
+    ).submit(
+        {"template_id": "JJMB202508261001394920", "order_file": str(order_path), "dry_run": True}
+    )
+
+    assert record["status"] == "completed", record.get("error")
+    component_task_path = next(
+        Path(task_path)
+        for task_path in record["outputs"]["render_task_files"]
+        if "-color-" in Path(task_path).name
+    )
+    component_task = json.loads(component_task_path.read_text(encoding="utf-8"))
+    compose_task_path = next(
+        Path(task_path)
+        for task_path in record["outputs"]["render_task_files"]
+        if "compose-color-frames" in Path(task_path).name
+    )
+    compose_task = json.loads(compose_task_path.read_text(encoding="utf-8"))
+    assert component_task["output"]["fixed_canvas_mm"] == {}
+    assert component_task["layout"]["pack_order_blocks"] is True
+    assert component_task["layout"]["suppress_labels"] is True
+    assert compose_task["master_packing"]["target_width_mm"] == width_mm
+    assert compose_task["master_packing"]["algorithm"] == "adaptive_column_grid"
+
+
+@pytest.mark.parametrize("department", ["PW", "EW"])
+def test_service_routes_pw_ew_to_single_orders_and_one_master(tmp_path, department):
+    config_path = tmp_path / f"templates-{department}.json"
+    order_path = tmp_path / f"orders-{department}.xlsx"
+    write_templates_config(config_path)
+    write_order_xlsx(order_path, department=department)
+
+    record = RenderService(
+        registry=TemplateRegistry(config_path),
+        jobs=JobStore(tmp_path / f"jobs-{department}"),
+    ).submit(
+        {"template_id": "JJMB202508261001394920", "order_file": str(order_path), "dry_run": True}
+    )
+
+    assert record["status"] == "completed", record.get("error")
+    assert [item["name"] for item in record["outputs"]["single_order_files"]] == ["ORDER1.ai"]
+    assert record["outputs"]["delivery_plan"][0]["path"].endswith(f"-{department}.ai")
+    arcnames = [member["arcname"] for member in record["outputs"]["bundle_plan"]]
+    assert arcnames[0] == "single-orders/ORDER1.ai"
+    assert arcnames[1].startswith("summary/")
+    assert arcnames[1].endswith(f"-{department}.ai")
+    master_task_path = next(
+        Path(task_path)
+        for task_path in record["outputs"]["render_task_files"]
+        if "single-order-tasks" not in str(task_path)
+    )
+    master_task = json.loads(master_task_path.read_text(encoding="utf-8"))
+    item = master_task["groups"][0]["items"][0]
+    assert item["production_label_lines"] == ["ORDER1", "平纹方形皮质首饰盒"]
+    assert master_task["output"]["fixed_canvas_mm"] == {}
+
+
+def test_service_routes_d_department_to_single_orders_without_master(tmp_path):
+    config_path = tmp_path / "templates-d.json"
+    order_path = tmp_path / "orders-d.xlsx"
+    write_templates_config(config_path)
+    write_order_xlsx(order_path, department="Dept_D")
+
+    record = RenderService(
+        registry=TemplateRegistry(config_path),
+        jobs=JobStore(tmp_path / "jobs-d"),
+    ).submit(
+        {"template_id": "JJMB202508261001394920", "order_file": str(order_path), "dry_run": True}
+    )
+
+    assert record["status"] == "completed", record.get("error")
+    assert record["stats"]["deliveries"] == 0
+    assert record["outputs"]["delivery_plan"] == []
+    assert [item["name"] for item in record["outputs"]["single_order_files"]] == ["ORDER1.ai"]
+    assert [member["arcname"] for member in record["outputs"]["bundle_plan"]] == [
+        "single-orders/ORDER1.ai",
+    ]
+    assert "output_manifest" in record["outputs"]
+    single_task_path = Path(record["outputs"]["render_task_files"][0])
+    single_task = json.loads(single_task_path.read_text(encoding="utf-8"))
+    item = single_task["groups"][0]["items"][0]
+    assert item["production_label_lines"] == ["ORDER1", "平纹方形皮质首饰盒"]
+
+
+def test_202603_pipeline_rejects_non_graphic_department_output(tmp_path):
+    config_path = tmp_path / "templates.json"
+    order_path = tmp_path / "orders.xlsx"
+    write_templates_config(config_path)
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    structure_path = tmp_path / "template.config.json"
+    structure_path.write_text(
+        json.dumps(
+            {
+                "font_options": {"F7": {"type": "text"}},
+                "style_options": {"Style1": {"width_mm": 80, "height_mm": 50}},
+                "slots": [{"name": "text_fit_box"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    config["templates"][0].update(
+        {
+            "pipeline": "jjmb_202603_grouped",
+            "template_type": "pure_text",
+            "template_id": "JJMB202603281027102517",
+            "template_config": str(structure_path),
+        }
+    )
+    config_path.write_text(json.dumps(config, ensure_ascii=False), encoding="utf-8")
+    write_order_xlsx(order_path, template_id="JJMB202603281027102517", department="T")
+    workbook = load_workbook(order_path)
+    workbook.active["N1"] = "Style Option"
+    workbook.active["N2"] = "Style 1"
+    workbook.save(order_path)
+
+    record = RenderService(
+        registry=TemplateRegistry(config_path),
+        jobs=JobStore(tmp_path / "jobs"),
+    ).submit(
+        {"template_id": "JJMB202603281027102517", "order_file": str(order_path), "dry_run": True}
+    )
+
+    assert record["status"] == "failed"
+    assert record["error_code"] == "department_output_pipeline_unsupported"
+
+
+def test_service_routes_202603_h_to_exact_pngs_and_paginated_master_ai(tmp_path):
+    config_path = tmp_path / "templates.json"
+    order_path = tmp_path / "orders.xlsx"
+    structure_path = tmp_path / "template.config.json"
+    rules_path = tmp_path / "template.rules.json"
+    write_templates_config(config_path)
+    structure_path.write_text(
+        json.dumps(
+            {
+                "font_options": {
+                    "F7": {
+                        "type": "text",
+                        "font_name": "TestFont",
+                        "font_size_pt": 48,
+                    }
+                },
+                "style_options": {
+                    "Style1": {
+                        "width_pt": 226.7716535433,
+                        "height_pt": 141.7322834646,
+                        "width_mm": 80,
+                        "height_mm": 50,
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    rules_path.write_text(json.dumps({"font_options": ["F7"], "style_options": ["Style1"]}), encoding="utf-8")
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    config["templates"][0].update(
+        {
+            "template_id": "JJMB202603281027102517",
+            "template_type": "pure_text_style",
+            "pipeline": "jjmb_202603_grouped",
+            "template_config": str(structure_path),
+            "template_rules_config": str(rules_path),
+        }
+    )
+    config_path.write_text(json.dumps(config, ensure_ascii=False), encoding="utf-8")
+    write_order_xlsx(order_path, template_id="JJMB202603281027102517", department="H")
+    workbook = load_workbook(order_path)
+    workbook.active["N1"] = "Style Option"
+    workbook.active["N2"] = "Style 1"
+    workbook.save(order_path)
+
+    record = RenderService(
+        registry=TemplateRegistry(config_path),
+        jobs=JobStore(tmp_path / "jobs-h-202603"),
+    ).submit(
+        {"template_id": "JJMB202603281027102517", "order_file": str(order_path), "dry_run": True}
+    )
+
+    assert record["status"] == "completed", record.get("error")
+    assert [item["name"] for item in record["outputs"]["graphic_files"]] == ["ORDER1.png"]
+    assert record["outputs"]["summary_files"][0]["name"].endswith("-H-580mm-master.ai")
+    assert [member["arcname"] for member in record["outputs"]["bundle_plan"]] == [
+        "single-graphics/ORDER1.png",
+        f"summary/{record['outputs']['summary_files'][0]['name']}",
+    ]
+    assert "output_manifest" in record["outputs"]
+    single_task_path = next(
+        Path(path)
+        for path in record["outputs"]["render_task_files"]
+        if "single-graphic-tasks" in str(path)
+    )
+    compose_task_path = next(
+        Path(path)
+        for path in record["outputs"]["render_task_files"]
+        if "compose-png-master-pages" in str(path)
+    )
+    single_task = json.loads(single_task_path.read_text(encoding="utf-8"))
+    compose_task = json.loads(compose_task_path.read_text(encoding="utf-8"))
+    assert single_task["layout"]["single_graphic_exact"] is True
+    assert single_task["layout"]["embed_order_label"] is True
+    assert single_task["layout"]["single_graphic_label_height_mm"] == 6.0
+    assert single_task["layout"]["single_graphic_label_gap_mm"] == 0.8
+    assert single_task["layout"]["single_graphic_bleed_mm"] == 2.0
+    assert single_task["export"]["format"] == "png"
+    assert single_task["export"]["png_path"].endswith("ORDER1.png")
+    assert "fixed_canvas_mm" not in single_task["export"]
+    assert compose_task["type"] == "compose_png_master_pages"
+    assert compose_task["compatibility"] == "CS5"
+    assert compose_task["frame_width_mm"] == 580.0
+    assert compose_task["frame_height_mm"] == 2000.0
+    assert compose_task["items"][0]["width_mm"] == 84.0
+    assert compose_task["items"][0]["height_mm"] == 60.8
+    assert compose_task["items"][0]["graphic_width_mm"] == 80.0
+    assert compose_task["items"][0]["graphic_height_mm"] == 50.0
+    assert compose_task["items"][0]["label_embedded"] is True
+    assert compose_task["items"][0]["bleed_mm"] == 2.0
+    render_batches = [str(path) for path in record["outputs"]["render_batch_files"]]
+    assert any("single-render-batches" in path for path in render_batches)
+    assert any("compose-render-batches" in path for path in render_batches)
+
+
+def test_202603_h_master_planner_paginates_without_scaling():
+    rule = resolve_department_output("H")
+    items = [
+        {"order_no": f"ORDER-{index:03d}", "width_mm": 80, "height_mm": 50}
+        for index in range(300)
+    ]
+
+    plan = _plan_png_master_pages(items, rule)
+
+    assert plan["scale"] == 1
+    assert len(plan["pages"]) > 1
+    assert all(page["artboard_height_mm"] <= 2000 for page in plan["pages"])
+    assert sum(page["items"] for page in plan["pages"]) == 300
+
+
+def test_service_routes_w_manufacturers_to_cs5_master_ai_pngs_and_standard_ai(tmp_path):
+    config_path = tmp_path / "templates.json"
+    order_path = tmp_path / "orders.xlsx"
+    write_templates_config(config_path)
+    write_order_xlsx(order_path, department="W", manufacturer="MY-W196")
+    workbook = load_workbook(order_path)
+    sheet = workbook.active
+    second = [cell.value for cell in sheet[2]]
+    second[8] = "DETAIL2"
+    second[11] = "Amy"
+    second[12] = "Black"
+    sheet.append(second)
+    workbook.save(order_path)
+
+    w196_record = RenderService(
+        registry=TemplateRegistry(config_path),
+        jobs=JobStore(tmp_path / "jobs-w196-cs5-master"),
+    ).submit(
+        {"template_id": "JJMB202508261001394920", "order_file": str(order_path), "dry_run": True}
+    )
+    component_path = next(
+        Path(path)
+        for path in w196_record["outputs"]["render_task_files"]
+        if "master-component" in str(path)
+    )
+    compose_path = next(
+        Path(path)
+        for path in w196_record["outputs"]["render_task_files"]
+        if "compose-color-frames" in str(path)
+    )
+    w196_task = json.loads(component_path.read_text(encoding="utf-8"))
+    compose_task = json.loads(compose_path.read_text(encoding="utf-8"))
+    assert w196_task["output"]["format"] == "ai"
+    assert w196_task["output"]["compatibility"] == "CS5"
+    assert w196_task["output"]["color_mode"] == "CMYK"
+    assert w196_task["layout"]["pack_order_blocks"] is True
+    assert w196_task["layout"]["suppress_labels"] is True
+    assert w196_task["layout"]["master_packing"]["force_subitem_order_labels"] is False
+    assert w196_task["layout"]["master_packing"]["component_suppress_labels"] is True
+    assert len(w196_task["groups"]) == 1
+    assert len(w196_task["groups"][0]["items"]) == 2
+    assert [item["color_option"] for item in w196_task["groups"][0]["items"]] == ["Gold", "Black"]
+    assert all(item["apply_color_to_artwork"] is True for item in w196_task["groups"][0]["items"])
+    assert all(item["production_label_lines"] == ["ORDER1"] for item in w196_task["groups"][0]["items"])
+    assert compose_task["compatibility"] == "CS5"
+    assert compose_task["show_color_header"] is False
+    assert compose_task["master_packing"]["keep_order_items_together"] is True
+    assert [item["name"] for item in w196_record["outputs"]["summary_files"]] == [
+        "JJMB202508261001394920-3col-W-MY-W196.ai"
+    ]
+    assert w196_record["outputs"]["delivery_plan"][0]["path"].endswith("-W-MY-W196.ai")
+    assert w196_record["outputs"]["graphic_files"] == []
+    assert "output_bundle" not in w196_record["outputs"]
+
+    write_order_xlsx(order_path, department="ZW")
+    workbook = load_workbook(order_path)
+    sheet = workbook.active
+    sheet["O1"] = "外协厂家代码"
+    sheet["O2"] = "MY-W196"
+    second = [cell.value for cell in sheet[2]]
+    second[8] = "DETAIL2"
+    second[11] = "Amy"
+    sheet.append(second)
+    workbook.save(order_path)
+    zw_w196_record = RenderService(
+        registry=TemplateRegistry(config_path),
+        jobs=JobStore(tmp_path / "jobs-zw-w196-cs5-master"),
+    ).submit(
+        {"template_id": "JJMB202508261001394920", "order_file": str(order_path), "dry_run": True}
+    )
+    zw_component_path = next(
+        Path(path)
+        for path in zw_w196_record["outputs"]["render_task_files"]
+        if "master-component" in str(path)
+    )
+    zw_task = json.loads(zw_component_path.read_text(encoding="utf-8"))
+    assert zw_task["output"]["compatibility"] == "CS5"
+    assert zw_task["groups"][0]["items"][0]["department"] == "ZW"
+    assert all(item["apply_color_to_artwork"] is True for item in zw_task["groups"][0]["items"])
+    assert zw_w196_record["outputs"]["delivery_plan"][0]["path"].endswith("-ZW-MY-W196.ai")
+
+    write_order_xlsx(order_path, department="W", manufacturer="OTHER-W")
+    standard_record = RenderService(
+        registry=TemplateRegistry(config_path),
+        jobs=JobStore(tmp_path / "jobs-standard"),
+    ).submit(
+        {"template_id": "JJMB202508261001394920", "order_file": str(order_path), "dry_run": True}
+    )
+    standard_task = json.loads(Path(standard_record["outputs"]["render_task_files"][0]).read_text(encoding="utf-8"))
+    assert standard_task["output"]["format"] == "ai"
+    assert standard_task["output"]["compatibility"] == "AI_STANDARD"
+    assert standard_record["outputs"]["delivery_plan"][0]["path"].endswith("-W-ORDER1.ai")
+
+    write_order_xlsx(order_path, department="W", manufacturer="MY-W120")
+    workbook = load_workbook(order_path)
+    sheet = workbook.active
+    sheet["C2"] = "W-120-001"
+    second = [cell.value for cell in sheet[2]]
+    second[2] = "W-120-002"
+    second[8] = "DETAIL2"
+    second[11] = "Amy"
+    sheet.append(second)
+    workbook.save(order_path)
+
+    png_record = RenderService(
+        registry=TemplateRegistry(config_path),
+        jobs=JobStore(tmp_path / "jobs-png"),
+    ).submit(
+        {"template_id": "JJMB202508261001394920", "order_file": str(order_path), "dry_run": True}
+    )
+    assert "output_bundle" not in png_record["outputs"]
+    assert [item["name"] for item in png_record["outputs"]["graphic_files"]] == ["W-120-001.png", "W-120-002.png"]
+    assert [member["arcname"] for member in png_record["outputs"]["bundle_plan"]] == [
+        "single-graphics/W-120-001.png",
+        "single-graphics/W-120-002.png",
+    ]
+    assert "output_manifest" in png_record["outputs"]
+    for task_path in png_record["outputs"]["render_task_files"]:
+        task = json.loads(Path(task_path).read_text(encoding="utf-8"))
+        assert task["output"]["format"] == "png"
+        assert task["groups"][0]["items"][0]["production_label_lines"] == [task["groups"][0]["order_no"]]
+        assert task["output"]["color_mode"] == "CMYK"
+        assert task["layout"]["suppress_labels"] is False
+        assert task["groups"][0]["items"][0]["apply_color_to_artwork"] is True
+
+
+def test_generic_w196_applies_cs5_and_quantity_split(tmp_path):
+    config_path = tmp_path / "templates.json"
+    rules_path = tmp_path / "template.rules.json"
+    order_path = tmp_path / "orders.xlsx"
+    fake_ai = tmp_path / "template.ai"
+    fake_ai.write_text("fake ai", encoding="utf-8")
+    rules_path.write_text(
+        json.dumps(
+            {
+                "status": "confirmed",
+                "order_bindings": {
+                    "order_no": "Order",
+                    "text": "Name",
+                    "quantity": "Quantity",
+                },
+                "slot_mappings": [{"field": "text", "slot": "Name"}],
+                "multi_name_customization": {"enabled": True},
+                "render_layout": {
+                    "type": "name_columns",
+                    "output_mode": "single_file",
+                    "default": {"group_by": ["order_no"], "header_fields": ["order_no"]},
+                    "manufacturer_overrides": {
+                        "MY-W196": {"group_by": ["row"], "header_fields": ["order_no"]}
+                    },
+                },
+                "output": {"color_mode": "CMYK"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    config_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "templates": [
+                    {
+                        "template_id": "GENERIC-W196",
+                        "name": "Generic W196",
+                        "template_type": "pure_text_color_design",
+                        "pipeline": "generic_rules_only",
+                        "status": "active",
+                        "template_ai": str(fake_ai),
+                        "template_rules_config": str(rules_path),
+                        "default_columns": 4,
+                        "default_hide_boxes": True,
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["Order", "Name", "Quantity", "Department", "Manufacturer"])
+    sheet.append(["ORDER-W196", "Alice|Bob", 3, "ZW", "MY-W196"])
+    workbook.save(order_path)
+
+    record = RenderService(
+        registry=TemplateRegistry(config_path),
+        jobs=JobStore(tmp_path / "jobs"),
+    ).submit(
+        {"template_id": "GENERIC-W196", "order_file": str(order_path), "dry_run": True}
+    )
+
+    task = json.loads(Path(record["outputs"]["render_task"]).read_text(encoding="utf-8"))
+    assert record["status"] == "completed"
+    assert task["output"]["compatibility"] == "CS5"
+    assert len(task["orders"]) == 3
+    assert [order["quantity_index"] for order in task["orders"]] == [1, 2, 3]
+    assert [len(order["layout_members"]) for order in task["orders"]] == [1, 1, 1]
+
+
+def test_generic_w120_outputs_per_graphic_png_bundle_plan(tmp_path):
+    config_path = tmp_path / "templates.json"
+    rules_path = tmp_path / "template.rules.json"
+    order_path = tmp_path / "orders.xlsx"
+    fake_ai = tmp_path / "template.ai"
+    fake_ai.write_text("fake ai", encoding="utf-8")
+    rules_path.write_text(
+        json.dumps(
+            {
+                "status": "confirmed",
+                "order_bindings": {
+                    "order_no": "Order",
+                    "text": "Name",
+                    "quantity": "Quantity",
+                },
+                "slot_mappings": [{"field": "text", "slot": "Name"}],
+                "multi_name_customization": {"enabled": True},
+                "render_layout": {
+                    "type": "name_columns",
+                    "output_mode": "single_file",
+                    "default": {"group_by": ["row"], "header_fields": ["order_no"]},
+                },
+                "output": {"color_mode": "CMYK"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    config_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "templates": [
+                    {
+                        "template_id": "GENERIC-W120",
+                        "name": "Generic W120",
+                        "template_type": "pure_text_color_design",
+                        "pipeline": "generic_rules_only",
+                        "status": "active",
+                        "template_ai": str(fake_ai),
+                        "template_rules_config": str(rules_path),
+                        "default_columns": 4,
+                        "default_hide_boxes": True,
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["Order", "Name", "Quantity", "Department", "Manufacturer"])
+    sheet.append(["ORDER-W120", "Alice|Bob", 2, "ZW", "MY-W120"])
+    workbook.save(order_path)
+
+    record = RenderService(
+        registry=TemplateRegistry(config_path),
+        jobs=JobStore(tmp_path / "jobs"),
+    ).submit(
+        {"template_id": "GENERIC-W120", "order_file": str(order_path), "dry_run": True}
+    )
+
+    task = json.loads(Path(record["outputs"]["render_task"]).read_text(encoding="utf-8"))
+    assert record["status"] == "completed"
+    assert task["output"]["format"] == "png"
+    assert task["output"]["transparent_background"] is True
+    assert task["render_layout"]["output_mode"] == "per_graphic"
+    assert [Path(item["path"]).name for item in record["outputs"]["graphic_files"]] == [
+        "ORDER-W120-1.png",
+        "ORDER-W120-2.png",
+    ]
+    assert [member["arcname"] for member in record["outputs"]["bundle_plan"]] == [
+        "single-graphics/ORDER-W120-1.png",
+        "single-graphics/ORDER-W120-2.png",
+    ]
+    assert "output_manifest" in record["outputs"]
 
 
 def test_202508_task_receives_every_configured_font_boldness_mapping(tmp_path):
@@ -219,7 +1061,7 @@ def test_202508_task_receives_every_configured_font_boldness_mapping(tmp_path):
         {"template_id": "JJMB202508261001394920", "order_file": str(order_path), "dry_run": True}
     )
 
-    task = json.loads(Path(record["outputs"]["render_task"]).read_text(encoding="utf-8"))
+    task = json.loads(Path(record["outputs"]["render_task_files"][0]).read_text(encoding="utf-8"))
     assert task["font_styles"] == {
         "F2": {"boldness": 0.4},
         "F3": {"boldness": 0.4},
@@ -264,7 +1106,7 @@ def test_202508_task_receives_compiled_segment_color_actions(tmp_path):
         {"template_id": "JJMB202508261001394920", "order_file": str(order_path), "dry_run": True}
     )
 
-    task = json.loads(Path(record["outputs"]["render_task"]).read_text(encoding="utf-8"))
+    task = json.loads(Path(record["outputs"]["render_task_files"][0]).read_text(encoding="utf-8"))
     assert len(task["groups"]) == 1
     assert len(task["groups"][0]["items"]) == 1
     assert task["groups"][0]["items"][0]["text"] == "Alice|Bob|Cara"
@@ -276,6 +1118,70 @@ def test_202508_task_receives_compiled_segment_color_actions(tmp_path):
             "selector": {"type": "segments", "delimiter": "|"},
         }
     ]
+
+
+def test_202508_segment_color_rules_still_split_comma_name_lists(tmp_path):
+    config_path = tmp_path / "templates.json"
+    order_path = tmp_path / "orders.xlsx"
+    rules_path = tmp_path / "template.rules.json"
+    write_templates_config(config_path)
+    write_order_xlsx(order_path)
+    rules_path.write_text(
+        json.dumps(
+            {
+                "rule_ast": {
+                    "$schema": "custom-renderer/template-rule-ast",
+                    "version": 1,
+                    "source_hash": "0" * 64,
+                    "rules": [
+                        {
+                            "target": {"type": "text", "name": "Name"},
+                            "conditions": [],
+                            "selector": {"type": "segments", "delimiter": "|"},
+                            "operations": [
+                                {
+                                    "type": "fill_color",
+                                    "strategy": "cycle",
+                                    "values": ["#FF0000", "#FFFFFF"],
+                                }
+                            ],
+                        }
+                    ],
+                    "unresolved": [],
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    config["templates"][0]["template_rules_config"] = str(rules_path)
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+    workbook = load_workbook(order_path)
+    workbook.active["L2"] = "Alice|Bob,Cara|Dana"
+    workbook.save(order_path)
+
+    record = RenderService(
+        registry=TemplateRegistry(config_path),
+        jobs=JobStore(tmp_path / "jobs"),
+    ).submit(
+        {"template_id": "JJMB202508261001394920", "order_file": str(order_path), "dry_run": True}
+    )
+
+    task = json.loads(Path(record["outputs"]["render_task_files"][0]).read_text(encoding="utf-8"))
+    assert len(task["groups"]) == 1
+    assert [item["text"] for item in task["groups"][0]["items"]] == ["Alice|Bob", "Cara|Dana"]
+    assert all(
+        item["text_actions"]
+        == [
+            {
+                "type": "fill_color",
+                "strategy": "cycle",
+                "values": ["#FF0000", "#FFFFFF"],
+                "selector": {"type": "segments", "delimiter": "|"},
+            }
+        ]
+        for item in task["groups"][0]["items"]
+    )
 
 
 def test_202603_grouped_task_receives_every_configured_font_boldness_mapping(tmp_path):
@@ -770,6 +1676,48 @@ def test_confirmed_pack_is_published_to_runtime_config_and_activates(tmp_path):
     assert json.loads(template.template_rules_config.read_text(encoding="utf-8")) == pack
 
 
+def test_template_registry_persists_template_text_output_flags(tmp_path):
+    registry = TemplateRegistry(tmp_path / "templates.json", tmp_path / "templates")
+
+    template = registry.upsert_template(
+        {
+            "template_id": "DEMO001",
+            "name": "Demo",
+            "template_type": "pure_text",
+            "outline_text": False,
+            "pathfinder_merge": False,
+        }
+    )
+
+    reloaded = TemplateRegistry(tmp_path / "templates.json", tmp_path / "templates").get_template("DEMO001")
+    assert template.outline_text is False
+    assert template.pathfinder_merge is False
+    assert reloaded.to_json_dict()["outline_text"] is False
+    assert reloaded.to_json_dict()["pathfinder_merge"] is False
+
+
+def test_confirmed_pack_updates_template_text_output_flags(tmp_path):
+    registry = TemplateRegistry(tmp_path / "templates.json", tmp_path / "templates")
+    registry.upsert_template(
+        {
+            "template_id": "DEMO001",
+            "name": "Demo",
+            "template_type": "pure_text",
+            "outline_text": False,
+            "pathfinder_merge": True,
+        }
+    )
+    pack = {
+        "template": {"template_id": "DEMO001"},
+        "rules": {"output": {"outline_text": True, "pathfinder_merge": False}},
+    }
+
+    template = registry.apply_confirmed_rule_pack("DEMO001", pack, activate=False)
+
+    assert template.outline_text is True
+    assert template.pathfinder_merge is False
+
+
 def test_destructive_template_action_requires_exact_id_confirmation():
     with pytest.raises(ValueError, match="template ID"):
         RenderRequestHandler._require_template_confirmation("DEMO001", {"confirmation": "wrong"})
@@ -987,7 +1935,7 @@ def test_service_never_enables_diagnostic_boxes_from_request_flags(tmp_path):
     )
 
     assert record["status"] == "completed"
-    task_path = Path(record["outputs"]["render_task"])
+    task_path = Path(record["outputs"]["render_task_files"][0])
     task = json.loads(task_path.read_text(encoding="utf-8"))
     assert task["layout"]["show_style_boxes"] is False
 

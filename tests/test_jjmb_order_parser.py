@@ -40,6 +40,10 @@ def test_parse_order_items_normalizes_options():
             "内部订单号": "4013367078",
             "订单明细id": "2313435",
             "购买数量": "2",
+            "生产部门": "H",
+            "产品中文名称": "测试产品",
+            "字体颜色": "Gold",
+            "外协厂家代码": "MY-H",
             "模板": "JJMB202603281027102517",
             "定制信息": "Style Option:Style 2\nFont Option:F3\nPersonalization:Mr Clarke\nMrs Clarke",
         }
@@ -54,6 +58,10 @@ def test_parse_order_items_normalizes_options():
     assert items[0].style_option == "Style2"
     assert items[0].font_option == "F3"
     assert items[0].personalization_values == ["Mr Clarke", "Mrs Clarke"]
+    assert items[0].department == "H"
+    assert items[0].manufacturer == "MY-H"
+    assert items[0].product_name == "测试产品"
+    assert items[0].color_option == "Gold"
 
 
 def test_parse_order_items_from_named_sheet_split_columns(tmp_path):

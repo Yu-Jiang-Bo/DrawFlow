@@ -30,6 +30,11 @@
     var padding = mmToPt(numberOrDefault(task.fit && task.fit.padding_mm, 1));
     var minFontSize = numberOrDefault(task.fit && task.fit.min_font_size_pt, 4);
     var maxFontSize = numberOrDefault(task.fit && task.fit.max_font_size_pt, 300);
+    var fitStats = { count: 0, maxDeltaPt: 0, f11HeartFitCount: 0 };
+
+    if (layout.single_graphic_exact === true && String(exportConfig.format || "").toLowerCase() === "png") {
+        return renderSingleGraphicExactPng(task, config);
+    }
 
     var groupMetrics = [];
     var maxGroupWidth = 0;
@@ -48,7 +53,6 @@
     if (maxColumnHeight > 0) maxColumnHeight -= gap;
     var docWidth = margin * 2 + columns * maxGroupWidth + (columns - 1) * gap;
     var docHeight = margin * 2 + maxColumnHeight;
-    var fitStats = { count: 0, maxDeltaPt: 0, f11HeartFitCount: 0 };
     var debugPayload = {
         groups: task.groups.length,
         columns: columns,
@@ -172,6 +176,124 @@
         return rect;
     }
 
+    function renderSingleGraphicExactPng(task, config) {
+        if (!task.groups || task.groups.length !== 1 || !task.groups[0].items || task.groups[0].items.length !== 1) {
+            throw new Error("single_graphic_exact requires exactly one item");
+        }
+        var item = task.groups[0].items[0];
+        var style = styleConfig(config, item.style_option);
+        var styleWidth = styleWidthPt(style);
+        var styleHeight = styleHeightPt(style);
+        var labelHeight = mmToPt(Number(layout.single_graphic_label_height_mm || layout.label_height_mm || 6));
+        var labelGap = mmToPt(Number(layout.single_graphic_label_gap_mm || layout.label_gap_mm || 0.8));
+        var labelWidth = mmToPt(Number(layout.single_graphic_label_width_mm || layout.label_width_mm || 42));
+        var bleed = mmToPt(Number(layout.single_graphic_bleed_mm || layout.png_bleed_mm || 0));
+        var contentWidth = Math.max(styleWidth, labelWidth);
+        var docWidth = contentWidth + bleed * 2;
+        var docHeight = styleHeight + labelGap + labelHeight + bleed * 2;
+        var contentLeft = bleed;
+        var effectLeft = contentLeft + (contentWidth - styleWidth) / 2;
+        var doc = app.documents.add(documentColorSpace(colorMode), docWidth, docHeight);
+        var layer = doc.layers[0];
+        layer.name = "SINGLE_GRAPHIC_EXACT";
+        drawSingleGraphicOrderLabel(
+            layer,
+            String(item.order_no || ""),
+            contentLeft,
+            bleed + styleHeight + labelGap + labelHeight,
+            contentLeft + contentWidth,
+            bleed + styleHeight + labelGap
+        );
+        var rect = [
+            effectLeft + padding,
+            bleed + styleHeight - padding,
+            effectLeft + styleWidth - padding,
+            bleed + padding
+        ];
+        if (String(item.render_kind || "text") === "design_asset") {
+            var designItem = renderDesignAssetItem(layer, item, rect, fontStyles[String(item.font_option || "")]);
+            try { designItem.name = String(item.order_no || "") + "_" + String(item.quantity_index || 1) + "_DESIGN"; } catch (eD0) {}
+        } else {
+            var font = fontConfig(config, item.font_option);
+            var tf = layer.textFrames.add();
+            tf.contents = String(item.text || "");
+            applyFontConfig(tf, font);
+            applyColor(tf, String(item.color_option || task.style && task.style.color_name || "black"));
+            applyFontBoldness(tf, fontStyles[String(item.font_option || "")]);
+            var outline = renderOutlinedTextToRect(tf, rect, minFontSize, maxFontSize);
+            try { outline.name = String(item.order_no || "") + "_" + String(item.quantity_index || 1) + "_TEXT"; } catch (e0) {}
+        }
+        var pngPath = String(exportConfig.png_path || "");
+        if (!pngPath) throw new Error("single_graphic_exact missing export.png_path");
+        var png = File(pngPath);
+        exportPng(doc, png, Number(exportConfig.dpi || 300));
+        writeDebug(task, {
+            single_graphic_exact: true,
+            order_no: String(item.order_no || ""),
+            style_option: String(item.style_option || ""),
+            label_embedded: true,
+            width_pt: docWidth,
+            height_pt: docHeight,
+            width_mm: ptToMm(docWidth),
+            height_mm: ptToMm(docHeight),
+            effect_width_pt: styleWidth,
+            effect_height_pt: styleHeight,
+            effect_width_mm: ptToMm(styleWidth),
+            effect_height_mm: ptToMm(styleHeight),
+            transparent_background: true,
+            bleed_mm: ptToMm(bleed),
+            output_png: png.fsName
+        });
+        try {
+            doc.close(SaveOptions.DONOTSAVECHANGES);
+        } catch (closeError) {
+            try { doc.close(); } catch (ignoredCloseError) {}
+        }
+        return png.fsName;
+    }
+
+    function drawSingleGraphicOrderLabel(layer, text, left, top, right, bottom) {
+        var tf = layer.textFrames.pointText([left, top - mmToPt(0.5)]);
+        tf.contents = String(text || "");
+        try { tf.textRange.contents = String(text || ""); } catch (e0) {}
+        tf.textRange.characterAttributes.size = 8;
+        var color = cmykColor(0, 0, 0, 100);
+        tf.textRange.characterAttributes.fillColor = color;
+        fitLabelTextToRect(tf, [left, top, right, bottom], 5, 8);
+        return tf;
+    }
+
+    function fitLabelTextToRect(tf, rect, minSize, maxSize) {
+        var left = rect[0], top = rect[1], right = rect[2], bottom = rect[3];
+        var maxW = right - left;
+        var maxH = top - bottom;
+        var size = maxSize;
+        tf.textRange.characterAttributes.size = size;
+        for (var i = 0; i < 8; i++) {
+            try { app.redraw(); } catch (e0) {}
+            var b = tf.visibleBounds;
+            var w = Math.abs(b[2] - b[0]);
+            var h = Math.abs(b[1] - b[3]);
+            if (w <= 0 || h <= 0) break;
+            var next = Math.min(Math.max(size * Math.min(maxW / w, maxH / h) * 0.96, minSize), maxSize);
+            if (Math.abs(next - size) < 0.05) break;
+            size = next;
+            tf.textRange.characterAttributes.size = size;
+        }
+        try { app.redraw(); } catch (e1) {}
+        var bounds = tf.visibleBounds;
+        tf.translate((left + right) / 2 - (bounds[0] + bounds[2]) / 2, (top + bottom) / 2 - (bounds[1] + bounds[3]) / 2);
+    }
+
+    function cmykColor(cyan, magenta, yellow, black) {
+        var color = new CMYKColor();
+        color.cyan = cyan;
+        color.magenta = magenta;
+        color.yellow = yellow;
+        color.black = black;
+        return color;
+    }
+
     function compactPlacements(metrics, columnCount, gapValue) {
         var heights = [];
         var items = [];
@@ -251,9 +373,9 @@
         designDoc.close(SaveOptions.DONOTSAVECHANGES);
         fitPageItemToRect(copy, rect);
         if (outlineText) {
-            outlineTextFrames(copy);
-            if (pathfinderMerge) cleanupOutline(copy);
+            outlineTextFrames(copy, false);
         }
+        try { copy.zOrder(ZOrderMethod.BRINGTOFRONT); } catch (eZ0) {}
         recordFitDelta(fitPageItemToRect(copy, rect));
         return copy;
     }
@@ -566,13 +688,13 @@
         for (var i = 0; i < item.pageItems.length; i++) collectTextFrames(item.pageItems[i], out);
     }
 
-    function outlineTextFrames(item) {
+    function outlineTextFrames(item, mergeOutlines) {
         var frames = [];
         collectTextFrames(item, frames);
         for (var i = frames.length - 1; i >= 0; i--) {
             try {
                 var outlined = frames[i].createOutline();
-                if (pathfinderMerge) cleanupOutline(outlined);
+                if (mergeOutlines === true && pathfinderMerge) cleanupOutline(outlined);
             } catch (e) {}
         }
     }
@@ -825,6 +947,36 @@
         doc.saveAs(file, opts);
     }
 
+    function exportPng(doc, file, dpi) {
+        ensureFolder(file.parent);
+        if (file.exists) file.remove();
+        var opts = new ExportOptionsPNG24();
+        var scale = Math.max(1, Number(dpi || 300) / 72 * 100 + 0.02);
+        opts.antiAliasing = true;
+        opts.artBoardClipping = true;
+        opts.transparency = true;
+        opts.horizontalScale = scale;
+        opts.verticalScale = scale;
+        doc.exportFile(file, ExportType.PNG24, opts);
+    }
+
+    function drawWhiteBackground(layer, left, top, width, height) {
+        var rect = layer.pathItems.rectangle(top, left, width, height);
+        rect.filled = true;
+        rect.stroked = false;
+        if (colorMode === "CMYK") {
+            var cmyk = new CMYKColor();
+            cmyk.cyan = 0; cmyk.magenta = 0; cmyk.yellow = 0; cmyk.black = 0;
+            rect.fillColor = cmyk;
+        } else {
+            var rgb = new RGBColor();
+            rgb.red = 255; rgb.green = 255; rgb.blue = 255;
+            rect.fillColor = rgb;
+        }
+        try { rect.zOrder(ZOrderMethod.SENDTOBACK); } catch (e0) {}
+        return rect;
+    }
+
     function ensureFolder(folder) {
         if (!folder.exists) {
             ensureFolder(folder.parent);
@@ -834,6 +986,10 @@
 
     function mmToPt(mm) {
         return mm * 72 / 25.4;
+    }
+
+    function ptToMm(pt) {
+        return pt * 25.4 / 72;
     }
 
     function outputColorMode(value) {

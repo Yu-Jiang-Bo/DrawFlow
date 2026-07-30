@@ -268,12 +268,14 @@ def test_build_task_includes_named_title_template_ai(tmp_path):
 
 def test_curved_renderer_outlines_and_merges_each_text_item_independently():
     source = Path("scripts/illustrator/render_202509_curved.jsx").read_text(encoding="utf-8")
-    outline_body = source[source.index("function outlineText(items)"):source.index("function failRender")]
+    outline_body = source[source.index("function outlineText(items, reportProgress)"):source.index("function failRender")]
     fit_body = source[source.index("function fitPageItemToRect"):source.index("function alignPageItemToRect")]
 
     assert "cleanupOutline(outline);" in source
     assert "function cleanupOutlines(items)" not in source
     assert 'failRender("Text outline failed at item " + (i + 1)' in source
+    assert "var itemTextItems = packOrderBlocks && outputConfig.outline_text ? [] : textItems;" in source
+    assert "if (outputConfig.outline_text) outlineText(itemTextItems, false);" in source
     assert "cleanupStats.failed += 1;" in source
     assert "var OUTLINE_BATCH_SIZE = 25;" in source
     assert "function shouldSettleOutlineBatch(processed, total)" in source
@@ -305,6 +307,6 @@ def test_curved_renderer_outlines_and_merges_each_text_item_independently():
     assert "preview.fsName" not in source
     assert "Cannot open render task JSON." in source
     assert '"Cannot open JSON: " + file.fsName' not in source
-    assert source.index("saveAsAI8(doc, output);") < source.index("savedDoc = app.open(output);")
+    assert source.index("saveAsAI(doc, output, String(outputConfig.compatibility || \"Illustrator 8\"));") < source.index("savedDoc = app.open(output);")
     assert source.index("savedDoc = app.open(output);") < source.index("exportPreviewPNG(savedDoc")
     assert "if (doc) doc.close(SaveOptions.DONOTSAVECHANGES);" in source
