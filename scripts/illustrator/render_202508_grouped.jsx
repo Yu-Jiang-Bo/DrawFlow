@@ -658,7 +658,7 @@
         var text = file.read();
         file.close();
         if (typeof JSON !== "undefined" && JSON.parse) return JSON.parse(text);
-        throw new Error("JSON.parse is required to read render task JSON.");
+        return eval("(" + text + ")");
     }
 
     function writeDebug(task, payload) {

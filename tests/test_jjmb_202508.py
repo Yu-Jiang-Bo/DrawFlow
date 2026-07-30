@@ -298,6 +298,7 @@ def test_202508_renderer_accepts_compiled_fill_color_actions():
     assert "function applyBoldnessToAttributes(attributes, boldness)" in source
     assert "var showBoxes = layout.show_style_boxes === true;" in source
     assert "var drawFrame = !compactOutput && showBoxes;" in source
+    assert "return eval(\"(\" + text + \")\");" in source
     compose_source = Path("scripts/illustrator/compose_color_frames.jsx").read_text(encoding="utf-8")
     assert "task.type !== \"compose_color_frames\"" in compose_source
     assert "COLOR_FRAME_" in compose_source
