@@ -20,6 +20,13 @@ def test_render_service_progress_never_moves_backwards(tmp_path):
     assert store.load(record["job_id"])["progress"]["current"] == 40
 
 
+def test_render_tasks_do_not_enable_live_jsx_progress_files(tmp_path):
+    service = RenderService(jobs=JobStore(tmp_path))
+    record = {"job_id": "job1", "job_dir": str(tmp_path / "job1")}
+
+    assert service._task_progress(record, 20, 100, "rendering") == {}
+
+
 def test_job_store_keeps_higher_saved_progress_when_live_file_is_stale(tmp_path):
     store = JobStore(tmp_path)
     record = store.create({"template_id": "T1"})

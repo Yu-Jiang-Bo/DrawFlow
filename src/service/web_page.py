@@ -1335,10 +1335,8 @@ INDEX_HTML = """<!doctype html>
         <div class="progress-subtitle" id="progressSubtitle">请保持 Illustrator 可用</div>
       </div>
       <div class="progress-body">
-        <div class="progress-track"><div class="progress-bar" id="progressBar"></div></div>
         <div class="progress-row">
           <span class="progress-stage" id="progressStage">准备任务</span>
-          <span class="progress-meta"><span class="progress-count" id="progressCount"></span><span id="progressPercent">0%</span></span>
         </div>
         <ul class="progress-steps" id="progressSteps"></ul>
       </div>
@@ -1403,12 +1401,7 @@ INDEX_HTML = """<!doctype html>
       runtimeRole: "unknown",
       pendingTemplateRemovalId: ""
     };
-    let progressTimer = null;
-    let progressPollTimer = null;
-    let progressValue = 0;
     let progressMode = "render";
-    let progressStartedAt = 0;
-    let hasRealRenderProgress = false;
 
     const typeNames = {
       pure_text: "纯文字模板",
@@ -3568,29 +3561,13 @@ INDEX_HTML = """<!doctype html>
 
     function showProgress(mode) {
       progressMode = mode;
-      progressValue = 0;
-      progressStartedAt = Date.now();
-      hasRealRenderProgress = false;
       const overlay = document.getElementById("renderProgressOverlay");
       overlay.classList.add("active");
       overlay.setAttribute("aria-hidden", "false");
       document.getElementById("progressTitle").textContent = progressTitle(mode);
       document.getElementById("progressSubtitle").textContent = progressSubtitle(mode);
-      document.getElementById("progressCount").textContent = "";
-      renderProgressSteps(0);
-      updateRenderProgress(6, progressStages()[0]);
-      clearInterval(progressTimer);
-      progressTimer = setInterval(tickProgress, 900);
-      clearInterval(progressPollTimer);
-      progressPollTimer = mode === "render" ? setInterval(pollRenderProgress, 1000) : null;
-      if (mode === "render") pollRenderProgress();
-    }
-
-    function tickProgress() {
-      if (hasRealRenderProgress) return;
-      const cap = progressCap();
-      const next = Math.min(cap, progressValue + progressIncrement(progressValue));
-      updateRenderProgress(next, stageForProgress(next));
+      document.getElementById("progressStage").textContent = activeProgressStage();
+      renderProgressSteps(activeProgressStage());
     }
 
     function progressTitle(mode) {
@@ -3603,24 +3580,6 @@ INDEX_HTML = """<!doctype html>
       return "Illustrator 正在生成 AI 文件，请不要关闭软件";
     }
 
-    function progressCap() {
-      if (progressMode === "dryRun") return 88;
-      return 96;
-    }
-
-    function progressIncrement(value) {
-      if (progressMode === "render") {
-        if (value < 24) return 8;
-        if (value < 46) return 5;
-        if (value < 68) return 3;
-        return 1;
-      }
-      if (value < 28) return 9;
-      if (value < 58) return 6;
-      if (value < 78) return 3;
-      return 1;
-    }
-
     function progressStages() {
       if (progressMode === "dryRun") {
         return ["上传订单表格", "解析订单字段", "生成 render task", "等待返回结果"];
@@ -3628,66 +3587,15 @@ INDEX_HTML = """<!doctype html>
       return ["上传订单表格", "解析订单字段", "调用 Illustrator", "生成 AI 文件", "完成收尾"];
     }
 
-    function stageForProgress(value) {
+    function activeProgressStage() {
       const stages = progressStages();
       if (progressMode === "dryRun") {
-        if (value < 28) return stages[0];
-        if (value < 58) return stages[1];
-        if (value < 82) return stages[2];
-        return stages[3];
+        return stages[1];
       }
-      if (value < 18) return stages[0];
-      if (value < 36) return stages[1];
-      if (value < 52) return stages[2];
-      if (value < 98) return stages[3];
-      return stages[4];
+      return stages[2];
     }
 
-    function updateRenderProgress(value, stage) {
-      progressValue = Math.max(0, Math.min(100, Math.round(value)));
-      document.getElementById("progressBar").style.width = `${progressValue}%`;
-      document.getElementById("progressPercent").textContent = `${progressValue}%`;
-      document.getElementById("progressStage").textContent = stage;
-      renderProgressSteps(progressValue);
-    }
-
-    async function pollRenderProgress() {
-      try {
-        const payload = await getJson("/api/jobs");
-        const job = currentRunningJob(payload.jobs || []);
-        if (!job || !job.progress) return;
-        const total = Number(job.progress.total || 0);
-        const current = Number(job.progress.current || 0);
-        if (!total) return;
-        hasRealRenderProgress = true;
-        clearInterval(progressTimer);
-        progressTimer = null;
-        const boundedCurrent = Math.max(0, Math.min(total, Math.round(current)));
-        document.getElementById("progressCount").textContent = `已渲染 ${boundedCurrent}/${total}`;
-        const stage = job.progress.stage || "";
-        let realPercent = Math.max(2, Math.floor((boundedCurrent / total) * 92));
-        if (/转曲|清理/.test(stage)) realPercent = Math.max(realPercent, 94);
-        if (/保存|导出/.test(stage)) realPercent = Math.max(realPercent, 96);
-        if (/关闭|收尾/.test(stage)) realPercent = Math.max(realPercent, 98);
-        updateRenderProgress(realPercent, stage || stageForProgress(realPercent));
-        document.getElementById("progressPercent").textContent = "实时";
-      } catch (error) {
-        // Progress polling is best-effort; the render request itself remains authoritative.
-      }
-    }
-
-    function currentRunningJob(jobs) {
-      const startedAt = progressStartedAt ? new Date(progressStartedAt - 30000) : null;
-      return jobs.find(job => {
-        if (job.status !== "running") return false;
-        if (!startedAt) return true;
-        const createdAt = Date.parse(job.created_at || "");
-        return !Number.isFinite(createdAt) || createdAt >= startedAt.getTime();
-      }) || jobs.find(job => job.status === "running") || null;
-    }
-
-    function renderProgressSteps(value) {
-      const current = stageForProgress(value);
+    function renderProgressSteps(current) {
       const stages = progressStages();
       const target = document.getElementById("progressSteps");
       target.innerHTML = stages.map(stage => {
@@ -3698,11 +3606,8 @@ INDEX_HTML = """<!doctype html>
     }
 
     function completeProgress(success) {
-      clearInterval(progressTimer);
-      progressTimer = null;
-      clearInterval(progressPollTimer);
-      progressPollTimer = null;
-      updateRenderProgress(success ? 100 : progressValue, success ? "处理完成" : "处理失败");
+      document.getElementById("progressStage").textContent = success ? "处理完成" : "处理失败";
+      renderProgressSteps(success ? progressStages()[progressStages().length - 1] : activeProgressStage());
       if (success) {
         setTimeout(hideRenderProgress, 550);
       } else {
@@ -3711,11 +3616,8 @@ INDEX_HTML = """<!doctype html>
     }
 
     function failProgress() {
-      clearInterval(progressTimer);
-      progressTimer = null;
-      clearInterval(progressPollTimer);
-      progressPollTimer = null;
-      updateRenderProgress(progressValue || 100, "处理失败");
+      document.getElementById("progressStage").textContent = "处理失败";
+      renderProgressSteps(activeProgressStage());
       setTimeout(hideRenderProgress, 900);
     }
 

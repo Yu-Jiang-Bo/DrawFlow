@@ -1244,12 +1244,7 @@ class RenderService:
         return Path(str(record["job_dir"])).resolve() / "progress.json"
 
     def _task_progress(self, record: Mapping[str, Any], offset: int, total: int, stage: str) -> Dict[str, Any]:
-        return {
-            "file": str(self._progress_path(record)),
-            "offset": max(int(offset), 0),
-            "total": max(int(total), 0),
-            "stage": stage,
-        }
+        return {}
 
     def _update_progress(self, record: Dict[str, Any], current: int, total: int, stage: str) -> None:
         progress_path = self._progress_path(record)
