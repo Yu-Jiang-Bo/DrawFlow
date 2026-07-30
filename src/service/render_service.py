@@ -1252,13 +1252,27 @@ class RenderService:
         }
 
     def _update_progress(self, record: Dict[str, Any], current: int, total: int, stage: str) -> None:
+        progress_path = self._progress_path(record)
+        previous = _read_progress(progress_path)
+        bounded_total = max(int(total), 0)
+        bounded_current = max(int(current), 0)
+        if previous:
+            try:
+                bounded_current = max(bounded_current, int(previous.get("current") or 0))
+            except (TypeError, ValueError):
+                pass
+            try:
+                bounded_total = max(bounded_total, int(previous.get("total") or 0))
+            except (TypeError, ValueError):
+                pass
+        bounded_current = min(bounded_current, bounded_total) if bounded_total else bounded_current
         progress = {
-            "current": max(int(current), 0),
-            "total": max(int(total), 0),
+            "current": bounded_current,
+            "total": bounded_total,
             "stage": stage,
         }
         record["progress"] = progress
-        self._write_json(self._progress_path(record), progress)
+        self._write_json(progress_path, progress)
         self.jobs.save(record)
 
     def _merge_live_progress(self, record: Dict[str, Any]) -> None:
@@ -1919,15 +1933,18 @@ def _render_generic_chunk(bridge: IllustratorBridge, script: Path, task_file: Pa
 
 def _render_production_batch_files(batch_files: Iterable[Path], visible: bool) -> None:
     script = Path(__file__).resolve().parents[2] / "scripts" / "illustrator" / "render_batch.jsx"
-    for batch_file in batch_files:
-        _render_202508_batch_chunk(script, Path(batch_file), visible)
-        time.sleep(1.0)
+    bridge = IllustratorBridge(visible=visible, fresh_instance=True, reuse_instance=True)
+    try:
+        for batch_file in batch_files:
+            _render_202508_batch_chunk(bridge, script, Path(batch_file))
+            time.sleep(1.0)
+    finally:
+        bridge.close()
 
 
-def _render_202508_batch_chunk(script: Path, task_file: Path, visible: bool) -> None:
+def _render_202508_batch_chunk(bridge: IllustratorBridge, script: Path, task_file: Path) -> None:
     for attempt in range(GENERIC_RULE_COM_RETRY_ATTEMPTS):
         try:
-            bridge = IllustratorBridge(visible=visible, fresh_instance=True, quit_after=True)
             bridge.render(script, task_file)
             return
         except IllustratorBridgeError as exc:
@@ -1935,6 +1952,7 @@ def _render_202508_batch_chunk(script: Path, task_file: Path, visible: bool) -> 
                 if _is_retryable_com_failure(exc):
                     raise IllustratorBridgeError(format_com_recovery_message(exc, retries=attempt)) from exc
                 raise
+            bridge.reset()
             time.sleep(GENERIC_RULE_COM_RETRY_DELAY_SECONDS)
 
 
@@ -1950,6 +1968,14 @@ def render_error_code(exc: Exception) -> str:
 
 def _is_retryable_com_failure(exc: IllustratorBridgeError) -> bool:
     return "-2147417851" in str(exc) or "-2147023170" in str(exc)
+
+
+def _read_progress(path: Path) -> Dict[str, Any]:
+    try:
+        progress = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return progress if isinstance(progress, dict) else {}
 
 
 def _configured_font_options(*configs: Dict[str, Any]) -> List[str] | None:

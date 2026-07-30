@@ -82,5 +82,14 @@ class JobStore:
         if isinstance(progress, dict):
             merged = dict(record.get("progress") or {})
             merged.update(progress)
+            merged["current"] = max(_safe_int(record.get("progress", {}).get("current")), _safe_int(progress.get("current")))
+            merged["total"] = max(_safe_int(record.get("progress", {}).get("total")), _safe_int(progress.get("total")))
             record["progress"] = merged
         return record
+
+
+def _safe_int(value: Any) -> int:
+    try:
+        return max(int(value), 0)
+    except (TypeError, ValueError):
+        return 0

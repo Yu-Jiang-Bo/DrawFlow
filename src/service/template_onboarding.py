@@ -12,6 +12,7 @@ from .template_rule_pack import (
     PROFILE_UNCLASSIFIED,
     normalize_template_rule_pack,
     profile_definition,
+    strip_template_output_text_flags,
 )
 from .font_style_rules import validate_font_style_rules
 from .name_color_cycle import validate_name_color_cycle
@@ -221,6 +222,7 @@ class TemplateOnboardingStore:
         pack["validation"]["unresolved_items"] = []
         pack["audit"]["confirmed_at"] = now
         pack["audit"]["change_summary"] = str(change_summary or "").strip()
+        pack = strip_template_output_text_flags(pack)
         return self._save_version(template_id, pack, event="confirm")
 
     def rollback(self, template_id: str, version: int, *, change_summary: str = "") -> Dict[str, Any]:
@@ -230,6 +232,7 @@ class TemplateOnboardingStore:
         pack = self._read(source)["pack"]
         pack["audit"]["confirmed_at"] = datetime.now(timezone.utc).isoformat()
         pack["audit"]["change_summary"] = str(change_summary or f"Rollback to version {version}")
+        pack = strip_template_output_text_flags(pack)
         return self._save_version(template_id, pack, event="rollback", source_version=int(version))
 
     def get_state(self, template_id: str) -> Dict[str, Any]:

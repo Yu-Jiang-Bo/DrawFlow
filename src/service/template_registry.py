@@ -10,6 +10,7 @@ from typing import Any, Dict, List
 
 from .paths import CONFIG_DIR, PROJECT_ROOT, TEMPLATE_STORAGE_DIR
 from .template_locks import TEMPLATE_STATE_LOCK
+from .template_rule_pack import strip_template_output_text_flags
 
 
 TEMPLATES_CONFIG = CONFIG_DIR / "templates.json"
@@ -239,7 +240,7 @@ class TemplateRegistry:
         )
         if target is None:
             raise KeyError(f"Template does not exist: {template_id}")
-        runtime_pack = _strip_template_output_text_flags(pack)
+        runtime_pack = strip_template_output_text_flags(pack)
         output_path = self._template_dir(template_id) / "template.rules.json"
         output_path.parent.mkdir(parents=True, exist_ok=True)
         temporary = output_path.with_suffix(".json.tmp")
@@ -271,7 +272,7 @@ class TemplateRegistry:
         if not text:
             return None
         parsed = json.loads(text)
-        parsed = _strip_template_output_text_flags(parsed)
+        parsed = strip_template_output_text_flags(parsed)
         template_dir = self._template_dir(template_id)
         template_dir.mkdir(parents=True, exist_ok=True)
         output_path = template_dir / "template.rules.json"
@@ -429,32 +430,3 @@ def _pack_requests_generic_pipeline(pack: Dict[str, Any]) -> bool:
     if not isinstance(bindings, dict) or not bindings:
         return False
     return bool(rules.get("slot_mappings") or rules.get("text_targets") or rules.get("asset_mappings"))
-
-
-def _strip_template_output_text_flags(pack: Any) -> Any:
-    if not isinstance(pack, dict):
-        return pack
-    sanitized = dict(pack)
-    _strip_text_flags_from_output(sanitized)
-    rules = sanitized.get("rules")
-    if not isinstance(rules, dict):
-        return sanitized
-    sanitized_rules = dict(rules)
-    _strip_text_flags_from_output(sanitized_rules)
-    sanitized["rules"] = sanitized_rules
-    return sanitized
-
-
-def _strip_text_flags_from_output(container: Dict[str, Any]) -> None:
-    output = container.get("output")
-    if not isinstance(output, dict):
-        return
-    sanitized_output = {
-        key: value
-        for key, value in output.items()
-        if key not in {"outline_text", "pathfinder_merge"}
-    }
-    if sanitized_output:
-        container["output"] = sanitized_output
-    else:
-        container.pop("output", None)

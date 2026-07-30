@@ -71,6 +71,22 @@ def normalize_template_rule_pack(payload: Mapping[str, Any], *, template_id: str
     return migrate_legacy_template_rule(source, template_id=template_id)
 
 
+def strip_template_output_text_flags(pack: Any) -> Any:
+    """Remove template-level text output flags from a rule pack copy."""
+
+    if not isinstance(pack, dict):
+        return pack
+    sanitized = dict(pack)
+    _strip_text_flags_from_output(sanitized)
+    rules = sanitized.get("rules")
+    if not isinstance(rules, dict):
+        return sanitized
+    sanitized_rules = dict(rules)
+    _strip_text_flags_from_output(sanitized_rules)
+    sanitized["rules"] = sanitized_rules
+    return sanitized
+
+
 def migrate_legacy_template_rule(payload: Mapping[str, Any], *, template_id: str = "") -> Dict[str, Any]:
     """Migrate the current flat rule JSON without discarding legacy details."""
 
@@ -295,6 +311,21 @@ def _normalize_pack_assets(value: Any) -> Dict[str, Any]:
 
 def _dict(value: Any) -> Dict[str, Any]:
     return deepcopy(dict(value)) if isinstance(value, Mapping) else {}
+
+
+def _strip_text_flags_from_output(container: Dict[str, Any]) -> None:
+    output = container.get("output")
+    if not isinstance(output, dict):
+        return
+    sanitized_output = {
+        key: value
+        for key, value in output.items()
+        if key not in {"outline_text", "pathfinder_merge"}
+    }
+    if sanitized_output:
+        container["output"] = sanitized_output
+    else:
+        container.pop("output", None)
 
 
 def _dict_list(value: Any) -> list[Dict[str, Any]]:

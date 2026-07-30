@@ -678,17 +678,45 @@
         if (!progress.file) return;
         var offset = Number(progress.offset || 0);
         var grandTotal = Number(progress.total || total || 0);
+        var file = File(String(progress.file));
+        var existing = readProgressFile(file);
+        if (existing) {
+            var previousTotal = Number(existing.total || 0);
+            if (!isNaN(previousTotal) && previousTotal > grandTotal) grandTotal = previousTotal;
+        }
+        var nextCurrent = Math.min(offset + current, grandTotal);
+        if (existing) {
+            var previousCurrent = Number(existing.current || 0);
+            if (!isNaN(previousCurrent) && previousCurrent > nextCurrent) {
+                nextCurrent = grandTotal ? Math.min(previousCurrent, grandTotal) : previousCurrent;
+            }
+        }
         var payload = {
-            current: Math.min(offset + current, grandTotal),
+            current: nextCurrent,
             total: grandTotal,
             stage: String(stage || progress.stage || "")
         };
-        var file = File(String(progress.file));
         ensureFolder(file.parent);
         if (file.open("w")) {
             file.encoding = "UTF-8";
             file.write(toJson(payload));
             file.close();
+        }
+    }
+
+    function readProgressFile(file) {
+        try {
+            if (!file.exists) return null;
+            file.encoding = "UTF-8";
+            if (!file.open("r")) return null;
+            var text = file.read();
+            file.close();
+            if (!text) return null;
+            if (typeof JSON !== "undefined" && JSON.parse) return JSON.parse(text);
+            return eval("(" + text + ")");
+        } catch (e) {
+            try { file.close(); } catch (ignored) {}
+            return null;
         }
     }
 
