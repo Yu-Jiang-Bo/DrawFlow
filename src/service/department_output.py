@@ -35,6 +35,8 @@ DEPARTMENT_SPECS: Mapping[str, Mapping[str, Any]] = {
         "exportUnit": EXPORT_UNIT_PER_ORDER,
         "fileFormat": FILE_FORMAT_AI8,
         "fillActualColor": False,
+        "outline_text": True,
+        "pathfinder_merge": True,
         "annotation_type": ANNOTATION_COLOR,
         "single_order_ai": True,
         "hasMaster": True,
@@ -48,6 +50,8 @@ DEPARTMENT_SPECS: Mapping[str, Mapping[str, Any]] = {
         "exportUnit": EXPORT_UNIT_PER_ORDER,
         "fileFormat": FILE_FORMAT_AI8,
         "fillActualColor": False,
+        "outline_text": True,
+        "pathfinder_merge": True,
         "annotation_type": ANNOTATION_COLOR,
         "single_order_ai": True,
         "hasMaster": True,
@@ -61,6 +65,8 @@ DEPARTMENT_SPECS: Mapping[str, Mapping[str, Any]] = {
         "exportUnit": EXPORT_UNIT_PER_ORDER,
         "fileFormat": FILE_FORMAT_AI8,
         "fillActualColor": False,
+        "outline_text": True,
+        "pathfinder_merge": True,
         "annotation_type": ANNOTATION_COLOR,
         "single_order_ai": True,
         "hasMaster": True,
@@ -74,6 +80,8 @@ DEPARTMENT_SPECS: Mapping[str, Mapping[str, Any]] = {
         "exportUnit": EXPORT_UNIT_PER_ORDER,
         "fileFormat": FILE_FORMAT_AI8,
         "fillActualColor": False,
+        "outline_text": True,
+        "pathfinder_merge": True,
         "annotation_type": ANNOTATION_PRODUCT_NAME,
         "single_order_ai": True,
         "hasMaster": True,
@@ -88,6 +96,8 @@ DEPARTMENT_SPECS: Mapping[str, Mapping[str, Any]] = {
         "exportUnit": EXPORT_UNIT_PER_ORDER,
         "fileFormat": FILE_FORMAT_AI8,
         "fillActualColor": False,
+        "outline_text": True,
+        "pathfinder_merge": True,
         "annotation_type": ANNOTATION_PRODUCT_NAME,
         "single_order_ai": True,
         "hasMaster": False,
@@ -152,6 +162,8 @@ class DepartmentOutputRule:
     omit_order_label: bool = False
     apply_color_to_artwork: bool = False
     fill_actual_color: bool = False
+    outline_text: bool = True
+    pathfinder_merge: bool = True
     annotation_type: str = ANNOTATION_COLOR
     single_order_ai: bool = False
     has_master: bool = True
@@ -229,6 +241,7 @@ def resolve_department_output(
 
     config = rules or read_department_rules()
     shop_rules = _mapping(config.get("shop_rules"))
+    global_requirements = _mapping(shop_rules.get("global_requirements"))
     requirements = shop_rules.get("department_output_requirements")
     if not isinstance(requirements, list):
         raise DepartmentOutputError("部门成品规则缺少 department_output_requirements")
@@ -247,6 +260,18 @@ def resolve_department_output(
             manufacturer=manufacturer_text,
             output_format="ai8",
             layout={},
+            outline_text=_resolved_output_bool(
+                global_requirements=global_requirements,
+                keys=("outline_text", "outlineText"),
+                global_key="must_outline_text",
+                fallback=True,
+            ),
+            pathfinder_merge=_resolved_output_bool(
+                global_requirements=global_requirements,
+                keys=("pathfinder_merge", "pathfinderMerge"),
+                global_key="must_pathfinder_merge",
+                fallback=True,
+            ),
         )
 
     name = str(matched.get("name") or "DEFAULT")
@@ -295,6 +320,24 @@ def resolve_department_output(
             ),
             apply_color_to_artwork=fill_actual_color,
             fill_actual_color=fill_actual_color,
+            outline_text=_resolved_output_bool(
+                manufacturer_rule,
+                matched,
+                config_defaults,
+                global_requirements=global_requirements,
+                keys=("outline_text", "outlineText"),
+                global_key="must_outline_text",
+                fallback=True,
+            ),
+            pathfinder_merge=_resolved_output_bool(
+                manufacturer_rule,
+                matched,
+                config_defaults,
+                global_requirements=global_requirements,
+                keys=("pathfinder_merge", "pathfinderMerge"),
+                global_key="must_pathfinder_merge",
+                fallback=True,
+            ),
             has_master=has_master,
             crop_master_height=_resolved_bool(
                 manufacturer_rule,
@@ -334,6 +377,22 @@ def resolve_department_output(
         layout=layout,
         apply_color_to_artwork=fill_actual_color,
         fill_actual_color=fill_actual_color,
+        outline_text=_resolved_output_bool(
+            matched,
+            config_defaults,
+            global_requirements=global_requirements,
+            keys=("outline_text", "outlineText"),
+            global_key="must_outline_text",
+            fallback=True,
+        ),
+        pathfinder_merge=_resolved_output_bool(
+            matched,
+            config_defaults,
+            global_requirements=global_requirements,
+            keys=("pathfinder_merge", "pathfinderMerge"),
+            global_key="must_pathfinder_merge",
+            fallback=True,
+        ),
         annotation_type=str(_setting(matched, config_defaults, "annotation_type", ANNOTATION_COLOR)),
         single_order_ai=_bool_setting(matched, config_defaults, "single_order_ai", False),
         has_master=_resolved_bool(
@@ -631,6 +690,35 @@ def _resolved_bool(
         if key in defaults:
             return bool(defaults[key])
     return bool(fallback)
+
+
+def _resolved_output_bool(
+    *sources: Mapping[str, Any],
+    global_requirements: Mapping[str, Any],
+    keys: tuple[str, ...],
+    global_key: str,
+    fallback: bool,
+) -> bool:
+    for source in sources:
+        for key in keys:
+            if key in source:
+                return _to_bool(source[key])
+    if global_key in global_requirements:
+        return _to_bool(global_requirements[global_key])
+    return bool(fallback)
+
+
+def _to_bool(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    text = str(value).strip().lower()
+    if text in {"0", "false", "no", "off", ""}:
+        return False
+    if text in {"1", "true", "yes", "on"}:
+        return True
+    return bool(value)
 
 
 def _resolved_float(

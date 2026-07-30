@@ -44,8 +44,6 @@ class TemplateDefinition:
     template_ai_role: str = "尺寸/作图区模板"
     default_columns: int = 4
     default_hide_boxes: bool = True
-    outline_text: bool = True
-    pathfinder_merge: bool = True
     template_config: Path | None = None
     template_rules_config: Path | None = None
     assets: List[Dict[str, Any]] = field(default_factory=list)
@@ -63,8 +61,6 @@ class TemplateDefinition:
             "template_rules_config": str(self.template_rules_config) if self.template_rules_config else "",
             "default_columns": self.default_columns,
             "default_hide_boxes": self.default_hide_boxes,
-            "outline_text": self.outline_text,
-            "pathfinder_merge": self.pathfinder_merge,
             "assets": self.assets,
         }
 
@@ -243,21 +239,15 @@ class TemplateRegistry:
         )
         if target is None:
             raise KeyError(f"Template does not exist: {template_id}")
+        runtime_pack = _strip_template_output_text_flags(pack)
         output_path = self._template_dir(template_id) / "template.rules.json"
         output_path.parent.mkdir(parents=True, exist_ok=True)
         temporary = output_path.with_suffix(".json.tmp")
-        temporary.write_text(json.dumps(pack, ensure_ascii=False, indent=2), encoding="utf-8")
+        temporary.write_text(json.dumps(runtime_pack, ensure_ascii=False, indent=2), encoding="utf-8")
         temporary.replace(output_path)
         target["template_rules_config"] = self.to_config_path(output_path)
         if _pack_requests_generic_pipeline(pack):
             target["pipeline"] = "generic_rules_only"
-        rules = pack.get("rules") if isinstance(pack, dict) else None
-        output = rules.get("output") if isinstance(rules, dict) else None
-        if isinstance(output, dict):
-            if "outline_text" in output:
-                target["outline_text"] = _to_bool(output.get("outline_text"))
-            if "pathfinder_merge" in output:
-                target["pathfinder_merge"] = _to_bool(output.get("pathfinder_merge"))
         if activate:
             target["status"] = "active"
         self._write_config(raw)
@@ -281,6 +271,7 @@ class TemplateRegistry:
         if not text:
             return None
         parsed = json.loads(text)
+        parsed = _strip_template_output_text_flags(parsed)
         template_dir = self._template_dir(template_id)
         template_dir.mkdir(parents=True, exist_ok=True)
         output_path = template_dir / "template.rules.json"
@@ -305,8 +296,6 @@ class TemplateRegistry:
             template_ai_role=str(item.get("template_ai_role", "尺寸/作图区模板") or "尺寸/作图区模板").strip(),
             default_columns=int(item.get("default_columns", 4) or 4),
             default_hide_boxes=bool(item.get("default_hide_boxes", True)),
-            outline_text=_to_bool(item.get("outline_text", True)),
-            pathfinder_merge=_to_bool(item.get("pathfinder_merge", True)),
             template_config=self._optional_path(item.get("template_config", "")),
             template_rules_config=self._optional_path(item.get("template_rules_config", "")),
             assets=self._parse_assets(item.get("assets", [])),
@@ -369,8 +358,6 @@ class TemplateRegistry:
             "template_ai_role": str(item.get("template_ai_role", "尺寸/作图区模板") or "尺寸/作图区模板").strip(),
             "default_columns": int(item.get("default_columns", 4) or 4),
             "default_hide_boxes": _to_bool(item.get("default_hide_boxes", True)),
-            "outline_text": _to_bool(item.get("outline_text", True)),
-            "pathfinder_merge": _to_bool(item.get("pathfinder_merge", True)),
         }
         template_config = str(item.get("template_config", "")).strip()
         if template_config:
@@ -442,3 +429,32 @@ def _pack_requests_generic_pipeline(pack: Dict[str, Any]) -> bool:
     if not isinstance(bindings, dict) or not bindings:
         return False
     return bool(rules.get("slot_mappings") or rules.get("text_targets") or rules.get("asset_mappings"))
+
+
+def _strip_template_output_text_flags(pack: Any) -> Any:
+    if not isinstance(pack, dict):
+        return pack
+    sanitized = dict(pack)
+    _strip_text_flags_from_output(sanitized)
+    rules = sanitized.get("rules")
+    if not isinstance(rules, dict):
+        return sanitized
+    sanitized_rules = dict(rules)
+    _strip_text_flags_from_output(sanitized_rules)
+    sanitized["rules"] = sanitized_rules
+    return sanitized
+
+
+def _strip_text_flags_from_output(container: Dict[str, Any]) -> None:
+    output = container.get("output")
+    if not isinstance(output, dict):
+        return
+    sanitized_output = {
+        key: value
+        for key, value in output.items()
+        if key not in {"outline_text", "pathfinder_merge"}
+    }
+    if sanitized_output:
+        container["output"] = sanitized_output
+    else:
+        container.pop("output", None)

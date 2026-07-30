@@ -16,6 +16,7 @@ from src.service.render_service import (
     RenderService,
     RenderServiceError,
     _configured_font_options,
+    _department_output_settings_for_rows,
     _design_font_options,
     _merge_202508_template_config,
     _missing_202508_font_configs,
@@ -333,13 +334,13 @@ def test_service_routes_h_to_per_graphic_pngs_and_cropped_master_png(tmp_path):
     assert master_task["output"]["dpi"] == 300
 
 
-def test_service_dry_run_uses_template_text_output_flags(tmp_path):
+def test_service_dry_run_ignores_template_text_output_flags(tmp_path):
     config_path = tmp_path / "templates.json"
     order_path = tmp_path / "orders.xlsx"
     write_templates_config(config_path)
     write_order_xlsx(order_path)
     config = json.loads(config_path.read_text(encoding="utf-8"))
-    config["templates"][0]["outline_text"] = True
+    config["templates"][0]["outline_text"] = False
     config["templates"][0]["pathfinder_merge"] = False
     config_path.write_text(json.dumps(config), encoding="utf-8")
 
@@ -352,7 +353,42 @@ def test_service_dry_run_uses_template_text_output_flags(tmp_path):
 
     task = json.loads(Path(record["outputs"]["render_task_files"][0]).read_text(encoding="utf-8"))
     assert task["output"]["outline_text"] is True
-    assert task["output"]["pathfinder_merge"] is False
+    assert task["output"]["pathfinder_merge"] is True
+
+
+def test_service_dry_run_uses_department_output_policy_for_task(monkeypatch, tmp_path):
+    from dataclasses import replace
+
+    import src.service.render_service as render_service_module
+
+    config_path = tmp_path / "templates.json"
+    order_path = tmp_path / "orders.xlsx"
+    write_templates_config(config_path)
+    write_order_xlsx(order_path, department="PW")
+
+    def fake_resolve_department_output(department, manufacturer="", **kwargs):
+        rule = resolve_department_output(department, manufacturer)
+        if str(department).strip() == "PW":
+            return replace(rule, pathfinder_merge=False)
+        return rule
+
+    monkeypatch.setattr(render_service_module, "resolve_department_output", fake_resolve_department_output)
+
+    record = RenderService(
+        registry=TemplateRegistry(config_path),
+        jobs=JobStore(tmp_path / "jobs"),
+    ).submit(
+        {"template_id": "JJMB202508261001394920", "order_file": str(order_path), "dry_run": True}
+    )
+
+    tasks = [
+        json.loads(Path(path).read_text(encoding="utf-8"))
+        for path in record["outputs"]["render_task_files"]
+        if str(path).endswith(".json")
+    ]
+
+    assert any(task.get("output", {}).get("outline_text") is True for task in tasks)
+    assert any(task.get("output", {}).get("pathfinder_merge") is False for task in tasks)
 
 
 def test_service_routes_t_to_one_ai_with_color_frame_artboards(tmp_path):
@@ -1676,7 +1712,7 @@ def test_confirmed_pack_is_published_to_runtime_config_and_activates(tmp_path):
     assert json.loads(template.template_rules_config.read_text(encoding="utf-8")) == pack
 
 
-def test_template_registry_persists_template_text_output_flags(tmp_path):
+def test_template_registry_does_not_persist_template_text_output_flags(tmp_path):
     registry = TemplateRegistry(tmp_path / "templates.json", tmp_path / "templates")
 
     template = registry.upsert_template(
@@ -1690,32 +1726,98 @@ def test_template_registry_persists_template_text_output_flags(tmp_path):
     )
 
     reloaded = TemplateRegistry(tmp_path / "templates.json", tmp_path / "templates").get_template("DEMO001")
-    assert template.outline_text is False
-    assert template.pathfinder_merge is False
-    assert reloaded.to_json_dict()["outline_text"] is False
-    assert reloaded.to_json_dict()["pathfinder_merge"] is False
+    raw = json.loads((tmp_path / "templates.json").read_text(encoding="utf-8"))
+    assert not hasattr(template, "outline_text")
+    assert not hasattr(template, "pathfinder_merge")
+    assert "outline_text" not in reloaded.to_json_dict()
+    assert "pathfinder_merge" not in reloaded.to_json_dict()
+    assert "outline_text" not in raw["templates"][0]
+    assert "pathfinder_merge" not in raw["templates"][0]
 
 
-def test_confirmed_pack_updates_template_text_output_flags(tmp_path):
+def test_confirmed_pack_does_not_persist_template_text_output_flags(tmp_path):
     registry = TemplateRegistry(tmp_path / "templates.json", tmp_path / "templates")
     registry.upsert_template(
         {
             "template_id": "DEMO001",
             "name": "Demo",
             "template_type": "pure_text",
-            "outline_text": False,
-            "pathfinder_merge": True,
         }
     )
     pack = {
         "template": {"template_id": "DEMO001"},
-        "rules": {"output": {"outline_text": True, "pathfinder_merge": False}},
+        "rules": {"output": {"outline_text": True, "pathfinder_merge": False, "color_mode": "RGB"}},
     }
 
     template = registry.apply_confirmed_rule_pack("DEMO001", pack, activate=False)
 
-    assert template.outline_text is True
-    assert template.pathfinder_merge is False
+    saved_pack = json.loads(template.template_rules_config.read_text(encoding="utf-8"))
+    raw = json.loads((tmp_path / "templates.json").read_text(encoding="utf-8"))
+    assert saved_pack["rules"]["output"] == {"color_mode": "RGB"}
+    assert "outline_text" not in template.to_json_dict()
+    assert "pathfinder_merge" not in template.to_json_dict()
+    assert "outline_text" not in raw["templates"][0]
+    assert "pathfinder_merge" not in raw["templates"][0]
+
+
+def test_direct_template_rules_save_strips_text_output_flags(tmp_path):
+    registry = TemplateRegistry(tmp_path / "templates.json", tmp_path / "templates")
+
+    rules_path = registry.save_template_rules_config(
+        "DEMO001",
+        json.dumps(
+            {
+                "output": {
+                    "outline_text": True,
+                    "pathfinder_merge": False,
+                    "color_mode": "CMYK",
+                }
+            }
+        ),
+    )
+
+    saved = json.loads(rules_path.read_text(encoding="utf-8"))
+    assert saved["output"] == {"color_mode": "CMYK"}
+
+
+def test_confirmed_pack_strips_top_level_template_text_output_flags(tmp_path):
+    registry = TemplateRegistry(tmp_path / "templates.json", tmp_path / "templates")
+    registry.upsert_template(
+        {
+            "template_id": "DEMO001",
+            "name": "Demo",
+            "template_type": "pure_text",
+        }
+    )
+    pack = {
+        "template": {"template_id": "DEMO001"},
+        "output": {"outline_text": True, "pathfinder_merge": False, "color_mode": "RGB"},
+    }
+
+    template = registry.apply_confirmed_rule_pack("DEMO001", pack, activate=False)
+
+    saved_pack = json.loads(template.template_rules_config.read_text(encoding="utf-8"))
+    assert saved_pack["output"] == {"color_mode": "RGB"}
+
+
+def test_shared_output_settings_reject_mixed_department_policies(monkeypatch):
+    from dataclasses import replace
+
+    import src.service.render_service as render_service_module
+
+    def fake_resolve_department_output(department, manufacturer="", **kwargs):
+        rule = resolve_department_output(department, manufacturer)
+        if str(department).strip() == "PW":
+            return replace(rule, pathfinder_merge=False)
+        return rule
+
+    monkeypatch.setattr(render_service_module, "resolve_department_output", fake_resolve_department_output)
+
+    with pytest.raises(RenderServiceError, match="不同生产部门转曲/去重策略"):
+        _department_output_settings_for_rows(
+            [{"department": "T"}, {"department": "PW"}],
+            {"output": {"color_mode": "CMYK"}},
+        )
 
 
 def test_destructive_template_action_requires_exact_id_confirmation():

@@ -156,7 +156,7 @@ class RenderService:
         job_dir = Path(record["job_dir"])
         output_ai = self._output_ai_path(job_dir, request, template)
         rows = read_202508_rows(Path(request["order_file"]), sheet_name=request["sheet_name"] or None)
-        rules = _rules_with_effective_output(template, read_template_rule_config(template.template_rules_config))
+        rules = _rules_with_output_color(read_template_rule_config(template.template_rules_config))
         generic_png_rule = _generic_png_output_rule(rows)
         if generic_png_rule:
             rules = _apply_generic_png_output_settings(rules, generic_png_rule)
@@ -378,8 +378,7 @@ class RenderService:
                 raise RenderServiceError("模板缺少可用的 .ai 模板文件", code="template_bundle_invalid")
             export_202508_config(template.template_ai, template_config, request["visible"])
 
-        template_rules = _rules_with_effective_output(template, read_template_rule_config(template.template_rules_config))
-        output_settings = _effective_output_settings(template, template_rules)
+        template_rules = _rules_with_output_color(read_template_rule_config(template.template_rules_config))
         rows = read_202508_rows(order_file, sheet_name=request["sheet_name"] or None)
         items = parse_202508_items(
             rows,
@@ -422,13 +421,18 @@ class RenderService:
                     for item in native_items
                 ]
             native_groups = group_202508_items(native_items)
+            output_settings = _department_output_settings(
+                template_rules,
+                rule,
+                color_mode="CMYK" if rule.is_png else None,
+            )
             return build_202508_task(
                 template_config=template_config,
                 output_ai=output_ai,
                 groups=native_groups,
                 columns=columns,
                 show_style_boxes=False if color_summary else not request["hide_boxes"],
-                color_mode="CMYK" if rule.is_png else str(output_settings["color_mode"]),
+                color_mode=str(output_settings["color_mode"]),
                 outline_text=bool(output_settings["outline_text"]),
                 pathfinder_merge=bool(output_settings["pathfinder_merge"]),
                 font_styles=_font_styles(template_rules),
@@ -790,7 +794,6 @@ class RenderService:
         structure_config: Mapping[str, Any],
         task: Any,
         units: Sequence[ProductionOutputUnit],
-        output_settings: Mapping[str, Any],
     ) -> Dict[str, Any]:
         request = record["request"]
         job_dir = Path(record["job_dir"]).resolve()
@@ -835,8 +838,8 @@ class RenderService:
                     color_mode=color_mode,
                     dpi=dpi,
                     label_layout=rule.layout,
-                    outline_text=bool(output_settings["outline_text"]),
-                    pathfinder_merge=bool(output_settings["pathfinder_merge"]),
+                    outline_text=rule.outline_text,
+                    pathfinder_merge=rule.pathfinder_merge,
                     progress=self._task_progress(
                         record,
                         rendered_items + graphic_index - 1,
@@ -984,8 +987,11 @@ class RenderService:
                 raise RenderServiceError(f"模板配置不存在，无法 dry-run: {template_config}", code="template_config_missing")
             self._export_generic_template_config(template.template_ai, template.template_id, template_config, request["visible"])
 
-        template_rules = _rules_with_effective_output(template, read_template_rule_config(template.template_rules_config))
-        output_settings = _effective_output_settings(template, template_rules)
+        template_rules = _rules_with_output_color(read_template_rule_config(template.template_rules_config))
+        output_settings = _department_output_settings_for_rows(
+            read_202508_rows(order_file, sheet_name=request["sheet_name"] or None),
+            template_rules,
+        )
         structure_config = read_template_rule_config(template_config)
         design_fonts = _design_font_options(template_rules)
         has_design_mapping_rules = isinstance(template_rules.get("asset_mappings"), list)
@@ -1028,7 +1034,6 @@ class RenderService:
                 structure_config,
                 task,
                 department_units,
-                output_settings,
             )
             result["outputs"]["template_config"] = str(template_config)
             return result
@@ -1067,8 +1072,8 @@ class RenderService:
             raise RenderServiceError(f"曲线标题字体报告不存在: {font_report}", code="template_font_config_missing")
 
         rows = read_202509_curved_rows(order_file, sheet_name=request["sheet_name"] or None)
-        template_rules = _rules_with_effective_output(template, read_template_rule_config(template.template_rules_config))
-        output_settings = _effective_output_settings(template, template_rules)
+        template_rules = _rules_with_output_color(read_template_rule_config(template.template_rules_config))
+        output_settings = _department_output_settings_for_rows(rows, template_rules)
         multi_name_policy = template_rules.get("multi_name_customization", {})
         items = parse_202509_curved_items(
             rows,
@@ -1105,6 +1110,7 @@ class RenderService:
                         replace(group, production_label_lines=(str(group.order_no or ""),))
                         for group in rendered_groups
                     ]
+                task_output_settings = _department_output_settings(template_rules, rule)
                 return build_202509_curved_task(
                     font_report=font_report,
                     output_ai=output_ai,
@@ -1112,9 +1118,9 @@ class RenderService:
                     columns=columns,
                     layout_overrides=curved_layout_overrides(template_rules),
                     title_template_ai=title_template_ai,
-                    color_mode=str(output_settings["color_mode"]),
-                    outline_text=bool(output_settings["outline_text"]),
-                    pathfinder_merge=bool(output_settings["pathfinder_merge"]),
+                    color_mode=str(task_output_settings["color_mode"]),
+                    outline_text=bool(task_output_settings["outline_text"]),
+                    pathfinder_merge=bool(task_output_settings["pathfinder_merge"]),
                     progress=progress,
                     fixed_canvas_mm=fixed_canvas,
                     output_compatibility=rule.ai_compatibility,
@@ -1676,10 +1682,12 @@ def _apply_generic_department_output_settings(
 ) -> Dict[str, Any]:
     """Apply W196's CS5 delivery requirement to generic-rule templates."""
 
+    row_list = list(rows)
     merged = dict(rules or {})
     output = dict(merged.get("output")) if isinstance(merged.get("output"), Mapping) else {}
+    output.update(_department_output_settings_for_rows(row_list, merged))
     changed = False
-    for row in rows:
+    for row in row_list:
         rule = resolve_department_output(
             _row_value(row, _DEPARTMENT_ROW_ALIASES),
             _row_value(row, _MANUFACTURER_ROW_ALIASES),
@@ -1690,7 +1698,7 @@ def _apply_generic_department_output_settings(
             output["compatibility"] = "CS5"
             output.setdefault("color_mode", "CMYK")
             changed = True
-    if changed:
+    if changed or output:
         merged["output"] = output
     return merged
 
@@ -1725,6 +1733,8 @@ def _apply_generic_png_output_settings(
             "color_mode": str(rule.layout.get("color_mode") or "CMYK"),
             "dpi": int(rule.layout.get("dpi") or 300),
             "transparent_background": True,
+            "outline_text": bool(rule.outline_text),
+            "pathfinder_merge": bool(rule.pathfinder_merge),
         }
     )
     merged["output"] = output
@@ -1787,23 +1797,63 @@ def _effective_pipeline(template: TemplateDefinition) -> str:
     return template.pipeline
 
 
-def _rules_with_effective_output(template: TemplateDefinition, rules: Dict[str, Any]) -> Dict[str, Any]:
+def _rules_with_output_color(rules: Dict[str, Any]) -> Dict[str, Any]:
     merged = dict(rules or {})
-    merged["output"] = _effective_output_settings(template, merged)
+    output = rules.get("output") if isinstance(rules, Mapping) else {}
+    output = dict(output) if isinstance(output, Mapping) else {}
+    output["color_mode"] = output_color_mode(merged)
+    merged["output"] = output
     return merged
 
 
-def _effective_output_settings(template: TemplateDefinition, rules: Mapping[str, Any]) -> Dict[str, Any]:
-    output = rules.get("output") if isinstance(rules, Mapping) else {}
-    output = dict(output) if isinstance(output, Mapping) else {}
+def _department_output_settings(
+    rules: Mapping[str, Any],
+    rule: DepartmentOutputRule,
+    *,
+    color_mode: str | None = None,
+) -> Dict[str, Any]:
     return {
-        **output,
-        "color_mode": output_color_mode(dict(rules or {})),
-        "outline_text": _to_bool(getattr(template, "outline_text", output.get("outline_text", True))),
-        "pathfinder_merge": _to_bool(
-            getattr(template, "pathfinder_merge", output.get("pathfinder_merge", True))
-        ),
+        "color_mode": color_mode or output_color_mode(dict(rules or {})),
+        "outline_text": bool(rule.outline_text),
+        "pathfinder_merge": bool(rule.pathfinder_merge),
     }
+
+
+def _department_output_settings_for_rows(
+    rows: Iterable[Mapping[str, Any]],
+    rules: Mapping[str, Any],
+) -> Dict[str, Any]:
+    policies: List[DepartmentOutputRule] = []
+    for row in rows:
+        if not any(value not in (None, "") for value in row.values()):
+            continue
+        policies.append(
+            resolve_department_output(
+                _row_value(row, _DEPARTMENT_ROW_ALIASES),
+                _row_value(row, _MANUFACTURER_ROW_ALIASES),
+            )
+        )
+    if not policies:
+        policies.append(resolve_department_output("", ""))
+    policy_values = {(bool(rule.outline_text), bool(rule.pathfinder_merge)) for rule in policies}
+    if len(policy_values) > 1:
+        labels = ", ".join(
+            dict.fromkeys(
+                f"{rule.department or rule.name}:{int(bool(rule.outline_text))}/{int(bool(rule.pathfinder_merge))}"
+                for rule in policies
+            )
+        )
+        raise RenderServiceError(
+            f"同一输出任务包含不同生产部门转曲/去重策略，需按部门拆分后输出: {labels}",
+            code="department_output_policy_conflict",
+        )
+    outline_text, pathfinder_merge = next(iter(policy_values))
+    return {
+        "color_mode": output_color_mode(dict(rules or {})),
+        "outline_text": outline_text,
+        "pathfinder_merge": pathfinder_merge,
+    }
+
 
 def _generic_layout_audit_files(
     job_dir: Path,

@@ -91,6 +91,85 @@ def test_department_config_exposes_single_order_and_master_rules():
     assert d_rule.has_master is False
 
 
+def test_output_policy_can_differ_by_department_rule():
+    rules = {
+        "shop_rules": {
+            "global_requirements": {
+                "must_outline_text": True,
+                "must_pathfinder_merge": True,
+            },
+            "department_output_requirements": [
+                {
+                    "name": "T",
+                    "departments": ["T"],
+                    "output_format": "ai8",
+                    "outline_text": True,
+                    "pathfinder_merge": True,
+                },
+                {
+                    "name": "PW_EW",
+                    "departments": ["PW", "EW"],
+                    "output_format": "ai8",
+                    "outline_text": True,
+                    "pathfinder_merge": False,
+                },
+            ],
+        }
+    }
+
+    t_rule = resolve_department_output("T", rules=rules)
+    pw_rule = resolve_department_output("PW", rules=rules)
+
+    assert t_rule.outline_text is True
+    assert t_rule.pathfinder_merge is True
+    assert pw_rule.outline_text is True
+    assert pw_rule.pathfinder_merge is False
+
+
+def test_output_policy_can_differ_by_manufacturer_rule():
+    rules = {
+        "shop_rules": {
+            "global_requirements": {
+                "must_outline_text": True,
+                "must_pathfinder_merge": True,
+            },
+            "department_output_requirements": [
+                {
+                    "name": "W_CONTAINS",
+                    "match": "contains",
+                    "departments": ["W"],
+                    "output_format": "manufacturer_specific",
+                    "outline_text": True,
+                    "pathfinder_merge": True,
+                    "manufacturer_rules": [
+                        {
+                            "manufacturer": "MY-W120",
+                            "output_format": "png_cmyk",
+                            "fileFormat": "PNG_CMYK",
+                            "exportUnit": "PER_GRAPHIC",
+                            "outline_text": True,
+                            "pathfinder_merge": False,
+                        },
+                        {
+                            "manufacturer": "other",
+                            "output_format": "ai_standard",
+                            "fileFormat": "AI_STANDARD",
+                        },
+                    ],
+                }
+            ],
+        }
+    }
+
+    w120_rule = resolve_department_output("W", "MY-W120", rules=rules)
+    other_rule = resolve_department_output("W", "OTHER", rules=rules)
+
+    assert w120_rule.outline_text is True
+    assert w120_rule.pathfinder_merge is False
+    assert other_rule.outline_text is True
+    assert other_rule.pathfinder_merge is True
+
+
 def test_department_d_matching_and_color_translation_are_standard():
     assert is_department_d("Dept_D") is True
     assert is_department_d("D_Group") is True
