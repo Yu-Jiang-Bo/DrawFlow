@@ -18,6 +18,7 @@ from src.service.render_service import (
     _configured_font_options,
     _department_output_settings_for_rows,
     _design_font_options,
+    JJMB_202603_RENDER_CHUNK_SIZE,
     _merge_202508_template_config,
     _missing_202508_font_configs,
     _plan_png_master_pages,
@@ -725,11 +726,12 @@ def test_service_routes_202603_h_to_exact_pngs_and_paginated_master_ai(tmp_path)
     workbook = load_workbook(order_path)
     workbook.active["N1"] = "Style Option"
     workbook.active["N2"] = "Style 1"
-    second_row = [cell.value for cell in workbook.active[2]]
-    second_row[2] = "ORDER2"
-    second_row[8] = "DETAIL2"
-    second_row[11] = "Amy"
-    workbook.active.append(second_row)
+    for row_index in range(2, 7):
+        row = [cell.value for cell in workbook.active[2]]
+        row[2] = f"ORDER{row_index}"
+        row[8] = f"DETAIL{row_index}"
+        row[11] = f"Name{row_index}"
+        workbook.active.append(row)
     workbook.save(order_path)
 
     record = RenderService(
@@ -740,11 +742,11 @@ def test_service_routes_202603_h_to_exact_pngs_and_paginated_master_ai(tmp_path)
     )
 
     assert record["status"] == "completed", record.get("error")
-    assert [item["name"] for item in record["outputs"]["graphic_files"]] == ["ORDER1.png", "ORDER2.png"]
+    expected_graphics = [f"ORDER{index}.png" for index in range(1, 7)]
+    assert [item["name"] for item in record["outputs"]["graphic_files"]] == expected_graphics
     assert record["outputs"]["summary_files"][0]["name"].endswith("-H-580mm-master.ai")
     assert [member["arcname"] for member in record["outputs"]["bundle_plan"]] == [
-        "single-graphics/ORDER1.png",
-        "single-graphics/ORDER2.png",
+        *(f"single-graphics/{name}" for name in expected_graphics),
         f"summary/{record['outputs']['summary_files'][0]['name']}",
     ]
     assert "output_manifest" in record["outputs"]
@@ -791,7 +793,8 @@ def test_service_routes_202603_h_to_exact_pngs_and_paginated_master_ai(tmp_path)
         for path in render_batches
         if "compose-render-batches" in path
     ]
-    assert [len(batch["tasks"]) for batch in single_batches] == [1, 1]
+    assert JJMB_202603_RENDER_CHUNK_SIZE == 5
+    assert [len(batch["tasks"]) for batch in single_batches] == [5, 1]
     assert [len(batch["tasks"]) for batch in compose_batches] == [1]
 
 
