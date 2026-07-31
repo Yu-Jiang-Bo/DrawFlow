@@ -61,6 +61,7 @@ GENERIC_RULE_RENDER_CHUNK_SIZE = 8
 GENERIC_RULE_COM_RETRY_ATTEMPTS = 3
 GENERIC_RULE_COM_RETRY_DELAY_SECONDS = 3.0
 JJMB_202508_RENDER_CHUNK_SIZE = 20
+JJMB_202603_RENDER_CHUNK_SIZE = 1
 _DEPARTMENT_ROW_ALIASES = ("department", "production department", "\u751f\u4ea7\u90e8\u95e8", "\u90e8\u95e8")
 _MANUFACTURER_ROW_ALIASES = (
     "manufacturer",
@@ -922,12 +923,12 @@ class RenderService:
         single_batch_task_paths = write_batch_task_files(
             job_dir / "single-render-batches",
             single_render_entries,
-            chunk_size=JJMB_202508_RENDER_CHUNK_SIZE,
+            chunk_size=JJMB_202603_RENDER_CHUNK_SIZE,
         )
         compose_batch_task_paths = write_batch_task_files(
             job_dir / "compose-render-batches",
             compose_render_entries,
-            chunk_size=JJMB_202508_RENDER_CHUNK_SIZE,
+            chunk_size=JJMB_202603_RENDER_CHUNK_SIZE,
         )
         batch_task_paths = single_batch_task_paths + compose_batch_task_paths
         if not request["dry_run"]:

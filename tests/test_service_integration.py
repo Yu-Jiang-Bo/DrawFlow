@@ -725,6 +725,11 @@ def test_service_routes_202603_h_to_exact_pngs_and_paginated_master_ai(tmp_path)
     workbook = load_workbook(order_path)
     workbook.active["N1"] = "Style Option"
     workbook.active["N2"] = "Style 1"
+    second_row = [cell.value for cell in workbook.active[2]]
+    second_row[2] = "ORDER2"
+    second_row[8] = "DETAIL2"
+    second_row[11] = "Amy"
+    workbook.active.append(second_row)
     workbook.save(order_path)
 
     record = RenderService(
@@ -735,10 +740,11 @@ def test_service_routes_202603_h_to_exact_pngs_and_paginated_master_ai(tmp_path)
     )
 
     assert record["status"] == "completed", record.get("error")
-    assert [item["name"] for item in record["outputs"]["graphic_files"]] == ["ORDER1.png"]
+    assert [item["name"] for item in record["outputs"]["graphic_files"]] == ["ORDER1.png", "ORDER2.png"]
     assert record["outputs"]["summary_files"][0]["name"].endswith("-H-580mm-master.ai")
     assert [member["arcname"] for member in record["outputs"]["bundle_plan"]] == [
         "single-graphics/ORDER1.png",
+        "single-graphics/ORDER2.png",
         f"summary/{record['outputs']['summary_files'][0]['name']}",
     ]
     assert "output_manifest" in record["outputs"]
@@ -775,6 +781,18 @@ def test_service_routes_202603_h_to_exact_pngs_and_paginated_master_ai(tmp_path)
     render_batches = [str(path) for path in record["outputs"]["render_batch_files"]]
     assert any("single-render-batches" in path for path in render_batches)
     assert any("compose-render-batches" in path for path in render_batches)
+    single_batches = [
+        json.loads(Path(path).read_text(encoding="utf-8"))
+        for path in render_batches
+        if "single-render-batches" in path
+    ]
+    compose_batches = [
+        json.loads(Path(path).read_text(encoding="utf-8"))
+        for path in render_batches
+        if "compose-render-batches" in path
+    ]
+    assert [len(batch["tasks"]) for batch in single_batches] == [1, 1]
+    assert [len(batch["tasks"]) for batch in compose_batches] == [1]
 
 
 def test_202603_h_master_planner_paginates_without_scaling():
