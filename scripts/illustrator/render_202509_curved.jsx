@@ -305,12 +305,16 @@
         var fitRect = [left + padding, top - padding, left + width - padding, top - height + padding];
         var sourceBounds = findNamedPageItem(titleTemplateInfo.doc, patternName(titleTemplateInfo.boundsPattern, option));
         if (sourceBounds) {
+            var frame = null;
             try {
-                var frame = sourceBounds.duplicate(layer, ElementPlacement.PLACEATEND);
+                frame = sourceBounds.duplicate(layer, ElementPlacement.PLACEATEND);
                 frame.name = "TITLE_DEBUG_BOUNDS";
                 fitPageItemToRect(frame, frameRect);
                 titleFrameItems.push(frame);
-            } catch (e1) {}
+                frame = null;
+            } catch (e1) {
+                try { if (frame) frame.remove(); } catch (e2) {}
+            }
         } else {
             var fallbackFrame = drawFallbackTitleFrame(layer, left, top, width, height);
             titleFrameItems.push(fallbackFrame);
@@ -325,7 +329,7 @@
             }
             applyBlackToPageItem(clonedText);
             fitPageItemWithinRect(clonedText, fitRect);
-            textItems.push({ item: clonedText, rect: frameRect, fitMode: "contain", outlineChildren: !isTextFrame(clonedText) });
+            textItems.push({ item: clonedText, rect: frameRect, exactFit: true, outlineChildren: !isTextFrame(clonedText) });
             titleTemplateStats.used += 1;
             return true;
         } catch (e3) {
@@ -461,7 +465,7 @@
         applyCenterParagraph(tf);
         tf.textRange.characterAttributes.size = Math.max(minFontSize, Math.min(maxFontSize, titleSize));
         fitTitleTextToRect(tf, fitRect, minFontSize, Math.max(minFontSize, Math.min(maxFontSize, titleSize)));
-        textItems.push({ item: tf, rect: frameRect, fitMode: "contain" });
+        textItems.push({ item: tf, rect: frameRect, exactFit: true });
     }
 
     function drawTitleFrame(layer, shape, left, top, width, height) {
@@ -717,21 +721,31 @@
         if (isTextFrame(source)) {
             var outline = outlineSingleTextFrame(source);
             fitOutlinedEntry(outline, entry);
+            if (pathfinderMerge) {
+                cleanupOutline(outline);
+                fitOutlinedEntry(outline, entry);
+            }
             return outline;
         }
 
         var frames = collectTextFrames(source);
+        var outlines = [];
         for (var i = 0; i < frames.length; i++) {
-            outlineSingleTextFrame(frames[i]);
+            outlines.push(outlineSingleTextFrame(frames[i]));
         }
-        if (frames.length > 0) fitOutlinedEntry(source, entry);
+        if (frames.length > 0) {
+            fitOutlinedEntry(source, entry);
+            if (pathfinderMerge) {
+                for (var o = 0; o < outlines.length; o++) cleanupOutline(outlines[o]);
+                fitOutlinedEntry(source, entry);
+            }
+        }
         return source;
     }
 
     function outlineSingleTextFrame(source) {
         var outline = source.createOutline();
         if (!outline) throw new Error("createOutline returned nothing");
-        if (pathfinderMerge) cleanupOutline(outline);
         return outline;
     }
 
@@ -838,19 +852,23 @@
         var left = rect[0], top = rect[1], right = rect[2], bottom = rect[3];
         var targetW = right - left;
         var targetH = top - bottom;
-        for (var i = 0; i < FIT_ITERATIONS; i++) {
-            var b = item.geometricBounds;
+        if (targetW <= 0 || targetH <= 0) throw new Error("Invalid exact text bounds");
+        for (var i = 0; i < 8; i++) {
+            var b = pageItemBounds(item);
             var w = Math.abs(b[2] - b[0]);
             var h = Math.abs(b[1] - b[3]);
-            if (w <= 0 || h <= 0) return;
-            if (Math.abs(targetW - w) < 0.01 && Math.abs(targetH - h) < 0.01) break;
-            try {
-                item.resize((targetW / w) * 100, (targetH / h) * 100, true, true, true, true, 100, Transformation.CENTER);
-            } catch (e1) {
-                try { item.resize((targetW / w) * 100, (targetH / h) * 100); } catch (e2) {}
+            if (w <= 0 || h <= 0) throw new Error("Cannot fit empty text bounds");
+            if (!pageItemRectMatches(item, rect)) {
+                try {
+                    item.resize((targetW / w) * 100, (targetH / h) * 100, true, true, true, true, 100, Transformation.CENTER);
+                } catch (e1) {
+                    try { item.resize((targetW / w) * 100, (targetH / h) * 100); } catch (e2) {}
+                }
             }
             alignPageItemToRect(item, rect);
+            if (pageItemRectMatches(item, rect)) return;
         }
+        validatePageItemRect(item, rect);
     }
 
     function fitPageItemWithinRect(item, rect) {
@@ -882,8 +900,26 @@
     }
 
     function alignPageItemToRect(item, rect) {
-        var b = item.geometricBounds;
+        var b = pageItemBounds(item);
         item.translate(rect[0] - b[0], rect[1] - b[1]);
+    }
+
+    function pageItemRectMatches(item, rect) {
+        var b = pageItemBounds(item);
+        return Math.abs((b[2] - b[0]) - (rect[2] - rect[0])) <= 0.02 &&
+            Math.abs((b[1] - b[3]) - (rect[1] - rect[3])) <= 0.02 &&
+            Math.abs(b[0] - rect[0]) <= 0.02 &&
+            Math.abs(b[1] - rect[1]) <= 0.02;
+    }
+
+    function validatePageItemRect(item, rect) {
+        if (pageItemRectMatches(item, rect)) return;
+        var b = pageItemBounds(item);
+        throw new Error(
+            "Text item did not reach configured box: actual=" +
+            Math.abs(b[2] - b[0]) + "x" + Math.abs(b[1] - b[3]) +
+            ", target=" + Math.abs(rect[2] - rect[0]) + "x" + Math.abs(rect[1] - rect[3])
+        );
     }
 
     function centerPageItemToRect(item, rect) {

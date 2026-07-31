@@ -293,7 +293,8 @@ def test_curved_renderer_outlines_and_merges_each_text_item_independently():
     assert 'failRender("Failed to save AI or export preview: "' in source
     assert 'previewPath.replace(/\\.png$/i, "")' in source
     assert "Preview PNG was not generated." in source
-    assert 'textItems.push({ item: tf, rect: frameRect, fitMode: "contain" });' in source
+    assert 'textItems.push({ item: tf, rect: frameRect, exactFit: true });' in source
+    assert 'textItems.push({ item: clonedText, rect: frameRect, exactFit: true, outlineChildren: !isTextFrame(clonedText) });' in source
     assert 'outlineChildren: !isTextFrame(clonedText)' in source
     assert "function outlineTextEntry(entry, itemIndex)" in source
     assert "function collectTextFrames(container)" in source
@@ -308,6 +309,7 @@ def test_curved_renderer_outlines_and_merges_each_text_item_independently():
     assert all(ord(char) < 128 for char in source)
     assert "TITLE_{font}_TEXT" in source
     assert "sourceText.duplicate(layer, ElementPlacement.PLACEATEND)" in source
+    assert "try { if (frame) frame.remove(); }" in source
     assert "titleTemplateStats.used += 1;" in source
     assert "titleTemplate: titleTemplateStats" in source
     assert "abortRenderUnexpected(eLayout);" in source
@@ -316,6 +318,10 @@ def test_curved_renderer_outlines_and_merges_each_text_item_independently():
     assert "function fitOutlinedEntry(item, entry)" in source
     assert "fitPageItemWithinRect(item, entry.rect);" in source
     assert "function fitPageItemWithinRect(item, rect)" in source
+    assert "function validatePageItemRect(item, rect)" in source
+    assert "Text item did not reach configured box" in source
+    assert "pageItemRectMatches(item, rect)" in source
+    assert source.index("fitOutlinedEntry(outline, entry);") < source.index("cleanupOutline(outline);")
     assert "Math.min(targetW / w, targetH / h)" in source
     assert "Math.min(1, targetW / w, targetH / h)" not in source
     assert "function clampPageItemToRect(item, rect)" in source
