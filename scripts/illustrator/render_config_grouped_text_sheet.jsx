@@ -110,7 +110,7 @@
                 var tf = layer.textFrames.add();
                 tf.contents = String(item.text || "");
                 applyFontConfig(tf, font);
-                applyColor(tf, String(task.style && task.style.color_name || "black"));
+                applyColor(tf, renderTextColor());
                 applyFontBoldness(tf, fontStyles[String(item.font_option || "")]);
                 var outline = renderOutlinedTextToRect(tf, [boxLeft + padding, boxTop - padding, boxRight - padding, boxBottom + padding], minFontSize, maxFontSize);
                 try { outline.name = String(item.order_no || "") + "_" + String(item.quantity_index || j + 1) + "_TEXT"; } catch (e0) {}
@@ -218,7 +218,7 @@
             var tf = layer.textFrames.add();
             tf.contents = String(item.text || "");
             applyFontConfig(tf, font);
-            applyColor(tf, String(item.color_option || task.style && task.style.color_name || "black"));
+            applyColor(tf, renderTextColor());
             applyFontBoldness(tf, fontStyles[String(item.font_option || "")]);
             var outline = renderOutlinedTextToRect(tf, rect, minFontSize, maxFontSize);
             try { outline.name = String(item.order_no || "") + "_" + String(item.quantity_index || 1) + "_TEXT"; } catch (e0) {}
@@ -395,6 +395,7 @@
         }
         removeDiagnosticFrames(copy);
         replaceDesignTexts(copy, parts || []);
+        applyColorToTextFrames(copy, renderTextColor());
         applyF11PrimaryHeartFit(copy, fontOption);
         applyDesignTextAlignment(copy, fontOption);
         applyFontBoldnessToTextFrames(copy, fontStyle);
@@ -827,6 +828,18 @@
         color.green = rgb[1];
         color.blue = rgb[2];
         tf.textRange.characterAttributes.fillColor = color;
+    }
+
+    function renderTextColor() {
+        return String(task.style && task.style.color_name || "white");
+    }
+
+    function applyColorToTextFrames(root, name) {
+        var frames = [];
+        collectTextFrames(root, frames);
+        for (var i = 0; i < frames.length; i++) {
+            try { applyColor(frames[i], name); } catch (e0) {}
+        }
     }
 
     function applyFontBoldness(tf, style) {

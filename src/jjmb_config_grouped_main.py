@@ -123,6 +123,7 @@ def build_grouped_task(
         template_config=template_config,
         output_ai=output_ai,
         groups=groups,
+        color_name="white",
         columns=max(columns, 1),
         color_mode=color_mode,
         outline_text=outline_text,

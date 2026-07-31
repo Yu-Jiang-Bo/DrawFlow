@@ -145,6 +145,7 @@ def test_grouped_sheet_groups_items_by_order_number(tmp_path):
     assert [item.text for item in task.groups[0].items] == ["A", "B", "B"]
     payload = task.to_json_dict()
     assert payload["layout"]["show_style_boxes"] is False
+    assert payload["style"]["color_name"] == "white"
     assert payload["export"]["color_mode"] == "CMYK"
 
     design_task = build_grouped_task(

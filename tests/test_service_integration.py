@@ -763,6 +763,7 @@ def test_service_routes_202603_h_to_exact_pngs_and_paginated_master_ai(tmp_path)
     single_task = json.loads(single_task_path.read_text(encoding="utf-8"))
     compose_task = json.loads(compose_task_path.read_text(encoding="utf-8"))
     assert single_task["layout"]["single_graphic_exact"] is True
+    assert single_task["style"]["color_name"] == "white"
     assert single_task["layout"]["embed_order_label"] is True
     assert single_task["layout"]["single_graphic_label_height_mm"] == 6.0
     assert single_task["layout"]["single_graphic_label_gap_mm"] == 0.8
@@ -1286,6 +1287,7 @@ def test_202603_grouped_task_receives_every_configured_font_boldness_mapping(tmp
 
     assert record["status"] == "completed", record.get("error")
     task = json.loads(Path(record["outputs"]["render_task"]).read_text(encoding="utf-8"))
+    assert task["style"]["color_name"] == "white"
     assert task["font_styles"] == {
         "F2": {"boldness": 0.4},
         "F3": {"boldness": 0.4},
@@ -1324,6 +1326,7 @@ def test_202603_grouped_design_asset_task_keeps_its_font_style_mapping(tmp_path)
     )
 
     task_json = task.to_json_dict()
+    assert task_json["style"]["color_name"] == "white"
     assert task_json["groups"][0]["items"][0]["render_kind"] == "design_asset"
     assert task_json["font_styles"] == {"F10": {"boldness": 0.4}}
 

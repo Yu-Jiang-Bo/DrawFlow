@@ -1407,7 +1407,7 @@ def _build_202603_single_graphic_task(
             for option, style in (font_styles or {}).items()
             if str(option).strip() and isinstance(style, Mapping)
         },
-        "style": {"color_name": str(item_payload.get("color_option") or "black")},
+        "style": {"color_name": "white"},
         "layout": {
             "columns": 1,
             "single_graphic_exact": True,
