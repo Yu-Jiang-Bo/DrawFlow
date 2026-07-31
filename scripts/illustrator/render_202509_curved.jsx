@@ -31,6 +31,8 @@
     var cleanupStats = { attempted: 0, failed: 0 };
     var OUTLINE_BATCH_SIZE = 25;
     var FIT_ITERATIONS = 2;
+    var EXACT_FIT_ITERATIONS = 64;
+    var EXACT_FIT_TOLERANCE_PT = 0.02;
     var renderProgress = { stage: "layout", totalTextItems: 0, processedTextItems: 0 };
     var minFontSize = Number(fit.min_font_size_pt || 4);
     var maxFontSize = Number(fit.max_font_size_pt || 80);
@@ -853,7 +855,7 @@
         var targetW = right - left;
         var targetH = top - bottom;
         if (targetW <= 0 || targetH <= 0) throw new Error("Invalid exact text bounds");
-        for (var i = 0; i < 8; i++) {
+        for (var i = 0; i < EXACT_FIT_ITERATIONS; i++) {
             var b = pageItemBounds(item);
             var w = Math.abs(b[2] - b[0]);
             var h = Math.abs(b[1] - b[3]);
@@ -905,20 +907,33 @@
     }
 
     function pageItemRectMatches(item, rect) {
+        var delta = pageItemRectDelta(item, rect);
+        return delta.width <= EXACT_FIT_TOLERANCE_PT &&
+            delta.height <= EXACT_FIT_TOLERANCE_PT &&
+            delta.left <= EXACT_FIT_TOLERANCE_PT &&
+            delta.top <= EXACT_FIT_TOLERANCE_PT;
+    }
+
+    function pageItemRectDelta(item, rect) {
         var b = pageItemBounds(item);
-        return Math.abs((b[2] - b[0]) - (rect[2] - rect[0])) <= 0.02 &&
-            Math.abs((b[1] - b[3]) - (rect[1] - rect[3])) <= 0.02 &&
-            Math.abs(b[0] - rect[0]) <= 0.02 &&
-            Math.abs(b[1] - rect[1]) <= 0.02;
+        return {
+            width: Math.abs((b[2] - b[0]) - (rect[2] - rect[0])),
+            height: Math.abs((b[1] - b[3]) - (rect[1] - rect[3])),
+            left: Math.abs(b[0] - rect[0]),
+            top: Math.abs(b[1] - rect[1])
+        };
     }
 
     function validatePageItemRect(item, rect) {
         if (pageItemRectMatches(item, rect)) return;
         var b = pageItemBounds(item);
+        var delta = pageItemRectDelta(item, rect);
         throw new Error(
             "Text item did not reach configured box: actual=" +
             Math.abs(b[2] - b[0]) + "x" + Math.abs(b[1] - b[3]) +
-            ", target=" + Math.abs(rect[2] - rect[0]) + "x" + Math.abs(rect[1] - rect[3])
+            ", target=" + Math.abs(rect[2] - rect[0]) + "x" + Math.abs(rect[1] - rect[3]) +
+            ", delta=" + delta.width + "x" + delta.height +
+            ", tolerance=" + EXACT_FIT_TOLERANCE_PT
         );
     }
 

@@ -320,7 +320,12 @@ def test_curved_renderer_outlines_and_merges_each_text_item_independently():
     assert "function fitPageItemWithinRect(item, rect)" in source
     assert "function validatePageItemRect(item, rect)" in source
     assert "Text item did not reach configured box" in source
+    assert "var EXACT_FIT_ITERATIONS = 64;" in source
+    assert "var EXACT_FIT_TOLERANCE_PT = 0.02;" in source
+    assert "function pageItemRectDelta(item, rect)" in source
+    assert "tolerance=\" + EXACT_FIT_TOLERANCE_PT" in source
     assert "pageItemRectMatches(item, rect)" in source
+    assert "i < EXACT_FIT_ITERATIONS" in source
     assert source.index("fitOutlinedEntry(outline, entry);") < source.index("cleanupOutline(outline);")
     assert "Math.min(targetW / w, targetH / h)" in source
     assert "Math.min(1, targetW / w, targetH / h)" not in source
