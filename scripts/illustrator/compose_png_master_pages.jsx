@@ -16,6 +16,7 @@
     var labelHeight = mmToPt(Number(task.label_height_mm || 6));
     var labelWidth = mmToPt(Number(task.label_width_mm || 42));
     var labelGap = mmToPt(Number(task.label_gap_mm || 0.8));
+    var previewBackground = task.preview_background || {};
 
     try { app.userInteractionLevel = UserInteractionLevel.DONTDISPLAYALERTS; } catch (e0) {}
 
@@ -132,18 +133,31 @@
         var doc = app.documents.add(DocumentColorSpace.CMYK, frameWidth, pageHeight);
         var layer = doc.layers[0];
         layer.name = "PNG_MASTER_" + pad(pageIndex + 1, 2);
+        var previewLayer = null;
+        if (previewBackground.enabled === true) {
+            previewLayer = layer;
+            previewLayer.name = "PREVIEW_BACKGROUND_NON_PRINTING";
+            try { previewLayer.printable = previewBackground.non_printing !== true; } catch (eP0) {}
+            layer = doc.layers.add();
+            layer.name = "PNG_MASTER_" + pad(pageIndex + 1, 2);
+        }
 
         for (var i = 0; i < page.placements.length; i++) {
             var placement = page.placements[i];
             var item = items[placement.index];
+            var imageLeft = placement.x + (placement.width - placement.imageWidth) / 2;
+            var imageTop = placement.labelEmbedded
+                ? pageHeight - placement.y
+                : pageHeight - placement.y - labelHeight - labelGap;
+            if (previewLayer) {
+                drawPreviewBackground(previewLayer, imageLeft, imageTop, placement.imageWidth, placement.imageHeight);
+            }
             var placed = layer.placedItems.add();
             placed.file = File(String(item.png_path));
             placed.width = placement.imageWidth;
             placed.height = placement.imageHeight;
-            placed.left = placement.x + (placement.width - placement.imageWidth) / 2;
-            placed.top = placement.labelEmbedded
-                ? pageHeight - placement.y
-                : pageHeight - placement.y - labelHeight - labelGap;
+            placed.left = imageLeft;
+            placed.top = imageTop;
             try {
                 placed.embed();
             } catch (embedError) {
@@ -212,6 +226,31 @@
         color.cyan = 0; color.magenta = 0; color.yellow = 0; color.black = 0;
         rect.fillColor = color;
         try { rect.zOrder(ZOrderMethod.SENDTOBACK); } catch (e0) {}
+    }
+
+    function drawPreviewBackground(layer, left, top, width, height) {
+        var rect = layer.pathItems.rectangle(top, left, width, height);
+        rect.filled = true;
+        rect.stroked = false;
+        rect.fillColor = previewBackgroundColor();
+        try { rect.zOrder(ZOrderMethod.SENDTOBACK); } catch (e0) {}
+        return rect;
+    }
+
+    function previewBackgroundColor() {
+        var values = previewBackground.cmyk || [0, 0, 0, 35];
+        var color = new CMYKColor();
+        color.cyan = clampPercent(values[0]);
+        color.magenta = clampPercent(values[1]);
+        color.yellow = clampPercent(values[2]);
+        color.black = clampPercent(values[3]);
+        return color;
+    }
+
+    function clampPercent(value) {
+        var number = Number(value);
+        if (isNaN(number)) return 0;
+        return Math.max(0, Math.min(number, 100));
     }
 
     function drawFrame(layer, left, top, width, height) {

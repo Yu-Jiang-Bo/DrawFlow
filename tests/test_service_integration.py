@@ -775,6 +775,11 @@ def test_service_routes_202603_h_to_exact_pngs_and_paginated_master_ai(tmp_path)
     assert compose_task["compatibility"] == "CS5"
     assert compose_task["frame_width_mm"] == 580.0
     assert compose_task["frame_height_mm"] == 2000.0
+    assert compose_task["preview_background"] == {
+        "enabled": True,
+        "non_printing": True,
+        "cmyk": [0, 0, 0, 35],
+    }
     assert compose_task["items"][0]["width_mm"] == 84.0
     assert compose_task["items"][0]["height_mm"] == 60.8
     assert compose_task["items"][0]["graphic_width_mm"] == 80.0

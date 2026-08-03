@@ -897,6 +897,11 @@ class RenderService:
                 "label_height_mm": master_plan["label_height_mm"],
                 "label_width_mm": master_plan["label_width_mm"],
                 "label_gap_mm": master_plan["label_gap_mm"],
+                "preview_background": {
+                    "enabled": True,
+                    "non_printing": True,
+                    "cmyk": [0, 0, 0, 35],
+                },
                 "debug": {"report_path": str(target_path.with_suffix(".debug.json"))},
             }
             compose_file = job_dir / f"compose-png-master-pages-{index:03d}.json"

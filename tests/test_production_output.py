@@ -125,13 +125,46 @@ def test_h_png_master_composer_embeds_placed_pngs():
     source = Path("scripts/illustrator/compose_png_master_pages.jsx").read_text(encoding="utf-8")
     compose_body = source[source.index("function composePage"):source.index("function drawLabel")]
 
+    assert "var previewBackground = task.preview_background || {};" in source
+    assert "PREVIEW_BACKGROUND_NON_PRINTING" in source
+    assert "previewLayer.printable = previewBackground.non_printing !== true;" in source
+    assert "drawPreviewBackground(previewLayer, imageLeft, imageTop, placement.imageWidth, placement.imageHeight);" in compose_body
+    assert compose_body.index("drawPreviewBackground(previewLayer") < compose_body.index("var placed = layer.placedItems.add();")
     assert "var placed = layer.placedItems.add();" in source
     assert "placed.file = File(String(item.png_path));" in source
     assert "placed.embed();" in source
     assert "Failed to embed PNG in H master AI" in source
     assert 'String(task.compatibility || "CS5")' in source
     assert "Compatibility.ILLUSTRATOR15" in source
+    assert "function drawPreviewBackground" in source
+    assert "function previewBackgroundColor" in source
+    assert "function clampPercent" in source
     assert "drawWhiteBackground(" not in compose_body
+
+
+def test_h_png_master_composer_javascript_parses_in_node(tmp_path):
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node.js is unavailable")
+    source_file = tmp_path / "compose.js"
+    source_file.write_text(
+        Path("scripts/illustrator/compose_png_master_pages.jsx").read_text(encoding="utf-8").replace("#target illustrator", "", 1),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [
+            node,
+            "-e",
+            "const fs = require('fs'); new Function(fs.readFileSync(process.argv[1], 'utf8'));",
+            str(source_file),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
 
 
 def test_color_frame_composer_packs_order_segments_by_adaptive_grid():
