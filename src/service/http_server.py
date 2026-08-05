@@ -28,6 +28,7 @@ from .template_onboarding import TemplateOnboardingStore
 from .template_inspector import TemplateInspector
 from .template_publication import TemplatePublicationService
 from .template_rule_compiler import compile_rule_ast
+from .v2_template_api import V2TemplateApi, handle_v2_template_api
 from .web_page import INDEX_HTML as WORKBENCH_HTML
 
 
@@ -774,6 +775,7 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
     llm_parser = LlmRuleParser()
     template_inspector = TemplateInspector()
     runtime_templates = RuntimeTemplateService(registry)
+    v2_template_api = V2TemplateApi()
     render_lock = threading.Lock()
     service_role = "legacy-renderer"
     allow_render = True
@@ -782,6 +784,8 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         path = urlparse(self.path).path
         parts = path.strip("/").split("/")
+        if handle_v2_template_api(self, "GET", path, parts):
+            return
         if path == "/":
             self._send_html(WORKBENCH_HTML)
             return
@@ -884,13 +888,15 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         path = urlparse(self.path).path
+        parts = path.strip("/").split("/")
+        if handle_v2_template_api(self, "POST", path, parts):
+            return
         if path == "/api/templates/import-scan":
             try:
                 self._send_json(self.runtime_templates.import_scan(self._read_json()))
             except (RuntimeTemplateError, ValueError) as exc:
                 self._send_error(HTTPStatus.BAD_REQUEST, str(exc))
             return
-        parts = path.strip("/").split("/")
         if len(parts) == 5 and parts[:3] == ["api", "runtime", "templates"] and parts[4] == "publish":
             try:
                 payload = self._read_json()
