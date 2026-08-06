@@ -29,7 +29,10 @@ from .template_inspector import TemplateInspector
 from .template_publication import TemplatePublicationService
 from .template_rule_compiler import compile_rule_ast
 from .v2_template_api import V2TemplateApi, handle_v2_template_api
+from .v2_workbench_page import INDEX_HTML as V2_WORKBENCH_HTML
 from .web_page import INDEX_HTML as WORKBENCH_HTML
+
+V2_WORKBENCH_STATIC_DIR = Path(__file__).resolve().parent / "static" / "v2-workbench"
 
 
 LEGACY_INDEX_HTML = """<!doctype html>
@@ -786,6 +789,12 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
         parts = path.strip("/").split("/")
         if handle_v2_template_api(self, "GET", path, parts):
             return
+        if path == "/v2/templates/workbench":
+            self._send_html(V2_WORKBENCH_HTML)
+            return
+        if path.startswith("/static/v2-workbench/"):
+            self._send_v2_workbench_static(path)
+            return
         if path == "/":
             self._send_html(WORKBENCH_HTML)
             return
@@ -1512,6 +1521,31 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def _send_v2_workbench_static(self, path: str) -> None:
+        file_name = _safe_static_name(unquote(path.rsplit("/", 1)[-1]))
+        if not file_name:
+            self._send_error(HTTPStatus.NOT_FOUND, "not found")
+            return
+        target = (V2_WORKBENCH_STATIC_DIR / file_name).resolve()
+        try:
+            target.relative_to(V2_WORKBENCH_STATIC_DIR.resolve())
+        except ValueError:
+            self._send_error(HTTPStatus.NOT_FOUND, "not found")
+            return
+        if not target.is_file():
+            self._send_error(HTTPStatus.NOT_FOUND, "not found")
+            return
+        content_types = {
+            ".css": "text/css; charset=utf-8",
+            ".js": "text/javascript; charset=utf-8",
+        }
+        data = target.read_bytes()
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", content_types.get(target.suffix.lower(), "application/octet-stream"))
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
     def _send_error(self, status: HTTPStatus, message: str) -> None:
         self._send_json({"error": message}, status)
 
@@ -1551,6 +1585,25 @@ def _safe_download_name(value: str) -> str:
             chars.append("_")
     name = "".join(chars).strip("._")
     return name or "file"
+
+
+def _safe_static_name(value: str) -> str:
+    name = Path(value).name
+    if name != value or not name:
+        return ""
+    allowed = {
+        "workbench.css",
+        "workbench.js",
+        "workbench-dom.js",
+        "workbench-api.js",
+        "workbench-scan-model.js",
+        "workbench-form-model.js",
+        "workbench-config.js",
+        "workbench-view.js",
+        "workbench-draft-actions.js",
+        "workbench-scan-actions.js",
+    }
+    return name if name in allowed else ""
 
 
 def _design_asset_count(assets: object) -> int:

@@ -20,11 +20,13 @@ from urllib.parse import unquote, urlparse
 
 from .local_client import HttpCentralClient, LocalClientError, LocalDrawFlowClient
 from .paths import LOCAL_DRAWFLOW_DIR
+from .v2_workbench_page import INDEX_HTML as V2_FALLBACK_HTML
 from .web_page import INDEX_HTML as FALLBACK_HTML
 
 
 LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
 LOGGER = logging.getLogger("drawflow.local_gateway")
+V2_WORKBENCH_STATIC_DIR = Path(__file__).resolve().parent / "static" / "v2-workbench"
 
 
 class LocalGatewayRequestHandler(BaseHTTPRequestHandler):
@@ -38,6 +40,12 @@ class LocalGatewayRequestHandler(BaseHTTPRequestHandler):
             return
         if path == "/":
             self._send_central_or_fallback("/")
+            return
+        if path == "/v2/templates/workbench":
+            self._send_central_or_fallback(path, fallback_html=V2_FALLBACK_HTML)
+            return
+        if path.startswith("/static/v2-workbench/"):
+            self._send_central_or_static(path)
             return
         if path in {"/local/jobs", "/api/jobs"}:
             self._send_local_jobs()
@@ -115,8 +123,18 @@ class LocalGatewayRequestHandler(BaseHTTPRequestHandler):
                 for item in values
             ]
             self._send_json(self.drawflow_client.scan_and_import(fields, uploads))
+        except LocalClientError as exc:
+            LOGGER.warning("local scan rejected: code=%s message=%s", exc.code, exc)
+            self._send_client_error(HTTPStatus.BAD_REQUEST, exc)
         except Exception as exc:
-            self._send_error(HTTPStatus.BAD_REQUEST, str(exc))
+            LOGGER.exception("local scan failed")
+            self._send_client_error(
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+                LocalClientError(
+                    "本地客户端扫描模板时发生异常，请重新启动 DrawFlowClient.exe 后重试。",
+                    code="local_scan_unexpected",
+                ),
+            )
 
     def _handle_local_job(self, path: str) -> None:
         parts = path.strip("/").split("/")
@@ -150,8 +168,8 @@ class LocalGatewayRequestHandler(BaseHTTPRequestHandler):
     def _send_local_job(self, job_id: str) -> None:
         try:
             self._send_json(self.drawflow_client.jobs.load(job_id))
-        except KeyError as exc:
-            self._send_error(HTTPStatus.NOT_FOUND, str(exc))
+        except KeyError:
+            self._send_error(HTTPStatus.NOT_FOUND, "任务不存在")
 
     def _read_render_payload(self) -> dict[str, object]:
         content_type = self.headers.get("Content-Type", "")
@@ -167,8 +185,8 @@ class LocalGatewayRequestHandler(BaseHTTPRequestHandler):
     def _send_job_output(self, job_id: str, key: str) -> None:
         try:
             record = self.drawflow_client.jobs.load(job_id)
-        except KeyError as exc:
-            self._send_error(HTTPStatus.NOT_FOUND, str(exc))
+        except KeyError:
+            self._send_error(HTTPStatus.NOT_FOUND, "任务不存在")
             return
         outputs = record.get("outputs", {})
         if not isinstance(outputs, dict):
@@ -183,12 +201,30 @@ class LocalGatewayRequestHandler(BaseHTTPRequestHandler):
         content_type = "application/zip" if output_path.suffix.lower() == ".zip" else "application/octet-stream"
         self._send_file(output_path, content_type, _safe_download_name(output_path.name))
 
-    def _send_central_or_fallback(self, path: str) -> None:
+    def _send_central_or_fallback(self, path: str, *, fallback_html: str = FALLBACK_HTML) -> None:
         try:
             status, headers, body = self.drawflow_client.central.proxy("GET", path)
             self._send_proxy_response(status, headers, body)
         except Exception:
-            self._send_html(FALLBACK_HTML)
+            self._send_html(fallback_html)
+
+    def _send_central_or_static(self, path: str) -> None:
+        try:
+            status, headers, body = self.drawflow_client.central.proxy("GET", path)
+            self._send_proxy_response(status, headers, body)
+            return
+        except Exception:
+            pass
+        file_name = _safe_static_name(unquote(path.rsplit("/", 1)[-1]))
+        target = (V2_WORKBENCH_STATIC_DIR / file_name).resolve() if file_name else None
+        if not target or not target.is_file():
+            self._send_error(HTTPStatus.NOT_FOUND, "not found")
+            return
+        content_types = {
+            ".css": "text/css; charset=utf-8",
+            ".js": "text/javascript; charset=utf-8",
+        }
+        self._send_bytes(target.read_bytes(), content_types.get(target.suffix.lower(), "application/octet-stream"))
 
     def _proxy(self, method: str) -> None:
         try:
@@ -345,6 +381,25 @@ def main() -> int:
 def _safe_download_name(value: str) -> str:
     chars = [char if char.isalnum() or char in {"-", "_", "."} else "_" for char in Path(value).name]
     return "".join(chars).strip("._") or "file"
+
+
+def _safe_static_name(value: str) -> str:
+    name = Path(value).name
+    if name != value or not name:
+        return ""
+    allowed = {
+        "workbench.css",
+        "workbench.js",
+        "workbench-dom.js",
+        "workbench-api.js",
+        "workbench-scan-model.js",
+        "workbench-form-model.js",
+        "workbench-config.js",
+        "workbench-view.js",
+        "workbench-draft-actions.js",
+        "workbench-scan-actions.js",
+    }
+    return name if name in allowed else ""
 
 
 class _BoundedBodyReader:

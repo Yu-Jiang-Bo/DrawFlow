@@ -107,6 +107,38 @@ def test_local_gateway_reads_jobs_and_downloads_from_the_client_not_central(tmp_
     assert downloaded_task == b'{"task": true}'
 
 
+def test_local_gateway_hides_requested_job_id_when_job_is_missing(tmp_path):
+    class FakeClient:
+        def __init__(self):
+            self.jobs = JobStore(tmp_path / "jobs")
+            self.data_dir = tmp_path
+
+    handler = type(
+        "TestMissingJobGatewayRequestHandler",
+        (local_gateway.LocalGatewayRequestHandler,),
+        {"client": FakeClient()},
+    )
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    worker = threading.Thread(target=server.serve_forever, daemon=True)
+    worker.start()
+    try:
+        with pytest.raises(urllib.error.HTTPError) as exc_info:
+            urllib.request.urlopen(
+                f"http://127.0.0.1:{server.server_address[1]}/api/jobs/C:%5Csecret%5Cjob"
+            )
+        payload = json.loads(exc_info.value.read().decode("utf-8"))
+    finally:
+        server.shutdown()
+        server.server_close()
+        worker.join(timeout=2)
+
+    rendered = json.dumps(payload, ensure_ascii=False)
+    assert exc_info.value.code == 404
+    assert payload == {"error": "任务不存在"}
+    assert "secret" not in rendered
+    assert "%5C" not in rendered
+
+
 def test_local_gateway_returns_structured_error_for_render_sync_failures(tmp_path):
     class FakeClient:
         def __init__(self):
@@ -146,6 +178,60 @@ def test_local_gateway_returns_structured_error_for_render_sync_failures(tmp_pat
             "message": "template MISSING001 has no published version",
         }
     }
+
+
+def test_local_gateway_hides_internal_scan_exception_details(tmp_path):
+    class FakeClient:
+        def __init__(self):
+            self.jobs = JobStore(tmp_path / "jobs")
+            self.data_dir = tmp_path
+
+        def scan_and_import(self, fields, uploads):
+            raise RuntimeError(
+                r'Traceback File "C:\Users\Administrator\secret\scan.py", line 7 token=abc123'
+            )
+
+    handler = type(
+        "TestScanFailureGatewayRequestHandler",
+        (local_gateway.LocalGatewayRequestHandler,),
+        {"client": FakeClient()},
+    )
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    worker = threading.Thread(target=server.serve_forever, daemon=True)
+    worker.start()
+    boundary = "----drawflow-test-boundary"
+    body = (
+        f"--{boundary}\r\n"
+        'Content-Disposition: form-data; name="template_id"\r\n\r\n'
+        "V2SCAN001\r\n"
+        f"--{boundary}\r\n"
+        'Content-Disposition: form-data; name="template_ai"; filename="sample.ai"\r\n'
+        "Content-Type: application/illustrator\r\n\r\n"
+        "ai-bytes\r\n"
+        f"--{boundary}--\r\n"
+    ).encode("utf-8")
+    try:
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{server.server_address[1]}/local/templates/scan",
+            data=body,
+            method="POST",
+            headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+        )
+        with pytest.raises(urllib.error.HTTPError) as exc_info:
+            urllib.request.urlopen(request)
+        payload = json.loads(exc_info.value.read().decode("utf-8"))
+    finally:
+        server.shutdown()
+        server.server_close()
+        worker.join(timeout=2)
+
+    rendered = json.dumps(payload, ensure_ascii=False)
+    assert exc_info.value.code == 500
+    assert payload["error"]["code"] == "local_scan_unexpected"
+    assert "DrawFlowClient.exe" in payload["error"]["message"]
+    assert "C:\\" not in rendered
+    assert "Traceback" not in rendered
+    assert "token=abc123" not in rendered
 
 
 def test_local_gateway_streams_v2_asset_upload_to_central(tmp_path):
@@ -201,6 +287,47 @@ def test_local_gateway_streams_v2_asset_upload_to_central(tmp_path):
     assert client.central.path.endswith("/api/v2/templates/V2GATE001/assets/template.ai")
     assert client.central.content_length == len(b"ai-bytes")
     assert client.central.chunks == [b"ai", b"-b", b"yt", b"es"]
+
+
+def test_local_gateway_serves_v2_workbench_fallback_when_central_is_unavailable(tmp_path):
+    class OfflineCentral:
+        def proxy(self, *args, **kwargs):
+            raise LocalClientError("central offline", code="central_unreachable")
+
+    class FakeClient:
+        def __init__(self):
+            self.jobs = JobStore(tmp_path / "jobs")
+            self.data_dir = tmp_path
+            self.central = OfflineCentral()
+
+    handler = type(
+        "TestV2WorkbenchGatewayRequestHandler",
+        (local_gateway.LocalGatewayRequestHandler,),
+        {"client": FakeClient()},
+    )
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    worker = threading.Thread(target=server.serve_forever, daemon=True)
+    worker.start()
+    base_url = f"http://127.0.0.1:{server.server_address[1]}"
+    try:
+        with urllib.request.urlopen(f"{base_url}/v2/templates/workbench") as response:
+            html = response.read().decode("utf-8")
+        with urllib.request.urlopen(f"{base_url}/static/v2-workbench/workbench.css") as response:
+            css = response.read().decode("utf-8")
+        with urllib.request.urlopen(f"{base_url}/static/v2-workbench/workbench-scan-actions.js") as response:
+            scan_actions_js = response.read().decode("utf-8")
+        with urllib.request.urlopen(f"{base_url}/static/v2-workbench/workbench-scan-model.js") as response:
+            scan_model_js = response.read().decode("utf-8")
+    finally:
+        server.shutdown()
+        server.server_close()
+        worker.join(timeout=2)
+
+    assert "V2 模板配置工作台" in html
+    assert 'id="v2WorkbenchApp"' in html
+    assert ".workspace-grid" in css
+    assert "/local/templates/scan" in scan_actions_js
+    assert "function scanModel" in scan_model_js
 
 
 def test_configure_local_logging_writes_gateway_errors_to_the_client_log(tmp_path):

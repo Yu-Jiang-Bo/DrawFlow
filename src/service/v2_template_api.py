@@ -103,11 +103,13 @@ class V2TemplateApi:
         return {"template": state["template"], "state": state_summary(state)}
 
     def save_draft(self, template_id: str, payload: Mapping[str, Any]) -> dict[str, Any]:
-        ensure_payload_fields(payload, {"name", "shop_name", "config", "scan", "scan_result"})
+        ensure_payload_fields(payload, {"name", "shop_name", "config"})
         current = self.store.get_state(template_id)
         metadata = metadata_from_payload(template_id, payload, current)
-        config = optional_mapping(payload, "config")
-        scan = optional_mapping(payload, "scan", "scan_result")
+        config = dict(optional_mapping(payload, "config"))
+        current_draft = optional_draft(self.store, template_id)
+        scan = dict(current_draft.get("scan", {})) if current_draft else {}
+        self._apply_trusted_scan_audit(config, scan)
         config, validation = self._prepare_saveable_config(config)
         self._ensure_config_template_matches(template_id, validation)
         state = self.store.save_draft(template_id, metadata=metadata, config=config, scan=scan)
@@ -254,6 +256,14 @@ class V2TemplateApi:
                 "配置中的模板 ID 与当前草稿模板 ID 不一致，草稿未保存。",
                 suggestion="请确认 URL 中的模板 ID 和配置 template.template_id 使用同一个值。",
             )
+
+    def _apply_trusted_scan_audit(self, config: dict[str, Any], scan: Mapping[str, Any]) -> None:
+        if not config:
+            return
+        audit = dict(config.get("audit") or {})
+        audit["scan_version"] = str(scan.get("scan_version") or scan.get("version") or "")
+        audit["template_sha256"] = str(scan.get("template_sha256") or scan.get("sha256") or "")
+        config["audit"] = audit
 
     def _record_audit(
         self,

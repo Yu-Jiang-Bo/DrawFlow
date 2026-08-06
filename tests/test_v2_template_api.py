@@ -60,47 +60,85 @@ def test_v2_api_creates_lists_and_reads_draft_with_optional_shop(tmp_path):
     assert not any("path" in key.lower() for key in listed["templates"][0])
 
 
-def test_v2_api_saves_draft_scan_and_runs_validation(tmp_path):
+def test_v2_api_saves_draft_config_without_accepting_untrusted_scan(tmp_path):
     api = api_for(tmp_path)
     api.create_template({"template_id": "V2API001", "name": "API Demo"})
 
     saved = api.handle(
         "POST",
         ["api", "v2", "templates", "V2API001", "draft"],
-        {"config": saveable_config(), "scan": {"scan_version": "scan-1"}},
+        {"config": saveable_config()},
     ).payload
     scan = api.handle("GET", ["api", "v2", "templates", "V2API001", "scan"]).payload
 
     assert saved["validation"]["can_save"] is True
     assert saved["draft"]["config"]["template"]["template_id"] == "V2API001"
-    assert scan == {"template_id": "V2API001", "draft_revision": "d0002", "scan": {"scan_version": "scan-1"}}
+    assert scan == {"template_id": "V2API001", "draft_revision": "d0002", "scan": {}}
+
+    with pytest.raises(V2TemplateApiError, match="未开放"):
+        api.save_draft("V2API001", {"config": saveable_config(), "scan": {"scan_version": "fake"}})
+
+    assert api.read_draft("V2API001")["scan"] == {}
+
+
+def test_v2_api_rebuilds_config_scan_audit_from_trusted_draft_scan(tmp_path):
+    api = api_for(tmp_path)
+    api.create_template({"template_id": "V2API001", "name": "API Demo"})
+    api.store.save_draft(
+        "V2API001",
+        metadata={"template_id": "V2API001", "name": "API Demo"},
+        scan={"scan_version": "trusted-scan", "template_sha256": "trusted-sha"},
+    )
+    forged = saveable_config()
+    forged["audit"] = {
+        "scan_version": "browser-forged-scan",
+        "template_sha256": "browser-forged-sha",
+        "config_version": 4,
+    }
+
+    saved = api.save_draft("V2API001", {"config": forged})
+
+    assert saved["draft"]["config"]["audit"] == {
+        "scan_version": "trusted-scan",
+        "template_sha256": "trusted-sha",
+        "config_version": 4,
+    }
+    assert saved["validation"]["contract"]["audit"] == {
+        "scan_version": "trusted-scan",
+        "template_sha256": "trusted-sha",
+        "config_version": 4,
+    }
+    assert api.read_draft("V2API001")["scan"] == {
+        "scan_version": "trusted-scan",
+        "template_sha256": "trusted-sha",
+    }
 
 
 def test_v2_api_rejects_malicious_config_without_changing_current_draft(tmp_path):
     api = api_for(tmp_path)
     api.create_template({"template_id": "V2API001", "name": "API Demo"})
-    api.save_draft("V2API001", {"config": saveable_config(), "scan": {"scan_version": "safe"}})
+    api.save_draft("V2API001", {"config": saveable_config()})
 
     with pytest.raises(V2TemplateApiError, match="草稿未保存"):
         api.save_draft("V2API001", {"config": {"natural_text": "Name odd red even white"}})
 
     draft = api.read_draft("V2API001")
     assert draft["config"]["template"]["template_id"] == "V2API001"
-    assert draft["scan"] == {"scan_version": "safe"}
+    assert draft["scan"] == {}
 
 
 def test_v2_api_rejects_config_template_id_mismatch_without_saving(tmp_path):
     api = api_for(tmp_path)
     api.create_template({"template_id": "V2API001", "name": "API Demo"})
-    api.save_draft("V2API001", {"config": saveable_config(), "scan": {"scan_version": "safe"}})
+    api.save_draft("V2API001", {"config": saveable_config()})
     mismatched = saveable_config("V2OTHER001")
 
     with pytest.raises(V2TemplateApiError, match="模板 ID 不一致"):
-        api.save_draft("V2API001", {"config": mismatched, "scan": {"scan_version": "bad"}})
+        api.save_draft("V2API001", {"config": mismatched})
 
     draft = api.read_draft("V2API001")
     assert draft["config"]["template"]["template_id"] == "V2API001"
-    assert draft["scan"] == {"scan_version": "safe"}
+    assert draft["scan"] == {}
 
 
 def test_v2_validation_endpoint_does_not_create_template_state(tmp_path):
