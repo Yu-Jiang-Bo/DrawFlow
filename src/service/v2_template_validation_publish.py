@@ -80,8 +80,13 @@ def _validate_colors(contract: Mapping[str, Any], issues: list[Dict[str, str]]) 
         for group_name in ("design", "font"):
             for option_index, option in enumerate(list_value(mapping(output.get(group_name)).get("options"))):
                 _validate_slot_colors(output_index, group_name, option_index, mapping(option), color_keys, contract, issues)
-    if needs_color and not colors:
+    if needs_color and not colors and not _manual_check_confirmed(contract, "colors"):
         add_issue(issues, "$.colors", "colors", V2_STATUS_PENDING, "color_samples_pending", "颜色扫描值还没有确认。")
+
+
+def _manual_check_confirmed(contract: Mapping[str, Any], key: str) -> bool:
+    checks = mapping(contract.get("checks"))
+    return str(mapping(checks.get(key)).get("status") or "") == "confirmed"
 
 
 def _validate_slot_colors(

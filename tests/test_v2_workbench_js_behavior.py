@@ -17,7 +17,7 @@ const ids = [
   "publishBlockerText", "scanRunningOverlay", "scanRunningMessage", "scanFailedOverlay", "scanFailedMessage", "retryScanBtn", "closeScanFailedBtn",
   "optionRuleSearch", "optionRuleList", "optionRuleStats", "optionRuleCount", "pendingOnlyBtn", "selectedOptionTitle",
   "selectedOptionPendingBadge", "optionContentPreset", "optionContentSeparator", "assetBindingRows", "templateCapabilityPanel",
-  "capabilityEvidenceRows", "saveAndNextOptionBtn", "rerunTrialRenderBtn", "preflightFailedOverlay", "preflightFailedMessage",
+  "capabilityEvidenceRows", "colorRuleRows", "dimensionRuleRows", "fontDependencyRows", "saveAndNextOptionBtn", "rerunTrialRenderBtn", "preflightFailedOverlay", "preflightFailedMessage",
   "preflightIssueList", "closePreflightFailedBtn", "returnToSampleDataBtn", "previewSampleRows", "previewValidationRows"
 ];
 
@@ -448,6 +448,75 @@ def test_v2_workbench_rules_stage_filters_pending_and_saves_next_option():
           assert.strictEqual(saveCount, 1);
           assert.notStrictEqual(app.elements.selectedOptionTitle.textContent, "");
           assert(app.elements.selectedOptionTitle.textContent === firstTitle || app.elements.selectedOptionTitle.textContent.includes("Design08"));
+        })().catch((error) => { console.error(error); process.exit(1); });
+        """
+    )
+
+
+def test_v2_workbench_can_confirm_label_only_color_rules_without_samples():
+    run_node(
+        r"""
+        (async () => {
+          let draftSaveBody = null;
+          const checks = ["output", "fields", "options", "slots", "content", "dimensions", "preview"].reduce((result, key) => {
+            result[key] = { status: "confirmed", reason: "" };
+            return result;
+          }, { colors: { status: "pending", reason: "等待颜色核验" } });
+          async function fakeFetch(url, options = {}) {
+            const textUrl = String(url);
+            if (textUrl === "/api/v2/templates") return response({ templates: [{ template_id: "V2COLOR", name: "Color Demo" }] });
+            if (textUrl.endsWith("/draft") && (!options.method || options.method === "GET")) {
+              return response({ draft: {
+                metadata: { template_id: "V2COLOR", name: "Color Demo", shop_name: "" },
+                manifest: { draft_revision: "d0001" },
+                scan: {
+                  outputs: [{ key: "Output_main" }],
+                  slots: [{ key: "slot_name", source_field: "name" }],
+                  designs: [{ key: "Design03" }],
+                  colors: []
+                },
+                config: {
+                  checks,
+                  field_bindings: { name: "Name", design: "Design", color: "Color" },
+                  outputs: [{
+                    key: "Output_main",
+                    display_name: "涓绘晥鏋滃浘",
+                    component_key: "main",
+                    style: { field: "", options: [] },
+                    design: { field: "design", options: [{ key: "Design03", content_preset: "direct_text", slots: [{ key: "slot_name", source_field: "name", color_binding: "color" }] }] },
+                    font: { field: "", options: [] }
+                  }],
+                  option_mappings: [{ field: "design", source_value: "03", target: "Design03", output: "Output_main", group: "design" }]
+                }
+              }});
+            }
+            if (textUrl.endsWith("/validate")) {
+              const submitted = JSON.parse(options.body).config;
+              return response({ validation: { can_save: true, can_publish: false, checks: submitted.checks } });
+            }
+            if (textUrl.endsWith("/draft") && options.method === "POST") {
+              draftSaveBody = JSON.parse(options.body);
+              return response({ draft: { metadata: { template_id: "V2COLOR", name: "Color Demo", shop_name: "" }, manifest: {}, config: draftSaveBody.config, scan: global.DrawFlowV2WorkbenchContext.state.scan } });
+            }
+            return response({});
+          }
+          const app = createApp(fakeFetch);
+          await flush();
+          app.elements.templateList.children[0].dispatch("click");
+          await flush();
+          global.setWorkbenchStage("rules");
+          await flush();
+          assert(app.elements.colorRuleRows.textContent.includes("无可配置颜色样本"));
+          const confirmButton = allDescendants(app.elements.colorRuleRows).find((item) => item.tagName === "BUTTON");
+          assert(confirmButton);
+          confirmButton.dispatch("click");
+          await flush();
+          assert.strictEqual(document.querySelector('#v2CheckRail .check-item[data-check-key="colors"]').dataset.status, "confirmed");
+          app.elements.saveDraftBtn.dispatch("click");
+          await flush();
+          assert(draftSaveBody);
+          assert.deepStrictEqual(draftSaveBody.config.colors, []);
+          assert.strictEqual(draftSaveBody.config.checks.colors.status, "confirmed");
         })().catch((error) => { console.error(error); process.exit(1); });
         """
     )

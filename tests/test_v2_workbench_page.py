@@ -150,6 +150,9 @@ def test_v2_workbench_has_independent_rules_stage_contract():
         "assetBindingRows",
         "templateCapabilityPanel",
         "capabilityEvidenceRows",
+        "colorRuleRows",
+        "dimensionRuleRows",
+        "fontDependencyRows",
         "saveAndNextOptionBtn",
     ]:
         assert f'id="{element_id}"' in INDEX_HTML

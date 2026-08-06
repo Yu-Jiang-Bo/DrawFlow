@@ -221,10 +221,14 @@ th { color: var(--v2-muted); background: #f7f9fc; font-size: 12px; font-weight: 
   display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-bottom: 18px;
 }
 .option-rule-editor h4 { margin: 18px 0 8px; font-size: 14px; }
+.option-capability-pane h4 {
+  margin: 16px 0 0; font-size: 13px; line-height: 1.3;
+}
 .asset-binding-row, .capability-evidence-row, .preview-validation-row {
   display: flex; align-items: center; justify-content: space-between; gap: 10px; min-width: 0;
   padding: 10px 12px; border: 1px solid var(--v2-border); border-radius: 5px; background: #f7f9fc;
 }
+.capability-evidence-row button { flex: 0 0 auto; }
 .capability-tags { display: flex; flex-wrap: wrap; gap: 8px; }
 .capability-tags span, .stage-status-pill {
   display: inline-flex; align-items: center; min-height: 24px; padding: 3px 8px; border-radius: 4px;

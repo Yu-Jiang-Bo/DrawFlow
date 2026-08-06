@@ -176,6 +176,7 @@ def test_pending_gates_have_chinese_paths_and_reasons():
     del payload["field_bindings"]["name"]
     payload["option_mappings"] = []
     payload["colors"] = []
+    payload["checks"]["colors"] = "pending"
     payload["outputs"][0]["style"]["options"][0]["dimensions"] = {}
     for group_name in ("design", "font"):
         for slot in payload["outputs"][0][group_name]["options"][0]["slots"]:
@@ -194,6 +195,29 @@ def test_pending_gates_have_chinese_paths_and_reasons():
     assert _has_issue(result, path="$.colors", code="color_samples_pending", reason="颜色")
     assert _has_issue(result, path="$.preview.evidence.render_task_sha256", code="preview_evidence_pending", reason="哈希")
     assert _all_issues_have_paths_and_chinese_reasons(result)
+
+
+def test_confirmed_color_check_allows_label_only_templates_without_color_samples():
+    payload = complete_contract()
+    payload["colors"] = []
+    payload["checks"]["colors"] = "confirmed"
+
+    result = validate_v2_template_configuration(payload)
+
+    assert result["can_publish"] is True
+    assert result["checks"]["colors"]["status"] == V2_STATUS_PASSED
+
+
+def test_blocked_color_check_overrides_label_only_color_confirmation():
+    payload = complete_contract()
+    payload["colors"] = []
+    payload["checks"]["colors"] = "blocked"
+
+    result = validate_v2_template_configuration(payload)
+
+    assert result["can_publish"] is False
+    assert result["checks"]["colors"]["status"] == V2_STATUS_BLOCKED
+    assert _has_issue(result, path="$.checks.colors", code="manual_check_blocked", reason="人工")
 
 
 def test_slot_dimension_rule_can_satisfy_dimension_gate_without_style_size():
