@@ -37,7 +37,7 @@
     const header = document.createElement("div");
     header.className = "content-option-header";
     header.appendChild(lineNode(`${output} · ${groupLabel(group)} ${optionKey}`, group === "design" ? "具体 Design 独立配置" : "具体 F 独立配置"));
-    header.appendChild(selectCell("option-content-preset", presetOptions(OPTION_PRESETS), safeOptionPreset(existing.content_preset, recommendedOptionPreset(group, optionKey, model))));
+    header.appendChild(selectCell("option-content-preset", presetOptions(OPTION_PRESETS), safeOptionPreset(existing.content_preset, recommendedOptionPreset(output, group, optionKey, model))));
     section.appendChild(header);
 
     const rows = document.createElement("div");
@@ -50,7 +50,19 @@
 
   function contentSlotHeader() {
     const row = tableRow("content-slot-head");
-    row.append(metaCell("slot"), metaCell("内容来源"), metaCell("业务渲染类型"), metaCell("状态"));
+    row.append(
+      metaCell("slot"),
+      metaCell("内容来源"),
+      metaCell("业务渲染类型"),
+      metaCell("状态"),
+      metaCell("素材键"),
+      metaCell("X 宽"),
+      metaCell("Y 高"),
+      metaCell("首尾巴"),
+      metaCell("末尾巴"),
+      metaCell("字体依赖"),
+      metaCell("颜色绑定")
+    );
     return row;
   }
 
@@ -60,11 +72,20 @@
     row.dataset.group = group;
     row.dataset.option = optionKey;
     row.dataset.slotKey = slot.key;
+    row.dataset.anchor = slot.anchor || "";
+    const dimensions = objectOf(slot.dimension_rule);
     row.append(
       metaCell(slot.key),
       inputCell("slot-source-field", slot.source_field || ""),
       selectCell("slot-preset", presetOptions(PRESETS), safePreset(slot.preset, "direct_text")),
-      selectCell("slot-required", [["required", "必填"], ["optional", "可选"]], slot.required === false ? "optional" : "required")
+      selectCell("slot-required", [["required", "必填"], ["optional", "可选"]], slot.required === false ? "optional" : "required"),
+      inputCell("slot-asset-key", slot.asset_key || ""),
+      inputCell("slot-width-mm", dimensions.width_mm || ""),
+      inputCell("slot-height-mm", dimensions.height_mm || ""),
+      inputCell("slot-tail-first", tailSample(slot.tails, "first")),
+      inputCell("slot-tail-last", tailSample(slot.tails, "last")),
+      inputCell("slot-font-dependencies", stringListValue(slot.font_dependencies)),
+      inputCell("slot-color-binding", slot.color_binding || "")
     );
     return row;
   }
@@ -99,12 +120,12 @@
       source_field: safeField(rowValue(row, "slot-source-field")) || fallbackField,
       required: rowValue(row, "slot-required") !== "optional",
       preset: safePreset(rowValue(row, "slot-preset"), "direct_text"),
-      anchor: "",
-      tails: [],
-      asset_key: "",
-      dimension_rule: {},
-      font_dependencies: [],
-      color_binding: ""
+      anchor: cleanText(row.dataset.anchor || ""),
+      tails: tailConfigsFromRow(row, key),
+      asset_key: safeIdentifier(rowValue(row, "slot-asset-key"), ""),
+      dimension_rule: dimensionRuleFromValues(rowValue(row, "slot-width-mm"), rowValue(row, "slot-height-mm"), "slot"),
+      font_dependencies: splitStringList(rowValue(row, "slot-font-dependencies")),
+      color_binding: safeIdentifier(rowValue(row, "slot-color-binding"), "")
     };
   }
 
@@ -120,12 +141,12 @@
         source_field: field,
         required: item.required === false ? false : true,
         preset: safePreset(item.preset, "direct_text"),
-        anchor: "",
-        tails: [],
-        asset_key: "",
-        dimension_rule: {},
-        font_dependencies: [],
-        color_binding: ""
+        anchor: cleanText(item.anchor || ""),
+        tails: Array.isArray(item.tails) ? item.tails : [],
+        asset_key: safeIdentifier(item.asset_key || inferredAssetKey(key, item), ""),
+        dimension_rule: objectOf(item.dimension_rule),
+        font_dependencies: Array.isArray(item.font_dependencies) ? item.font_dependencies.map(cleanText).filter(Boolean) : [],
+        color_binding: safeIdentifier(item.color_binding || "", "")
       };
     });
   }
@@ -147,7 +168,7 @@
 
   function existingOptionSlots(output, group, option, fallbackSlots) {
     const found = findConfigOption(output, group, option);
-    return Array.isArray(found.slots) && found.slots.length ? found.slots : fallbackSlots;
+    return Array.isArray(found.slots) && found.slots.length ? found.slots : scopedScanItemsFor(output, fallbackSlots);
   }
 
   function findConfigOption(output, group, option) {
@@ -159,18 +180,19 @@
 
   function contentSlotsFor(output, group, optionKey, model, existing) {
     if (Array.isArray(existing.slots) && existing.slots.length) return controlledSlots(existing.slots);
-    const scanned = scannedOptionSlots(group === "design" ? model.designs : model.fonts, group, optionKey);
-    return controlledSlots(scanned.length ? scanned : model.slots);
+    const scanned = scannedOptionSlots(output, group === "design" ? model.designs : model.fonts, group, optionKey);
+    const fallbackSlots = scopedScanItemsFor(output, model.slots);
+    return controlledSlots(scanned.length ? scanned : fallbackSlots);
   }
 
-  function scannedOptionSlots(items, group, optionKey) {
-    const option = objectOf(items.find((item) => safeOptionKey(item.key || item.name || item.label, group) === optionKey));
+  function scannedOptionSlots(output, items, group, optionKey) {
+    const option = objectOf(scopedScanItemsFor(output, items).find((item) => safeOptionKey(item.key || item.name || item.label, group) === optionKey));
     return Array.isArray(option.slots) ? option.slots : [];
   }
 
-  function recommendedOptionPreset(group, optionKey, model) {
+  function recommendedOptionPreset(output, group, optionKey, model) {
     const source = group === "design" ? model.designs : model.fonts;
-    const option = objectOf(source.find((item) => safeOptionKey(item.key || item.name || item.label, group) === optionKey));
+    const option = objectOf(scopedScanItemsFor(output, source).find((item) => safeOptionKey(item.key || item.name || item.label, group) === optionKey));
     return safeOptionPreset(option.content_preset || option.recommended_preset || option.preset, "direct_text");
   }
 
@@ -202,6 +224,39 @@
 
   function groupLabel(group) {
     return group === "font" ? "F" : "Design";
+  }
+
+  function tailSample(tails, position) {
+    const found = Array.isArray(tails) ? tails.find((tail) => objectOf(tail).position === position) : null;
+    return cleanText(objectOf(found).sample || "");
+  }
+
+  function tailConfigsFromRow(row, slotKey) {
+    return [
+      tailConfig(slotKey, "first", rowValue(row, "slot-tail-first")),
+      tailConfig(slotKey, "last", rowValue(row, "slot-tail-last"))
+    ].filter(Boolean);
+  }
+
+  function tailConfig(slotKey, position, sample) {
+    const value = cleanText(sample);
+    if (!value) return null;
+    const suffix = slotKey.replace(/^slot_/, "");
+    const sampleKey = safeIdentifier(value.toLowerCase(), position);
+    return { key: `tail_${suffix}_${position}_${sampleKey}`, position, sample: value };
+  }
+
+  function stringListValue(value) {
+    return Array.isArray(value) ? value.map(cleanText).filter(Boolean).join(", ") : "";
+  }
+
+  function splitStringList(value) {
+    return cleanText(value).split(/[,\n;]+/).map(cleanText).filter(Boolean);
+  }
+
+  function inferredAssetKey(slotKey, item) {
+    if (item.preset === "asset_replace") return slotKey.replace(/^slot_/, "");
+    return "";
   }
 
   function metaCell(text) {

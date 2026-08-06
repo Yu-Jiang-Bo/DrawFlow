@@ -25,7 +25,11 @@
   function groupOptions(config, group) {
     return (Array.isArray(config.outputs) ? config.outputs : []).flatMap((output) => {
       const section = objectOf(output[group]);
-      return Array.isArray(section.options) ? section.options : [];
+      const outputKey = cleanText(output.key || output.name || "");
+      return Array.isArray(section.options) ? section.options.map((option) => {
+        if (option && typeof option === "object") return { ...option, output: outputKey };
+        return { name: String(option || ""), output: outputKey };
+      }) : [];
     });
   }
 

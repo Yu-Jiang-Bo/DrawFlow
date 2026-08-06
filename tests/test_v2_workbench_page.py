@@ -17,7 +17,9 @@ JS = "\n".join(
         "workbench-form-model.js",
         "workbench-config.js",
         "workbench-content.js",
+        "workbench-style-dimensions.js",
         "workbench-option-rules.js",
+        "workbench-rule-evidence.js",
         "workbench-stage-view.js",
         "workbench-view.js",
         "workbench-draft-actions.js",
@@ -72,6 +74,7 @@ REQUIRED_IDS = [
     "outputConfigRows",
     "fieldBindingRows",
     "optionMappingRows",
+    "styleDimensionRows",
     "contentOptionRows",
     "selectedNodeSummary",
     "blockerList",
@@ -98,7 +101,9 @@ def test_v2_workbench_page_exposes_independent_entry_contract():
     assert 'src="/static/v2-workbench/workbench-api.js"' in INDEX_HTML
     assert 'src="/static/v2-workbench/workbench-scan-model.js"' in INDEX_HTML
     assert 'src="/static/v2-workbench/workbench-content.js"' in INDEX_HTML
+    assert 'src="/static/v2-workbench/workbench-style-dimensions.js"' in INDEX_HTML
     assert 'src="/static/v2-workbench/workbench-option-rules.js"' in INDEX_HTML
+    assert 'src="/static/v2-workbench/workbench-rule-evidence.js"' in INDEX_HTML
     assert 'src="/static/v2-workbench/workbench-stage-view.js"' in INDEX_HTML
     assert 'src="/static/v2-workbench/workbench-view.js"' in INDEX_HTML
     assert 'class="v2-shell" id="v2WorkbenchApp" data-workbench-stage="upload"' in INDEX_HTML
@@ -201,6 +206,13 @@ def test_v2_workbench_uses_controlled_business_inputs():
     assert "field_bindings" in JS
     assert "option_mappings" in JS
     assert "content_preset" in JS
+    assert "styleDimensionRows" in INDEX_HTML
+    assert "0.007mm" in INDEX_HTML
+    assert "dimensionRuleFromValues" in JS
+    assert "slot-asset-key" in JS
+    assert "slot-tail-first" in JS
+    assert "slot-font-dependencies" in JS
+    assert "slot-color-binding" in JS
     assert "output-component" in JS
     assert "component_key" in JS
     assert "替换文本" in JS
@@ -235,6 +247,8 @@ def test_v2_workbench_static_styles_cover_desktop_layout_and_states():
     assert ".structured-row" in CSS
     assert ".content-option-group" in CSS
     assert ".content-slot-row" in CSS
+    assert "position: sticky; bottom: 0" in CSS
+    assert ".structured-row.style-dimension-row" in CSS
     assert "url(" not in ALL_CSS
     assert "gradient" not in ALL_CSS.lower()
 
@@ -245,7 +259,9 @@ def test_v2_workbench_routes_are_isolated_from_legacy_page():
     assert 'path.startswith("/static/v2-workbench/")' in SERVER
     assert '"workbench-scan-actions.js"' in SERVER
     assert '"workbench-content.js"' in SERVER
+    assert '"workbench-style-dimensions.js"' in SERVER
     assert '"workbench-option-rules.js"' in SERVER
+    assert '"workbench-rule-evidence.js"' in SERVER
     assert '"workbench-stages.css"' in SERVER
     assert '"workbench-stage-view.js"' in SERVER
     assert "self._send_html(WORKBENCH_HTML)" in SERVER

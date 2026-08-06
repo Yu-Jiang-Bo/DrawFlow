@@ -2,6 +2,7 @@
   "use strict";
   const ctx = globalThis.DrawFlowV2WorkbenchContext;
   const { state, CHECK_KEYS } = ctx;
+  const DIMENSION_TOLERANCE_MM = 0.007;
 
   function buildControlledConfig() {
     const basics = formBasics();
@@ -34,10 +35,12 @@
     const rows = Array.from(document.querySelectorAll("#outputConfigRows .output-row"));
     const result = rows.map((row, index) => {
       const fallback = index ? `Output_Side${String.fromCharCode(65 + index)}` : "Output_main";
+      const key = safeOutputKey(rowValue(row, "output-key"), fallback, index);
+      const singleMain = rows.length === 1 && key === "Output_main";
       return {
-        key: safeOutputKey(rowValue(row, "output-key"), fallback, index),
-        display_name: cleanText(rowValue(row, "output-name")),
-        component_key: safeIdentifier(rowValue(row, "output-component"), ""),
+        key,
+        display_name: cleanText(rowValue(row, "output-name")) || (singleMain ? "主效果图" : ""),
+        component_key: safeIdentifier(rowValue(row, "output-component"), singleMain ? "main" : ""),
         scope: "local",
         style: { field: safeField(rowValue(row, "output-style-field")), options: [] },
         design: { field: safeField(rowValue(row, "output-design-field")), options: [] },
@@ -131,10 +134,12 @@
 
 
   function styleOptionsFor(output, mappings, styles) {
-    return optionKeysFor(output, "style", mappings, styles).map((key) => ({
+    const dimensions = collectStyleDimensionConfigs();
+    const keys = unique([...optionKeysFor(output, "style", mappings, styles), ...Object.keys(dimensions[output] || {})]);
+    return keys.map((key) => ({
       key: safeOptionKey(key, "style"),
       label: key,
-      dimensions: {},
+      dimensions: styleDimensionsFor(output, key, dimensions, styles),
       component_key: "",
       scope: "local"
     })).filter((item) => item.key);
@@ -144,16 +149,20 @@
 
   function designOptionsFor(output, mappings, designs, slots) {
     const content = collectContentOptionConfigs();
-    return optionKeysFor(output, "design", mappings, designs).map((key) => ({
-      key: safeOptionKey(key, "design"),
-      label: key,
-      content_preset: contentOptionPreset(content, output, "design", key),
-      component_key: "",
-      scope: "local",
-      font_dependencies: [],
-      slots: contentOptionSlots(content, output, "design", key, slots),
-      assets: []
-    })).filter((item) => item.key);
+    const model = scanModel(state.scan, state.draft && state.draft.config);
+    return optionKeysFor(output, "design", mappings, designs).map((key) => {
+      const optionSlots = contentOptionSlots(content, output, "design", key, slots);
+      return {
+        key: safeOptionKey(key, "design"),
+        label: key,
+        content_preset: contentOptionPreset(content, output, "design", key),
+        component_key: "",
+        scope: "local",
+        font_dependencies: optionFontDependencies(output, "design", key, optionSlots),
+        slots: optionSlots,
+        assets: optionAssetsFor(output, "design", key, optionSlots, model.assets)
+      };
+    }).filter((item) => item.key);
   }
 
 
@@ -166,7 +175,7 @@
       content_preset: contentOptionPreset(content, output, "font", key),
       component_key: "",
       scope: "local",
-      font_dependencies: [cleanText(key)].filter(Boolean),
+      font_dependencies: optionFontDependencies(output, "font", key, contentOptionSlots(content, output, "font", key, slots), [key]),
       slots: contentOptionSlots(content, output, "font", key, slots),
       assets: []
     })).filter((item) => item.key);
@@ -176,8 +185,119 @@
 
   function optionKeysFor(output, group, mappings, scanItems) {
     const mapped = mappings.filter((item) => item.output === output && item.group === group).map((item) => item.target);
-    const scanned = scanItems.map((item) => item.key || item.name || item.label).filter(Boolean);
+    const scanned = scopedScanItemsFor(output, scanItems).map((item) => item.key || item.name || item.label).filter(Boolean);
     return unique([...mapped, ...scanned]).slice(0, 30);
+  }
+
+
+
+  function scopedScanItemsFor(output, scanItems) {
+    const scoped = scanItems.filter((item) => outputScopeKey(item));
+    if (scoped.length) return scoped.filter((item) => outputScopeKey(item) === output);
+    return currentOutputCount() > 1 ? [] : scanItems;
+  }
+
+
+
+  function outputScopeKey(item) {
+    const data = objectOf(item);
+    const nested = objectOf(data.output);
+    const candidates = [
+      nested.key,
+      nested.name,
+      data.output_key,
+      data.outputKey,
+      data.parent_output,
+      data.parentOutput,
+      data.output,
+      data.artboard_key,
+      data.page_key
+    ];
+    const found = candidates.map((candidate) => cleanText(candidate)).find((text) => text === "Output_main" || /^Output_Side[A-Z]$/.test(text));
+    return found || "";
+  }
+
+
+
+  function currentOutputCount() {
+    const rows = document.querySelectorAll("#outputConfigRows .output-row");
+    if (rows.length) return rows.length;
+    const configured = configOutputs();
+    if (configured.length) return configured.length;
+    return inferredOutputs().length;
+  }
+
+  function collectStyleDimensionConfigs() {
+    const result = {};
+    Array.from(document.querySelectorAll("#styleDimensionRows .style-dimension-row")).forEach((row) => {
+      const output = safeOutputKey(rowValue(row, "style-output") || row.dataset.output, "Output_main", 0);
+      const key = safeOptionKey(rowValue(row, "style-key") || row.dataset.styleKey, "style");
+      if (!output || !key) return;
+      const dimensions = dimensionRuleFromValues(rowValue(row, "style-width-mm"), rowValue(row, "style-height-mm"), "fixed");
+      if (!result[output]) result[output] = {};
+      result[output][key] = dimensions;
+    });
+    return result;
+  }
+
+  function styleDimensionsFor(output, key, collected, styles) {
+    const rowDimensions = objectOf(objectOf(collected[output])[safeOptionKey(key, "style")]);
+    if (Object.keys(rowDimensions).length) return rowDimensions;
+    const configured = objectOf(findConfigOption(output, "style", key).dimensions);
+    if (Object.keys(configured).length) return normalizedDimensionRule(configured, "fixed");
+    const scanned = objectOf(scopedScanItemsFor(output, styles).find((item) => safeOptionKey(item.key || item.name || item.label, "style") === safeOptionKey(key, "style")));
+    return normalizedDimensionRule(scanned.dimensions || scanned, "style");
+  }
+
+  function optionAssetsFor(output, group, key, slots, scannedAssets) {
+    const existing = Array.isArray(findConfigOption(output, group, key).assets) ? findConfigOption(output, group, key).assets : [];
+    const scopedAssets = scopedScanItemsFor(output, scannedAssets);
+    return slots.filter((slot) => slot.asset_key).map((slot) => {
+      const assetKey = safeIdentifier(slot.asset_key, "");
+      const existingAsset = objectOf(existing.find((asset) => asset.asset_key === assetKey));
+      const scannedAsset = objectOf(scopedAssets.find((asset) => safeIdentifier(asset.asset_key || asset.key || asset.name, "") === assetKey));
+      return {
+        asset_key: assetKey,
+        slot: slot.key,
+        supported_values: supportedValuesFor(existingAsset, scannedAsset),
+        component_key: "",
+        scope: "local"
+      };
+    }).filter((asset) => asset.asset_key && asset.slot);
+  }
+
+  function optionFontDependencies(output, group, key, slots, defaults) {
+    const existing = findConfigOption(output, group, key);
+    return unique([
+      ...(Array.isArray(defaults) ? defaults : []),
+      ...(Array.isArray(existing.font_dependencies) ? existing.font_dependencies : []),
+      ...slots.flatMap((slot) => Array.isArray(slot.font_dependencies) ? slot.font_dependencies : [])
+    ].map(cleanText));
+  }
+
+  function supportedValuesFor(existing, scanned) {
+    const values = existing.supported_values || scanned.supported_values || scanned.values || scanned.characters || scanned.range || [];
+    if (Array.isArray(values)) return values.map(cleanText).filter(Boolean);
+    if (typeof values === "string") return values.split(/[,\s]+/).map(cleanText).filter(Boolean);
+    return [];
+  }
+
+  function dimensionRuleFromValues(width, height, mode) {
+    const normalized = {};
+    const widthNumber = Number(width);
+    const heightNumber = Number(height);
+    if (Number.isFinite(widthNumber) && widthNumber > 0) normalized.width_mm = widthNumber;
+    if (Number.isFinite(heightNumber) && heightNumber > 0) normalized.height_mm = heightNumber;
+    if (normalized.width_mm || normalized.height_mm) {
+      normalized.mode = mode || "fixed";
+      normalized.tolerance_mm = DIMENSION_TOLERANCE_MM;
+    }
+    return normalized;
+  }
+
+  function normalizedDimensionRule(value, mode) {
+    const dimensions = objectOf(value);
+    return dimensionRuleFromValues(dimensions.width_mm, dimensions.height_mm, dimensions.mode || mode);
   }
 
 
@@ -197,6 +317,9 @@
     styleOptionsFor,
     designOptionsFor,
     fontOptionsFor,
-    optionKeysFor
+    optionKeysFor,
+    scopedScanItemsFor,
+    collectStyleDimensionConfigs,
+    dimensionRuleFromValues
   });
 })();

@@ -86,6 +86,8 @@
     on("backToUploadBtn", "click", () => globalThis.setWorkbenchStage("upload"));
     on("pendingOnlyBtn", "click", togglePendingOnlyOptions);
     on("optionRuleSearch", "input", renderOptionRuleStage);
+    on("optionContentPreset", "change", applySelectedOptionControls);
+    on("optionContentSeparator", "change", applySelectedOptionControls);
     on("saveAndNextOptionBtn", "click", saveDraftAndSelectNextOption);
     on("rerunTrialRenderBtn", "click", showPreflightFailure);
     on("closePreflightFailedBtn", "click", closePreflightFailure);

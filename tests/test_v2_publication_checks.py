@@ -94,7 +94,7 @@ def _duplicate_slot(payload):
             "key": "slot_name",
             "source_field": "name",
             "preset": "direct_text",
-            "dimension_rule": {"mode": "anchor", "tolerance_mm": 0.01},
+            "dimension_rule": {"mode": "anchor", "tolerance_mm": 0.007},
             "font_dependencies": ["Milkshake"],
         }
     )

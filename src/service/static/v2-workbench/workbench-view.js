@@ -108,6 +108,7 @@
     renderOutputRows();
     renderFieldBindingRows();
     renderOptionMappingRows();
+    renderStyleDimensionRows();
     renderContentOptionRows();
     updateBlockers();
   }
@@ -119,36 +120,20 @@
     const outputs = configOutputs().length ? configOutputs() : inferredOutputs();
     target.replaceChildren(tableHeader(["输出", "名称", "用途", "样式字段", "设计字段", "字体字段"]));
     (outputs.length ? outputs : [emptyOutput()]).forEach((output, index) => {
+      const key = output.key || (index ? `Output_Side${String.fromCharCode(65 + index)}` : "Output_main");
+      const singleMain = outputs.length === 1 && key === "Output_main";
       const row = tableRow("output-row");
       row.append(
-        inputCell("output-key", output.key || (index ? `Output_Side${String.fromCharCode(65 + index)}` : "Output_main")),
-        inputCell("output-name", output.display_name || ""),
-        inputCell("output-component", output.component_key || ""),
+        inputCell("output-key", key),
+        inputCell("output-name", output.display_name || (singleMain ? "主效果图" : "")),
+        inputCell("output-component", output.component_key || (singleMain ? "main" : "")),
         inputCell("output-style-field", objectOf(output.style).field || ""),
         inputCell("output-design-field", objectOf(output.design).field || ""),
         inputCell("output-font-field", objectOf(output.font).field || "")
       );
       target.appendChild(row);
     });
-    target.appendChild(addRowButton("添加输出", () => {
-      target.insertBefore(outputRowElement(emptyOutput()), target.lastElementChild);
-    }));
   }
-
-
-  function outputRowElement(output) {
-    const row = tableRow("output-row");
-    row.append(
-      inputCell("output-key", output.key || "Output_main"),
-      inputCell("output-name", output.display_name || ""),
-      inputCell("output-component", output.component_key || ""),
-      inputCell("output-style-field", ""),
-      inputCell("output-design-field", ""),
-      inputCell("output-font-field", "")
-    );
-    return row;
-  }
-
 
   function renderFieldBindingRows() {
     const target = $("fieldBindingRows");
@@ -184,15 +169,23 @@
 
 
   function optionMappingRow(mapping) {
+    const group = mapping.group || "design";
     const row = tableRow("option-mapping-row");
     row.append(
       inputCell("mapping-field", mapping.field || ""),
       inputCell("mapping-source", mapping.source_value || ""),
-      inputCell("mapping-target", mapping.target || ""),
+      selectCell("mapping-target", mappingTargetOptions(group, mapping.target), mapping.target || ""),
       selectCell("mapping-output", outputOptions(mapping.output), mapping.output || "Output_main"),
-      selectCell("mapping-group", [["style", "样式"], ["design", "设计"], ["font", "字体"], ["color", "颜色"]], mapping.group || "design")
+      selectCell("mapping-group", [["style", "样式"], ["design", "设计"], ["font", "字体"], ["color", "颜色"]], group)
     );
     return row;
+  }
+
+  function mappingTargetOptions(group, selected) {
+    const model = scanModel(state.scan, state.draft && state.draft.config);
+    const source = group === "style" ? model.styles : group === "font" ? model.fonts : group === "color" ? model.colors : model.designs;
+    const values = unique([selected, ...source.map((item) => item.key || item.name || item.label)]).map((item) => safeOptionKey(item, group)).filter(Boolean);
+    return [["", "选择目标"], ...values.map((value) => [value, value])];
   }
 
   function outputOptions(selected) {
@@ -289,7 +282,6 @@
     renderStructureTree,
     renderTables,
     renderOutputRows,
-    outputRowElement,
     renderFieldBindingRows,
     renderOptionMappingRows,
     optionMappingRow,

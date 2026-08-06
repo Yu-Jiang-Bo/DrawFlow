@@ -24,7 +24,7 @@ def complete_contract():
                 "key": "Output_main",
                 "style": {
                     "field": "style",
-                    "options": [{"key": "style1", "dimensions": {"mode": "fixed", "width_mm": 80, "height_mm": 50}}],
+                    "options": [{"key": "style1", "dimensions": {"mode": "fixed", "width_mm": 80, "height_mm": 50, "tolerance_mm": 0.007}}],
                 },
                 "design": {
                     "field": "design",
@@ -39,14 +39,14 @@ def complete_contract():
                                     "source_field": "initial",
                                     "preset": "asset_replace",
                                     "asset_key": "initial",
-                                    "dimension_rule": {"mode": "anchor", "tolerance_mm": 0.01},
+                                    "dimension_rule": {"mode": "anchor", "tolerance_mm": 0.007},
                                 },
                                 {
                                     "key": "slot_name",
                                     "source_field": "name",
                                     "preset": "direct_text",
                                     "anchor": "anchor_name",
-                                    "dimension_rule": {"mode": "anchor", "tolerance_mm": 0.01},
+                                    "dimension_rule": {"mode": "anchor", "tolerance_mm": 0.007},
                                     "font_dependencies": ["Milkshake"],
                                     "color_binding": "color",
                                 },
@@ -73,7 +73,7 @@ def complete_contract():
                                     "key": "slot_name",
                                     "source_field": "name",
                                     "preset": "direct_text",
-                                    "dimension_rule": {"mode": "slot", "tolerance_mm": 0.01},
+                                    "dimension_rule": {"mode": "slot", "tolerance_mm": 0.007},
                                     "font_dependencies": ["Milkshake"],
                                     "color_binding": "color",
                                 }
@@ -144,7 +144,7 @@ def test_structure_blockers_return_paths_and_chinese_reasons():
             "preset": "direct_text",
             "anchor": "anchor_title",
             "tails": [{"key": "tail_title_first_a", "position": "first", "sample": "a"}],
-            "dimension_rule": {"mode": "anchor", "tolerance_mm": 0.01},
+            "dimension_rule": {"mode": "anchor", "tolerance_mm": 0.007},
             "font_dependencies": ["Milkshake"],
         }
     )
@@ -230,6 +230,17 @@ def test_slot_dimension_rule_can_satisfy_dimension_gate_without_style_size():
 
     assert result["can_publish"] is True
     assert result["checks"]["dimensions"]["status"] == V2_STATUS_PASSED
+
+
+def test_dimension_tolerance_must_be_fixed_to_0007():
+    payload = complete_contract()
+    payload["outputs"][0]["style"]["options"][0]["dimensions"]["tolerance_mm"] = 0.01
+
+    result = validate_v2_template_configuration(payload)
+
+    assert result["can_publish"] is False
+    assert result["checks"]["dimensions"]["status"] == V2_STATUS_BLOCKED
+    assert _has_issue(result, path="$.outputs[0].style.options[0].dimensions", code="dimension_tolerance_invalid", reason="0.007mm")
 
 
 def test_asset_supported_range_is_required_before_publication():

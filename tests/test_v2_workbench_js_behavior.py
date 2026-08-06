@@ -13,7 +13,7 @@ const ids = [
   "aiDropzone", "aiFile", "scanTemplateBtn", "rescanTemplateBtn", "scanProgress",
   "scanSummary", "scanEmptyState", "structureSearch", "structureTree", "toggleDesignsBtn",
   "toggleFontsBtn", "outputConfigRows", "fieldBindingRows", "optionMappingRows", "selectedNodeSummary",
-  "contentOptionRows", "blockerList", "draftSummary", "saveDraftBtn", "trialRenderBtn", "publishVersionBtn",
+  "styleDimensionRows", "contentOptionRows", "blockerList", "draftSummary", "saveDraftBtn", "trialRenderBtn", "publishVersionBtn",
   "publishBlockerText", "scanRunningOverlay", "scanRunningMessage", "scanFailedOverlay", "scanFailedMessage", "retryScanBtn", "closeScanFailedBtn",
   "optionRuleSearch", "optionRuleList", "optionRuleStats", "optionRuleCount", "pendingOnlyBtn", "selectedOptionTitle",
   "selectedOptionPendingBadge", "optionContentPreset", "optionContentSeparator", "assetBindingRows", "templateCapabilityPanel",
@@ -181,7 +181,9 @@ function createApp(fetchImpl) {
     "workbench-form-model.js",
     "workbench-config.js",
     "workbench-content.js",
+    "workbench-style-dimensions.js",
     "workbench-option-rules.js",
+    "workbench-rule-evidence.js",
     "workbench-stage-view.js",
     "workbench-view.js",
     "workbench-draft-actions.js",
@@ -382,6 +384,249 @@ def test_v2_workbench_keeps_same_slot_independent_per_design_and_font_option():
     )
 
 
+def test_v2_workbench_roundtrips_multi_output_dimensions_assets_tails_fonts_colors():
+    run_node(
+        r"""
+        (async () => {
+          let draftSaveBody = null;
+          const confirmedChecks = ["output", "fields", "options", "slots", "content", "dimensions", "colors", "preview"].reduce((checks, key) => {
+            checks[key] = { status: "confirmed", reason: "" };
+            return checks;
+          }, {});
+          let currentDraft = {
+            metadata: { template_id: "V2ROUNDTRIP", name: "Roundtrip Demo", shop_name: "" },
+            manifest: { draft_revision: "d0001" },
+            scan: {
+              outputs: [{ key: "Output_SideA" }, { key: "Output_SideB" }],
+              styles: [{ key: "style1", dimensions: { mode: "style", width_mm: 80, height_mm: 50, tolerance_mm: 0.007 } }],
+              designs: [{ key: "Design03", slots: [{ key: "slot_initial_top", preset: "asset_replace" }, { key: "slot_name" }] }],
+              fonts: [{ key: "F10", slots: [{ key: "slot_name" }] }],
+              assets: [{ asset_key: "initial_top", slot: "slot_initial_top", supported_values: ["A", "B", "C"] }],
+              colors: [{ key: "Black", zh_name: "黑色", space: "RGB", value: [0, 0, 0], allow_recolor: true }]
+            },
+            config: {
+              checks: confirmedChecks,
+              field_bindings: { style: "Size", design: "Design", font: "Font", name: "Name", initial: "Initial", color: "Color" },
+              option_mappings: [
+                { field: "style", source_value: "small", target: "style1", output: "Output_SideA", group: "style" },
+                { field: "design", source_value: "03", target: "Design03", output: "Output_SideA", group: "design" },
+                { field: "font", source_value: "F10", target: "F10", output: "Output_SideB", group: "font" }
+              ],
+              outputs: [
+                {
+                  key: "Output_SideA",
+                  display_name: "外部设计",
+                  component_key: "front",
+                  style: { field: "style", options: [{ key: "style1", dimensions: { mode: "style", width_mm: 80, height_mm: 50, tolerance_mm: 0.007 } }] },
+                  design: { field: "design", options: [{
+                    key: "Design03",
+                    content_preset: "initial_with_text",
+                    font_dependencies: ["Cinzel Decorative"],
+                    slots: [
+                      { key: "slot_initial_top", source_field: "initial", preset: "asset_replace", asset_key: "initial_top", dimension_rule: { mode: "slot", width_mm: 12, height_mm: 12, tolerance_mm: 0.007 } },
+                      { key: "slot_name", source_field: "name", preset: "tail_text", tails: [{ key: "tail_name_first_a", position: "first", sample: "a" }], dimension_rule: { mode: "slot", width_mm: 42, height_mm: 8, tolerance_mm: 0.007 }, font_dependencies: ["Cinzel Decorative"], color_binding: "color" }
+                    ],
+                    assets: [{ asset_key: "initial_top", slot: "slot_initial_top", supported_values: ["A", "B", "C"] }]
+                  }] },
+                  font: { field: "", options: [] }
+                },
+                {
+                  key: "Output_SideB",
+                  display_name: "内部文字",
+                  component_key: "inside",
+                  style: { field: "", options: [] },
+                  design: { field: "", options: [] },
+                  font: { field: "font", options: [{ key: "F10", content_preset: "direct_text", font_dependencies: ["F10"], slots: [{ key: "slot_name", source_field: "name", preset: "direct_text", dimension_rule: { mode: "slot", width_mm: 38, height_mm: 6, tolerance_mm: 0.007 }, font_dependencies: ["F10"], color_binding: "color" }] }] }
+                }
+              ]
+            }
+          };
+          async function fakeFetch(url, options = {}) {
+            const textUrl = String(url);
+            if (textUrl === "/api/v2/templates") return response({ templates: [{ template_id: "V2ROUNDTRIP", name: "Roundtrip Demo" }] });
+            if (textUrl.endsWith("/draft") && (!options.method || options.method === "GET")) return response({ draft: currentDraft });
+            if (textUrl.endsWith("/validate")) return response({ validation: { can_save: true, can_publish: true, checks: confirmedChecks } });
+            if (textUrl.endsWith("/draft") && options.method === "POST") {
+              draftSaveBody = JSON.parse(options.body);
+              currentDraft = { ...currentDraft, config: draftSaveBody.config, manifest: { draft_revision: "d0002" } };
+              return response({ draft: currentDraft });
+            }
+            return response({});
+          }
+          const app = createApp(fakeFetch);
+          await flush();
+          app.elements.templateList.children[0].dispatch("click");
+          await flush();
+          global.setWorkbenchStage("structure");
+          await flush();
+
+          const styleRow = document.querySelectorAll("#styleDimensionRows .style-dimension-row")[0];
+          assert(styleRow);
+          assert.strictEqual(styleRow.dataset.output, "Output_SideA");
+          assert.strictEqual(document.querySelectorAll('#styleDimensionRows .style-dimension-row[data-output="Output_SideB"]').length, 0);
+          assert.strictEqual(String(styleRow.querySelector('[data-field="style-width-mm"]').value), "80");
+          const designSlot = document.querySelectorAll("#contentOptionRows .content-slot-row").find((row) => row.dataset.output === "Output_SideA" && row.dataset.option === "Design03" && row.dataset.slotKey === "slot_name");
+          assert(designSlot);
+          assert.strictEqual(designSlot.querySelector('[data-field="slot-tail-first"]').value, "a");
+          assert.strictEqual(designSlot.querySelector('[data-field="slot-font-dependencies"]').value, "Cinzel Decorative");
+          assert.strictEqual(designSlot.querySelector('[data-field="slot-color-binding"]').value, "color");
+
+          app.elements.saveDraftBtn.dispatch("click");
+          await flush();
+          assert(draftSaveBody);
+          const sideA = draftSaveBody.config.outputs.find((output) => output.key === "Output_SideA");
+          const sideB = draftSaveBody.config.outputs.find((output) => output.key === "Output_SideB");
+          assert.strictEqual(sideA.style.options[0].dimensions.tolerance_mm, 0.007);
+          const option = sideA.design.options.find((item) => item.key === "Design03");
+          assert.deepStrictEqual(option.assets[0].supported_values, ["A", "B", "C"]);
+          const savedSlot = option.slots.find((slot) => slot.key === "slot_name");
+          assert.deepStrictEqual(savedSlot.tails, [{ key: "tail_name_first_a", position: "first", sample: "a" }]);
+          assert.deepStrictEqual(savedSlot.font_dependencies, ["Cinzel Decorative"]);
+          assert.strictEqual(savedSlot.color_binding, "color");
+          assert.strictEqual(savedSlot.dimension_rule.tolerance_mm, 0.007);
+          assert.strictEqual(sideB.style.options.length, 0);
+          assert.strictEqual(sideB.design.options.length, 0);
+          assert.strictEqual(sideB.font.options[0].key, "F10");
+          assert(draftSaveBody.config.option_mappings.some((item) => item.output === "Output_SideB" && item.group === "font" && item.target === "F10"));
+
+          const reloadedSlot = document.querySelectorAll("#contentOptionRows .content-slot-row").find((row) => row.dataset.output === "Output_SideA" && row.dataset.option === "Design03" && row.dataset.slotKey === "slot_name");
+          assert(reloadedSlot);
+          assert.strictEqual(reloadedSlot.querySelector('[data-field="slot-tail-first"]').value, "a");
+          assert.strictEqual(String(reloadedSlot.querySelector('[data-field="slot-width-mm"]').value), "42");
+        })().catch((error) => { console.error(error); process.exit(1); });
+        """
+    )
+
+
+def test_v2_workbench_scopes_same_design_slots_by_output():
+    run_node(
+        r"""
+        (async () => {
+          let draftSaveBody = null;
+          const confirmedChecks = ["output", "fields", "options", "slots", "content", "dimensions", "colors", "preview"].reduce((checks, key) => {
+            checks[key] = { status: "confirmed", reason: "" };
+            return checks;
+          }, {});
+          const currentDraft = {
+            metadata: { template_id: "V2SCOPED", name: "Scoped Demo", shop_name: "" },
+            manifest: { draft_revision: "d0001" },
+            scan: {
+              outputs: [{ key: "Output_SideA" }, { key: "Output_SideB" }],
+              designs: [
+                {
+                  key: "Design03",
+                  output: "Output_SideA",
+                  recommended_preset: "initial_with_text",
+                  slots: [{
+                    key: "slot_front_name",
+                    source_field: "front_name",
+                    preset: "initial_with_text",
+                    asset_key: "front_letters",
+                    dimension_rule: { mode: "slot", width_mm: 30, height_mm: 9, tolerance_mm: 0.007 },
+                    font_dependencies: ["Front Serif"],
+                    color_binding: "front_color"
+                  }]
+                },
+                {
+                  key: "Design03",
+                  output: "Output_SideB",
+                  recommended_preset: "tail_text",
+                  slots: [{
+                    key: "slot_back_name",
+                    source_field: "back_name",
+                    preset: "tail_text",
+                    asset_key: "back_letters",
+                    dimension_rule: { mode: "slot", width_mm: 44, height_mm: 11, tolerance_mm: 0.007 },
+                    tails: [{ key: "tail_back_last_z", position: "last", sample: "z" }]
+                  }]
+                }
+              ],
+              assets: [
+                { asset_key: "front_letters", output: "Output_SideA", supported_values: ["A", "B"] },
+                { asset_key: "back_letters", output: "Output_SideB", supported_values: ["X", "Z"] }
+              ]
+            },
+            config: {
+              checks: confirmedChecks,
+              field_bindings: { design: "Design", front_name: "Front Name", back_name: "Back Name" },
+              option_mappings: [
+                { field: "design", source_value: "03", target: "Design03", output: "Output_SideA", group: "design" },
+                { field: "design", source_value: "03", target: "Design03", output: "Output_SideB", group: "design" }
+              ],
+              outputs: [
+                {
+                  key: "Output_SideA",
+                  display_name: "Front",
+                  component_key: "front",
+                  style: { field: "", options: [] },
+                  design: { field: "design", options: [] },
+                  font: { field: "", options: [] }
+                },
+                {
+                  key: "Output_SideB",
+                  display_name: "Back",
+                  component_key: "back",
+                  style: { field: "", options: [] },
+                  design: { field: "design", options: [] },
+                  font: { field: "", options: [] }
+                }
+              ]
+            }
+          };
+          async function fakeFetch(url, options = {}) {
+            const textUrl = String(url);
+            if (textUrl === "/api/v2/templates") return response({ templates: [{ template_id: "V2SCOPED", name: "Scoped Demo" }] });
+            if (textUrl.endsWith("/draft") && (!options.method || options.method === "GET")) return response({ draft: currentDraft });
+            if (textUrl.endsWith("/validate")) return response({ validation: { can_save: true, can_publish: true, checks: confirmedChecks } });
+            if (textUrl.endsWith("/draft") && options.method === "POST") {
+              draftSaveBody = JSON.parse(options.body);
+              return response({ draft: { ...currentDraft, config: draftSaveBody.config } });
+            }
+            return response({});
+          }
+          const app = createApp(fakeFetch);
+          await flush();
+          app.elements.templateList.children[0].dispatch("click");
+          await flush();
+          global.setWorkbenchStage("structure");
+          await flush();
+
+          const frontSlot = document.querySelectorAll("#contentOptionRows .content-slot-row").find((row) => row.dataset.output === "Output_SideA" && row.dataset.slotKey === "slot_front_name");
+          const backSlot = document.querySelectorAll("#contentOptionRows .content-slot-row").find((row) => row.dataset.output === "Output_SideB" && row.dataset.slotKey === "slot_back_name");
+          assert(frontSlot);
+          assert(backSlot);
+          assert.strictEqual(frontSlot.querySelector('[data-field="slot-asset-key"]').value, "front_letters");
+          assert.strictEqual(backSlot.querySelector('[data-field="slot-asset-key"]').value, "back_letters");
+          assert.strictEqual(backSlot.querySelector('[data-field="slot-tail-last"]').value, "z");
+
+          global.setWorkbenchStage("rules");
+          await flush();
+          const sideBIndex = global.ruleOptionItems().findIndex((item) => item.output === "Output_SideB" && item.group === "design" && item.key === "Design03");
+          assert(sideBIndex >= 0);
+          global.selectRuleOption(sideBIndex);
+          await flush();
+          assert(app.elements.assetBindingRows.textContent.includes("back_letters"));
+          assert(!app.elements.assetBindingRows.textContent.includes("front_letters"));
+
+          app.elements.saveDraftBtn.dispatch("click");
+          await flush();
+          const sideA = draftSaveBody.config.outputs.find((output) => output.key === "Output_SideA");
+          const sideB = draftSaveBody.config.outputs.find((output) => output.key === "Output_SideB");
+          const frontOption = sideA.design.options.find((item) => item.key === "Design03");
+          const backOption = sideB.design.options.find((item) => item.key === "Design03");
+          assert.strictEqual(frontOption.content_preset, "initial_with_text");
+          assert.strictEqual(backOption.content_preset, "tail_text");
+          assert.strictEqual(frontOption.slots[0].key, "slot_front_name");
+          assert.strictEqual(backOption.slots[0].key, "slot_back_name");
+          assert.deepStrictEqual(frontOption.assets[0].supported_values, ["A", "B"]);
+          assert.deepStrictEqual(backOption.assets[0].supported_values, ["X", "Z"]);
+          assert.strictEqual(frontOption.slots[0].color_binding, "front_color");
+          assert.deepStrictEqual(backOption.slots[0].tails, [{ key: "tail_back_name_last_z", position: "last", sample: "z" }]);
+        })().catch((error) => { console.error(error); process.exit(1); });
+        """
+    )
+
+
 def test_v2_workbench_rules_stage_filters_pending_and_saves_next_option():
     run_node(
         r"""
@@ -437,6 +682,11 @@ def test_v2_workbench_rules_stage_filters_pending_and_saves_next_option():
           assert(app.elements.optionRuleList.textContent.includes("Design03"));
           assert(app.elements.optionRuleList.textContent.includes("Design08"));
           assert(app.elements.optionRuleList.textContent.includes("F1"));
+          app.elements.optionContentSeparator.value = "pipe";
+          app.elements.optionContentSeparator.dispatch("change");
+          await flush();
+          const selectedGroup = document.querySelectorAll("#contentOptionRows .content-option-group").find((row) => row.dataset.group === "design" && row.dataset.option === "Design03");
+          assert.strictEqual(selectedGroup.querySelector('[data-field="option-content-preset"]').value, "split_by_pipe");
           app.elements.pendingOnlyBtn.dispatch("click");
           await flush();
           assert.strictEqual(app.elements.pendingOnlyBtn.attributes["aria-pressed"], "true");

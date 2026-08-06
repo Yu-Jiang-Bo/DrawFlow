@@ -24,7 +24,7 @@ def test_tail_text_preset_requires_source_field_on_tail_slot():
                 "key": "slot_name",
                 "preset": "tail_text",
                 "tails": [{"key": "tail_name_first_a", "position": "first", "sample": "a"}],
-                "dimension_rule": {"mode": "anchor", "tolerance_mm": 0.01},
+                "dimension_rule": {"mode": "anchor", "tolerance_mm": 0.007},
                 "font_dependencies": ["Milkshake"],
             }
         ],
@@ -42,8 +42,8 @@ def test_multi_initials_preset_requires_source_fields_for_each_asset_slot():
     option = payload["outputs"][0]["design"]["options"][0]
     option["content_preset"] = "multi_initials"
     option["slots"] = [
-        {"key": "slot_initial1", "preset": "asset_replace", "asset_key": "initial1", "dimension_rule": {"mode": "anchor", "tolerance_mm": 0.01}, "font_dependencies": ["Milkshake"]},
-        {"key": "slot_initial2", "preset": "asset_replace", "asset_key": "initial2", "dimension_rule": {"mode": "anchor", "tolerance_mm": 0.01}, "font_dependencies": ["Milkshake"]},
+        {"key": "slot_initial1", "preset": "asset_replace", "asset_key": "initial1", "dimension_rule": {"mode": "anchor", "tolerance_mm": 0.007}, "font_dependencies": ["Milkshake"]},
+        {"key": "slot_initial2", "preset": "asset_replace", "asset_key": "initial2", "dimension_rule": {"mode": "anchor", "tolerance_mm": 0.007}, "font_dependencies": ["Milkshake"]},
     ]
     option["assets"] = [
         {"asset_key": "initial1", "slot": "slot_initial1", "supported_values": ["A"]},
@@ -76,8 +76,8 @@ def test_text_presets_reject_incompatible_slot_primitives():
     option = split_payload["outputs"][0]["font"]["options"][0]
     option["content_preset"] = "split_by_pipe"
     option["slots"] = [
-        {"key": "slot_name1", "source_field": "name", "preset": "split_by_pipe", "dimension_rule": {"mode": "slot", "tolerance_mm": 0.01}, "font_dependencies": ["Milkshake"]},
-        {"key": "slot_initial", "source_field": "name", "preset": "asset_replace", "asset_key": "initial", "dimension_rule": {"mode": "slot", "tolerance_mm": 0.01}, "font_dependencies": ["Milkshake"]},
+        {"key": "slot_name1", "source_field": "name", "preset": "split_by_pipe", "dimension_rule": {"mode": "slot", "tolerance_mm": 0.007}, "font_dependencies": ["Milkshake"]},
+        {"key": "slot_initial", "source_field": "name", "preset": "asset_replace", "asset_key": "initial", "dimension_rule": {"mode": "slot", "tolerance_mm": 0.007}, "font_dependencies": ["Milkshake"]},
     ]
 
     for payload, code, reason in (

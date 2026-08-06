@@ -15,7 +15,9 @@ INDEX_HTML = """<!doctype html>
   <script src="/static/v2-workbench/workbench-form-model.js" defer></script>
   <script src="/static/v2-workbench/workbench-config.js" defer></script>
   <script src="/static/v2-workbench/workbench-content.js" defer></script>
+  <script src="/static/v2-workbench/workbench-style-dimensions.js" defer></script>
   <script src="/static/v2-workbench/workbench-option-rules.js" defer></script>
+  <script src="/static/v2-workbench/workbench-rule-evidence.js" defer></script>
   <script src="/static/v2-workbench/workbench-stage-view.js" defer></script>
   <script src="/static/v2-workbench/workbench-view.js" defer></script>
   <script src="/static/v2-workbench/workbench-draft-actions.js" defer></script>
@@ -222,6 +224,16 @@ INDEX_HTML = """<!doctype html>
           <div class="pane-body">
             <p class="v2-help">支持将订单原值 03 映射为 Design03，将 F10 映射为 F10。</p>
             <div class="config-table" id="optionMappingRows" aria-live="polite"></div>
+          </div>
+        </section>
+
+        <section class="pane">
+          <div class="pane-header">
+            <h3>Style 与固定尺寸</h3>
+            <span class="muted">容差固定 0.007mm</span>
+          </div>
+          <div class="pane-body">
+            <div class="config-table" id="styleDimensionRows" aria-live="polite"></div>
           </div>
         </section>
 

@@ -17,6 +17,9 @@ from .v2_template_validation_common import (
 )
 
 
+DIMENSION_TOLERANCE_MM = 0.007
+
+
 def collect_publication_gate_issues(contract: Mapping[str, Any]) -> list[Dict[str, str]]:
     issues: list[Dict[str, str]] = []
     _validate_dimensions(contract, issues)
@@ -32,10 +35,12 @@ def _validate_dimensions(contract: Mapping[str, Any], issues: list[Dict[str, str
     for output_index, output in enumerate(outputs(contract)):
         for option_index, option in enumerate(list_value(mapping(output.get("style")).get("options"))):
             dimensions = mapping(mapping(option).get("dimensions"))
+            path = f"$.outputs[{output_index}].style.options[{option_index}].dimensions"
             if positive_number(dimensions.get("width_mm")) and positive_number(dimensions.get("height_mm")):
                 has_dimension_rule = True
+                _validate_fixed_tolerance(dimensions, path, issues)
             elif mapping(option).get("key"):
-                add_issue(issues, f"$.outputs[{output_index}].style.options[{option_index}].dimensions", "dimensions", V2_STATUS_PENDING, "dimension_pending", "Style 尺寸还没有完整宽高。")
+                add_issue(issues, path, "dimensions", V2_STATUS_PENDING, "dimension_pending", "Style 尺寸还没有完整宽高。")
         for group_name in ("design", "font"):
             has_dimension_rule = _validate_slot_dimensions(output_index, group_name, mapping(output.get(group_name)), issues) or has_dimension_rule
     if not has_dimension_rule:
@@ -58,7 +63,19 @@ def _validate_slot_dimensions(
             if "tolerance_mm" not in rule:
                 path = f"$.outputs[{output_index}].{group_name}.options[{option_index}].slots[{slot_index}].dimension_rule"
                 add_issue(issues, path, "dimensions", V2_STATUS_PENDING, "dimension_tolerance_pending", "槽位尺寸规则还没有确认最终边界容差。")
+            else:
+                path = f"$.outputs[{output_index}].{group_name}.options[{option_index}].slots[{slot_index}].dimension_rule"
+                _validate_fixed_tolerance(rule, path, issues)
     return has_rule
+
+
+def _validate_fixed_tolerance(rule: Mapping[str, Any], path: str, issues: list[Dict[str, str]]) -> None:
+    tolerance = rule.get("tolerance_mm")
+    if tolerance is None:
+        add_issue(issues, path, "dimensions", V2_STATUS_PENDING, "dimension_tolerance_pending", "最终边界容差固定为 0.007mm，当前还未确认。")
+        return
+    if abs(float(tolerance) - DIMENSION_TOLERANCE_MM) > 0.0000001:
+        add_issue(issues, path, "dimensions", V2_STATUS_BLOCKED, "dimension_tolerance_invalid", "最终边界容差必须固定为 0.007mm，不允许改成其他值。")
 
 
 def _validate_asset_ranges(contract: Mapping[str, Any], issues: list[Dict[str, str]]) -> None:
