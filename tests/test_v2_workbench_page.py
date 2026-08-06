@@ -5,6 +5,8 @@ from src.service.v2_workbench_page import INDEX_HTML
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 CSS = (PROJECT_ROOT / "src/service/static/v2-workbench/workbench.css").read_text(encoding="utf-8")
+STAGE_CSS = (PROJECT_ROOT / "src/service/static/v2-workbench/workbench-stages.css").read_text(encoding="utf-8")
+ALL_CSS = CSS + "\n" + STAGE_CSS
 JS = "\n".join(
     (PROJECT_ROOT / f"src/service/static/v2-workbench/{name}").read_text(encoding="utf-8")
     for name in [
@@ -15,6 +17,7 @@ JS = "\n".join(
         "workbench-form-model.js",
         "workbench-config.js",
         "workbench-content.js",
+        "workbench-stage-view.js",
         "workbench-view.js",
         "workbench-draft-actions.js",
         "workbench-scan-actions.js",
@@ -38,20 +41,27 @@ REQUIRED_IDS = [
     "v2CheckRail",
     "templateList",
     "templateSearch",
+    "newTemplateBtn",
+    "templateListStats",
     "templateId",
     "templateName",
     "shopName",
     "currentTemplateContext",
+    "backToUploadBtn",
     "draftStatusBadge",
     "draftVersion",
+    "uploadScanBadge",
     "aiDropzone",
     "aiFile",
     "scanTemplateBtn",
     "rescanTemplateBtn",
     "cancelScanBtn",
     "scanProgress",
+    "scanSummaryMetrics",
+    "scanSummaryWarning",
     "scanSummary",
     "scanEmptyState",
+    "enterStructureBtn",
     "structureSearch",
     "structureTree",
     "toggleDesignsBtn",
@@ -76,16 +86,18 @@ REQUIRED_IDS = [
 
 def test_v2_workbench_page_exposes_independent_entry_contract():
     assert "<title>DrawFlow · V2 模板配置工作台</title>" in INDEX_HTML
-    assert 'href="/v2/templates/workbench"' in INDEX_HTML
-    assert 'data-nav-target="v2-workbench"' in INDEX_HTML
+    assert 'href="/templates" data-nav-target="templates" aria-current="page"' in INDEX_HTML
+    assert 'data-nav-target="v2-workbench"' not in INDEX_HTML
     assert 'href="/static/v2-workbench/workbench.css"' in INDEX_HTML
+    assert 'href="/static/v2-workbench/workbench-stages.css"' in INDEX_HTML
     assert 'src="/static/v2-workbench/workbench.js"' in INDEX_HTML
     assert 'src="/static/v2-workbench/workbench-dom.js"' in INDEX_HTML
     assert 'src="/static/v2-workbench/workbench-api.js"' in INDEX_HTML
     assert 'src="/static/v2-workbench/workbench-scan-model.js"' in INDEX_HTML
     assert 'src="/static/v2-workbench/workbench-content.js"' in INDEX_HTML
+    assert 'src="/static/v2-workbench/workbench-stage-view.js"' in INDEX_HTML
     assert 'src="/static/v2-workbench/workbench-view.js"' in INDEX_HTML
-    assert 'class="v2-shell" id="v2WorkbenchApp"' in INDEX_HTML
+    assert 'class="v2-shell" id="v2WorkbenchApp" data-workbench-stage="upload"' in INDEX_HTML
     assert 'class="workspace-grid"' in INDEX_HTML
     assert 'class="bottom-action-bar"' in INDEX_HTML
 
@@ -94,6 +106,19 @@ def test_v2_workbench_page_exposes_independent_entry_contract():
     assert 'id="templateIdMirror"' not in INDEX_HTML
     assert 'id="templateNameMirror"' not in INDEX_HTML
     assert 'id="shopNameMirror"' not in INDEX_HTML
+
+
+def test_v2_workbench_upload_stage_hides_later_configuration():
+    upload_start = INDEX_HTML.index('data-stage-panel="upload" aria-label="上传与扫描"')
+    structure_start = INDEX_HTML.index('data-stage-panel="structure" aria-label="扫描结构"')
+    upload_markup = INDEX_HTML[upload_start:structure_start]
+    for forbidden in ["structureTree", "outputConfigRows", "fieldBindingRows", "optionMappingRows", "contentOptionRows"]:
+        assert forbidden not in upload_markup
+    assert "模板草稿" in upload_markup
+    assert "上传并扫描模板" in upload_markup
+    assert "扫描摘要" in upload_markup
+    assert "进入结构与字段核验" in upload_markup
+    assert 'data-stage-panel="rules"' in INDEX_HTML
 
 
 def test_v2_workbench_page_has_exact_eight_check_items():
@@ -134,9 +159,11 @@ def test_v2_workbench_does_not_expose_forbidden_ui_concepts():
 
 
 def test_v2_workbench_static_styles_cover_desktop_layout_and_states():
-    assert ".v2-header" in CSS
-    assert ".workspace-grid" in CSS
+    assert ".v2-header" in ALL_CSS
+    assert ".workspace-grid" in ALL_CSS
     assert "grid-template-columns: minmax(260px, 300px) minmax(0, 1fr) minmax(260px, 300px)" in CSS
+    assert '#v2WorkbenchApp[data-workbench-stage="upload"] .workspace-grid' in STAGE_CSS
+    assert '#v2WorkbenchApp[data-workbench-stage="structure"] .workspace-grid' in STAGE_CSS
     assert "@media (max-width: 1280px)" in CSS
     assert "@media (max-width: 1100px)" in CSS
     assert ".upload-zone.dragover" in CSS
@@ -144,8 +171,8 @@ def test_v2_workbench_static_styles_cover_desktop_layout_and_states():
     assert ".structured-row" in CSS
     assert ".content-option-group" in CSS
     assert ".content-slot-row" in CSS
-    assert "url(" not in CSS
-    assert "gradient" not in CSS.lower()
+    assert "url(" not in ALL_CSS
+    assert "gradient" not in ALL_CSS.lower()
 
 
 def test_v2_workbench_routes_are_isolated_from_legacy_page():
@@ -154,4 +181,6 @@ def test_v2_workbench_routes_are_isolated_from_legacy_page():
     assert 'path.startswith("/static/v2-workbench/")' in SERVER
     assert '"workbench-scan-actions.js"' in SERVER
     assert '"workbench-content.js"' in SERVER
+    assert '"workbench-stages.css"' in SERVER
+    assert '"workbench-stage-view.js"' in SERVER
     assert "self._send_html(WORKBENCH_HTML)" in SERVER

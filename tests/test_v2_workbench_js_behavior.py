@@ -8,7 +8,8 @@ const fs = require("fs");
 
 const ids = [
   "v2CheckRail", "templateList", "templateSearch", "templateId", "templateName", "shopName",
-  "currentTemplateContext", "draftStatusBadge", "draftVersion",
+  "newTemplateBtn", "templateListStats", "currentTemplateContext", "backToUploadBtn", "draftStatusBadge", "draftVersion",
+  "uploadScanBadge", "scanSummaryMetrics", "scanSummaryWarning", "enterStructureBtn",
   "aiDropzone", "aiFile", "scanTemplateBtn", "rescanTemplateBtn", "cancelScanBtn", "scanProgress",
   "scanSummary", "scanEmptyState", "structureSearch", "structureTree", "toggleDesignsBtn",
   "toggleFontsBtn", "outputConfigRows", "fieldBindingRows", "optionMappingRows", "selectedNodeSummary",
@@ -166,6 +167,7 @@ function createApp(fetchImpl) {
     "workbench-form-model.js",
     "workbench-config.js",
     "workbench-content.js",
+    "workbench-stage-view.js",
     "workbench-view.js",
     "workbench-draft-actions.js",
     "workbench-scan-actions.js"
@@ -217,6 +219,9 @@ def test_v2_workbench_renders_scan_structure_groups_from_draft():
           await flush();
           app.elements.templateList.children[0].dispatch("click");
           await flush();
+          assert.strictEqual(app.elements.outputConfigRows.children.length, 0);
+          global.setWorkbenchStage("structure");
+          await flush();
           const tree = app.elements.structureTree.textContent;
           assert(tree.includes("定位框"));
           assert(tree.includes("anchor_name"));
@@ -259,6 +264,8 @@ def test_v2_workbench_save_draft_does_not_submit_scan_payload():
           const app = createApp(fakeFetch);
           await flush();
           app.elements.templateList.children[0].dispatch("click");
+          await flush();
+          global.setWorkbenchStage("structure");
           await flush();
           app.elements.saveDraftBtn.dispatch("click");
           await flush();
@@ -310,6 +317,9 @@ def test_v2_workbench_keeps_same_slot_independent_per_design_and_font_option():
           const app = createApp(fakeFetch);
           await flush();
           app.elements.templateList.children[0].dispatch("click");
+          await flush();
+          assert.strictEqual(app.elements.outputConfigRows.children.length, 0);
+          global.setWorkbenchStage("structure");
           await flush();
 
           const outputRow = document.querySelectorAll("#outputConfigRows .output-row")[0];
@@ -398,7 +408,7 @@ def test_v2_workbench_sanitizes_sensitive_failures_and_cancel_state():
           await flush();
           app.elements.cancelScanBtn.dispatch("click");
           await flush();
-          assert.strictEqual(app.elements.scanProgress.textContent, "扫描已取消。");
+          assert(app.elements.scanProgress.textContent.includes("扫描已取消。"));
         })().catch((error) => { console.error(error); process.exit(1); });
         """
     )

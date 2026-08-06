@@ -81,7 +81,12 @@
 
 
   function setScanningUi(active, message) {
-    setText("scanProgress", message);
+    if (globalThis.renderScanProgress) {
+      globalThis.renderScanProgress(message, active ? "active" : "idle");
+    } else {
+      setText("scanProgress", message);
+    }
+    setText("uploadScanBadge", active ? "扫描中" : message);
     setDisabled("scanTemplateBtn", active);
     setDisabled("rescanTemplateBtn", active);
     setDisabled("saveDraftBtn", active);

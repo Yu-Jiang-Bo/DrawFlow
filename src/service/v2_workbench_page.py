@@ -7,6 +7,7 @@ INDEX_HTML = """<!doctype html>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>DrawFlow · V2 模板配置工作台</title>
   <link rel="stylesheet" href="/static/v2-workbench/workbench.css" />
+  <link rel="stylesheet" href="/static/v2-workbench/workbench-stages.css" />
   <script src="/static/v2-workbench/workbench.js" defer></script>
   <script src="/static/v2-workbench/workbench-dom.js" defer></script>
   <script src="/static/v2-workbench/workbench-api.js" defer></script>
@@ -14,6 +15,7 @@ INDEX_HTML = """<!doctype html>
   <script src="/static/v2-workbench/workbench-form-model.js" defer></script>
   <script src="/static/v2-workbench/workbench-config.js" defer></script>
   <script src="/static/v2-workbench/workbench-content.js" defer></script>
+  <script src="/static/v2-workbench/workbench-stage-view.js" defer></script>
   <script src="/static/v2-workbench/workbench-view.js" defer></script>
   <script src="/static/v2-workbench/workbench-draft-actions.js" defer></script>
   <script src="/static/v2-workbench/workbench-scan-actions.js" defer></script>
@@ -27,8 +29,7 @@ INDEX_HTML = """<!doctype html>
       </div>
       <nav class="v2-nav" aria-label="主导航">
       <a href="/" data-nav-target="render-tasks">出图任务</a>
-      <a href="/templates" data-nav-target="templates">模板管理</a>
-      <a href="/v2/templates/workbench" data-nav-target="v2-workbench" aria-current="page">V2 工作台</a>
+      <a href="/templates" data-nav-target="templates" aria-current="page">模板管理</a>
       <a href="/rules" data-nav-target="rules">规则配置</a>
       <a href="/jobs" data-nav-target="jobs">任务记录</a>
       </nav>
@@ -36,13 +37,15 @@ INDEX_HTML = """<!doctype html>
     </div>
   </header>
 
-  <main class="v2-shell" id="v2WorkbenchApp">
+  <main class="v2-shell" id="v2WorkbenchApp" data-workbench-stage="upload">
     <section class="v2-title-row" aria-labelledby="v2PageTitle">
       <div>
         <p class="v2-section-kicker">模板管理 / 独立入口</p>
         <h2 id="v2PageTitle">V2 模板配置工作台</h2>
+        <p class="v2-title-copy">上传已按规范标注的 Illustrator 模板，完成扫描、核验、试渲染和版本发布。</p>
       </div>
       <div class="v2-title-status" aria-label="当前模板状态">
+        <button id="backToUploadBtn" class="stage-back-btn" type="button" hidden>上一步</button>
         <span id="currentTemplateContext" class="v2-title-context">未选择模板</span>
         <span id="draftStatusBadge" class="v2-badge">草稿</span>
         <span id="draftVersion" class="v2-badge v2-badge-muted">v0</span>
@@ -85,69 +88,22 @@ INDEX_HTML = """<!doctype html>
     </section>
 
     <div class="workspace-grid">
-      <aside class="left-pane" aria-label="模板与扫描结构">
+      <aside class="left-pane template-list-pane" data-stage-panel="upload" aria-label="当前模板列表">
         <section class="pane">
           <div class="pane-header">
             <h3>模板列表</h3>
+            <button id="newTemplateBtn" class="primary compact-btn" type="button">新增模板</button>
           </div>
           <div class="pane-body">
             <label for="templateSearch">搜索模板</label>
             <input id="templateSearch" type="search" placeholder="输入模板 ID 或名称" autocomplete="off" />
             <div class="v2-list" id="templateList" aria-live="polite"></div>
-          </div>
-        </section>
-
-        <section class="pane">
-          <div class="pane-header">
-            <h3>上传与扫描</h3>
-          </div>
-          <div class="pane-body">
-            <div class="upload-zone" id="aiDropzone">
-              <input id="aiFile" type="file" accept=".ai" />
-              <p>拖放或选择 .ai 模板文件</p>
-              <small>扫描后生成结构摘要，可重新扫描并恢复未发布草稿。</small>
-            </div>
-            <div class="v2-action-row">
-              <button id="scanTemplateBtn" type="button">开始扫描</button>
-              <button id="rescanTemplateBtn" type="button">重新扫描</button>
-              <button id="cancelScanBtn" type="button">取消</button>
-            </div>
-            <div class="v2-progress" id="scanProgress" aria-live="polite" aria-label="扫描进度"></div>
-            <div class="v2-summary" id="scanSummary" aria-live="polite"></div>
-            <div class="v2-empty" id="scanEmptyState">尚未扫描模板，请先上传 .ai 文件。</div>
-          </div>
-        </section>
-
-        <section class="pane">
-          <div class="pane-header">
-            <h3>扫描结构</h3>
-          </div>
-          <div class="pane-body">
-            <label for="structureSearch">搜索结构</label>
-            <input id="structureSearch" type="search" placeholder="Output、Style、Design、Font、slot..." autocomplete="off" />
-            <div class="v2-filter-row">
-              <button id="toggleDesignsBtn" type="button">展开 Design</button>
-              <button id="toggleFontsBtn" type="button">展开 Font</button>
-            </div>
-            <div class="structure-tree" id="structureTree" aria-live="polite">
-              <section data-node-group="Output">
-                <h4>Output</h4>
-                <p>单 Output_main 显示为“主效果图”；多 Output 需确认中文部件名、用途和连续 Side 顺序。</p>
-              </section>
-              <section data-node-group="Style"><h4>Style</h4></section>
-              <section data-node-group="Design"><h4>Design</h4></section>
-              <section data-node-group="Font"><h4>Font</h4></section>
-              <section data-node-group="slot"><h4>slot</h4></section>
-              <section data-node-group="anchor"><h4>anchor</h4></section>
-              <section data-node-group="tail"><h4>tail</h4></section>
-              <section data-node-group="Assets"><h4>Assets</h4></section>
-              <section data-node-group="Colors"><h4>Colors</h4></section>
-            </div>
+            <div class="template-list-stats" id="templateListStats" aria-live="polite"></div>
           </div>
         </section>
       </aside>
 
-      <section class="center-pane" aria-label="当前配置">
+      <section class="upload-pane" data-stage-panel="upload" aria-label="上传与扫描">
         <section class="pane">
           <div class="pane-header">
             <h3>模板草稿</h3>
@@ -168,6 +124,78 @@ INDEX_HTML = """<!doctype html>
           </div>
         </section>
 
+        <section class="pane upload-scan-pane">
+          <div class="pane-header">
+            <h3>上传并扫描模板</h3>
+            <span class="v2-badge v2-badge-muted" id="uploadScanBadge">等待文件</span>
+          </div>
+          <div class="pane-body upload-scan-grid">
+            <div class="upload-zone" id="aiDropzone">
+              <input id="aiFile" type="file" accept=".ai" />
+              <p>拖入已标注的 .ai 模板</p>
+              <small>或点击选择文件，系统调用本机 Illustrator 扫描</small>
+              <button class="dropzone-file-button" type="button" tabindex="-1">重新选择文件</button>
+            </div>
+            <div class="scan-flow-panel">
+              <h4>扫描流程</h4>
+              <div class="v2-progress" id="scanProgress" aria-live="polite" aria-label="扫描进度"></div>
+              <div class="v2-action-row">
+                <button id="scanTemplateBtn" class="primary" type="button">上传并扫描</button>
+                <button id="rescanTemplateBtn" type="button">重新扫描已保存文件</button>
+                <button id="cancelScanBtn" type="button">取消</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="pane scan-summary-pane">
+          <div class="pane-header">
+            <h3>扫描摘要</h3>
+            <span class="muted">只展示 Template 下规范结构</span>
+          </div>
+          <div class="pane-body">
+            <div class="scan-metric-grid" id="scanSummaryMetrics" aria-live="polite"></div>
+            <div class="v2-warning-note" id="scanSummaryWarning">等待扫描结果。完成扫描后先核对规范标注字段，再进入结构与字段核验。</div>
+            <div class="scan-summary-footer">
+              <div class="v2-summary" id="scanSummary" aria-live="polite"></div>
+              <button id="enterStructureBtn" class="primary" type="button">进入结构与字段核验</button>
+            </div>
+            <div class="v2-empty" id="scanEmptyState">尚未扫描模板，请先上传 .ai 文件。</div>
+          </div>
+        </section>
+      </section>
+
+      <aside class="left-pane structure-pane" data-stage-panel="structure" aria-label="扫描结构">
+        <section class="pane">
+          <div class="pane-header">
+            <h3>扫描结构</h3>
+          </div>
+          <div class="pane-body">
+            <label for="structureSearch">搜索结构</label>
+            <input id="structureSearch" type="search" placeholder="筛选 Output、选项或槽位" autocomplete="off" />
+            <div class="v2-filter-row">
+              <button id="toggleDesignsBtn" type="button">展开全部设计</button>
+              <button id="toggleFontsBtn" type="button">展开全部字体</button>
+            </div>
+            <div class="structure-tree" id="structureTree" aria-live="polite">
+              <section data-node-group="Output">
+                <h4>Output</h4>
+                <p>单 Output_main 显示为“主效果图”；多 Output 需确认中文部件名、用途和连续 Side 顺序。</p>
+              </section>
+              <section data-node-group="Style"><h4>Style</h4></section>
+              <section data-node-group="Design"><h4>Design</h4></section>
+              <section data-node-group="Font"><h4>Font</h4></section>
+              <section data-node-group="slot"><h4>slot</h4></section>
+              <section data-node-group="anchor"><h4>anchor</h4></section>
+              <section data-node-group="tail"><h4>tail</h4></section>
+              <section data-node-group="Assets"><h4>Assets</h4></section>
+              <section data-node-group="Colors"><h4>Colors</h4></section>
+            </div>
+          </div>
+        </section>
+      </aside>
+
+      <section class="center-pane" data-stage-panel="structure" aria-label="结构与字段配置">
         <section class="pane">
           <div class="pane-header">
             <h3>Output 配置</h3>
@@ -197,7 +225,7 @@ INDEX_HTML = """<!doctype html>
           </div>
         </section>
 
-        <section class="pane">
+        <section class="pane content-rules-pane" data-stage-panel="rules">
           <div class="pane-header">
             <h3>逐选项内容处理</h3>
           </div>
@@ -208,7 +236,7 @@ INDEX_HTML = """<!doctype html>
         </section>
       </section>
 
-      <aside class="right-pane" aria-label="核验状态与上下文摘要">
+      <aside class="right-pane" data-stage-panel="structure" aria-label="核验状态与上下文摘要">
         <section class="pane">
           <div class="pane-header">
             <h3>发布阻断</h3>

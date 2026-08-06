@@ -1593,6 +1593,7 @@ def _safe_static_name(value: str) -> str:
         return ""
     allowed = {
         "workbench.css",
+        "workbench-stages.css",
         "workbench.js",
         "workbench-dom.js",
         "workbench-api.js",
@@ -1600,6 +1601,7 @@ def _safe_static_name(value: str) -> str:
         "workbench-form-model.js",
         "workbench-config.js",
         "workbench-content.js",
+        "workbench-stage-view.js",
         "workbench-view.js",
         "workbench-draft-actions.js",
         "workbench-scan-actions.js",

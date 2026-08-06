@@ -4,16 +4,16 @@
   const API_ROOT = "/api/v2/templates";
   const CHECK_KEYS = ["output", "fields", "options", "slots", "content", "dimensions", "colors", "preview"];
   const CHECK_LABELS = {
-    output: "输出结构",
-    fields: "字段绑定",
-    options: "选项映射",
-    slots: "槽位核验",
-    content: "内容预设",
-    dimensions: "尺寸核验",
-    colors: "颜色/字体",
-    preview: "预览核验"
+    output: "1 Output 结构",
+    fields: "2 订单字段",
+    options: "3 选项映射",
+    slots: "4 槽位要求",
+    content: "5 处理预设",
+    dimensions: "6 尺寸边界",
+    colors: "7 颜色规则",
+    preview: "8 样例预览"
   };
-  const STATUS_LABELS = { confirmed: "已核验", pending: "待核验", blocked: "阻断" };
+  const STATUS_LABELS = { confirmed: "已核验", pending: "待校验", blocked: "阻断" };
   const STATUS_CLASS = { confirmed: "success", pending: "warn", blocked: "blocked" };
   const PRESETS = ["direct_text", "split_by_pipe", "initial_with_text", "multi_initials", "path_text", "tail_text", "design_font_combo", "asset_replace"];
   const OPTION_PRESETS = PRESETS.filter((preset) => preset !== "asset_replace");
@@ -38,7 +38,8 @@
     uploadFile: null,
     lastUploadFile: null,
     scanController: null,
-    isScanning: false
+    isScanning: false,
+    stage: "upload"
   };
 
   const $ = (id) => document.getElementById(id);
@@ -82,6 +83,15 @@
     on("aiFile", "change", handleFileInput);
     on("retryScanBtn", "click", retryScan);
     on("closeScanFailedBtn", "click", closeScanFailure);
+    on("enterStructureBtn", "click", () => globalThis.setWorkbenchStage("structure"));
+    on("backToUploadBtn", "click", () => globalThis.setWorkbenchStage("upload"));
+    on("newTemplateBtn", "click", () => {
+      clearDraftView();
+      globalThis.setWorkbenchStage("upload");
+    });
+    document.querySelectorAll("#v2CheckRail .check-item").forEach((item) => {
+      item.addEventListener("click", () => globalThis.setWorkbenchStage("structure"));
+    });
     bindDropzone();
   }
 
@@ -93,14 +103,12 @@
   function renderInitialState() {
     setText("draftStatusBadge", "未选择模板");
     setText("draftVersion", "-");
-    setText("scanProgress", "等待选择 .ai 文件");
-    setText("scanSummary", "等待扫描结果");
-    setText("scanEmptyState", "等待扫描结果，扫描接口未就绪时可先保存文件。");
+    renderScanProgress("等待选择 .ai 文件", "idle");
+    renderScanSummary();
     setText("publishBlockerText", "请先完成草稿配置与人工核验。");
     setDisabled("publishVersionBtn", true);
     setDisabled("trialRenderBtn", true);
-    renderStructureTree();
-    renderTables();
+    globalThis.setWorkbenchStage("upload");
     updateCheckRail(defaultChecks());
     updateDraftButtons();
   }

@@ -48,9 +48,13 @@
 
   function renderAll() {
     renderScanSummary();
-    renderStructureTree();
-    renderTables();
-    validateCurrentConfig(false).catch(() => updateCheckRail(configChecks()));
+    if (state.stage === "structure") {
+      renderStructureTree();
+      renderTables();
+      validateCurrentConfig(false).catch(() => updateCheckRail(configChecks()));
+    } else {
+      updateCheckRail(defaultChecks());
+    }
     updateDraftButtons();
   }
 

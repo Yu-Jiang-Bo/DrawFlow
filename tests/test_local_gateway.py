@@ -314,6 +314,10 @@ def test_local_gateway_serves_v2_workbench_fallback_when_central_is_unavailable(
             html = response.read().decode("utf-8")
         with urllib.request.urlopen(f"{base_url}/static/v2-workbench/workbench.css") as response:
             css = response.read().decode("utf-8")
+        with urllib.request.urlopen(f"{base_url}/static/v2-workbench/workbench-stages.css") as response:
+            stage_css = response.read().decode("utf-8")
+        with urllib.request.urlopen(f"{base_url}/static/v2-workbench/workbench-stage-view.js") as response:
+            stage_view_js = response.read().decode("utf-8")
         with urllib.request.urlopen(f"{base_url}/static/v2-workbench/workbench-scan-actions.js") as response:
             scan_actions_js = response.read().decode("utf-8")
         with urllib.request.urlopen(f"{base_url}/static/v2-workbench/workbench-scan-model.js") as response:
@@ -328,6 +332,9 @@ def test_local_gateway_serves_v2_workbench_fallback_when_central_is_unavailable(
     assert "V2 模板配置工作台" in html
     assert 'id="v2WorkbenchApp"' in html
     assert ".workspace-grid" in css
+    assert 'data-workbench-stage="upload"' in html
+    assert '[data-stage-panel]:not([data-stage-panel="upload"])' in stage_css
+    assert "function setWorkbenchStage" in stage_view_js
     assert "/local/templates/scan" in scan_actions_js
     assert "function scanModel" in scan_model_js
     assert "function renderContentOptionRows" in content_js

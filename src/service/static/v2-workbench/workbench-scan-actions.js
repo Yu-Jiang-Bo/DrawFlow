@@ -138,7 +138,8 @@
 
   function setUploadFile(file) {
     state.uploadFile = file;
-    setText("scanProgress", isAiFile(file) ? `已选择：${safeFileName(file.name)}` : "请选择 .ai 文件。");
+    renderScanProgress(isAiFile(file) ? `已选择：${safeFileName(file.name)}` : "请选择 .ai 文件。", "idle");
+    renderScanSummary();
     updateDraftButtons();
   }
 
@@ -155,6 +156,8 @@
     setDisabled("scanTemplateBtn", !hasBasics || !state.uploadFile || state.isScanning);
     setDisabled("rescanTemplateBtn", !hasBasics || state.isScanning);
     setDisabled("cancelScanBtn", !state.isScanning);
+    const hasScan = scanSummary(state.scan || {}).total > 0 || Object.keys(state.scan || {}).length > 0;
+    setDisabled("enterStructureBtn", !hasScan);
   }
 
 

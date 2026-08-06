@@ -12,6 +12,7 @@
       return !keyword || text.includes(keyword);
     });
     target.replaceChildren();
+    globalThis.renderTemplateStats(items);
     if (!items.length) {
       target.appendChild(emptyNode(state.templates.length ? "没有匹配的模板" : "暂无模板草稿"));
       return;
@@ -54,9 +55,16 @@
     const scan = state.scan || {};
     const summary = scanSummary(scan);
     const hasScan = summary.total > 0 || Object.keys(scan).length > 0;
+    globalThis.renderScanMetrics(summary);
     setText("scanSummary", message || (hasScan ? summaryText(summary) : "等待扫描结果"));
+    setText("scanSummaryWarning", globalThis.scanWarningText(summary, hasScan));
+    setText("uploadScanBadge", hasScan ? "扫描已完成" : (state.uploadFile ? "待上传" : "等待文件"));
+    if (globalThis.renderScanProgress) {
+      globalThis.renderScanProgress(message || (hasScan ? "等待人工核验" : "等待选择 .ai 文件"), "idle");
+    }
     setText("scanEmptyState", hasScan ? "" : "等待扫描结果，扫描接口未就绪时可先保存文件。");
     setHidden("scanEmptyState", hasScan);
+    setDisabled("enterStructureBtn", !hasScan);
     setText("draftSummary", draftSummaryText(summary));
   }
 
@@ -217,8 +225,8 @@
       const label = item.querySelector(".check-label, span");
       const status = item.querySelector(".check-status, strong");
       if (label) label.textContent = CHECK_LABELS[key] || key;
-      if (status) status.textContent = STATUS_LABELS[check.status] || "待核验";
-      if (!label && !status) item.textContent = `${CHECK_LABELS[key] || key}：${STATUS_LABELS[check.status] || "待核验"}`;
+      if (status) status.textContent = STATUS_LABELS[check.status] || "待校验";
+      if (!label && !status) item.textContent = `${CHECK_LABELS[key] || key}：${STATUS_LABELS[check.status] || "待校验"}`;
       item.title = check.reason || STATUS_LABELS[check.status] || "";
     });
   }
@@ -272,8 +280,6 @@
   function showTransientStatus(text) {
     setText("publishBlockerText", text);
   }
-
-
 
   Object.assign(globalThis, {
     renderTemplateList,
