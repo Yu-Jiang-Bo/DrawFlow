@@ -401,6 +401,51 @@
   min-height: 42px;
 }
 
+.scan-running-dialog {
+  width: min(520px, 100%);
+}
+
+.scan-running-dialog .modal-body {
+  display: grid;
+  gap: 14px;
+}
+
+.scan-running-progress {
+  position: relative;
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e2e8f0;
+}
+
+.scan-running-progress span {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 42%;
+  border-radius: inherit;
+  background: var(--v2-primary);
+  animation: scan-running-slide 1.4s ease-in-out infinite;
+}
+
+.modal-note {
+  margin: 0;
+  color: var(--v2-muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+@keyframes scan-running-slide {
+  0% {
+    transform: translateX(-115%);
+  }
+  50% {
+    transform: translateX(72%);
+  }
+  100% {
+    transform: translateX(245%);
+  }
+}
+
 @media (max-width: 1280px) {
   #v2WorkbenchApp[data-workbench-stage="upload"] .workspace-grid,
   #v2WorkbenchApp[data-workbench-stage="structure"] .workspace-grid {

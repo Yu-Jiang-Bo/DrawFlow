@@ -10,11 +10,11 @@ const ids = [
   "v2CheckRail", "templateList", "templateSearch", "templateId", "templateName", "shopName",
   "newTemplateBtn", "templateListStats", "currentTemplateContext", "backToUploadBtn", "draftStatusBadge", "draftVersion",
   "uploadScanBadge", "scanSummaryMetrics", "scanSummaryWarning", "enterStructureBtn",
-  "aiDropzone", "aiFile", "scanTemplateBtn", "rescanTemplateBtn", "cancelScanBtn", "scanProgress",
+  "aiDropzone", "aiFile", "scanTemplateBtn", "rescanTemplateBtn", "scanProgress",
   "scanSummary", "scanEmptyState", "structureSearch", "structureTree", "toggleDesignsBtn",
   "toggleFontsBtn", "outputConfigRows", "fieldBindingRows", "optionMappingRows", "selectedNodeSummary",
   "contentOptionRows", "blockerList", "draftSummary", "saveDraftBtn", "trialRenderBtn", "publishVersionBtn",
-  "publishBlockerText", "scanFailedOverlay", "scanFailedMessage", "retryScanBtn", "closeScanFailedBtn"
+  "publishBlockerText", "scanRunningOverlay", "scanRunningMessage", "scanFailedOverlay", "scanFailedMessage", "retryScanBtn", "closeScanFailedBtn"
 ];
 
 function makeClassList(element) {
@@ -106,7 +106,7 @@ function makeDocument() {
   ids.forEach((id) => { elements[id] = new Element("div", id); });
   ["aiFile"].forEach((id) => { elements[id].tagName = "INPUT"; });
   ["templateSearch", "templateId", "templateName", "shopName", "structureSearch"].forEach((id) => { elements[id].tagName = "INPUT"; });
-  ["scanTemplateBtn", "rescanTemplateBtn", "cancelScanBtn", "saveDraftBtn", "trialRenderBtn", "publishVersionBtn", "retryScanBtn", "closeScanFailedBtn", "toggleDesignsBtn", "toggleFontsBtn"].forEach((id) => { elements[id].tagName = "BUTTON"; });
+  ["scanTemplateBtn", "rescanTemplateBtn", "saveDraftBtn", "trialRenderBtn", "publishVersionBtn", "retryScanBtn", "closeScanFailedBtn", "toggleDesignsBtn", "toggleFontsBtn"].forEach((id) => { elements[id].tagName = "BUTTON"; });
   const checkKeys = ["output", "fields", "options", "slots", "content", "dimensions", "colors", "preview"];
   checkKeys.forEach((key) => {
     const item = new Element("button");
@@ -367,7 +367,7 @@ def test_v2_workbench_keeps_same_slot_independent_per_design_and_font_option():
     )
 
 
-def test_v2_workbench_sanitizes_sensitive_failures_and_cancel_state():
+def test_v2_workbench_sanitizes_sensitive_failures_and_scanning_overlay():
     run_node(
         r"""
         (async () => {
@@ -383,19 +383,23 @@ def test_v2_workbench_sanitizes_sensitive_failures_and_cancel_state():
     run_node(
         r"""
         (async () => {
+          let finishScan;
           async function fakeFetch(url, options = {}) {
             const textUrl = String(url);
             if (textUrl === "/api/v2/templates" && options.method === "POST") return response({ state: { template_id: "V2CANCEL", template: { template_id: "V2CANCEL", name: "Cancel Demo" } } });
             if (textUrl === "/api/v2/templates") return response({ templates: [] });
             if (textUrl === "/local/templates/scan") {
-              return new Promise((resolve, reject) => {
-                options.signal.addEventListener("abort", () => {
-                  const error = new Error("aborted");
-                  error.name = "AbortError";
-                  reject(error);
-                });
+              return new Promise((resolve) => {
+                finishScan = () => resolve(response({ draft: {
+                  metadata: { template_id: "V2CANCEL", name: "Cancel Demo", shop_name: "" },
+                  manifest: {},
+                  config: {},
+                  scan: { outputs: [{ key: "Output_main" }] }
+                }}));
               });
             }
+            if (textUrl.endsWith("/draft")) return response({ draft: { metadata: { template_id: "V2CANCEL", name: "Cancel Demo", shop_name: "" }, manifest: {}, config: {}, scan: {} } });
+            if (textUrl.endsWith("/validate")) return response({ validation: { checks: {} } });
             return response({});
           }
           const app = createApp(fakeFetch);
@@ -406,9 +410,17 @@ def test_v2_workbench_sanitizes_sensitive_failures_and_cancel_state():
           app.elements.aiFile.dispatch("change", { target: app.elements.aiFile });
           app.elements.scanTemplateBtn.dispatch("click");
           await flush();
-          app.elements.cancelScanBtn.dispatch("click");
+          assert(!Object.prototype.hasOwnProperty.call(app.elements, "cancelScanBtn"));
+          assert.strictEqual(app.elements.scanRunningOverlay.hidden, false);
+          assert(app.elements.scanRunningMessage.textContent.includes("Illustrator"));
+          assert(app.elements.scanRunningMessage.textContent.includes("Template"));
+          assert.strictEqual(app.elements.scanTemplateBtn.disabled, true);
+          assert.strictEqual(app.elements.rescanTemplateBtn.disabled, true);
+          assert.strictEqual(app.elements.saveDraftBtn.disabled, true);
+          finishScan();
           await flush();
-          assert(app.elements.scanProgress.textContent.includes("扫描已取消。"));
+          assert.strictEqual(app.elements.scanRunningOverlay.hidden, true);
+          assert(app.elements.scanProgress.textContent.includes("扫描完成"));
         })().catch((error) => { console.error(error); process.exit(1); });
         """
     )

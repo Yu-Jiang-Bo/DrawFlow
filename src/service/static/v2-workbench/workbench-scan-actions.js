@@ -20,21 +20,20 @@
     }
     state.lastUploadFile = file;
     state.isScanning = true;
-    state.scanController = new AbortController();
     setScanningUi(true, rescan ? "正在重新扫描 .ai 模板" : "正在扫描 .ai 模板");
     try {
       await ensureDraftExists();
-      const localResult = await tryLocalScan(file, state.scanController.signal);
+      const localResult = await tryLocalScan(file);
       await refreshDraftAfterScan(localResult);
       setScanningUi(false, "扫描完成，请核对结构和绑定。");
     } catch (scanError) {
       if (isAbort(scanError)) {
-        setScanningUi(false, "扫描已取消。");
+        setScanningUi(false, "页面已停止等待扫描结果。");
         return;
       }
       const scanMessage = friendlyError(scanError, "本地扫描接口未就绪，文件将先保存到中央草稿。");
       try {
-        await uploadAssetToCentral(file, state.scanController.signal);
+        await uploadAssetToCentral(file);
         setScanningUi(false, "文件已保存，等待本地扫描。");
         setText("scanSummary", "文件已保存，等待本地扫描结果。");
         await safeRefreshDraft(formBasics().template_id);
@@ -45,13 +44,12 @@
       }
     } finally {
       state.isScanning = false;
-      state.scanController = null;
       updateDraftButtons();
     }
   }
 
 
-  async function tryLocalScan(file, signal) {
+  async function tryLocalScan(file) {
     const basics = formBasics();
     const form = new FormData();
     form.append("template_id", basics.template_id);
@@ -59,18 +57,17 @@
     form.append("shop_name", basics.shop_name);
     form.append("template_type", "pure_text");
     form.append("template_ai", file, file.name);
-    return postForm("/local/templates/scan", form, signal, "本地扫描接口未就绪，请确认本地客户端已启动。");
+    return postForm("/local/templates/scan", form, null, "本地扫描接口未就绪，请确认本地客户端已启动。");
   }
 
 
-  async function uploadAssetToCentral(file, signal) {
+  async function uploadAssetToCentral(file) {
     const id = formBasics().template_id;
     const headers = { "Content-Type": file.type || "application/illustrator", "X-DrawFlow-Asset-Role": "template" };
     const payload = await fetchJson(`${API_ROOT}/${encodeURIComponent(id)}/assets/${encodeURIComponent(file.name)}`, {
       method: "POST",
       headers,
-      body: file,
-      signal
+      body: file
     }, "文件上传失败，请稍后重试。");
     if (payload.draft) {
       state.draft = payload.draft;
@@ -91,11 +88,6 @@
     }
     if (result && result.scan) state.scan = objectOf(result.scan);
     await safeRefreshDraft(id);
-  }
-
-
-  function cancelScan() {
-    if (state.scanController) state.scanController.abort();
   }
 
 
@@ -155,7 +147,6 @@
     setDisabled("saveDraftBtn", !hasBasics || state.isScanning);
     setDisabled("scanTemplateBtn", !hasBasics || !state.uploadFile || state.isScanning);
     setDisabled("rescanTemplateBtn", !hasBasics || state.isScanning);
-    setDisabled("cancelScanBtn", !state.isScanning);
     const hasScan = scanSummary(state.scan || {}).total > 0 || Object.keys(state.scan || {}).length > 0;
     setDisabled("enterStructureBtn", !hasScan);
   }
@@ -168,7 +159,6 @@
     tryLocalScan,
     uploadAssetToCentral,
     refreshDraftAfterScan,
-    cancelScan,
     retryScan,
     handleFileInput,
     bindDropzone,

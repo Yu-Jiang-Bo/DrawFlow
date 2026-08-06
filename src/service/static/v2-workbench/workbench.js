@@ -37,7 +37,6 @@
     expanded: { designs: false, fonts: false },
     uploadFile: null,
     lastUploadFile: null,
-    scanController: null,
     isScanning: false,
     stage: "upload"
   };
@@ -79,7 +78,6 @@
     on("publishVersionBtn", "click", () => showTransientStatus("发布接口未接入，当前不会伪造发布结果。"));
     on("scanTemplateBtn", "click", () => uploadSelectedAiFile(false));
     on("rescanTemplateBtn", "click", () => uploadSelectedAiFile(true));
-    on("cancelScanBtn", "click", cancelScan);
     on("aiFile", "change", handleFileInput);
     on("retryScanBtn", "click", retryScan);
     on("closeScanFailedBtn", "click", closeScanFailure);

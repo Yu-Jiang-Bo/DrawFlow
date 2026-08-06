@@ -79,6 +79,14 @@
     if (overlay) overlay.setAttribute("aria-hidden", "true");
   }
 
+  function setScanningOverlay(active, message) {
+    const overlay = $("scanRunningOverlay");
+    const text = message || "正在扫描 .ai 模板";
+    setHidden("scanRunningOverlay", !active);
+    setText("scanRunningMessage", `${text}。系统正在调用本机 Illustrator 读取 Template 下的规范标注字段。请勿刷新或关闭页面。`);
+    if (overlay) overlay.setAttribute("aria-hidden", active ? "false" : "true");
+  }
+
 
   function setScanningUi(active, message) {
     if (globalThis.renderScanProgress) {
@@ -90,7 +98,7 @@
     setDisabled("scanTemplateBtn", active);
     setDisabled("rescanTemplateBtn", active);
     setDisabled("saveDraftBtn", active);
-    setDisabled("cancelScanBtn", !active);
+    setScanningOverlay(active, message);
   }
 
 
@@ -106,6 +114,7 @@
     containsSensitive,
     showScanFailure,
     closeScanFailure,
+    setScanningOverlay,
     setScanningUi
   });
 })();

@@ -55,8 +55,10 @@ REQUIRED_IDS = [
     "aiFile",
     "scanTemplateBtn",
     "rescanTemplateBtn",
-    "cancelScanBtn",
     "scanProgress",
+    "scanRunningOverlay",
+    "scanRunningTitle",
+    "scanRunningMessage",
     "scanSummaryMetrics",
     "scanSummaryWarning",
     "scanSummary",
@@ -106,6 +108,7 @@ def test_v2_workbench_page_exposes_independent_entry_contract():
     assert 'id="templateIdMirror"' not in INDEX_HTML
     assert 'id="templateNameMirror"' not in INDEX_HTML
     assert 'id="shopNameMirror"' not in INDEX_HTML
+    assert 'id="cancelScanBtn"' not in INDEX_HTML
 
 
 def test_v2_workbench_upload_stage_hides_later_configuration():
@@ -149,6 +152,8 @@ def test_v2_workbench_uses_controlled_business_inputs():
     assert "素材替换" in JS
     assert "showScanFailure" in JS
     assert "sanitizeMessage" in JS
+    assert "setScanningOverlay" in JS
+    assert "cancelScan" not in JS
 
 
 def test_v2_workbench_does_not_expose_forbidden_ui_concepts():
@@ -167,6 +172,8 @@ def test_v2_workbench_static_styles_cover_desktop_layout_and_states():
     assert "@media (max-width: 1280px)" in CSS
     assert "@media (max-width: 1100px)" in CSS
     assert ".upload-zone.dragover" in CSS
+    assert ".scan-running-dialog" in STAGE_CSS
+    assert "@keyframes scan-running-slide" in STAGE_CSS
     assert ".structure-node" in CSS
     assert ".structured-row" in CSS
     assert ".content-option-group" in CSS

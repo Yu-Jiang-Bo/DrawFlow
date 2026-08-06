@@ -142,7 +142,6 @@ INDEX_HTML = """<!doctype html>
               <div class="v2-action-row">
                 <button id="scanTemplateBtn" class="primary" type="button">上传并扫描</button>
                 <button id="rescanTemplateBtn" type="button">重新扫描已保存文件</button>
-                <button id="cancelScanBtn" type="button">取消</button>
               </div>
             </div>
           </div>
@@ -278,6 +277,21 @@ INDEX_HTML = """<!doctype html>
       </div>
     </footer>
   </main>
+
+  <div class="modal-overlay scan-running-overlay" id="scanRunningOverlay" role="status" aria-live="polite" aria-modal="true" aria-labelledby="scanRunningTitle" aria-describedby="scanRunningMessage" hidden>
+    <section class="modal-dialog scan-running-dialog">
+      <header>
+        <h2 id="scanRunningTitle">正在扫描模板</h2>
+      </header>
+      <section class="modal-body">
+        <p id="scanRunningMessage">正在调用本机 Illustrator 扫描 .ai 模板中的规范标注字段。</p>
+        <div class="scan-running-progress" aria-hidden="true">
+          <span></span>
+        </div>
+        <p class="modal-note">请勿刷新或关闭页面；刷新只会中断当前页面等待，不能保证停止已经开始的 Illustrator 扫描。</p>
+      </section>
+    </section>
+  </div>
 
   <div class="modal-overlay" id="scanFailedOverlay" role="alertdialog" aria-modal="true" aria-labelledby="scanFailedTitle" aria-describedby="scanFailedMessage" hidden>
     <section class="modal-dialog">
