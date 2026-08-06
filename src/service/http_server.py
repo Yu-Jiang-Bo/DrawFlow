@@ -1434,14 +1434,31 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
 
     def _send_runtime_bundle(self, template_id: str, version: str) -> None:
         path = self.runtime_templates.bundle_path(template_id, version)
-        data = path.read_bytes()
+        self._send_file_stream(
+            path,
+            content_type="application/zip",
+            download_name=_safe_download_name(path.name),
+            extra_headers={"X-DrawFlow-SHA256": sha256_file(path)},
+        )
+
+    def _send_file_stream(
+        self,
+        path: Path,
+        *,
+        content_type: str,
+        download_name: str,
+        extra_headers: dict[str, str] | None = None,
+    ) -> None:
         self.send_response(HTTPStatus.OK)
-        self.send_header("Content-Type", "application/zip")
-        self.send_header("Content-Disposition", f'attachment; filename="{_safe_download_name(path.name)}"')
-        self.send_header("X-DrawFlow-SHA256", sha256_file(path))
-        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Disposition", f'attachment; filename="{_safe_download_name(download_name)}"')
+        for key, value in (extra_headers or {}).items():
+            self.send_header(key, str(value))
+        self.send_header("Content-Length", str(path.stat().st_size))
         self.end_headers()
-        self.wfile.write(data)
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                self.wfile.write(chunk)
 
     def _save_uploaded_order(self, filename: str, content: bytes) -> Path:
         if not content:

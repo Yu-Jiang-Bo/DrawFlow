@@ -1,4 +1,6 @@
 import json
+import hashlib
+import zipfile
 
 import pytest
 
@@ -93,6 +95,82 @@ def test_publish_creates_immutable_version_and_edit_copies_to_new_draft(tmp_path
     assert first_manifest["immutable"] is True
     assert first_config == {"version": 1}
     assert store.rollback("V2DEMO001")["publication"]["current_version"] == "v0001"
+
+
+def test_version_bundle_contains_manifest_payload_and_assets(tmp_path):
+    store = V2TemplateStore(tmp_path / "v2")
+    store.save_draft(
+        "V2DEMO001",
+        metadata={"name": "Demo"},
+        config={"version": 1},
+        scan={"scan_version": "scan-1"},
+        assets=[{"filename": "template.ai", "content": b"ai-v1"}],
+    )
+    store.publish_draft("V2DEMO001")
+
+    bundle_path = store.version_bundle_path("V2DEMO001", "v0001")
+
+    with zipfile.ZipFile(bundle_path) as archive:
+        assert archive.testzip() is None
+        assert {"manifest.json", "metadata.json", "config.json", "scan.json", "assets/template.ai"} <= set(
+            archive.namelist()
+        )
+        assert archive.read("assets/template.ai") == b"ai-v1"
+
+
+def test_save_draft_accepts_streamed_source_path_asset_metadata(tmp_path):
+    source = tmp_path / "upload-cache" / "template.ai"
+    source.parent.mkdir()
+    source.write_bytes(b"streamed-ai")
+    store = V2TemplateStore(tmp_path / "v2")
+
+    store.save_draft(
+        "V2DEMO001",
+        metadata={"name": "Demo"},
+        assets=[
+            {
+                "filename": "template.ai",
+                "role": "template",
+                "source_path": source,
+                "sha256": hashlib.sha256(b"streamed-ai").hexdigest(),
+                "mime_type": "application/illustrator",
+                "scan_version": "scan-2",
+                "draft_revision": "d0001",
+            }
+        ],
+    )
+    draft = store.read_draft("V2DEMO001")
+
+    asset = draft["manifest"]["assets"][0]
+    assert asset["path"] == "assets/template.ai"
+    assert asset["size_bytes"] == len(b"streamed-ai")
+    assert asset["sha256"] == hashlib.sha256(b"streamed-ai").hexdigest()
+    assert asset["mime_type"] == "application/illustrator"
+    assert asset["scan_version"] == "scan-2"
+    assert (tmp_path / "v2/V2DEMO001/drafts/d0001/assets/template.ai").read_bytes() == b"streamed-ai"
+
+
+def test_create_draft_from_version_streams_assets_without_reading_ai_bytes(tmp_path, monkeypatch):
+    store = V2TemplateStore(tmp_path / "v2")
+    store.save_draft(
+        "V2DEMO001",
+        metadata={"name": "Demo"},
+        assets=[{"filename": "template.ai", "content": b"ai-v1"}],
+    )
+    store.publish_draft("V2DEMO001")
+    original_read_bytes = type(tmp_path).read_bytes
+
+    def fail_ai_read_bytes(self):
+        if self.suffix == ".ai":
+            raise AssertionError("AI assets must be copied as streams, not read_bytes()")
+        return original_read_bytes(self)
+
+    monkeypatch.setattr(type(tmp_path), "read_bytes", fail_ai_read_bytes)
+
+    state = store.create_draft_from_version("V2DEMO001")
+
+    assert state["draft"]["source_version"] == "v0001"
+    assert store.read_draft("V2DEMO001")["manifest"]["assets"][0]["sha256"]
 
 
 def test_failed_publish_state_write_keeps_previous_active_version(tmp_path, monkeypatch):

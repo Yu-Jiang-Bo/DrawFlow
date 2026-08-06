@@ -7,30 +7,25 @@ import shutil
 from pathlib import Path
 from typing import Any, Mapping
 from uuid import uuid4
+import zipfile
 
 from .paths import V2_TEMPLATE_DATA_DIR
 from .template_locks import TEMPLATE_STATE_LOCK
+from .v2_template_store_assets import bundle_is_valid, bundle_members, write_v2_assets
 from .v2_template_store_utils import (
     optional_json,
     read_json,
     remove_tree,
-    safe_name,
     safe_segment,
     sha256_file,
-    unique_path,
     utc_now,
-    write_bytes_atomic,
     write_json_atomic,
 )
-
-
 V2_TEMPLATE_STORE_SCHEMA = "custom-renderer/v2-template-store"
 V2_TEMPLATE_STORE_VERSION = 1
 
-
 class V2TemplateStoreError(RuntimeError):
     """Raised when a V2 template draft or version cannot be stored."""
-
 
 class V2TemplateStore:
     _write_json_atomic = staticmethod(write_json_atomic)
@@ -57,6 +52,9 @@ class V2TemplateStore:
             try:
                 manifest = self._stage_payload(staging, template, config or {}, scan or {}, assets or [])
                 manifest.update({"draft_revision": revision, "source_version": source_version})
+                for asset_record in manifest["assets"]:
+                    asset_record["draft_version"] = revision
+                    asset_record["draft_revision"] = revision
                 self._write_json_atomic(staging / "manifest.json", manifest)
                 final_dir.parent.mkdir(parents=True, exist_ok=True)
                 staging.rename(final_dir)
@@ -84,7 +82,12 @@ class V2TemplateStore:
             {
                 "filename": item["file_name"],
                 "role": item.get("role", ""),
-                "content": (version_dir / item["path"]).read_bytes(),
+                "source_path": version_dir / item["path"],
+                "mime_type": item.get("mime_type", ""),
+                "extension": item.get("extension", ".ai"),
+                "scan_version": item.get("scan_version", ""),
+                "draft_version": item.get("draft_version", ""),
+                "draft_revision": item.get("draft_revision", ""),
             }
             for item in manifest.get("assets", [])
             if isinstance(item, Mapping)
@@ -128,6 +131,23 @@ class V2TemplateStore:
                     remove_tree(version_dir)
                 raise
         return self.get_state(template_id)
+
+    def version_bundle_path(self, template_id: str, version: str) -> Path:
+        version_dir = self._version_dir(template_id, version)
+        manifest_path = version_dir / "manifest.json"
+        if not manifest_path.exists():
+            raise V2TemplateStoreError("正式模板版本不存在，无法下载。")
+        manifest = read_json(manifest_path)
+        bundle_path = version_dir / "template-bundle.zip"
+        expected = bundle_members(manifest)
+        if not bundle_is_valid(bundle_path, expected):
+            if bundle_path.exists():
+                bundle_path.unlink()
+            with zipfile.ZipFile(bundle_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+                for path in sorted(version_dir.rglob("*")):
+                    if path.is_file() and path.name != bundle_path.name:
+                        archive.write(path, path.relative_to(version_dir).as_posix())
+        return bundle_path
 
     def discard_draft(self, template_id: str) -> dict[str, Any]:
         with TEMPLATE_STATE_LOCK:
@@ -179,7 +199,7 @@ class V2TemplateStore:
         self._write_json_atomic(directory / "metadata.json", template)
         self._write_json_atomic(directory / "config.json", dict(config))
         self._write_json_atomic(directory / "scan.json", dict(scan))
-        asset_records = self._write_assets(directory / "assets", assets)
+        asset_records = write_v2_assets(directory / "assets", assets, error_cls=V2TemplateStoreError)
         return {
             "schema": V2_TEMPLATE_STORE_SCHEMA,
             "schema_version": V2_TEMPLATE_STORE_VERSION,
@@ -189,24 +209,6 @@ class V2TemplateStore:
             "scan_sha256": sha256_file(directory / "scan.json"),
             "assets": asset_records,
         }
-
-    def _write_assets(self, directory: Path, assets: list[Mapping[str, Any]]) -> list[dict[str, Any]]:
-        records: list[dict[str, Any]] = []
-        for index, asset in enumerate(assets):
-            filename = safe_name(str(asset.get("filename") or f"asset-{index}.ai"), f"asset-{index}.ai")
-            content = asset.get("content", b"")
-            if not filename.lower().endswith(".ai") or not isinstance(content, bytes) or not content:
-                raise V2TemplateStoreError("V2 模板资产必须是非空 .ai 文件。")
-            target = unique_path(directory, filename)
-            write_bytes_atomic(target, content)
-            records.append({
-                "file_name": target.name,
-                "role": str(asset.get("role") or ""),
-                "path": target.relative_to(directory.parent).as_posix(),
-                "size_bytes": target.stat().st_size,
-                "sha256": sha256_file(target),
-            })
-        return records
 
     def _state_after_publish(self, state: Mapping[str, Any], version: str, manifest: Mapping[str, Any]) -> dict[str, Any]:
         next_state = deepcopy(dict(state))

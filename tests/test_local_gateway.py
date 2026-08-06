@@ -148,6 +148,61 @@ def test_local_gateway_returns_structured_error_for_render_sync_failures(tmp_pat
     }
 
 
+def test_local_gateway_streams_v2_asset_upload_to_central(tmp_path):
+    class StreamingCentral:
+        def __init__(self):
+            self.chunks = []
+            self.content_length = None
+            self.path = ""
+
+        def proxy(self, *args, **kwargs):
+            raise AssertionError("V2 asset upload must use proxy_stream")
+
+        def proxy_stream(self, method, path, body_stream, *, content_length, headers):
+            self.content_length = content_length
+            self.path = path
+            while True:
+                chunk = body_stream.read(2)
+                if chunk == b"":
+                    break
+                self.chunks.append(chunk)
+            return 201, {"Content-Type": "application/json"}, b'{"ok":true}'
+
+    class FakeClient:
+        def __init__(self):
+            self.jobs = JobStore(tmp_path / "jobs")
+            self.data_dir = tmp_path
+            self.central = StreamingCentral()
+
+    client = FakeClient()
+    handler = type(
+        "TestStreamingGatewayRequestHandler",
+        (local_gateway.LocalGatewayRequestHandler,),
+        {"client": client},
+    )
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    worker = threading.Thread(target=server.serve_forever, daemon=True)
+    worker.start()
+    try:
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{server.server_address[1]}/api/v2/templates/V2GATE001/assets/template.ai",
+            data=b"ai-bytes",
+            method="POST",
+            headers={"Content-Type": "application/illustrator"},
+        )
+        with urllib.request.urlopen(request) as response:
+            payload = response.read()
+    finally:
+        server.shutdown()
+        server.server_close()
+        worker.join(timeout=2)
+
+    assert payload == b'{"ok":true}'
+    assert client.central.path.endswith("/api/v2/templates/V2GATE001/assets/template.ai")
+    assert client.central.content_length == len(b"ai-bytes")
+    assert client.central.chunks == [b"ai", b"-b", b"yt", b"es"]
+
+
 def test_configure_local_logging_writes_gateway_errors_to_the_client_log(tmp_path):
     local_gateway.configure_local_logging(tmp_path)
     local_gateway.LOGGER.warning("diagnostic event for test")

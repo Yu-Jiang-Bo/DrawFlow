@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import base64
-import io
 import json
+import http.client
 import shutil
 import urllib.error
 import urllib.request
@@ -12,6 +12,7 @@ import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
+from urllib.parse import urlsplit
 
 from .job_store import JobStore
 from .paths import LOCAL_DRAWFLOW_DIR
@@ -20,6 +21,7 @@ from .runtime_templates import sha256_file
 from .template_inspector import TemplateInspector
 from .template_onboarding import TemplateOnboardingStore
 from .template_registry import TemplateRegistry
+from .v2_template_transfer import TransferError, download_stream_to_file
 
 
 class LocalClientError(RuntimeError):
@@ -46,8 +48,28 @@ class HttpCentralClient:
     def get_manifest(self, template_id: str) -> dict[str, Any]:
         return self._get_json(f"/api/runtime/templates/{quote_segment(template_id)}/manifest")
 
-    def download_bundle(self, template_id: str, version: str) -> bytes:
-        return self._request("GET", f"/api/runtime/templates/{quote_segment(template_id)}/bundle/{quote_segment(version)}")
+    def download_bundle_to_file(self, template_id: str, version: str, target_path: Path | str) -> dict[str, Any]:
+        request = urllib.request.Request(
+            self.base_url + f"/api/runtime/templates/{quote_segment(template_id)}/bundle/{quote_segment(version)}",
+            method="GET",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=60) as response:
+                expected = str(response.headers.get("X-DrawFlow-SHA256") or "").strip()
+                return download_stream_to_file(response, target_path, expected_sha256=expected)
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace")
+            raise LocalClientError(
+                f"中央服务请求失败（HTTP {exc.code}）：{central_error_detail(detail)}",
+                code=f"central_http_{exc.code}",
+            ) from exc
+        except TransferError as exc:
+            raise LocalClientError(str(exc), code=exc.code) from exc
+        except OSError as exc:
+            raise LocalClientError(
+                f"无法连接中央服务：{self.base_url}",
+                code="central_unreachable",
+            ) from exc
 
     def import_scan(self, payload: Mapping[str, Any]) -> dict[str, Any]:
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
@@ -71,6 +93,36 @@ class HttpCentralClient:
                 return response.status, dict(response.headers.items()), response.read()
         except urllib.error.HTTPError as exc:
             return exc.code, dict(exc.headers.items()), exc.read()
+        except OSError as exc:
+            raise LocalClientError(
+                f"无法连接中央服务：{self.base_url}",
+                code="central_unreachable",
+            ) from exc
+
+    def proxy_stream(
+        self,
+        method: str,
+        path: str,
+        body_stream: Any,
+        *,
+        content_length: int,
+        headers: Mapping[str, str] | None = None,
+    ) -> tuple[int, dict[str, str], bytes]:
+        url = urlsplit(self.base_url)
+        connection_cls = http.client.HTTPSConnection if url.scheme == "https" else http.client.HTTPConnection
+        host = url.hostname or "127.0.0.1"
+        port = url.port
+        request_path = (url.path.rstrip("/") + path) if url.path else path
+        request_headers = {key: value for key, value in (headers or {}).items() if key.lower() != "host"}
+        request_headers["Content-Length"] = str(content_length)
+        try:
+            connection = connection_cls(host, port, timeout=60)
+            try:
+                connection.request(method, request_path, body=body_stream, headers=request_headers)
+                response = connection.getresponse()
+                return response.status, dict(response.getheaders()), response.read()
+            finally:
+                connection.close()
         except OSError as exc:
             raise LocalClientError(
                 f"无法连接中央服务：{self.base_url}",
@@ -124,8 +176,9 @@ class LocalTemplateCache:
         self._validate_manifest_paths(target, manifest)
         if self._is_cache_valid(target, manifest):
             return CachedTemplate(template_id, version, target, manifest, True)
+        bundle_path = target.with_suffix(".download.zip")
         try:
-            bundle = self.central.download_bundle(template_id, version)
+            self.central.download_bundle_to_file(template_id, version, bundle_path)
         except LocalClientError as exc:
             raise template_sync_error(template_id, "bundle", exc) from exc
         staging = target.with_name(target.name + ".download")
@@ -133,7 +186,7 @@ class LocalTemplateCache:
             shutil.rmtree(staging)
         staging.mkdir(parents=True, exist_ok=True)
         try:
-            with zipfile.ZipFile(io.BytesIO(bundle)) as archive:
+            with zipfile.ZipFile(bundle_path) as archive:
                 self._validate_archive_members(archive, manifest)
                 archive.extractall(staging)
             self._verify_bundle(staging, manifest)
@@ -146,6 +199,8 @@ class LocalTemplateCache:
             if staging.exists():
                 shutil.rmtree(staging)
             raise
+        finally:
+            bundle_path.unlink(missing_ok=True)
 
     def registry(self) -> TemplateRegistry:
         return TemplateRegistry(self.registry_path, self.templates_dir)

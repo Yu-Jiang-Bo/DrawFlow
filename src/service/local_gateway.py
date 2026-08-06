@@ -192,6 +192,9 @@ class LocalGatewayRequestHandler(BaseHTTPRequestHandler):
 
     def _proxy(self, method: str) -> None:
         try:
+            if method == "POST" and _is_v2_asset_upload(self.path):
+                self._proxy_streaming_upload(method)
+                return
             body = self._read_raw_body()
             headers = {key: value for key, value in self.headers.items()}
             status, response_headers, response_body = self.drawflow_client.central.proxy(
@@ -204,6 +207,18 @@ class LocalGatewayRequestHandler(BaseHTTPRequestHandler):
         except LocalClientError as exc:
             LOGGER.warning("central proxy failed: code=%s message=%s", exc.code, exc)
             self._send_client_error(HTTPStatus.SERVICE_UNAVAILABLE, exc)
+
+    def _proxy_streaming_upload(self, method: str) -> None:
+        length = _required_content_length(self.headers)
+        headers = {key: value for key, value in self.headers.items()}
+        status, response_headers, response_body = self.drawflow_client.central.proxy_stream(
+            method,
+            self.path,
+            _BoundedBodyReader(self.rfile, length),
+            content_length=length,
+            headers=headers,
+        )
+        self._send_proxy_response(status, response_headers, response_body)
 
     def _send_proxy_response(self, status: int, headers: dict[str, str], body: bytes) -> None:
         self.send_response(status)
@@ -330,6 +345,38 @@ def main() -> int:
 def _safe_download_name(value: str) -> str:
     chars = [char if char.isalnum() or char in {"-", "_", "."} else "_" for char in Path(value).name]
     return "".join(chars).strip("._") or "file"
+
+
+class _BoundedBodyReader:
+    def __init__(self, source: object, remaining: int) -> None:
+        self.source = source
+        self.remaining = remaining
+
+    def read(self, size: int = -1) -> bytes:
+        if self.remaining <= 0:
+            return b""
+        bounded = self.remaining if size is None or size < 0 else min(int(size), self.remaining)
+        chunk = self.source.read(bounded)  # type: ignore[attr-defined]
+        if chunk == b"" and self.remaining > 0:
+            raise OSError("request body ended before Content-Length bytes were read")
+        self.remaining -= len(chunk)
+        return chunk
+
+
+def _is_v2_asset_upload(path: str) -> bool:
+    parts = urlparse(path).path.strip("/").split("/")
+    return len(parts) == 6 and parts[:3] == ["api", "v2", "templates"] and parts[4] == "assets"
+
+
+def _required_content_length(headers: object) -> int:
+    raw = str(headers.get("Content-Length", "0") or "0")  # type: ignore[attr-defined]
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise LocalClientError("Content-Length 不是有效数字", code="invalid_content_length") from exc
+    if value <= 0:
+        raise LocalClientError("上传 AI 文件必须提供 Content-Length", code="missing_content_length")
+    return value
 
 
 def default_central_url() -> str:

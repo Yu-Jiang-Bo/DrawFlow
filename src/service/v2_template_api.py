@@ -4,12 +4,36 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from http import HTTPStatus
-from typing import Any, Mapping
+from pathlib import Path
+from typing import Any, BinaryIO, Mapping
 from urllib.parse import unquote
+from uuid import uuid4
 
 from .paths import V2_TEMPLATE_DATA_DIR
+from .v2_template_api_support import (
+    V2TemplateApiError,
+    current_asset_sources,
+    ensure_payload_fields,
+    find_asset,
+    handle_v2_template_api,
+    header,
+    header_map,
+    metadata_from_payload,
+    metadata_from_state,
+    not_found,
+    optional_draft,
+    optional_mapping,
+    required_text,
+    state_summary,
+)
+from .v2_template_audit import V2AuditRecorder, audit_event_from_state
+from .v2_template_errors import V2ApiError, sanitize_v2_config
+from .v2_template_limits import StreamingWriteGuard, V2TemplateLimitConfig, V2UploadConcurrencyGate
+from .v2_template_maintenance import build_maintenance_snapshot, drawing_group_safe_view
+from .v2_template_maintenance import require_central_upload_allowed
 from .v2_template_store import V2TemplateStore, V2TemplateStoreError
-from .v2_template_store_utils import read_json
+from .v2_template_store_utils import read_json, remove_tree, safe_segment
+from .v2_template_transfer import DEFAULT_CHUNK_SIZE, receive_ai_stream
 from .v2_template_validation import validate_v2_template_configuration
 
 
@@ -19,35 +43,19 @@ class V2ApiResult:
     status: HTTPStatus = HTTPStatus.OK
 
 
-class V2TemplateApiError(ValueError):
+class V2TemplateApi:
     def __init__(
         self,
-        code: str,
-        reason: str,
+        store: V2TemplateStore | None = None,
         *,
-        status: HTTPStatus = HTTPStatus.BAD_REQUEST,
-        title: str = "V2 模板请求无法处理",
-        suggestion: str = "请检查模板 ID、草稿内容和受控配置字段后重试。",
+        limits: V2TemplateLimitConfig | None = None,
+        upload_gate: V2UploadConcurrencyGate | None = None,
+        audit_recorder: V2AuditRecorder | None = None,
     ) -> None:
-        super().__init__(reason)
-        self.code = code
-        self.reason = reason
-        self.status = status
-        self.title = title
-        self.suggestion = suggestion
-
-    def to_payload(self) -> dict[str, str]:
-        return {
-            "code": self.code,
-            "title": self.title,
-            "reason": self.reason,
-            "suggestion": self.suggestion,
-        }
-
-
-class V2TemplateApi:
-    def __init__(self, store: V2TemplateStore | None = None) -> None:
         self.store = store or V2TemplateStore(V2_TEMPLATE_DATA_DIR)
+        self.limits = limits or V2TemplateLimitConfig(temp_dir=self.store.root / "_tmp")
+        self.upload_gate = upload_gate or V2UploadConcurrencyGate(self.limits)
+        self.audit_recorder = audit_recorder or V2AuditRecorder(self.store.root / "audit.jsonl")
 
     def handle(self, method: str, parts: list[str], payload: Mapping[str, Any] | None = None) -> V2ApiResult:
         if len(parts) == 3 and parts == ["api", "v2", "templates"]:
@@ -55,6 +63,9 @@ class V2TemplateApi:
                 return V2ApiResult({"templates": self.list_templates()})
             if method == "POST":
                 return V2ApiResult(self.create_template(payload or {}), HTTPStatus.CREATED)
+        if len(parts) == 4 and parts == ["api", "v2", "templates", "maintenance"]:
+            if method == "GET":
+                return V2ApiResult({"maintenance": self.drawing_group_safe_maintenance()})
         if len(parts) == 5 and parts[:3] == ["api", "v2", "templates"]:
             template_id = unquote(parts[3])
             action = parts[4]
@@ -72,7 +83,7 @@ class V2TemplateApi:
             "v2_route_not_found",
             "请求的 V2 模板接口不存在。",
             status=HTTPStatus.NOT_FOUND,
-            suggestion="请使用 /api/v2/templates 及其草稿、扫描、校验或版本子接口。",
+            suggestion="请使用 /api/v2/templates 及其草稿、扫描、校验、版本或资产子接口。",
         )
 
     def list_templates(self) -> list[dict[str, Any]]:
@@ -80,34 +91,102 @@ class V2TemplateApi:
             return []
         states = []
         for state_path in sorted(self.store.root.glob("*/state.json")):
-            states.append(_state_summary(read_json(state_path)))
+            states.append(state_summary(read_json(state_path)))
         return states
 
     def create_template(self, payload: Mapping[str, Any]) -> dict[str, Any]:
-        template_id = _required_text(payload, "template_id", "请填写模板 ID。")
-        metadata = _metadata_from_payload(template_id, payload, None)
+        ensure_payload_fields(payload, {"template_id", "name", "shop_name"})
+        template_id = required_text(payload, "template_id", "请填写模板 ID。")
+        metadata = metadata_from_payload(template_id, payload, None)
         state = self.store.save_draft(template_id, metadata=metadata)
-        return {"template": state["template"], "state": _state_summary(state)}
+        self._record_audit("template_created", state)
+        return {"template": state["template"], "state": state_summary(state)}
 
     def save_draft(self, template_id: str, payload: Mapping[str, Any]) -> dict[str, Any]:
+        ensure_payload_fields(payload, {"name", "shop_name", "config", "scan", "scan_result"})
         current = self.store.get_state(template_id)
-        metadata = _metadata_from_payload(template_id, payload, current)
-        config = _optional_mapping(payload, "config")
-        scan = _optional_mapping(payload, "scan", "scan_result")
-        validation = self._validate_saveable_config(config)
+        metadata = metadata_from_payload(template_id, payload, current)
+        config = optional_mapping(payload, "config")
+        scan = optional_mapping(payload, "scan", "scan_result")
+        config, validation = self._prepare_saveable_config(config)
         self._ensure_config_template_matches(template_id, validation)
         state = self.store.save_draft(template_id, metadata=metadata, config=config, scan=scan)
+        draft = self.store.read_draft(template_id)
+        self._record_audit("draft_saved", state, draft)
         return {
-            "state": _state_summary(state),
-            "draft": self.store.read_draft(template_id),
+            "state": state_summary(state),
+            "draft": draft,
             "validation": validation,
         }
+
+    def upload_asset(
+        self,
+        template_id: str,
+        file_name: str,
+        source: BinaryIO,
+        *,
+        content_length: int | None = None,
+        headers: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        state = self.store.get_state(template_id)
+        metadata = metadata_from_state(template_id, state)
+        draft = optional_draft(self.store, template_id)
+        config = dict(draft.get("config", {})) if draft else {}
+        scan = dict(draft.get("scan", {})) if draft else {}
+        headers_by_name = header_map(headers or {})
+        asset_role = header(headers_by_name, "x-drawflow-asset-role") or "template"
+        require_central_upload_allowed(asset_role)
+        safe_id = safe_segment(template_id)
+        if not safe_id:
+            raise V2TemplateApiError("v2_template_not_found", "模板 ID 不合法，无法上传资产。", status=HTTPStatus.NOT_FOUND)
+        upload_dir = self.limits.temp_dir / "uploads" / safe_id / uuid4().hex
+        upload_path = upload_dir / file_name
+        guard = StreamingWriteGuard(
+            upload_path,
+            config=self.limits,
+            expected_size_bytes=content_length,
+        )
+        guard.preflight()
+        try:
+            with self.upload_gate.acquire():
+                upload_record = receive_ai_stream(
+                    source,
+                    upload_dir,
+                    file_name,
+                    role=asset_role,
+                    scan_version=header(headers_by_name, "x-drawflow-scan-version") or str(scan.get("scan_version") or ""),
+                    draft_version=str(dict(state.get("draft") or {}).get("revision") or ""),
+                    mime_type=header(headers_by_name, "content-type"),
+                    chunk_size=DEFAULT_CHUNK_SIZE,
+                    on_chunk=guard.record_chunk,
+                )
+                assets = [
+                    *current_asset_sources(self.store, template_id, draft, replace_file_name=upload_record["file_name"]),
+                    {
+                        **upload_record,
+                        "filename": upload_record["file_name"],
+                        "source_path": upload_dir / upload_record["file_name"],
+                    },
+                ]
+                next_state = self.store.save_draft(template_id, metadata=metadata, config=config, scan=scan, assets=assets)
+                next_draft = self.store.read_draft(template_id)
+                self._record_audit("asset_uploaded", next_state, next_draft, details={"file_name": upload_record["file_name"]})
+                return {
+                    "state": state_summary(next_state),
+                    "asset": find_asset(next_draft["manifest"], upload_record["file_name"]),
+                    "draft": next_draft,
+                }
+        finally:
+            remove_tree(upload_dir)
+
+    def version_bundle_path(self, template_id: str, version: str) -> Path:
+        return self.store.version_bundle_path(template_id, version)
 
     def read_draft(self, template_id: str) -> dict[str, Any]:
         try:
             return self.store.read_draft(template_id)
         except V2TemplateStoreError as exc:
-            raise _not_found(str(exc)) from exc
+            raise not_found(str(exc)) from exc
 
     def read_scan(self, template_id: str) -> dict[str, Any]:
         draft = self.read_draft(template_id)
@@ -121,7 +200,11 @@ class V2TemplateApi:
         config = payload.get("config", payload)
         if not isinstance(config, Mapping):
             raise V2TemplateApiError("v2_config_invalid", "校验内容必须是 JSON 对象。")
-        return {"validation": validate_v2_template_configuration(dict(config))}
+        validation = validate_v2_template_configuration(dict(config))
+        if validation.get("ok"):
+            state = {"template_id": str(dict(validation.get("contract", {}).get("template", {})).get("template_id") or "")}
+            self._record_audit("draft_validated", state, details={"can_save": validation.get("can_save", False)})
+        return {"validation": validation}
 
     def read_versions(self, template_id: str) -> dict[str, Any]:
         state = self.store.get_state(template_id)
@@ -131,17 +214,33 @@ class V2TemplateApi:
             "versions": state["versions"],
         }
 
-    def _validate_saveable_config(self, config: Mapping[str, Any]) -> dict[str, Any] | None:
+    def maintenance_snapshot(self) -> dict[str, Any]:
+        return build_maintenance_snapshot(self.store.root, limits=self.limits)
+
+    def drawing_group_safe_maintenance(self) -> dict[str, Any]:
+        return drawing_group_safe_view(self.maintenance_snapshot())
+
+    def _prepare_saveable_config(self, config: Mapping[str, Any]) -> tuple[dict[str, Any], dict[str, Any] | None]:
         if not config:
-            return None
-        validation = validate_v2_template_configuration(dict(config))
+            return {}, None
+        try:
+            sanitize_v2_config(config)
+        except V2ApiError as exc:
+            raise V2TemplateApiError(
+                "v2_config_rejected",
+                "配置包含脚本、JSX、自然语言规则或未开放字段，草稿未保存。",
+                suggestion="请删除脚本、自然语言规则、未知字段或错误类型后再保存。",
+                cause=exc,
+            ) from exc
+        controlled_config = dict(config)
+        validation = validate_v2_template_configuration(controlled_config)
         if not validation["can_save"]:
             raise V2TemplateApiError(
                 "v2_config_rejected",
                 "配置没有通过 V2 白名单契约，草稿未保存。",
                 suggestion="请删除脚本、自然语言规则、未知字段或错误类型后再保存。",
             )
-        return validation
+        return controlled_config, validation
 
     def _ensure_config_template_matches(self, template_id: str, validation: Mapping[str, Any] | None) -> None:
         if not validation:
@@ -156,88 +255,17 @@ class V2TemplateApi:
                 suggestion="请确认 URL 中的模板 ID 和配置 template.template_id 使用同一个值。",
             )
 
-
-def handle_v2_template_api(handler: Any, method: str, path: str, parts: list[str]) -> bool:
-    if len(parts) < 3 or parts[:3] != ["api", "v2", "templates"]:
-        return False
-    try:
-        payload = handler._read_json() if method == "POST" else None
-        result = handler.v2_template_api.handle(method, parts, payload)
-        handler._send_json(result.payload, result.status)
-    except V2TemplateApiError as exc:
-        handler._send_json({"error": exc.to_payload()}, exc.status)
-    except (TypeError, ValueError, V2TemplateStoreError) as exc:
-        error = V2TemplateApiError("v2_invalid_request", _safe_reason(exc))
-        handler._send_json({"error": error.to_payload()}, error.status)
-    except Exception:
-        error = V2TemplateApiError(
-            "v2_internal_error",
-            "服务处理 V2 模板请求时失败，技术详情已保留在服务日志。",
-            status=HTTPStatus.INTERNAL_SERVER_ERROR,
-            title="V2 模板服务异常",
-            suggestion="请稍后重试；如果持续失败，请联系维护人员查看服务日志。",
-        )
-        handler._send_json({"error": error.to_payload()}, error.status)
-    return True
-
-
-def _metadata_from_payload(
-    template_id: str,
-    payload: Mapping[str, Any],
-    current_state: Mapping[str, Any] | None,
-) -> dict[str, str]:
-    template = current_state.get("template", {}) if isinstance(current_state, Mapping) else {}
-    name = str(payload.get("name") or dict(template).get("name") or "").strip()
-    if not name:
-        raise V2TemplateApiError("v2_template_name_required", "请填写模板名称。")
-    return {
-        "template_id": template_id,
-        "name": name,
-        "shop_name": str(payload.get("shop_name") or dict(template).get("shop_name") or "").strip(),
-    }
-
-
-def _optional_mapping(payload: Mapping[str, Any], key: str, fallback_key: str = "") -> dict[str, Any]:
-    value = payload.get(key, payload.get(fallback_key, {})) if fallback_key else payload.get(key, {})
-    if value in (None, ""):
-        return {}
-    if not isinstance(value, Mapping):
-        raise V2TemplateApiError("v2_payload_invalid", f"{key} 必须是 JSON 对象。")
-    return dict(value)
-
-
-def _required_text(payload: Mapping[str, Any], key: str, reason: str) -> str:
-    value = str(payload.get(key) or "").strip()
-    if not value:
-        raise V2TemplateApiError("v2_required_field_missing", reason)
-    return value
-
-
-def _state_summary(state: Mapping[str, Any]) -> dict[str, Any]:
-    return {
-        "template_id": state.get("template_id", ""),
-        "template": dict(state.get("template", {})),
-        "draft": dict(state["draft"]) if isinstance(state.get("draft"), Mapping) else None,
-        "publication": dict(state.get("publication", {})),
-        "versions": [dict(item) for item in state.get("versions", []) if isinstance(item, Mapping)],
-    }
-
-
-def _not_found(reason: str) -> V2TemplateApiError:
-    return V2TemplateApiError(
-        "v2_template_not_found",
-        reason,
-        status=HTTPStatus.NOT_FOUND,
-        suggestion="请确认模板 ID 是否存在，或先创建模板草稿。",
-    )
-
-
-def _safe_reason(exc: BaseException) -> str:
-    reason = str(exc).strip() or "请求内容不符合 V2 模板接口要求。"
-    for marker in (":\\", "/", "Traceback", "HTTPStatus"):
-        if marker in reason:
-            return "请求内容不符合 V2 模板接口要求。"
-    return reason
-
+    def _record_audit(
+        self,
+        event: str,
+        state: Mapping[str, Any],
+        draft: Mapping[str, Any] | None = None,
+        *,
+        details: Mapping[str, Any] | None = None,
+    ) -> None:
+        try:
+            self.audit_recorder.append(audit_event_from_state(event, state, draft, details=details or {}))
+        except OSError:
+            pass
 
 __all__ = ["V2TemplateApi", "V2TemplateApiError", "handle_v2_template_api"]
