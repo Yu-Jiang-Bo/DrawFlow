@@ -35,12 +35,18 @@
     setValue("templateId", template.template_id || fallbackId || "");
     setValue("templateName", template.name || "");
     setValue("shopName", template.shop_name || "");
-    setValue("templateIdMirror", template.template_id || fallbackId || "");
-    setValue("templateNameMirror", template.name || "");
-    setValue("shopNameMirror", template.shop_name || "");
     const manifest = objectOf(draft && draft.manifest);
     setText("draftVersion", manifest.draft_revision || manifest.version || "-");
+    setText("currentTemplateContext", templateContextText(template, fallbackId));
     setDraftStatus(draft ? "草稿已读取" : "等待创建草稿", draft ? "confirmed" : "pending");
+  }
+
+
+  function templateContextText(template, fallbackId) {
+    const id = cleanText(template.template_id || fallbackId || "");
+    const name = cleanText(template.name || "");
+    if (!id) return "未选择模板";
+    return name ? `${id} · ${name}` : `${id} · 等待创建草稿`;
   }
 
 
@@ -272,6 +278,7 @@
   Object.assign(globalThis, {
     renderTemplateList,
     fillDraftFields,
+    templateContextText,
     renderScanSummary,
     renderStructureTree,
     renderTables,

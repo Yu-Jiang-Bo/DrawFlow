@@ -42,28 +42,11 @@ INDEX_HTML = """<!doctype html>
         <p class="v2-section-kicker">模板管理 / 独立入口</p>
         <h2 id="v2PageTitle">V2 模板配置工作台</h2>
       </div>
-      <dl class="v2-template-meta" aria-label="当前模板信息">
-        <div>
-          <dt>模板 ID</dt>
-          <dd><input id="templateId" type="text" placeholder="例如 JJMB202608060001" autocomplete="off" /></dd>
-        </div>
-        <div>
-          <dt>模板名称</dt>
-          <dd><input id="templateName" type="text" placeholder="输入中文模板名称" autocomplete="off" /></dd>
-        </div>
-        <div>
-          <dt>店铺</dt>
-          <dd><input id="shopName" type="text" placeholder="选填" autocomplete="off" /></dd>
-        </div>
-        <div>
-          <dt>状态</dt>
-          <dd><span id="draftStatusBadge" class="v2-badge">草稿</span></dd>
-        </div>
-        <div>
-          <dt>版本</dt>
-          <dd id="draftVersion">v0</dd>
-        </div>
-      </dl>
+      <div class="v2-title-status" aria-label="当前模板状态">
+        <span id="currentTemplateContext" class="v2-title-context">未选择模板</span>
+        <span id="draftStatusBadge" class="v2-badge">草稿</span>
+        <span id="draftVersion" class="v2-badge v2-badge-muted">v0</span>
+      </div>
     </section>
 
     <section class="check-rail" id="v2CheckRail" aria-label="八项待确认">
@@ -167,20 +150,20 @@ INDEX_HTML = """<!doctype html>
       <section class="center-pane" aria-label="当前配置">
         <section class="pane">
           <div class="pane-header">
-            <h3>基础信息</h3>
+            <h3>模板草稿</h3>
           </div>
-          <div class="pane-body field-grid">
+          <div class="pane-body field-grid draft-field-grid">
             <label>
               <span>模板 ID</span>
-              <input id="templateIdMirror" name="template_id" type="text" placeholder="例如 JJMB202608060001" disabled />
+              <input id="templateId" name="template_id" type="text" placeholder="例如 JJMB202608060001" autocomplete="off" />
             </label>
             <label>
               <span>模板名称</span>
-              <input id="templateNameMirror" name="template_name" type="text" placeholder="输入中文模板名称" disabled />
+              <input id="templateName" name="template_name" type="text" placeholder="输入中文模板名称" autocomplete="off" />
             </label>
             <label>
               <span>店铺</span>
-              <input id="shopNameMirror" name="shop_name" type="text" placeholder="选填" disabled />
+              <input id="shopName" name="shop_name" type="text" placeholder="选填" autocomplete="off" />
             </label>
           </div>
         </section>

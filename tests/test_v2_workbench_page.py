@@ -41,6 +41,7 @@ REQUIRED_IDS = [
     "templateId",
     "templateName",
     "shopName",
+    "currentTemplateContext",
     "draftStatusBadge",
     "draftVersion",
     "aiDropzone",
@@ -90,6 +91,9 @@ def test_v2_workbench_page_exposes_independent_entry_contract():
 
     for element_id in REQUIRED_IDS:
         assert f'id="{element_id}"' in INDEX_HTML
+    assert 'id="templateIdMirror"' not in INDEX_HTML
+    assert 'id="templateNameMirror"' not in INDEX_HTML
+    assert 'id="shopNameMirror"' not in INDEX_HTML
 
 
 def test_v2_workbench_page_has_exact_eight_check_items():

@@ -8,7 +8,7 @@ const fs = require("fs");
 
 const ids = [
   "v2CheckRail", "templateList", "templateSearch", "templateId", "templateName", "shopName",
-  "templateIdMirror", "templateNameMirror", "shopNameMirror", "draftStatusBadge", "draftVersion",
+  "currentTemplateContext", "draftStatusBadge", "draftVersion",
   "aiDropzone", "aiFile", "scanTemplateBtn", "rescanTemplateBtn", "cancelScanBtn", "scanProgress",
   "scanSummary", "scanEmptyState", "structureSearch", "structureTree", "toggleDesignsBtn",
   "toggleFontsBtn", "outputConfigRows", "fieldBindingRows", "optionMappingRows", "selectedNodeSummary",
