@@ -19,7 +19,6 @@ from tests.test_v2_template_validation import complete_contract
         ("slots", V2_STATUS_BLOCKED, "duplicate_name", "_duplicate_slot"),
         ("content", V2_STATUS_BLOCKED, "direct_text_requires_single_slot", "_break_content_preset"),
         ("dimensions", V2_STATUS_PENDING, "dimension_pending", "_remove_dimensions"),
-        ("colors", V2_STATUS_PENDING, "color_samples_pending", "_remove_colors"),
         ("preview", V2_STATUS_PENDING, "preview_sample_pending", "_remove_preview"),
     ],
 )
@@ -52,6 +51,19 @@ def test_multi_output_missing_names_are_pending_while_side_gaps_block_publicatio
     assert _has_issue(result, check="output", code="output_display_name_pending")
     assert _has_issue(result, check="output", code="output_component_pending")
     assert _has_issue(result, check="output", code="output_side_sequence_invalid")
+
+
+def test_color_samples_are_optional_only_after_manual_confirmation():
+    payload = complete_contract()
+    _remove_colors(payload)
+    payload["checks"]["colors"] = "pending"
+
+    result = validate_v2_template_configuration(payload)
+
+    assert result["can_save"] is True
+    assert result["can_publish"] is False
+    assert result["checks"]["colors"]["status"] == V2_STATUS_PENDING
+    assert _has_issue(result, check="colors", code="color_samples_pending")
 
 
 def _break_output_sequence(payload):
