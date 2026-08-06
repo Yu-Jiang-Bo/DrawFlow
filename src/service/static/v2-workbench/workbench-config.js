@@ -1,7 +1,7 @@
 ﻿(function () {
   "use strict";
   const ctx = globalThis.DrawFlowV2WorkbenchContext;
-  const { state, PRESETS, CHECK_KEYS } = ctx;
+  const { state, CHECK_KEYS } = ctx;
 
   function buildControlledConfig() {
     const basics = formBasics();
@@ -37,7 +37,7 @@
       return {
         key: safeOutputKey(rowValue(row, "output-key"), fallback, index),
         display_name: cleanText(rowValue(row, "output-name")),
-        component_key: "",
+        component_key: safeIdentifier(rowValue(row, "output-component"), ""),
         scope: "local",
         style: { field: safeField(rowValue(row, "output-style-field")), options: [] },
         design: { field: safeField(rowValue(row, "output-design-field")), options: [] },
@@ -143,14 +143,15 @@
 
 
   function designOptionsFor(output, mappings, designs, slots) {
+    const content = collectContentOptionConfigs();
     return optionKeysFor(output, "design", mappings, designs).map((key) => ({
       key: safeOptionKey(key, "design"),
       label: key,
-      content_preset: "direct_text",
+      content_preset: contentOptionPreset(content, output, "design", key),
       component_key: "",
       scope: "local",
       font_dependencies: [],
-      slots: controlledSlots(slots),
+      slots: contentOptionSlots(content, output, "design", key, slots),
       assets: []
     })).filter((item) => item.key);
   }
@@ -158,14 +159,15 @@
 
 
   function fontOptionsFor(output, mappings, fonts, slots) {
+    const content = collectContentOptionConfigs();
     return optionKeysFor(output, "font", mappings, fonts).map((key) => ({
       key: safeOptionKey(key, "font"),
       label: key,
-      content_preset: "direct_text",
+      content_preset: contentOptionPreset(content, output, "font", key),
       component_key: "",
       scope: "local",
       font_dependencies: [cleanText(key)].filter(Boolean),
-      slots: controlledSlots(slots),
+      slots: contentOptionSlots(content, output, "font", key, slots),
       assets: []
     })).filter((item) => item.key);
   }
@@ -179,28 +181,6 @@
   }
 
 
-
-  function controlledSlots(slots) {
-    const source = slots.length ? slots : [{ name: "name" }];
-    return source.slice(0, 12).map((item) => {
-      const raw = cleanText(item.key || item.name || item.label || "name");
-      const suffix = safeIdentifier(raw.replace(/^slot_/, ""), "name").toLowerCase();
-      const field = safeField(item.source_field || item.field || suffix) || "name";
-      const preset = PRESETS.includes(item.preset) ? item.preset : "direct_text";
-      return {
-        key: `slot_${suffix}`,
-        source_field: field,
-        required: item.required === false ? false : true,
-        preset,
-        anchor: "",
-        tails: [],
-        asset_key: "",
-        dimension_rule: {},
-        font_dependencies: [],
-        color_binding: ""
-      };
-    });
-  }
 
 
 
@@ -217,7 +197,6 @@
     styleOptionsFor,
     designOptionsFor,
     fontOptionsFor,
-    optionKeysFor,
-    controlledSlots
+    optionKeysFor
   });
 })();

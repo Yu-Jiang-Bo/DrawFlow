@@ -207,20 +207,9 @@ def _normalize_outputs(value: Any, issues: list[Dict[str, str]]) -> list[Dict[st
         _issue(issues, "$.outputs", "At least one output is required.")
         return []
     outputs = [_normalize_output(item, f"$.outputs[{index}]", issues) for index, item in enumerate(items)]
-    keys = [item["key"] for item in outputs if item.get("key")]
-    if len(outputs) == 1:
-        if keys and keys[0] != "Output_main":
-            _issue(issues, "$.outputs[0].key", "A single-output template must use Output_main.")
-    else:
-        expected = [f"Output_Side{chr(ord('A') + index)}" for index in range(len(outputs))]
-        if keys != expected:
-            _issue(issues, "$.outputs", "Multi-output templates must use contiguous Output_SideA/B/C... keys.")
-        for index, output in enumerate(outputs):
-            if not output.get("display_name"):
-                _issue(issues, f"$.outputs[{index}].display_name", "Multi-output display_name is required.")
     for index, output in enumerate(outputs, start=1):
         output["order"] = index
-        if len(outputs) == 1 and not output["display_name"]:
+        if len(outputs) == 1 and output.get("key") == "Output_main" and not output["display_name"]:
             output["display_name"] = "主效果图"
     return outputs
 

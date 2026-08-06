@@ -342,18 +342,29 @@ def test_rejects_wrong_types_before_normalization():
     assert any(path == "$.checks.preview" and "Check status" in message for path, message in errors)
 
 
-def test_rejects_invalid_output_names_and_gaps():
-    single = base_contract("V2BADOUT001")
-    single["outputs"][0]["key"] = "Output_SideA"
+def test_rejects_unknown_output_name_pattern():
+    payload = base_contract("V2BADOUT001")
+    payload["outputs"][0]["key"] = "Output_front"
 
-    multi = base_contract("V2BADOUT002")
-    multi["outputs"] = [
-        {"key": "Output_SideA", "display_name": "A"},
-        {"key": "Output_SideC", "display_name": "C"},
+    result = check_v2_template_contract(payload)
+
+    assert result["ok"] is False
+    assert result["errors"][0]["path"] == "$.outputs[0].key"
+
+
+def test_allows_incomplete_multi_output_draft_for_publication_checks():
+    payload = base_contract("V2DRAFTOUT001")
+    payload["outputs"] = [
+        {"key": "Output_SideA", "display_name": ""},
+        {"key": "Output_SideC", "display_name": "内部文字"},
     ]
+    payload["field_bindings"] = {}
+    payload["option_mappings"] = []
 
-    assert check_v2_template_contract(single)["errors"][0]["path"] == "$.outputs[0].key"
-    assert any(error["path"] == "$.outputs" for error in check_v2_template_contract(multi)["errors"])
+    result = check_v2_template_contract(payload)
+
+    assert result["ok"] is True
+    assert [output["key"] for output in result["contract"]["outputs"]] == ["Output_SideA", "Output_SideC"]
 
 
 def test_rejects_design_short_names_and_bad_font_names():

@@ -29,10 +29,58 @@ def collect_structure_validation_issues(contract: Mapping[str, Any]) -> list[Dic
 def _validate_structure(contract: Mapping[str, Any], issues: list[Dict[str, str]]) -> None:
     output_items = outputs(contract)
     add_duplicate_path_issues(_output_records(output_items), "$.outputs", "output", "output_key", issues)
+    _validate_output_readiness(output_items, issues)
     for output_index, output in enumerate(output_items):
         output_key = str(output.get("key") or f"output_{output_index}")
         for group_name in ("style", "design", "font"):
             _validate_option_group(output_index, output_key, group_name, mapping(output.get(group_name)), issues)
+
+
+def _validate_output_readiness(output_items: list[Mapping[str, Any]], issues: list[Dict[str, str]]) -> None:
+    if not output_items:
+        return
+    keys = [str(output.get("key") or "") for output in output_items]
+    if len(output_items) == 1:
+        if keys[0] != "Output_main":
+            add_issue(
+                issues,
+                "$.outputs[0].key",
+                "output",
+                V2_STATUS_BLOCKED,
+                "single_output_key_invalid",
+                "单效果图模板必须使用 Output_main；多面模板才使用 Output_SideA/B/C。",
+            )
+        return
+
+    expected = [f"Output_Side{chr(ord('A') + index)}" for index in range(len(output_items))]
+    if keys != expected:
+        add_issue(
+            issues,
+            "$.outputs",
+            "output",
+            V2_STATUS_BLOCKED,
+            "output_side_sequence_invalid",
+            "多 Output 必须使用连续的 Output_SideA/B/C 顺序，不能缺少中间 Side。",
+        )
+    for index, output in enumerate(output_items):
+        if not str(output.get("display_name") or "").strip():
+            add_issue(
+                issues,
+                f"$.outputs[{index}].display_name",
+                "output",
+                V2_STATUS_PENDING,
+                "output_display_name_pending",
+                "多 Output 必须确认中文部件名，便于配置、预览和错误定位。",
+            )
+        if not str(output.get("component_key") or "").strip():
+            add_issue(
+                issues,
+                f"$.outputs[{index}].component_key",
+                "output",
+                V2_STATUS_PENDING,
+                "output_component_pending",
+                "多 Output 必须确认用途标识，避免不同部件共用规则。",
+            )
 
 
 def _validate_option_group(

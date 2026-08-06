@@ -13,6 +13,7 @@ INDEX_HTML = """<!doctype html>
   <script src="/static/v2-workbench/workbench-scan-model.js" defer></script>
   <script src="/static/v2-workbench/workbench-form-model.js" defer></script>
   <script src="/static/v2-workbench/workbench-config.js" defer></script>
+  <script src="/static/v2-workbench/workbench-content.js" defer></script>
   <script src="/static/v2-workbench/workbench-view.js" defer></script>
   <script src="/static/v2-workbench/workbench-draft-actions.js" defer></script>
   <script src="/static/v2-workbench/workbench-scan-actions.js" defer></script>
@@ -215,10 +216,11 @@ INDEX_HTML = """<!doctype html>
 
         <section class="pane">
           <div class="pane-header">
-            <h3>选中节点摘要</h3>
+            <h3>逐选项内容处理</h3>
           </div>
           <div class="pane-body">
-            <div class="v2-summary" id="selectedNodeSummary">请选择左侧结构节点查看上下文。</div>
+            <p class="v2-help">每个具体 Design/F 单独选择内容处理方式；每个 slot 单独设置内容来源、业务渲染类型和必填状态。</p>
+            <div class="content-option-list" id="contentOptionRows" aria-live="polite"></div>
           </div>
         </section>
       </section>
@@ -239,6 +241,15 @@ INDEX_HTML = """<!doctype html>
           </div>
           <div class="pane-body">
             <div class="v2-summary" id="draftSummary">暂无草稿变更。</div>
+          </div>
+        </section>
+
+        <section class="pane">
+          <div class="pane-header">
+            <h3>扫描事实</h3>
+          </div>
+          <div class="pane-body">
+            <div class="v2-summary" id="selectedNodeSummary">请选择左侧结构节点查看上下文。</div>
           </div>
         </section>
       </aside>

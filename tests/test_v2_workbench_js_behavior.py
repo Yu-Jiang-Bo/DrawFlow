@@ -12,7 +12,7 @@ const ids = [
   "aiDropzone", "aiFile", "scanTemplateBtn", "rescanTemplateBtn", "cancelScanBtn", "scanProgress",
   "scanSummary", "scanEmptyState", "structureSearch", "structureTree", "toggleDesignsBtn",
   "toggleFontsBtn", "outputConfigRows", "fieldBindingRows", "optionMappingRows", "selectedNodeSummary",
-  "blockerList", "draftSummary", "saveDraftBtn", "trialRenderBtn", "publishVersionBtn",
+  "contentOptionRows", "blockerList", "draftSummary", "saveDraftBtn", "trialRenderBtn", "publishVersionBtn",
   "publishBlockerText", "scanFailedOverlay", "scanFailedMessage", "retryScanBtn", "closeScanFailedBtn"
 ];
 
@@ -165,6 +165,7 @@ function createApp(fetchImpl) {
     "workbench-scan-model.js",
     "workbench-form-model.js",
     "workbench-config.js",
+    "workbench-content.js",
     "workbench-view.js",
     "workbench-draft-actions.js",
     "workbench-scan-actions.js"
@@ -269,6 +270,88 @@ def test_v2_workbench_save_draft_does_not_submit_scan_payload():
           assert.deepStrictEqual(Object.keys(draftSaveBody.config.checks), ["output", "fields", "options", "slots", "content", "dimensions", "colors", "preview"]);
           assert.strictEqual(app.elements.publishVersionBtn.disabled, true);
           assert(app.elements.publishBlockerText.textContent.includes("发布接口未接入"));
+        })().catch((error) => { console.error(error); process.exit(1); });
+        """
+    )
+
+
+def test_v2_workbench_keeps_same_slot_independent_per_design_and_font_option():
+    run_node(
+        r"""
+        (async () => {
+          async function fakeFetch(url, options = {}) {
+            const textUrl = String(url);
+            if (textUrl === "/api/v2/templates") return response({ templates: [{ template_id: "V2CONTENT", name: "Content Demo" }] });
+            if (textUrl.endsWith("/draft")) {
+              return response({ draft: {
+                metadata: { template_id: "V2CONTENT", name: "Content Demo", shop_name: "" },
+                manifest: { draft_revision: "d0001" },
+                scan: {
+                  outputs: [{ key: "Output_main" }],
+                  slots: [{ key: "slot_name", source_field: "name" }],
+                  designs: [{ key: "Design03", slots: [{ key: "slot_name", source_field: "name" }] }],
+                  fonts: [{ key: "F1", slots: [{ key: "slot_name", source_field: "name" }] }]
+                },
+                config: {
+                  outputs: [{
+                    key: "Output_main",
+                    display_name: "主效果图",
+                    component_key: "main",
+                    style: { field: "", options: [] },
+                    design: { field: "design", options: [{ key: "Design03", content_preset: "direct_text", slots: [{ key: "slot_name", source_field: "name", preset: "direct_text", required: true }] }] },
+                    font: { field: "font", options: [{ key: "F1", content_preset: "direct_text", slots: [{ key: "slot_name", source_field: "name", preset: "direct_text", required: true }] }] }
+                  }]
+                }
+              }});
+            }
+            if (textUrl.endsWith("/validate")) return response({ validation: { checks: {} } });
+            return response({});
+          }
+          const app = createApp(fakeFetch);
+          await flush();
+          app.elements.templateList.children[0].dispatch("click");
+          await flush();
+
+          const outputRow = document.querySelectorAll("#outputConfigRows .output-row")[0];
+          assert(outputRow);
+          assert.strictEqual(outputRow.querySelector('[data-field="output-component"]').value, "main");
+          outputRow.querySelector('[data-field="output-component"]').value = "inside";
+
+          const groups = document.querySelectorAll("#contentOptionRows .content-option-group");
+          const designGroup = groups.find((row) => row.dataset.group === "design" && row.dataset.option === "Design03");
+          const fontGroup = groups.find((row) => row.dataset.group === "font" && row.dataset.option === "F1");
+          assert(designGroup);
+          assert(fontGroup);
+          designGroup.querySelector('[data-field="option-content-preset"]').value = "split_by_pipe";
+          fontGroup.querySelector('[data-field="option-content-preset"]').value = "path_text";
+
+          const slotRows = document.querySelectorAll("#contentOptionRows .content-slot-row");
+          const designSlot = slotRows.find((row) => row.dataset.group === "design" && row.dataset.option === "Design03" && row.dataset.slotKey === "slot_name");
+          const fontSlot = slotRows.find((row) => row.dataset.group === "font" && row.dataset.option === "F1" && row.dataset.slotKey === "slot_name");
+          assert(designSlot);
+          assert(fontSlot);
+          designSlot.querySelector('[data-field="slot-source-field"]').value = "design_name";
+          designSlot.querySelector('[data-field="slot-preset"]').value = "split_by_pipe";
+          designSlot.querySelector('[data-field="slot-required"]').value = "required";
+          fontSlot.querySelector('[data-field="slot-source-field"]').value = "font_name";
+          fontSlot.querySelector('[data-field="slot-preset"]').value = "path_text";
+          fontSlot.querySelector('[data-field="slot-required"]').value = "optional";
+
+          const config = buildControlledConfig();
+          const output = config.outputs[0];
+          assert.strictEqual(output.component_key, "inside");
+          const designOption = output.design.options.find((item) => item.key === "Design03");
+          const fontOption = output.font.options.find((item) => item.key === "F1");
+          assert.strictEqual(designOption.content_preset, "split_by_pipe");
+          assert.strictEqual(designOption.slots[0].key, "slot_name");
+          assert.strictEqual(designOption.slots[0].source_field, "design_name");
+          assert.strictEqual(designOption.slots[0].preset, "split_by_pipe");
+          assert.strictEqual(designOption.slots[0].required, true);
+          assert.strictEqual(fontOption.content_preset, "path_text");
+          assert.strictEqual(fontOption.slots[0].key, "slot_name");
+          assert.strictEqual(fontOption.slots[0].source_field, "font_name");
+          assert.strictEqual(fontOption.slots[0].preset, "path_text");
+          assert.strictEqual(fontOption.slots[0].required, false);
         })().catch((error) => { console.error(error); process.exit(1); });
         """
     )

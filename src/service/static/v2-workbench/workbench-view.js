@@ -94,6 +94,7 @@
     renderOutputRows();
     renderFieldBindingRows();
     renderOptionMappingRows();
+    renderContentOptionRows();
     updateBlockers();
   }
 
@@ -102,12 +103,13 @@
     const target = $("outputConfigRows");
     if (!target) return;
     const outputs = configOutputs().length ? configOutputs() : inferredOutputs();
-    target.replaceChildren(tableHeader(["输出", "名称", "样式字段", "设计字段", "字体字段"]));
+    target.replaceChildren(tableHeader(["输出", "名称", "用途", "样式字段", "设计字段", "字体字段"]));
     (outputs.length ? outputs : [emptyOutput()]).forEach((output, index) => {
       const row = tableRow("output-row");
       row.append(
         inputCell("output-key", output.key || (index ? `Output_Side${String.fromCharCode(65 + index)}` : "Output_main")),
         inputCell("output-name", output.display_name || ""),
+        inputCell("output-component", output.component_key || ""),
         inputCell("output-style-field", objectOf(output.style).field || ""),
         inputCell("output-design-field", objectOf(output.design).field || ""),
         inputCell("output-font-field", objectOf(output.font).field || "")
@@ -125,6 +127,7 @@
     row.append(
       inputCell("output-key", output.key || "Output_main"),
       inputCell("output-name", output.display_name || ""),
+      inputCell("output-component", output.component_key || ""),
       inputCell("output-style-field", ""),
       inputCell("output-design-field", ""),
       inputCell("output-font-field", "")
@@ -177,7 +180,6 @@
     );
     return row;
   }
-
 
   function outputOptions(selected) {
     const options = [["Output_main", "Output_main"]];

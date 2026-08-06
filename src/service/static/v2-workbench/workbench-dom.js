@@ -211,7 +211,6 @@
     return ["confirmed", "pending", "blocked"].includes(value) ? value : "pending";
   }
 
-
   function objectOf(value) {
     return isPlainObject(value) ? value : {};
   }

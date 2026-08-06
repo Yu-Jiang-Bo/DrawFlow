@@ -14,6 +14,7 @@ JS = "\n".join(
         "workbench-scan-model.js",
         "workbench-form-model.js",
         "workbench-config.js",
+        "workbench-content.js",
         "workbench-view.js",
         "workbench-draft-actions.js",
         "workbench-scan-actions.js",
@@ -57,6 +58,7 @@ REQUIRED_IDS = [
     "outputConfigRows",
     "fieldBindingRows",
     "optionMappingRows",
+    "contentOptionRows",
     "selectedNodeSummary",
     "blockerList",
     "draftSummary",
@@ -80,6 +82,7 @@ def test_v2_workbench_page_exposes_independent_entry_contract():
     assert 'src="/static/v2-workbench/workbench-dom.js"' in INDEX_HTML
     assert 'src="/static/v2-workbench/workbench-api.js"' in INDEX_HTML
     assert 'src="/static/v2-workbench/workbench-scan-model.js"' in INDEX_HTML
+    assert 'src="/static/v2-workbench/workbench-content.js"' in INDEX_HTML
     assert 'src="/static/v2-workbench/workbench-view.js"' in INDEX_HTML
     assert 'class="v2-shell" id="v2WorkbenchApp"' in INDEX_HTML
     assert 'class="workspace-grid"' in INDEX_HTML
@@ -108,6 +111,13 @@ def test_v2_workbench_uses_controlled_business_inputs():
     assert "buildControlledConfig" in JS
     assert "field_bindings" in JS
     assert "option_mappings" in JS
+    assert "content_preset" in JS
+    assert "output-component" in JS
+    assert "component_key" in JS
+    assert "替换文本" in JS
+    assert "路径文字" in JS
+    assert "尾巴文字" in JS
+    assert "素材替换" in JS
     assert "showScanFailure" in JS
     assert "sanitizeMessage" in JS
 
@@ -128,6 +138,8 @@ def test_v2_workbench_static_styles_cover_desktop_layout_and_states():
     assert ".upload-zone.dragover" in CSS
     assert ".structure-node" in CSS
     assert ".structured-row" in CSS
+    assert ".content-option-group" in CSS
+    assert ".content-slot-row" in CSS
     assert "url(" not in CSS
     assert "gradient" not in CSS.lower()
 
@@ -137,4 +149,5 @@ def test_v2_workbench_routes_are_isolated_from_legacy_page():
     assert 'path == "/v2/templates/workbench"' in SERVER
     assert 'path.startswith("/static/v2-workbench/")' in SERVER
     assert '"workbench-scan-actions.js"' in SERVER
+    assert '"workbench-content.js"' in SERVER
     assert "self._send_html(WORKBENCH_HTML)" in SERVER

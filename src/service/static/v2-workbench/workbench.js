@@ -16,6 +16,17 @@
   const STATUS_LABELS = { confirmed: "已核验", pending: "待核验", blocked: "阻断" };
   const STATUS_CLASS = { confirmed: "success", pending: "warn", blocked: "blocked" };
   const PRESETS = ["direct_text", "split_by_pipe", "initial_with_text", "multi_initials", "path_text", "tail_text", "design_font_combo", "asset_replace"];
+  const OPTION_PRESETS = PRESETS.filter((preset) => preset !== "asset_replace");
+  const PRESET_LABELS = {
+    direct_text: "替换文本",
+    split_by_pipe: "替换文本 · 按 | 拆分",
+    initial_with_text: "素材替换 · 首字母素材 + 正文",
+    multi_initials: "素材替换 · 多首字母素材",
+    path_text: "路径文字",
+    tail_text: "尾巴文字",
+    design_font_combo: "替换文本 · Design + Font 组合",
+    asset_replace: "素材替换"
+  };
 
   const state = {
     templates: [],
@@ -39,6 +50,8 @@
     STATUS_LABELS,
     STATUS_CLASS,
     PRESETS,
+    OPTION_PRESETS,
+    PRESET_LABELS,
     state,
     $
   };
