@@ -324,6 +324,8 @@ def test_local_gateway_serves_v2_workbench_fallback_when_central_is_unavailable(
             scan_model_js = response.read().decode("utf-8")
         with urllib.request.urlopen(f"{base_url}/static/v2-workbench/workbench-content.js") as response:
             content_js = response.read().decode("utf-8")
+        with urllib.request.urlopen(f"{base_url}/static/v2-workbench/workbench-option-rules.js") as response:
+            option_rules_js = response.read().decode("utf-8")
     finally:
         server.shutdown()
         server.server_close()
@@ -338,6 +340,7 @@ def test_local_gateway_serves_v2_workbench_fallback_when_central_is_unavailable(
     assert "/local/templates/scan" in scan_actions_js
     assert "function scanModel" in scan_model_js
     assert "function renderContentOptionRows" in content_js
+    assert "function renderOptionRuleStage" in option_rules_js
 
 
 def test_configure_local_logging_writes_gateway_errors_to_the_client_log(tmp_path):

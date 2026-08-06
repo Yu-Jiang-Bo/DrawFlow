@@ -14,7 +14,11 @@ const ids = [
   "scanSummary", "scanEmptyState", "structureSearch", "structureTree", "toggleDesignsBtn",
   "toggleFontsBtn", "outputConfigRows", "fieldBindingRows", "optionMappingRows", "selectedNodeSummary",
   "contentOptionRows", "blockerList", "draftSummary", "saveDraftBtn", "trialRenderBtn", "publishVersionBtn",
-  "publishBlockerText", "scanRunningOverlay", "scanRunningMessage", "scanFailedOverlay", "scanFailedMessage", "retryScanBtn", "closeScanFailedBtn"
+  "publishBlockerText", "scanRunningOverlay", "scanRunningMessage", "scanFailedOverlay", "scanFailedMessage", "retryScanBtn", "closeScanFailedBtn",
+  "optionRuleSearch", "optionRuleList", "optionRuleStats", "optionRuleCount", "pendingOnlyBtn", "selectedOptionTitle",
+  "selectedOptionPendingBadge", "optionContentPreset", "optionContentSeparator", "assetBindingRows", "templateCapabilityPanel",
+  "capabilityEvidenceRows", "saveAndNextOptionBtn", "rerunTrialRenderBtn", "preflightFailedOverlay", "preflightFailedMessage",
+  "preflightIssueList", "closePreflightFailedBtn", "returnToSampleDataBtn", "previewSampleRows", "previewValidationRows"
 ];
 
 function makeClassList(element) {
@@ -29,6 +33,15 @@ function makeClassList(element) {
       element.className = (element.className || "").split(/\s+/).filter((name) => !remove.has(name)).join(" ");
     },
     contains: (name) => (element.className || "").split(/\s+/).includes(name)
+    ,
+    toggle: (name, force) => {
+      const set = new Set((element.className || "").split(/\s+/).filter(Boolean));
+      const shouldAdd = force === undefined ? !set.has(name) : Boolean(force);
+      if (shouldAdd) set.add(name);
+      else set.delete(name);
+      element.className = Array.from(set).join(" ");
+      return shouldAdd;
+    }
   };
 }
 
@@ -105,8 +118,9 @@ function makeDocument() {
   const elements = {};
   ids.forEach((id) => { elements[id] = new Element("div", id); });
   ["aiFile"].forEach((id) => { elements[id].tagName = "INPUT"; });
-  ["templateSearch", "templateId", "templateName", "shopName", "structureSearch"].forEach((id) => { elements[id].tagName = "INPUT"; });
-  ["scanTemplateBtn", "rescanTemplateBtn", "saveDraftBtn", "trialRenderBtn", "publishVersionBtn", "retryScanBtn", "closeScanFailedBtn", "toggleDesignsBtn", "toggleFontsBtn"].forEach((id) => { elements[id].tagName = "BUTTON"; });
+  ["templateSearch", "templateId", "templateName", "shopName", "structureSearch", "optionRuleSearch"].forEach((id) => { elements[id].tagName = "INPUT"; });
+  ["optionContentPreset", "optionContentSeparator"].forEach((id) => { elements[id].tagName = "SELECT"; });
+  ["scanTemplateBtn", "rescanTemplateBtn", "saveDraftBtn", "trialRenderBtn", "publishVersionBtn", "retryScanBtn", "closeScanFailedBtn", "toggleDesignsBtn", "toggleFontsBtn", "pendingOnlyBtn", "saveAndNextOptionBtn", "rerunTrialRenderBtn", "closePreflightFailedBtn", "returnToSampleDataBtn"].forEach((id) => { elements[id].tagName = "BUTTON"; });
   const checkKeys = ["output", "fields", "options", "slots", "content", "dimensions", "colors", "preview"];
   checkKeys.forEach((key) => {
     const item = new Element("button");
@@ -167,6 +181,7 @@ function createApp(fetchImpl) {
     "workbench-form-model.js",
     "workbench-config.js",
     "workbench-content.js",
+    "workbench-option-rules.js",
     "workbench-stage-view.js",
     "workbench-view.js",
     "workbench-draft-actions.js",
@@ -275,7 +290,7 @@ def test_v2_workbench_save_draft_does_not_submit_scan_payload():
           assert.strictEqual(draftSaveBody.config.audit.scan_version, "");
           assert.strictEqual(draftSaveBody.config.audit.template_sha256, "");
           assert.deepStrictEqual(Object.keys(draftSaveBody.config.checks), ["output", "fields", "options", "slots", "content", "dimensions", "colors", "preview"]);
-          assert.strictEqual(app.elements.publishVersionBtn.disabled, true);
+          assert.strictEqual(app.elements.publishVersionBtn.disabled, false);
           assert(app.elements.publishBlockerText.textContent.includes("发布接口未接入"));
         })().catch((error) => { console.error(error); process.exit(1); });
         """
@@ -362,6 +377,98 @@ def test_v2_workbench_keeps_same_slot_independent_per_design_and_font_option():
           assert.strictEqual(fontOption.slots[0].source_field, "font_name");
           assert.strictEqual(fontOption.slots[0].preset, "path_text");
           assert.strictEqual(fontOption.slots[0].required, false);
+        })().catch((error) => { console.error(error); process.exit(1); });
+        """
+    )
+
+
+def test_v2_workbench_rules_stage_filters_pending_and_saves_next_option():
+    run_node(
+        r"""
+        (async () => {
+          let saveCount = 0;
+          const confirmedChecks = ["output", "fields", "options", "slots", "content", "dimensions", "colors", "preview"].reduce((checks, key) => {
+            checks[key] = { status: "confirmed", reason: "" };
+            return checks;
+          }, {});
+          async function fakeFetch(url, options = {}) {
+            const textUrl = String(url);
+            if (textUrl === "/api/v2/templates") return response({ templates: [{ template_id: "V2RULES", name: "Rules Demo" }] });
+            if (textUrl.endsWith("/draft") && (!options.method || options.method === "GET")) {
+              return response({ draft: {
+                metadata: { template_id: "V2RULES", name: "Rules Demo", shop_name: "" },
+                manifest: { draft_revision: "d0001" },
+                scan: {
+                  outputs: [{ key: "Output_main" }],
+                  slots: [{ key: "slot_name", source_field: "name" }],
+                  designs: [{ key: "Design03" }, { key: "Design08" }],
+                  fonts: [{ key: "F1" }]
+                },
+                config: {
+                  outputs: [{
+                    key: "Output_main",
+                    display_name: "涓绘晥鏋滃浘",
+                    component_key: "main",
+                    style: { field: "", options: [] },
+                    design: { field: "design", options: [{ key: "Design03", content_preset: "direct_text", slots: [{ key: "slot_name", source_field: "name" }] }] },
+                    font: { field: "font", options: [{ key: "F1", content_preset: "path_text", slots: [{ key: "slot_name", source_field: "name" }] }] }
+                  }]
+                }
+              }});
+            }
+            if (textUrl.endsWith("/validate")) return response({ validation: { can_save: true, can_publish: true, checks: confirmedChecks } });
+            if (textUrl.endsWith("/draft") && options.method === "POST") {
+              saveCount += 1;
+              return response({ draft: {
+                metadata: { template_id: "V2RULES", name: "Rules Demo", shop_name: "" },
+                manifest: {},
+                config: JSON.parse(options.body).config,
+                scan: global.DrawFlowV2WorkbenchContext.state.scan
+              }});
+            }
+            return response({});
+          }
+          const app = createApp(fakeFetch);
+          await flush();
+          app.elements.templateList.children[0].dispatch("click");
+          await flush();
+          global.setWorkbenchStage("rules");
+          await flush();
+          assert(app.elements.optionRuleList.textContent.includes("Design03"));
+          assert(app.elements.optionRuleList.textContent.includes("Design08"));
+          assert(app.elements.optionRuleList.textContent.includes("F1"));
+          app.elements.pendingOnlyBtn.dispatch("click");
+          await flush();
+          assert.strictEqual(app.elements.pendingOnlyBtn.attributes["aria-pressed"], "true");
+          assert(!app.elements.optionRuleList.textContent.includes("Design03"));
+          assert(app.elements.optionRuleList.textContent.includes("Design08"));
+          const firstTitle = app.elements.selectedOptionTitle.textContent;
+          app.elements.saveAndNextOptionBtn.dispatch("click");
+          await flush();
+          assert.strictEqual(saveCount, 1);
+          assert.notStrictEqual(app.elements.selectedOptionTitle.textContent, "");
+          assert(app.elements.selectedOptionTitle.textContent === firstTitle || app.elements.selectedOptionTitle.textContent.includes("Design08"));
+        })().catch((error) => { console.error(error); process.exit(1); });
+        """
+    )
+
+
+def test_v2_workbench_preflight_modal_sanitizes_issue_details():
+    run_node(
+        r"""
+        (async () => {
+          const app = createApp(async (url) => {
+            if (String(url) === "/api/v2/templates") return response({ templates: [] });
+            return response({});
+          });
+          await flush();
+          showPreflightFailure({ issues: [{ title: "C:\\secret\\order.xlsx COMError", detail: "Traceback at C:\\tmp", hint: "修正测试数据" }] });
+          assert.strictEqual(app.elements.preflightFailedOverlay.hidden, false);
+          assert(!app.elements.preflightIssueList.textContent.includes("C:\\"));
+          assert(!app.elements.preflightIssueList.textContent.includes("COMError"));
+          assert(app.elements.preflightIssueList.textContent.includes("修正测试数据"));
+          app.elements.closePreflightFailedBtn.dispatch("click");
+          assert.strictEqual(app.elements.preflightFailedOverlay.hidden, true);
         })().catch((error) => { console.error(error); process.exit(1); });
         """
     )

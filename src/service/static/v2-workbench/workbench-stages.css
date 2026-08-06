@@ -174,12 +174,22 @@
 }
 
 #v2WorkbenchApp[data-workbench-stage="upload"] [data-stage-panel]:not([data-stage-panel="upload"]),
-#v2WorkbenchApp[data-workbench-stage="structure"] [data-stage-panel]:not([data-stage-panel="structure"]) {
+#v2WorkbenchApp[data-workbench-stage="structure"] [data-stage-panel]:not([data-stage-panel="structure"]),
+#v2WorkbenchApp[data-workbench-stage="rules"] [data-stage-panel]:not([data-stage-panel="rules"]),
+#v2WorkbenchApp[data-workbench-stage="preview"] [data-stage-panel]:not([data-stage-panel="preview"]) {
   display: none !important;
 }
 
 #v2WorkbenchApp[data-workbench-stage="upload"] .bottom-action-bar {
   display: none;
+}
+
+#v2WorkbenchApp[data-workbench-stage="rules"] .workspace-grid {
+  grid-template-columns: minmax(260px, 278px) minmax(0, 708px) minmax(300px, 326px);
+}
+
+#v2WorkbenchApp[data-workbench-stage="preview"] .workspace-grid {
+  display: block;
 }
 
 #v2WorkbenchApp[data-workbench-stage="upload"] .check-item.warn,

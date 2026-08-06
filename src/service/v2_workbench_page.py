@@ -15,6 +15,7 @@ INDEX_HTML = """<!doctype html>
   <script src="/static/v2-workbench/workbench-form-model.js" defer></script>
   <script src="/static/v2-workbench/workbench-config.js" defer></script>
   <script src="/static/v2-workbench/workbench-content.js" defer></script>
+  <script src="/static/v2-workbench/workbench-option-rules.js" defer></script>
   <script src="/static/v2-workbench/workbench-stage-view.js" defer></script>
   <script src="/static/v2-workbench/workbench-view.js" defer></script>
   <script src="/static/v2-workbench/workbench-draft-actions.js" defer></script>
@@ -224,15 +225,6 @@ INDEX_HTML = """<!doctype html>
           </div>
         </section>
 
-        <section class="pane content-rules-pane" data-stage-panel="rules">
-          <div class="pane-header">
-            <h3>逐选项内容处理</h3>
-          </div>
-          <div class="pane-body">
-            <p class="v2-help">每个具体 Design/F 单独选择内容处理方式；每个 slot 单独设置内容来源、业务渲染类型和必填状态。</p>
-            <div class="content-option-list" id="contentOptionRows" aria-live="polite"></div>
-          </div>
-        </section>
       </section>
 
       <aside class="right-pane" data-stage-panel="structure" aria-label="核验状态与上下文摘要">
@@ -263,6 +255,72 @@ INDEX_HTML = """<!doctype html>
           </div>
         </section>
       </aside>
+
+      <aside class="left-pane option-rules-list-pane" data-stage-panel="rules" aria-label="选项列表">
+        <section class="pane">
+          <div class="pane-header"><h3>选项列表</h3><span class="muted" id="optionRuleCount">0 项</span></div>
+          <div class="pane-body">
+            <label for="optionRuleSearch">搜索 Design 或 F</label>
+            <input id="optionRuleSearch" type="search" placeholder="Design08 或 F2" autocomplete="off" />
+            <div class="option-rule-list" id="optionRuleList" aria-live="polite"></div>
+            <div class="option-rule-stats" id="optionRuleStats"></div>
+            <button id="pendingOnlyBtn" type="button">仅显示待处理选项</button>
+          </div>
+        </section>
+      </aside>
+
+      <section class="center-pane option-rules-editor-pane" data-stage-panel="rules" aria-label="选项渲染规则">
+        <section class="pane">
+          <div class="pane-header"><h3 id="selectedOptionTitle">Design08 · 双素材组合设计</h3><span class="v2-badge v2-badge-muted" id="selectedOptionPendingBadge">待确认</span></div>
+          <div class="pane-body option-rule-editor">
+            <div class="option-rule-controls">
+              <label><span>内容处理预设</span><select id="optionContentPreset"></select></label>
+              <label><span>内容分隔</span><select id="optionContentSeparator"><option value="pipe">按 | 顺序拆分</option><option value="none">不拆分</option></select></label>
+            </div>
+            <h4>槽位要求</h4>
+            <div class="content-option-list" id="contentOptionRows" aria-live="polite"></div>
+            <h4>素材库绑定</h4>
+            <div class="asset-binding-list" id="assetBindingRows" aria-live="polite"></div>
+          </div>
+        </section>
+      </section>
+
+      <aside class="right-pane option-capability-pane" data-stage-panel="rules" aria-label="模板能力与依赖">
+        <section class="pane">
+          <div class="pane-header"><h3>模板能力与依赖</h3></div>
+          <div class="pane-body" id="templateCapabilityPanel">
+            <div class="capability-tags"><span>双素材库</span><span>可替换文本</span><span>尺寸边界</span></div>
+            <div class="capability-evidence" id="capabilityEvidenceRows"></div>
+          </div>
+        </section>
+      </aside>
+
+      <section class="preview-stage-pane" data-stage-panel="preview" aria-label="样例预览与发布">
+        <section class="pane preview-main-pane">
+          <div class="pane-header"><h3>代表数据与正式效果图预览</h3><span class="v2-badge">正式渲染链路</span></div>
+          <div class="pane-body">
+            <div class="preview-sample-grid" id="previewSampleRows"></div>
+            <div class="preview-side-tabs" id="previewSideTabs"><button class="primary" type="button">外部设计</button><button type="button">内部文字</button></div>
+            <div class="preview-artwork-layout">
+              <div class="preview-artwork-pane" id="previewArtworkPane"><span>AHERN YERR</span><small>可见边界辅助线仅在预览显示</small></div>
+              <div class="preview-side-summary"><div class="preview-thumbnail">BEST DAD</div><div class="v2-warning-note">非阻断警告：较长正文已缩小。</div><button id="rerunTrialRenderBtn" class="primary" type="button">重新试渲染</button></div>
+            </div>
+          </div>
+        </section>
+        <section class="pane preview-validation-pane">
+          <div class="pane-header"><h3>核验结果</h3><span class="stage-status-pill success">通过</span></div>
+          <div class="pane-body"><div class="preview-validation-callout">与正式订单共用 Illustrator 渲染链路</div><div id="previewValidationRows" class="preview-validation-list"></div></div>
+        </section>
+        <section class="pane version-publish-panel" id="versionPublishPanel">
+          <div class="pane-header"><h3>版本与发布</h3><span class="stage-status-pill success">满足发布条件 8/8</span></div>
+          <div class="pane-body version-publish-grid">
+            <div><span class="muted">当前草稿</span><strong>v4 · 待发布</strong><small>试渲染已通过</small></div>
+            <div><span class="muted">当前正式版</span><strong>v3 · 2026-08-01</strong><small>正在生产使用</small></div>
+            <div><span class="muted">上一回滚版</span><strong>v2 · 2026-07-28</strong><small>查看或回滚</small></div>
+            <label><span>发布说明</span><input id="publishNotes" type="text" value="补齐双素材库并通过样例核验" /></label>
+          </div>
+        </section>
+      </section>
     </div>
 
     <footer class="bottom-action-bar" aria-label="底部操作栏">
@@ -271,6 +329,7 @@ INDEX_HTML = """<!doctype html>
         <span id="publishBlockerText">完成八项确认后可发布新版本。</span>
       </div>
       <div class="v2-bottom-actions">
+        <button id="saveAndNextOptionBtn" type="button">保存并配置下一个选项</button>
         <button id="saveDraftBtn" type="button">保存草稿</button>
         <button id="trialRenderBtn" type="button">使用样例试渲染</button>
         <button id="publishVersionBtn" type="button" disabled>发布新版本</button>
@@ -304,6 +363,34 @@ INDEX_HTML = """<!doctype html>
       <footer>
         <button id="retryScanBtn" type="button">重试扫描</button>
         <button id="closeScanFailedBtn" type="button">关闭</button>
+      </footer>
+    </section>
+  </div>
+
+  <div class="modal-overlay" id="preflightFailedOverlay" role="alertdialog" aria-modal="true" aria-labelledby="preflightFailedTitle" aria-describedby="preflightFailedMessage" hidden>
+    <section class="modal-dialog preflight-dialog">
+      <header>
+        <h2 id="preflightFailedTitle">订单数据预检未通过</h2>
+        <span class="stage-status-pill blocked">整批阻断</span>
+      </header>
+      <section class="modal-body">
+        <p id="preflightFailedMessage">Illustrator 尚未启动。请修正下列订单内容后重新提交，本批次不会生成不完整文件。</p>
+        <div class="preflight-issue-list" id="preflightIssueList">
+          <article class="preflight-issue blocked">
+            <strong>第 28 行 · 订单号 A10258 · Design08</strong>
+            <p>原始值包含 3 段内容，但当前选项要求 2 个必填槽位。</p>
+            <small>期望格式：首字母|正文</small>
+          </article>
+          <article class="preflight-issue warn">
+            <strong>第 41 行 · 订单号 A10306 · Design03</strong>
+            <p>首字母素材库不支持订单内容。</p>
+          </article>
+        </div>
+        <div class="preflight-pass-note">通过后将自动开始 Illustrator 试渲染。</div>
+      </section>
+      <footer>
+        <button id="closePreflightFailedBtn" type="button">关闭</button>
+        <button id="returnToSampleDataBtn" class="primary" type="button">返回修改测试数据</button>
       </footer>
     </section>
   </div>

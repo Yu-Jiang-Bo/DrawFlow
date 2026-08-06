@@ -38,7 +38,8 @@
     uploadFile: null,
     lastUploadFile: null,
     isScanning: false,
-    stage: "upload"
+    stage: "upload",
+    optionRules: { pendingOnly: false, selectedIndex: 0 }
   };
 
   const $ = (id) => document.getElementById(id);
@@ -83,12 +84,23 @@
     on("closeScanFailedBtn", "click", closeScanFailure);
     on("enterStructureBtn", "click", () => globalThis.setWorkbenchStage("structure"));
     on("backToUploadBtn", "click", () => globalThis.setWorkbenchStage("upload"));
+    on("pendingOnlyBtn", "click", togglePendingOnlyOptions);
+    on("optionRuleSearch", "input", renderOptionRuleStage);
+    on("saveAndNextOptionBtn", "click", saveDraftAndSelectNextOption);
+    on("rerunTrialRenderBtn", "click", showPreflightFailure);
+    on("closePreflightFailedBtn", "click", closePreflightFailure);
+    on("returnToSampleDataBtn", "click", closePreflightFailure);
     on("newTemplateBtn", "click", () => {
       clearDraftView();
       globalThis.setWorkbenchStage("upload");
     });
     document.querySelectorAll("#v2CheckRail .check-item").forEach((item) => {
-      item.addEventListener("click", () => globalThis.setWorkbenchStage("structure"));
+      item.addEventListener("click", () => {
+        const key = item.dataset.checkKey || "";
+        if (["slots", "content", "dimensions", "colors"].includes(key)) globalThis.setWorkbenchStage("rules");
+        else if (key === "preview") globalThis.setWorkbenchStage("preview");
+        else globalThis.setWorkbenchStage("structure");
+      });
     });
     bindDropzone();
   }

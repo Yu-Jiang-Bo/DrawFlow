@@ -263,7 +263,7 @@
       });
     }
     const ready = validation && validation.can_publish === true && !blockers.length;
-    setDisabled("publishVersionBtn", true);
+    setDisabled("publishVersionBtn", !ready);
     setDisabled("trialRenderBtn", !state.draft);
     setText("publishBlockerText", ready ? "核验已完成，发布接口未接入。" : (blockers[0] || "请先完成草稿配置与人工核验。"));
   }

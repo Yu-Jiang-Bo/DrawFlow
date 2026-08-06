@@ -79,6 +79,36 @@
     if (overlay) overlay.setAttribute("aria-hidden", "true");
   }
 
+
+  function showPreflightFailure(payload) {
+    const issueList = $("preflightIssueList");
+    const issues = payload && Array.isArray(payload.issues) ? payload.issues : [];
+    if (issueList && issues.length) {
+      issueList.replaceChildren(...issues.map((issue) => {
+        const item = document.createElement("article");
+        item.className = `preflight-issue ${issue.severity === "warn" ? "warn" : "blocked"}`;
+        const title = document.createElement("strong");
+        const detail = document.createElement("p");
+        const hint = document.createElement("small");
+        title.textContent = sanitizeMessage(issue.title || "订单数据需要修正", "订单数据需要修正");
+        detail.textContent = sanitizeMessage(issue.detail || "", "");
+        hint.textContent = sanitizeMessage(issue.hint || "", "");
+        item.append(title, detail, hint);
+        return item;
+      }));
+    }
+    setHidden("preflightFailedOverlay", false);
+    const overlay = $("preflightFailedOverlay");
+    if (overlay) overlay.setAttribute("aria-hidden", "false");
+  }
+
+
+  function closePreflightFailure() {
+    setHidden("preflightFailedOverlay", true);
+    const overlay = $("preflightFailedOverlay");
+    if (overlay) overlay.setAttribute("aria-hidden", "true");
+  }
+
   function setScanningOverlay(active, message) {
     const overlay = $("scanRunningOverlay");
     const text = message || "正在扫描 .ai 模板";
@@ -114,6 +144,8 @@
     containsSensitive,
     showScanFailure,
     closeScanFailure,
+    showPreflightFailure,
+    closePreflightFailure,
     setScanningOverlay,
     setScanningUi
   });

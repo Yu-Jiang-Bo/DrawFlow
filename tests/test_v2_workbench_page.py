@@ -17,6 +17,7 @@ JS = "\n".join(
         "workbench-form-model.js",
         "workbench-config.js",
         "workbench-content.js",
+        "workbench-option-rules.js",
         "workbench-stage-view.js",
         "workbench-view.js",
         "workbench-draft-actions.js",
@@ -97,6 +98,7 @@ def test_v2_workbench_page_exposes_independent_entry_contract():
     assert 'src="/static/v2-workbench/workbench-api.js"' in INDEX_HTML
     assert 'src="/static/v2-workbench/workbench-scan-model.js"' in INDEX_HTML
     assert 'src="/static/v2-workbench/workbench-content.js"' in INDEX_HTML
+    assert 'src="/static/v2-workbench/workbench-option-rules.js"' in INDEX_HTML
     assert 'src="/static/v2-workbench/workbench-stage-view.js"' in INDEX_HTML
     assert 'src="/static/v2-workbench/workbench-view.js"' in INDEX_HTML
     assert 'class="v2-shell" id="v2WorkbenchApp" data-workbench-stage="upload"' in INDEX_HTML
@@ -129,6 +131,58 @@ def test_v2_workbench_page_has_exact_eight_check_items():
     for key in CHECK_KEYS:
         assert f'data-check-key="{key}"' in INDEX_HTML
     assert '["output", "fields", "options", "slots", "content", "dimensions", "colors", "preview"]' in JS
+
+
+def test_v2_workbench_has_independent_rules_stage_contract():
+    assert 'data-stage-panel="rules" aria-label="选项列表"' in INDEX_HTML
+    assert 'data-stage-panel="rules" aria-label="选项渲染规则"' in INDEX_HTML
+    assert 'data-stage-panel="rules" aria-label="模板能力与依赖"' in INDEX_HTML
+    for element_id in [
+        "optionRuleSearch",
+        "optionRuleList",
+        "optionRuleStats",
+        "pendingOnlyBtn",
+        "selectedOptionTitle",
+        "selectedOptionPendingBadge",
+        "optionContentPreset",
+        "optionContentSeparator",
+        "contentOptionRows",
+        "assetBindingRows",
+        "templateCapabilityPanel",
+        "capabilityEvidenceRows",
+        "saveAndNextOptionBtn",
+    ]:
+        assert f'id="{element_id}"' in INDEX_HTML
+    assert 'const allowed = ["upload", "structure", "rules", "preview"]' in JS
+    assert 'globalThis.setWorkbenchStage("rules")' in JS
+    assert "renderOptionRuleStage" in JS
+    assert '#v2WorkbenchApp[data-workbench-stage="rules"] .workspace-grid' in STAGE_CSS
+    assert 'id="structureContentOptionRows"' not in INDEX_HTML
+
+
+def test_v2_workbench_has_preview_publish_and_preflight_contract():
+    assert 'data-stage-panel="preview" aria-label="样例预览与发布"' in INDEX_HTML
+    for element_id in [
+        "previewSampleRows",
+        "previewSideTabs",
+        "previewArtworkPane",
+        "rerunTrialRenderBtn",
+        "previewValidationRows",
+        "versionPublishPanel",
+        "publishNotes",
+        "preflightFailedOverlay",
+        "preflightFailedTitle",
+        "preflightFailedMessage",
+        "preflightIssueList",
+        "closePreflightFailedBtn",
+        "returnToSampleDataBtn",
+    ]:
+        assert f'id="{element_id}"' in INDEX_HTML
+    assert 'globalThis.setWorkbenchStage("preview")' in JS
+    assert "showPreflightFailure" in JS
+    assert "closePreflightFailure" in JS
+    assert '#v2WorkbenchApp[data-workbench-stage="preview"] .workspace-grid' in STAGE_CSS
+    assert ".preflight-dialog" in CSS
 
 
 def test_v2_workbench_uses_controlled_business_inputs():
@@ -188,6 +242,7 @@ def test_v2_workbench_routes_are_isolated_from_legacy_page():
     assert 'path.startswith("/static/v2-workbench/")' in SERVER
     assert '"workbench-scan-actions.js"' in SERVER
     assert '"workbench-content.js"' in SERVER
+    assert '"workbench-option-rules.js"' in SERVER
     assert '"workbench-stages.css"' in SERVER
     assert '"workbench-stage-view.js"' in SERVER
     assert "self._send_html(WORKBENCH_HTML)" in SERVER

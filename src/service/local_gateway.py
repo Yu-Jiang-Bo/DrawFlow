@@ -397,6 +397,7 @@ def _safe_static_name(value: str) -> str:
         "workbench-form-model.js",
         "workbench-config.js",
         "workbench-content.js",
+        "workbench-option-rules.js",
         "workbench-view.js",
         "workbench-stage-view.js",
         "workbench-draft-actions.js",
