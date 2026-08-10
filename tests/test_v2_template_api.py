@@ -38,6 +38,23 @@ def saveable_config(template_id="V2API001"):
     }
 
 
+def scan_evidence(template_sha256):
+    return {
+        "$schema": "custom-renderer/v2-template-scan",
+        "scan_protocol_version": 1,
+        "evidence": {
+            "template_sha256": template_sha256,
+            "scan_protocol_version": 1,
+            "illustrator_version": "28.7.1",
+            "scanned_at": "2026-08-07T00:00:00Z",
+            "object_path_digest": "b" * 64,
+        },
+        "template": {"path": "Template"},
+        "outputs": [{"key": "Output_main", "path": "Template/Output_main"}],
+        "issues": [],
+    }
+
+
 def api_for(tmp_path):
     return V2TemplateApi(V2TemplateStore(tmp_path / "v2"))
 
@@ -112,6 +129,178 @@ def test_v2_api_rebuilds_config_scan_audit_from_trusted_draft_scan(tmp_path):
         "scan_version": "trusted-scan",
         "template_sha256": "trusted-sha",
     }
+
+
+def test_v2_api_accepts_trusted_local_scan_for_current_ai_asset(tmp_path):
+    api = api_for(tmp_path)
+    api.create_template({"template_id": "V2API001", "name": "API Demo"})
+    uploaded = api.upload_asset("V2API001", "template.ai", TrackingStream(b"ai-bytes"), content_length=8, headers={})
+    evidence = scan_evidence(uploaded["asset"]["sha256"])
+
+    result = api.handle("POST", ["api", "v2", "templates", "V2API001", "scan"], {"evidence": evidence}).payload
+
+    assert result["state"]["draft"]["revision"] == "d0003"
+    assert result["scan"] == evidence
+    assert result["draft"]["scan"] == evidence
+    assert result["draft"]["manifest"]["assets"][0]["sha256"] == uploaded["asset"]["sha256"]
+
+
+def test_v2_api_rejects_scan_missing_trusted_contract_fields(tmp_path):
+    api = api_for(tmp_path)
+    api.create_template({"template_id": "V2API001", "name": "API Demo"})
+    uploaded = api.upload_asset("V2API001", "template.ai", TrackingStream(b"ai-bytes"), content_length=8, headers={})
+    forged = {
+        "evidence": {"template_sha256": uploaded["asset"]["sha256"]},
+        "outputs": [{"key": "Output_main", "path": "Template/Output_main"}],
+        "issues": [],
+    }
+
+    with pytest.raises(V2TemplateApiError) as exc_info:
+        api.handle("POST", ["api", "v2", "templates", "V2API001", "scan"], {"evidence": forged})
+
+    assert exc_info.value.problem.code == "v2_scan_evidence_invalid"
+    assert api.read_draft("V2API001")["scan"] == {}
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("illustrator_version", "x"),
+        ("illustrator_version", "29.beta"),
+        ("scanned_at", "not-a-time"),
+        ("scanned_at", "2026-08-07T00:00:00"),
+        ("scanned_at", "2026-08-07 00:00:00+00:00"),
+        ("scanned_at", "2026-08-07X00:00:00+00:00"),
+    ],
+)
+def test_v2_api_rejects_scan_with_malformed_trusted_contract_fields(tmp_path, field, value):
+    api = api_for(tmp_path)
+    api.create_template({"template_id": "V2API001", "name": "API Demo"})
+    uploaded = api.upload_asset("V2API001", "template.ai", TrackingStream(b"ai-bytes"), content_length=8, headers={})
+    evidence = scan_evidence(uploaded["asset"]["sha256"])
+    evidence["evidence"][field] = value
+
+    with pytest.raises(V2TemplateApiError) as exc_info:
+        api.handle("POST", ["api", "v2", "templates", "V2API001", "scan"], {"evidence": evidence})
+
+    assert exc_info.value.problem.code == "v2_scan_evidence_invalid"
+    assert api.read_draft("V2API001")["scan"] == {}
+
+
+def test_v2_api_reuploading_template_ai_clears_stale_scan(tmp_path):
+    api = api_for(tmp_path)
+    api.create_template({"template_id": "V2API001", "name": "API Demo"})
+    uploaded = api.upload_asset("V2API001", "template.ai", TrackingStream(b"old-ai"), content_length=6, headers={})
+    evidence = scan_evidence(uploaded["asset"]["sha256"])
+    api.submit_scan("V2API001", {"evidence": evidence})
+
+    result = api.upload_asset("V2API001", "template.ai", TrackingStream(b"new-ai"), content_length=6, headers={})
+
+    assert result["draft"]["scan"] == {}
+    assert api.read_draft("V2API001")["scan"] == {}
+    assert result["asset"]["sha256"] == hashlib.sha256(b"new-ai").hexdigest()
+    assert result["asset"]["sha256"] != uploaded["asset"]["sha256"]
+
+
+def test_v2_api_rejects_scan_sha_mismatch_without_replacing_scan(tmp_path):
+    api = api_for(tmp_path)
+    api.create_template({"template_id": "V2API001", "name": "API Demo"})
+    api.upload_asset("V2API001", "template.ai", TrackingStream(b"ai-bytes"), content_length=8, headers={})
+    mismatch = scan_evidence("0" * 64)
+
+    with pytest.raises(V2TemplateApiError) as exc_info:
+        api.handle("POST", ["api", "v2", "templates", "V2API001", "scan"], {"evidence": mismatch})
+
+    assert exc_info.value.problem.code == "v2_scan_template_sha_mismatch"
+    assert exc_info.value.status == HTTPStatus.CONFLICT
+    assert api.read_draft("V2API001")["scan"] == {}
+
+
+def test_v2_api_rejects_scan_without_uploaded_template_ai_asset(tmp_path):
+    api = api_for(tmp_path)
+    api.create_template({"template_id": "V2API001", "name": "API Demo"})
+
+    with pytest.raises(V2TemplateApiError) as exc_info:
+        api.handle("POST", ["api", "v2", "templates", "V2API001", "scan"], {"evidence": scan_evidence("a" * 64)})
+
+    assert exc_info.value.problem.code == "v2_template_ai_asset_missing"
+    assert api.read_draft("V2API001")["scan"] == {}
+
+
+def test_v2_api_rejects_scan_without_template_sha_or_structure(tmp_path):
+    api = api_for(tmp_path)
+    api.create_template({"template_id": "V2API001", "name": "API Demo"})
+    api.upload_asset("V2API001", "template.ai", TrackingStream(b"ai-bytes"), content_length=8, headers={})
+    missing_sha = scan_evidence("")
+
+    with pytest.raises(V2TemplateApiError) as exc_info:
+        api.handle("POST", ["api", "v2", "templates", "V2API001", "scan"], {"evidence": missing_sha})
+    assert exc_info.value.problem.code == "v2_scan_template_sha_missing"
+
+    with pytest.raises(V2TemplateApiError) as exc_info:
+        api.handle("POST", ["api", "v2", "templates", "V2API001", "scan"], {"evidence": {"template_sha256": "a" * 64}})
+    assert exc_info.value.problem.code == "v2_scan_evidence_empty"
+    assert api.read_draft("V2API001")["scan"] == {}
+
+
+def test_v2_api_rejects_blocked_scan_evidence(tmp_path):
+    api = api_for(tmp_path)
+    api.create_template({"template_id": "V2API001", "name": "API Demo"})
+    uploaded = api.upload_asset("V2API001", "template.ai", TrackingStream(b"ai-bytes"), content_length=8, headers={})
+    blocked = scan_evidence(uploaded["asset"]["sha256"])
+    blocked["blocked"] = True
+    blocked["issues"] = [{"status": "blocked", "code": "template_root_missing", "reason": "缺少 Template 根组。"}]
+
+    with pytest.raises(V2TemplateApiError) as exc_info:
+        api.handle("POST", ["api", "v2", "templates", "V2API001", "scan"], {"evidence": blocked})
+
+    assert exc_info.value.problem.code == "v2_scan_evidence_blocked"
+    assert api.read_draft("V2API001")["scan"] == {}
+
+
+@pytest.mark.parametrize(
+    "issue",
+    [
+        {"status": "blocked", "code": "duplicate_name", "reason": "同一作用域名称重复。"},
+        {"status": "blocking", "code": "duplicate_name", "reason": "同一作用域名称重复。"},
+        {"status": "failed", "code": "scan_failed", "reason": "扫描失败。"},
+        {"severity": "error", "code": "scan_failed", "reason": "扫描失败。"},
+    ],
+)
+def test_v2_api_rejects_scan_evidence_with_blocking_issue_status(tmp_path, issue):
+    api = api_for(tmp_path)
+    api.create_template({"template_id": "V2API001", "name": "API Demo"})
+    uploaded = api.upload_asset("V2API001", "template.ai", TrackingStream(b"ai-bytes"), content_length=8, headers={})
+    evidence = scan_evidence(uploaded["asset"]["sha256"])
+    evidence["blocked"] = False
+    evidence["issues"] = [issue]
+
+    with pytest.raises(V2TemplateApiError) as exc_info:
+        api.handle("POST", ["api", "v2", "templates", "V2API001", "scan"], {"evidence": evidence})
+
+    assert exc_info.value.problem.code == "v2_scan_evidence_blocked"
+    assert api.read_draft("V2API001")["scan"] == {}
+
+
+@pytest.mark.parametrize(
+    "shell",
+    [
+        {"template": {"path": "Template"}},
+        {"recommendations": [{"status": "pending", "preset": "direct_text"}]},
+        {"dependencies": {"fonts": [{"font_name": "Milkshake"}]}},
+    ],
+)
+def test_v2_api_rejects_scan_shells_without_outputs(tmp_path, shell):
+    api = api_for(tmp_path)
+    api.create_template({"template_id": "V2API001", "name": "API Demo"})
+    uploaded = api.upload_asset("V2API001", "template.ai", TrackingStream(b"ai-bytes"), content_length=8, headers={})
+    evidence = {"evidence": {"template_sha256": uploaded["asset"]["sha256"]}, **shell}
+
+    with pytest.raises(V2TemplateApiError) as exc_info:
+        api.handle("POST", ["api", "v2", "templates", "V2API001", "scan"], {"evidence": evidence})
+
+    assert exc_info.value.problem.code == "v2_scan_evidence_empty"
+    assert api.read_draft("V2API001")["scan"] == {}
 
 
 def test_v2_api_rejects_malicious_config_without_changing_current_draft(tmp_path):

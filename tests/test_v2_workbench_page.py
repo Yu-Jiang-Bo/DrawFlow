@@ -201,7 +201,7 @@ def test_v2_workbench_uses_controlled_business_inputs():
     assert "字段绑定" in INDEX_HTML
     assert "订单原值映射" in INDEX_HTML
     assert "/local/templates/scan" in JS
-    assert "/assets/" in JS
+    assert "/assets/" not in JS
     assert "buildControlledConfig" in JS
     assert "field_bindings" in JS
     assert "option_mappings" in JS

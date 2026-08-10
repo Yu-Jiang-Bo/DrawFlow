@@ -793,6 +793,46 @@ def test_v2_workbench_preflight_modal_sanitizes_issue_details():
     )
 
 
+def test_v2_workbench_local_scan_failure_does_not_upload_ai_to_central_assets():
+    run_node(
+        r"""
+        (async () => {
+          const urls = [];
+          async function fakeFetch(url, options = {}) {
+            const textUrl = String(url);
+            urls.push({ url: textUrl, method: options.method || "GET" });
+            if (textUrl === "/api/v2/templates" && options.method === "POST") {
+              return response({ state: { template_id: "V2FAILSCAN", template: { template_id: "V2FAILSCAN", name: "Fail Demo" } } });
+            }
+            if (textUrl === "/api/v2/templates") return response({ templates: [] });
+            if (textUrl === "/local/templates/scan") {
+              return response({ error: { message: "本地扫描未完成，请重新扫描。" } }, false);
+            }
+            if (textUrl.endsWith("/draft")) {
+              return response({ draft: { metadata: { template_id: "V2FAILSCAN", name: "Fail Demo", shop_name: "" }, manifest: {}, config: {}, scan: {} } });
+            }
+            if (textUrl.endsWith("/validate")) return response({ validation: { checks: {} } });
+            return response({});
+          }
+          const app = createApp(fakeFetch);
+          await flush();
+          app.elements.templateId.value = "V2FAILSCAN";
+          app.elements.templateName.value = "Fail Demo";
+          app.elements.aiFile.files = [{ name: "failed.ai", type: "application/illustrator" }];
+          app.elements.aiFile.dispatch("change", { target: app.elements.aiFile });
+          app.elements.scanTemplateBtn.dispatch("click");
+          await flush();
+          await flush();
+          assert(!urls.some((entry) => entry.url.includes("/assets/")));
+          assert(app.elements.scanFailedMessage.textContent.includes("草稿已保留"));
+          assert(app.elements.scanFailedMessage.textContent.includes("重新扫描"));
+          assert(!app.elements.scanFailedMessage.textContent.includes("文件已保存"));
+          assert.strictEqual(app.elements.scanRunningOverlay.hidden, true);
+        })().catch((error) => { console.error(error); process.exit(1); });
+        """
+    )
+
+
 def test_v2_workbench_sanitizes_sensitive_failures_and_scanning_overlay():
     run_node(
         r"""
@@ -810,11 +850,13 @@ def test_v2_workbench_sanitizes_sensitive_failures_and_scanning_overlay():
         r"""
         (async () => {
           let finishScan;
+          let localScanForm = null;
           async function fakeFetch(url, options = {}) {
             const textUrl = String(url);
             if (textUrl === "/api/v2/templates" && options.method === "POST") return response({ state: { template_id: "V2CANCEL", template: { template_id: "V2CANCEL", name: "Cancel Demo" } } });
             if (textUrl === "/api/v2/templates") return response({ templates: [] });
             if (textUrl === "/local/templates/scan") {
+              localScanForm = options.body;
               return new Promise((resolve) => {
                 finishScan = () => resolve(response({ draft: {
                   metadata: { template_id: "V2CANCEL", name: "Cancel Demo", shop_name: "" },
@@ -843,6 +885,10 @@ def test_v2_workbench_sanitizes_sensitive_failures_and_scanning_overlay():
           assert.strictEqual(app.elements.scanTemplateBtn.disabled, true);
           assert.strictEqual(app.elements.rescanTemplateBtn.disabled, true);
           assert.strictEqual(app.elements.saveDraftBtn.disabled, true);
+          const fields = Object.fromEntries(localScanForm.items.filter((item) => item.length >= 2).map(([key, value]) => [key, value]));
+          assert.strictEqual(fields.shop_name, "");
+          assert.strictEqual(fields.template_type, "pure_text");
+          assert.strictEqual(fields.scan_contract_version, "v2-template-scan/1");
           finishScan();
           await flush();
           assert.strictEqual(app.elements.scanRunningOverlay.hidden, true);

@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
 from urllib.parse import urlsplit
+from uuid import uuid4
 
 from .job_store import JobStore
 from .paths import LOCAL_DRAWFLOW_DIR
@@ -21,15 +22,17 @@ from .runtime_templates import sha256_file
 from .template_inspector import TemplateInspector
 from .template_onboarding import TemplateOnboardingStore
 from .template_registry import TemplateRegistry
+from .v2_template_scanner import V2TemplateScanner, V2TemplateScannerError
 from .v2_template_transfer import TransferError, download_stream_to_file
 
 
 class LocalClientError(RuntimeError):
     """Raised when the local client cannot complete a request."""
 
-    def __init__(self, message: str, *, code: str = "local_client_error") -> None:
+    def __init__(self, message: str, *, code: str = "local_client_error", technical_message: str = "") -> None:
         super().__init__(message)
         self.code = code
+        self.technical_message = technical_message
 
 
 @dataclass(frozen=True)
@@ -76,6 +79,36 @@ class HttpCentralClient:
         raw = self._request(
             "POST",
             "/api/templates/import-scan",
+            data=data,
+            headers={"Content-Type": "application/json"},
+        )
+        return json.loads(raw.decode("utf-8"))
+
+    def upload_v2_asset(self, template_id: str, file_name: str, path: Path | str) -> dict[str, Any]:
+        target = Path(path)
+        with target.open("rb") as source:
+            status, headers, body = self.proxy_stream(
+                "POST",
+                f"/api/v2/templates/{quote_segment(template_id)}/assets/{quote_segment(file_name)}",
+                source,
+                content_length=target.stat().st_size,
+                headers={
+                    "Content-Type": "application/illustrator",
+                    "X-DrawFlow-Asset-Role": "template",
+                },
+            )
+        if status >= 400:
+            raise LocalClientError(
+                f"中央服务保存 AI 文件失败（HTTP {status}）：{central_error_detail(body.decode('utf-8', errors='replace'))}",
+                code=f"central_http_{status}",
+            )
+        return json.loads(body.decode("utf-8")) if body else {}
+
+    def submit_v2_scan(self, template_id: str, evidence: Mapping[str, Any]) -> dict[str, Any]:
+        data = json.dumps({"evidence": evidence}, ensure_ascii=False).encode("utf-8")
+        raw = self._request(
+            "POST",
+            f"/api/v2/templates/{quote_segment(template_id)}/scan",
             data=data,
             headers={"Content-Type": "application/json"},
         )
@@ -323,6 +356,7 @@ class LocalDrawFlowClient:
         data_dir: Path | str = LOCAL_DRAWFLOW_DIR,
         *,
         inspector: TemplateInspector | None = None,
+        v2_scanner: Any | None = None,
         font_dirs: list[Path] | None = None,
     ) -> None:
         self.central = central
@@ -330,6 +364,7 @@ class LocalDrawFlowClient:
         self.cache = LocalTemplateCache(central, self.data_dir)
         self.jobs = JobStore(self.data_dir / "jobs")
         self.inspector = inspector or TemplateInspector()
+        self.v2_scanner = v2_scanner or V2TemplateScanner()
         self.font_dirs = font_dirs
 
     def health(self) -> dict[str, Any]:
@@ -372,6 +407,8 @@ class LocalDrawFlowClient:
         return record
 
     def scan_and_import(self, fields: Mapping[str, str], uploads: list[dict[str, Any]]) -> dict[str, Any]:
+        if _is_v2_scan_request(fields):
+            return self._scan_v2_and_submit(fields, uploads)
         template_id = str(fields.get("template_id") or "").strip()
         if not template_id:
             raise LocalClientError("缺少 template_id")
@@ -379,7 +416,8 @@ class LocalDrawFlowClient:
         first = next((item for item in uploads if str(item.get("filename", "")).lower().endswith(".ai")), None)
         if not first:
             raise LocalClientError("请上传 .ai 模板文件")
-        ai_path = scan_registry.save_uploaded_ai(template_id, str(first["filename"]), first["content"])
+        content = upload_bytes(first)
+        ai_path = scan_registry.save_uploaded_ai(template_id, str(first["filename"]), content)
         template = scan_registry.upsert_template({
             "template_id": template_id,
             "name": str(fields.get("name") or template_id),
@@ -397,12 +435,57 @@ class LocalDrawFlowClient:
             "files": [
                 {
                     "filename": str(item["filename"]),
-                    "content_base64": base64.b64encode(item["content"]).decode("ascii"),
+                    "content_base64": base64.b64encode(upload_bytes(item)).decode("ascii"),
                 }
                 for item in uploads
-                if isinstance(item.get("content"), bytes)
+                if _has_upload_body(item)
             ],
         })
+
+    def _scan_v2_and_submit(self, fields: Mapping[str, str], uploads: list[dict[str, Any]]) -> dict[str, Any]:
+        template_id = str(fields.get("template_id") or "").strip()
+        if not template_id:
+            raise LocalClientError("缺少 template_id", code="missing_template_id")
+        first = next((item for item in uploads if str(item.get("filename", "")).lower().endswith(".ai")), None)
+        if not first:
+            raise LocalClientError("请上传 .ai 模板文件", code="v2_scan_ai_required")
+        filename = safe_file_name(str(first.get("filename") or "template.ai"))
+        ai_path = upload_path_or_saved_copy(self, template_id, filename, first)
+        try:
+            scan = self.v2_scanner.scan(template_id=template_id, ai_path=ai_path, fields=fields)
+        except V2TemplateScannerError as exc:
+            raise LocalClientError(str(exc), code=exc.code, technical_message=exc.technical_message) from exc
+        except Exception as exc:
+            raise LocalClientError(
+                "本地 Illustrator 扫描失败，请关闭占用中的窗口后重试；若仍失败，请检查模板是否可以正常打开。",
+                code="v2_illustrator_scan_failed",
+                technical_message=str(exc),
+            ) from exc
+        if scan.get("blocked"):
+            raise LocalClientError(_blocked_scan_message(scan), code="v2_scan_blocked")
+        if hasattr(self.central, "upload_v2_asset") and hasattr(self.central, "submit_v2_scan"):
+            self.central.upload_v2_asset(template_id, filename, ai_path)
+            return self.central.submit_v2_scan(template_id, scan)
+        return self.central.import_scan({
+            "template_id": template_id,
+            "name": str(fields.get("name") or template_id),
+            "shop_name": str(fields.get("shop_name") or ""),
+            "template_type": str(fields.get("template_type") or "pure_text"),
+            "scan": scan,
+            "files": [
+                {
+                    "filename": filename,
+                    "content_base64": base64.b64encode(upload_bytes(first)).decode("ascii"),
+                }
+            ],
+        })
+
+    def _save_v2_scan_ai(self, template_id: str, filename: str, content: bytes) -> Path:
+        target_dir = self.data_dir / "v2-scan" / safe_segment(template_id) / uuid4().hex
+        target_dir.mkdir(parents=True, exist_ok=True)
+        target = target_dir / filename
+        target.write_bytes(content)
+        return target
 
 
 def missing_required_fonts(required: Any, font_dirs: list[Path] | None = None) -> list[str]:
@@ -440,6 +523,67 @@ def sha256_text(value: str) -> str:
 
 def safe_segment(value: str) -> str:
     return "".join(char for char in str(value).strip() if char.isalnum() or char in {"-", "_"})
+
+
+def safe_file_name(value: str) -> str:
+    name = Path(str(value or "template.ai")).name
+    cleaned = "".join(char if char.isalnum() or char in {"-", "_", "."} else "_" for char in name).strip("._")
+    return cleaned or "template.ai"
+
+
+def upload_path_or_saved_copy(
+    client: LocalDrawFlowClient,
+    template_id: str,
+    filename: str,
+    upload: Mapping[str, Any],
+) -> Path:
+    path_value = upload.get("path")
+    if path_value:
+        path = Path(path_value)
+        if path.suffix.lower() != ".ai":
+            raise LocalClientError("请上传 .ai 模板文件", code="v2_scan_ai_required")
+        if not path.is_file() or path.stat().st_size <= 0:
+            raise LocalClientError("上传的 .ai 文件为空，请选择有效模板后重试。", code="v2_scan_ai_empty")
+        return path
+    content = upload_bytes(upload)
+    return client._save_v2_scan_ai(template_id, filename, content)
+
+
+def upload_bytes(upload: Mapping[str, Any]) -> bytes:
+    content = upload.get("content")
+    if isinstance(content, bytes):
+        if not content:
+            raise LocalClientError("上传的 .ai 文件为空，请选择有效模板后重试。", code="v2_scan_ai_empty")
+        return content
+    path_value = upload.get("path")
+    if path_value:
+        path = Path(path_value)
+        if not path.is_file() or path.stat().st_size <= 0:
+            raise LocalClientError("上传的 .ai 文件为空，请选择有效模板后重试。", code="v2_scan_ai_empty")
+        return path.read_bytes()
+    raise LocalClientError("上传的 .ai 文件为空，请选择有效模板后重试。", code="v2_scan_ai_empty")
+
+
+def _has_upload_body(upload: Mapping[str, Any]) -> bool:
+    return isinstance(upload.get("content"), bytes) or bool(upload.get("path"))
+
+
+def _is_v2_scan_request(fields: Mapping[str, str]) -> bool:
+    template_type = str(fields.get("template_type") or "").strip().lower()
+    scan_contract = str(fields.get("scan_contract_version") or "").strip().lower()
+    return template_type.startswith("v2") or scan_contract.startswith("v2")
+
+
+def _blocked_scan_message(scan: Mapping[str, Any]) -> str:
+    issues = scan.get("issues", [])
+    if isinstance(issues, list):
+        for issue in issues:
+            if not isinstance(issue, Mapping):
+                continue
+            reason = str(issue.get("reason") or "").strip()
+            if reason:
+                return f"{reason} 请按模板标注规则调整后重新扫描。"
+    return "扫描发现模板结构未通过初步验收，请按 Template 标注规则调整后重新扫描。"
 
 
 def quote_segment(value: str) -> str:

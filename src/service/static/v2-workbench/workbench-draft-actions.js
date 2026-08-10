@@ -142,7 +142,7 @@
       fillDraftFields(state.draft, id);
       renderAll();
     } catch (_) {
-      renderScanSummary("文件已保存，等待扫描结果。");
+      renderScanSummary("草稿状态未刷新，请稍后重试。");
     }
   }
 

@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from http import HTTPStatus
 from pathlib import Path
+import re
 from typing import Any, BinaryIO, Mapping
 from urllib.parse import unquote
 from uuid import uuid4
@@ -35,6 +37,9 @@ from .v2_template_store import V2TemplateStore, V2TemplateStoreError
 from .v2_template_store_utils import read_json, remove_tree, safe_segment
 from .v2_template_transfer import DEFAULT_CHUNK_SIZE, receive_ai_stream
 from .v2_template_validation import validate_v2_template_configuration
+
+
+SCAN_TIMESTAMP_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
 
 
 @dataclass(frozen=True)
@@ -75,6 +80,8 @@ class V2TemplateApi:
                 return V2ApiResult(self.save_draft(template_id, payload or {}))
             if method == "GET" and action == "scan":
                 return V2ApiResult(self.read_scan(template_id))
+            if method == "POST" and action == "scan":
+                return V2ApiResult(self.submit_scan(template_id, payload or {}))
             if method == "POST" and action == "validate":
                 return V2ApiResult(self.validate_config(payload or {}))
             if method == "GET" and action == "versions":
@@ -134,10 +141,10 @@ class V2TemplateApi:
         metadata = metadata_from_state(template_id, state)
         draft = optional_draft(self.store, template_id)
         config = dict(draft.get("config", {})) if draft else {}
-        scan = dict(draft.get("scan", {})) if draft else {}
         headers_by_name = header_map(headers or {})
         asset_role = header(headers_by_name, "x-drawflow-asset-role") or "template"
         require_central_upload_allowed(asset_role)
+        scan = {} if asset_role.strip().lower() == "template" else dict(draft.get("scan", {})) if draft else {}
         safe_id = safe_segment(template_id)
         if not safe_id:
             raise V2TemplateApiError("v2_template_not_found", "模板 ID 不合法，无法上传资产。", status=HTTPStatus.NOT_FOUND)
@@ -197,6 +204,59 @@ class V2TemplateApi:
             "draft_revision": draft["manifest"].get("draft_revision", ""),
             "scan": draft["scan"],
         }
+
+    def submit_scan(self, template_id: str, payload: Mapping[str, Any]) -> dict[str, Any]:
+        ensure_payload_fields(payload, {"evidence"})
+        evidence = optional_mapping(payload, "evidence")
+        if not evidence:
+            raise V2TemplateApiError(
+                "v2_scan_evidence_missing",
+                "请先完成本地 Illustrator 扫描，再提交扫描证据。",
+                suggestion="请重新上传并扫描 .ai 模板，确认扫描完成后再保存结构。",
+            )
+        if self._has_blocking_scan_issue(evidence):
+            raise V2TemplateApiError(
+                "v2_scan_evidence_blocked",
+                "扫描证据包含阻断问题，不能作为可信结构保存。",
+                suggestion="请按扫描提示调整 Template 标注后重新扫描。",
+            )
+        if not self._has_scan_structure(evidence):
+            raise V2TemplateApiError(
+                "v2_scan_evidence_empty",
+                "扫描证据里没有可用的模板结构，已拒绝保存。",
+                suggestion="请通过本地网关重新调用 Illustrator 扫描，不要提交空结构。",
+            )
+        self._validate_scan_evidence_contract(evidence)
+        draft = self.read_draft(template_id)
+        asset = self._current_template_ai_asset(draft)
+        if not asset:
+            raise V2TemplateApiError(
+                "v2_template_ai_asset_missing",
+                "当前草稿还没有已上传的模板 AI 文件，不能保存扫描证据。",
+                suggestion="请先上传 .ai 模板文件，等待文件保存成功后再重新扫描。",
+            )
+        evidence_sha = self._scan_template_sha256(evidence)
+        if not evidence_sha:
+            raise V2TemplateApiError(
+                "v2_scan_template_sha_missing",
+                "扫描证据缺少模板文件哈希，不能绑定到当前草稿。",
+                suggestion="请通过本地网关重新扫描已上传的 .ai 模板。",
+            )
+        asset_sha = str(asset.get("sha256") or "").strip().lower()
+        if evidence_sha != asset_sha:
+            raise V2TemplateApiError(
+                "v2_scan_template_sha_mismatch",
+                "扫描证据对应的模板文件与当前草稿里的 AI 文件不一致，已拒绝保存。",
+                status=HTTPStatus.CONFLICT,
+                suggestion="请重新上传当前 .ai 文件并重新扫描，确保扫描结果来自同一个模板文件。",
+            )
+        metadata = metadata_from_state(template_id, self.store.get_state(template_id))
+        config = dict(draft.get("config", {}))
+        assets = current_asset_sources(self.store, template_id, draft, replace_file_name="")
+        state = self.store.save_draft(template_id, metadata=metadata, config=config, scan=evidence, assets=assets)
+        next_draft = self.store.read_draft(template_id)
+        self._record_audit("scan_submitted", state, next_draft, details={"template_sha256": evidence_sha})
+        return {"state": state_summary(state), "draft": next_draft, "scan": next_draft["scan"]}
 
     def validate_config(self, payload: Mapping[str, Any]) -> dict[str, Any]:
         config = payload.get("config", payload)
@@ -262,8 +322,107 @@ class V2TemplateApi:
             return
         audit = dict(config.get("audit") or {})
         audit["scan_version"] = str(scan.get("scan_version") or scan.get("version") or "")
-        audit["template_sha256"] = str(scan.get("template_sha256") or scan.get("sha256") or "")
+        audit["template_sha256"] = self._scan_template_sha256(scan)
         config["audit"] = audit
+
+    def _current_template_ai_asset(self, draft: Mapping[str, Any]) -> dict[str, Any]:
+        manifest = dict(draft.get("manifest", {}))
+        assets = [dict(item) for item in manifest.get("assets", []) if isinstance(item, Mapping)]
+        template_assets = [
+            item for item in assets
+            if str(item.get("role") or "").strip().lower() == "template"
+            and str(item.get("extension") or "").strip().lower() == ".ai"
+        ]
+        if template_assets:
+            return template_assets[-1]
+        for item in assets:
+            file_name = str(item.get("file_name") or item.get("filename") or "").strip().lower()
+            extension = str(item.get("extension") or "").strip().lower()
+            if file_name == "template.ai" and extension == ".ai":
+                return item
+        return {}
+
+    def _scan_template_sha256(self, evidence: Mapping[str, Any]) -> str:
+        nested = evidence.get("evidence")
+        if isinstance(nested, Mapping):
+            value = str(nested.get("template_sha256") or "").strip().lower()
+            if value:
+                return value
+        for key in ("template_sha256", "sha256"):
+            value = str(evidence.get(key) or "").strip().lower()
+            if value:
+                return value
+        return ""
+
+    def _has_scan_structure(self, evidence: Mapping[str, Any]) -> bool:
+        outputs = evidence.get("outputs")
+        if not isinstance(outputs, list):
+            return False
+        return any(
+            isinstance(output, Mapping)
+            and bool(str(output.get("key") or output.get("path") or "").strip())
+            for output in outputs
+        )
+
+    def _has_blocking_scan_issue(self, evidence: Mapping[str, Any]) -> bool:
+        if evidence.get("blocked") is True:
+            return True
+        issues = evidence.get("issues")
+        if not isinstance(issues, list):
+            return False
+        blocking = {"blocked", "blocking", "failed", "error"}
+        return any(
+            isinstance(issue, Mapping)
+            and str(issue.get("status") or issue.get("severity") or "").strip().lower() in blocking
+            for issue in issues
+        )
+
+    def _validate_scan_evidence_contract(self, evidence: Mapping[str, Any]) -> None:
+        nested = evidence.get("evidence")
+        if evidence.get("$schema") != "custom-renderer/v2-template-scan" or not isinstance(nested, Mapping):
+            raise self._invalid_scan_evidence()
+        if not self._protocol_version_ok(evidence.get("scan_protocol_version")):
+            raise self._invalid_scan_evidence()
+        if not self._protocol_version_ok(nested.get("scan_protocol_version")):
+            raise self._invalid_scan_evidence()
+        if not self._illustrator_version_ok(nested.get("illustrator_version")):
+            raise self._invalid_scan_evidence()
+        if not self._scanned_at_ok(nested.get("scanned_at")):
+            raise self._invalid_scan_evidence()
+        digest = str(nested.get("object_path_digest") or "").strip().lower()
+        if len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
+            raise self._invalid_scan_evidence()
+
+    def _invalid_scan_evidence(self) -> V2TemplateApiError:
+        return V2TemplateApiError(
+            "v2_scan_evidence_invalid",
+            "扫描证据缺少可信协议字段，已拒绝保存。",
+            suggestion="请通过本地网关重新调用 Illustrator 扫描，不要提交手写结构。",
+        )
+
+    def _protocol_version_ok(self, value: Any) -> bool:
+        if isinstance(value, bool):
+            return False
+        if isinstance(value, (int, float)):
+            return int(value) == 1 and float(value) == 1.0
+        return str(value or "").strip() in {"1", "1.0"}
+
+    def _illustrator_version_ok(self, value: Any) -> bool:
+        text = str(value or "").strip()
+        if not text:
+            return False
+        parts = text.split(".")
+        return bool(parts) and all(part.isdigit() for part in parts)
+
+    def _scanned_at_ok(self, value: Any) -> bool:
+        text = str(value or "").strip()
+        if not SCAN_TIMESTAMP_PATTERN.fullmatch(text):
+            return False
+        try:
+            datetime.fromisoformat(text[:-1] + "+00:00")
+        except ValueError:
+            return False
+        return True
 
     def _record_audit(
         self,

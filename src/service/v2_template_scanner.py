@@ -5,10 +5,14 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import tempfile
 from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, Mapping
+from uuid import uuid4
+
+from ..renderer.illustrator_bridge import IllustratorBridge, IllustratorBridgeError
 
 
 V2_SCAN_SCHEMA = "custom-renderer/v2-template-scan"
@@ -22,6 +26,146 @@ _OUTPUT_SIDE_RE = re.compile(r"^Output_Side([A-Z])$", re.I)
 _DESIGN_RE = re.compile(r"^Design\d{2,}$", re.I)
 _FONT_RE = re.compile(r"^F[1-9]\d*$", re.I)
 _STYLE_RE = re.compile(r"^style[1-9]\d*$", re.I)
+
+
+class V2TemplateScannerError(RuntimeError):
+    """Raised when the local Illustrator scan cannot produce trusted evidence."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: str = "v2_scan_failed",
+        technical_message: str = "",
+    ) -> None:
+        super().__init__(message)
+        self.code = code
+        self.technical_message = technical_message
+
+
+class V2TemplateScanner:
+    """Run the V2 Illustrator scanner script and normalize its JSON output."""
+
+    def __init__(
+        self,
+        *,
+        script_path: str | Path | None = None,
+        bridge: Any | None = None,
+        bridge_factory: Any | None = None,
+        work_dir: str | Path | None = None,
+    ) -> None:
+        repo_root = Path(__file__).resolve().parents[2]
+        self.script_path = Path(script_path or repo_root / "scripts" / "illustrator" / "scan_v2_template.jsx")
+        self.bridge = bridge
+        self.bridge_factory = bridge_factory
+        self.work_dir = Path(work_dir) if work_dir is not None else None
+
+    def scan(
+        self,
+        ai_path: str | Path,
+        *,
+        template_id: str = "",
+        fields: Mapping[str, str] | None = None,
+        template_sha256: str = "",
+    ) -> Dict[str, Any]:
+        source = Path(ai_path)
+        if not source.is_file():
+            raise V2TemplateScannerError(
+                "请上传可以读取的 .ai 模板文件后重试。",
+                code="v2_scan_ai_missing",
+                technical_message=f"AI file missing: {source}",
+            )
+        if source.suffix.lower() != ".ai":
+            raise V2TemplateScannerError("只支持 Illustrator .ai 模板文件。", code="v2_scan_ai_required")
+        if source.stat().st_size <= 0:
+            raise V2TemplateScannerError("上传的 .ai 文件为空，请选择有效模板后重试。", code="v2_scan_ai_empty")
+
+        with self._task_directory() as task_dir:
+            task_path = task_dir / f"scan-{uuid4().hex}.json"
+            output_path = task_path.with_name(task_path.stem + "-result.json")
+            task = {
+                "input_ai": str(source),
+                "output_json": str(output_path),
+                "input_sha256": template_sha256,
+                "template_sha256": template_sha256,
+            }
+            task_path.write_text(_json(task), encoding="utf-8")
+            try:
+                self._bridge().render(self.script_path, task_path)
+            except V2TemplateScannerError:
+                raise
+            except (IllustratorBridgeError, OSError, RuntimeError) as exc:
+                raise V2TemplateScannerError(
+                    "本地 Illustrator 扫描失败，请关闭占用中的窗口后重试；若仍失败，请检查模板是否可以正常打开。",
+                    code="v2_illustrator_scan_failed",
+                    technical_message=str(exc),
+                ) from exc
+            if not output_path.is_file():
+                raise V2TemplateScannerError(
+                    "本地 Illustrator 没有生成扫描结果，请重新启动 DrawFlowClient.exe 后重试。",
+                    code="v2_scan_output_missing",
+                    technical_message=f"scan output missing: {output_path}",
+                )
+            raw_scan = self._read_scan_json(output_path)
+        raw_scan = _with_source_facts(raw_scan, source, template_sha256)
+        result = normalize_v2_template_scan(raw_scan, ai_path=source)
+        result["document"]["source_ai"] = source.name
+        result["document"]["file_name"] = source.name
+        return result
+
+    def _bridge(self) -> Any:
+        if self.bridge is not None:
+            return self.bridge
+        if self.bridge_factory is not None:
+            return self.bridge_factory()
+        return IllustratorBridge(visible=False)
+
+    def _task_directory(self) -> Any:
+        return _TaskDirectory(self.work_dir)
+
+    @staticmethod
+    def _read_scan_json(path: Path) -> Dict[str, Any]:
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8-sig"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise V2TemplateScannerError(
+                "本地 Illustrator 生成的扫描结果无法读取，请重试扫描。",
+                code="v2_scan_json_invalid",
+                technical_message=str(exc),
+            ) from exc
+        if not isinstance(raw, Mapping):
+            raise V2TemplateScannerError(
+                "本地 Illustrator 生成的扫描结果格式无效，请重试扫描。",
+                code="v2_scan_json_invalid",
+            )
+        return dict(raw)
+
+
+class _TaskDirectory:
+    def __init__(self, path: Path | None) -> None:
+        self.path = path
+        self._temporary: tempfile.TemporaryDirectory[str] | None = None
+
+    def __enter__(self) -> Path:
+        if self.path is not None:
+            self.path.mkdir(parents=True, exist_ok=True)
+            return self.path
+        self._temporary = tempfile.TemporaryDirectory(prefix="drawflow-v2-scan-")
+        return Path(self._temporary.__enter__())
+
+    def __exit__(self, exc_type: Any, exc: Any, traceback: Any) -> None:
+        if self._temporary is not None:
+            self._temporary.__exit__(exc_type, exc, traceback)
+
+
+def _with_source_facts(raw_scan: Mapping[str, Any], source: Path, template_sha256: str) -> Dict[str, Any]:
+    raw = dict(raw_scan)
+    document = dict(raw.get("document") or {})
+    document.setdefault("source_ai", str(source))
+    if template_sha256:
+        document.setdefault("template_sha256", template_sha256)
+    raw["document"] = document
+    return raw
 
 
 def normalize_v2_template_scan(raw_scan: Any, ai_path: str | Path | None = None) -> Dict[str, Any]:
@@ -830,6 +974,8 @@ def _utc_now() -> str:
 __all__ = [
     "V2_SCAN_PROTOCOL_VERSION",
     "V2_SCAN_SCHEMA",
+    "V2TemplateScanner",
+    "V2TemplateScannerError",
     "evidence_is_current",
     "normalize_v2_template_scan",
 ]

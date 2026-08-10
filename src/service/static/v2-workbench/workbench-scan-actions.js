@@ -31,17 +31,11 @@
         setScanningUi(false, "页面已停止等待扫描结果。");
         return;
       }
-      const scanMessage = friendlyError(scanError, "本地扫描接口未就绪，文件将先保存到中央草稿。");
-      try {
-        await uploadAssetToCentral(file);
-        setScanningUi(false, "文件已保存，等待本地扫描。");
-        setText("scanSummary", "文件已保存，等待本地扫描结果。");
-        await safeRefreshDraft(formBasics().template_id);
-        showScanFailure(`${scanMessage} 文件已保存，等待本地扫描。`);
-      } catch (uploadError) {
-        setScanningUi(false, "上传失败，请重试。");
-        showScanFailure(friendlyError(uploadError, "文件上传失败，请稍后重试。"));
-      }
+      const scanMessage = friendlyError(scanError, "本地扫描接口未就绪，请确认本地客户端已启动后重试。");
+      setScanningUi(false, "扫描失败，请重试。");
+      setText("scanSummary", "扫描未完成，草稿已保留，可重新扫描。");
+      await safeRefreshDraft(formBasics().template_id);
+      showScanFailure(`${scanMessage} 草稿已保留，可重新扫描。`);
     } finally {
       state.isScanning = false;
       updateDraftButtons();
@@ -56,24 +50,9 @@
     form.append("name", basics.name);
     form.append("shop_name", basics.shop_name);
     form.append("template_type", "pure_text");
+    form.append("scan_contract_version", "v2-template-scan/1");
     form.append("template_ai", file, file.name);
     return postForm("/local/templates/scan", form, null, "本地扫描接口未就绪，请确认本地客户端已启动。");
-  }
-
-
-  async function uploadAssetToCentral(file) {
-    const id = formBasics().template_id;
-    const headers = { "Content-Type": file.type || "application/illustrator", "X-DrawFlow-Asset-Role": "template" };
-    const payload = await fetchJson(`${API_ROOT}/${encodeURIComponent(id)}/assets/${encodeURIComponent(file.name)}`, {
-      method: "POST",
-      headers,
-      body: file
-    }, "文件上传失败，请稍后重试。");
-    if (payload.draft) {
-      state.draft = payload.draft;
-      state.scan = normalizeScanFromDraft(state.draft);
-    }
-    return payload;
   }
 
 
@@ -157,7 +136,6 @@
     uploadSelectedAiFile,
     uploadTemplateFile,
     tryLocalScan,
-    uploadAssetToCentral,
     refreshDraftAfterScan,
     retryScan,
     handleFileInput,

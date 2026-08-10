@@ -1,4 +1,5 @@
 import json
+import hashlib
 import shutil
 import subprocess
 from pathlib import Path
@@ -7,6 +8,8 @@ import pytest
 
 from src.service.v2_template_scanner import (
     V2_SCAN_PROTOCOL_VERSION,
+    V2TemplateScanner,
+    V2TemplateScannerError,
     evidence_is_current,
     normalize_v2_template_scan,
 )
@@ -62,6 +65,35 @@ def valid_scan_items():
 
 def issue_codes(result):
     return {issue["code"] for issue in result["issues"]}
+
+
+class WritingBridge:
+    def __init__(self, items):
+        self.items = items
+        self.calls = []
+
+    def render(self, script_path, task_path):
+        task = json.loads(Path(task_path).read_text(encoding="utf-8"))
+        self.calls.append({"script_path": Path(script_path), "task_path": Path(task_path), "task": task})
+        Path(task["output_json"]).write_text(
+            json.dumps(
+                {
+                    "document": {
+                        "source_ai": task["input_ai"],
+                        "illustrator_version": "29.0",
+                    },
+                    "scanned_at": "2026-08-07T00:00:00Z",
+                    "items": self.items,
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+
+
+class SilentBridge:
+    def render(self, script_path, task_path):
+        return ""
 
 
 def test_normalizes_scan_with_stable_sorting_and_digest():
@@ -247,6 +279,35 @@ def test_evidence_hash_invalidates_when_ai_file_changes():
     finally:
         if ai.exists():
             ai.unlink()
+
+
+def test_v2_template_scanner_runs_bridge_and_normalizes_output(tmp_path):
+    ai = tmp_path / "template.ai"
+    ai.write_bytes(b"ai-bytes")
+    bridge = WritingBridge(valid_scan_items())
+    scanner = V2TemplateScanner(bridge=bridge, work_dir=tmp_path / "tasks")
+
+    result = scanner.scan(ai, template_id="V2SCAN001", fields={"name": "Demo"})
+
+    assert result["blocked"] is False
+    assert result["outputs"][0]["key"] == "Output_main"
+    assert result["evidence"]["template_sha256"] == hashlib.sha256(b"ai-bytes").hexdigest()
+    assert result["document"]["source_ai"] == "template.ai"
+    assert bridge.calls[0]["script_path"].name == "scan_v2_template.jsx"
+    assert bridge.calls[0]["task"]["input_ai"] == str(ai)
+    assert Path(bridge.calls[0]["task"]["output_json"]).is_file()
+
+
+def test_v2_template_scanner_reports_missing_json_without_fake_success(tmp_path):
+    ai = tmp_path / "template.ai"
+    ai.write_bytes(b"ai-bytes")
+    scanner = V2TemplateScanner(bridge=SilentBridge(), work_dir=tmp_path / "tasks")
+
+    with pytest.raises(V2TemplateScannerError) as exc_info:
+        scanner.scan(ai)
+
+    assert exc_info.value.code == "v2_scan_output_missing"
+    assert "没有生成扫描结果" in str(exc_info.value)
 
 
 def test_missing_template_sha256_blocks_scan_evidence():
