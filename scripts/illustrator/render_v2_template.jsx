@@ -42,15 +42,16 @@
         for (var index = 0; index < actions.length; index++) {
             var action = actions[index] || {};
             if (action.type === "copy_option_group" && isSelected(action, selected)) {
-                copied[copyKey(outputKey, action)] = copyOptionGroup(sourceDoc, targetLayer, action.object_path);
+                copied[copyKey(outputKey, action)] = copyOptionGroup(sourceDoc, targetLayer, action.object_path, action.source_only === true);
             }
         }
         for (var replaceIndex = 0; replaceIndex < actions.length; replaceIndex++) {
             var replaceAction = actions[replaceIndex] || {};
             if (replaceAction.type === "replace_slot_text" && isSelected(replaceAction, selected)) {
-                replaceSlotText(copied, outputKey, replaceAction, valuesByField);
+                replaceSlotText(copied, outputKey, replaceAction, valuesByField, selected);
             }
         }
+        removeSourceOnlyCopies(copied);
     }
 
     function isSelected(action, selected) {
@@ -59,13 +60,13 @@
         return group && optionKey && String(selected[group] || "") === optionKey;
     }
 
-    function copyOptionGroup(sourceDoc, targetLayer, objectPath) {
+    function copyOptionGroup(sourceDoc, targetLayer, objectPath, sourceOnly) {
         var source = findPageItemByPath(sourceDoc, objectPath);
         var copy = source.duplicate(targetLayer, ElementPlacement.PLACEATEND);
-        return { item: copy, source_path: String(objectPath || "") };
+        return { item: copy, source_path: String(objectPath || ""), source_only: sourceOnly === true };
     }
 
-    function replaceSlotText(copied, outputKey, action, valuesByField) {
+    function replaceSlotText(copied, outputKey, action, valuesByField, selected) {
         var holder = copied[copyKey(outputKey, action)];
         if (!holder || !holder.item) throw new Error("Selected option was not copied: " + copyKey(outputKey, action));
         var slot = findPageItemByRelativePath(holder.item, relativePath(String(action.object_path || ""), holder.source_path));
@@ -76,7 +77,11 @@
             removePageItem(slot);
             return;
         }
-        writeTextToItem(slot, parts[0]);
+        var target = slot;
+        if (action.style_source) {
+            target = replaceWithFontStyleSource(copied, outputKey, action, selected, slot);
+        }
+        writeTextToItem(target, parts[0]);
         var tailPaths = action.tail_paths || [];
         for (var index = 0; index < tailPaths.length; index++) {
             var tail = findPageItemByRelativePath(holder.item, relativePath(String(tailPaths[index] || ""), holder.source_path));
@@ -85,6 +90,32 @@
                 writeTextToItem(tail, tailText);
             } else {
                 removePageItem(tail);
+            }
+        }
+    }
+
+    function replaceWithFontStyleSource(copied, outputKey, action, selected, targetSlot) {
+        var sourceInfo = action.style_source || {};
+        var group = String(sourceInfo.group || "");
+        var fontOption = String(selected[group] || "");
+        if (!fontOption) throw new Error("V2 font style source selection is missing");
+        var paths = sourceInfo.paths_by_option || {};
+        var sourcePath = String(paths[fontOption] || "");
+        if (!sourcePath) throw new Error("V2 font style source path is missing: " + fontOption);
+        var sourceHolder = copied[outputKey + "|" + group + "|" + fontOption];
+        if (!sourceHolder || !sourceHolder.item) throw new Error("V2 font style source was not copied: " + fontOption);
+        var sourceItem = findPageItemByRelativePath(sourceHolder.item, relativePath(sourcePath, sourceHolder.source_path));
+        var parent = targetSlot.parent || sourceHolder.item.parent;
+        var replacement = sourceItem.duplicate(parent, ElementPlacement.PLACEATEND);
+        alignItemToItem(replacement, targetSlot);
+        removePageItem(targetSlot);
+        return replacement;
+    }
+
+    function removeSourceOnlyCopies(copied) {
+        for (var key in copied) {
+            if (copied.hasOwnProperty(key) && copied[key] && copied[key].source_only === true) {
+                removePageItem(copied[key].item);
             }
         }
     }
@@ -113,6 +144,18 @@
         } catch (removeError) {
             try { item.hidden = true; } catch (hideError) {}
         }
+    }
+
+    function alignItemToItem(item, target) {
+        try {
+            var itemBounds = item.visibleBounds;
+            var targetBounds = target.visibleBounds;
+            var itemCenterX = (Number(itemBounds[0]) + Number(itemBounds[2])) / 2;
+            var itemCenterY = (Number(itemBounds[1]) + Number(itemBounds[3])) / 2;
+            var targetCenterX = (Number(targetBounds[0]) + Number(targetBounds[2])) / 2;
+            var targetCenterY = (Number(targetBounds[1]) + Number(targetBounds[3])) / 2;
+            item.translate(targetCenterX - itemCenterX, targetCenterY - itemCenterY);
+        } catch (alignError) {}
     }
 
     function findPageItemByPath(root, objectPath) {

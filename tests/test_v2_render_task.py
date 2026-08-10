@@ -330,8 +330,15 @@ def test_keeps_design_and_font_same_slot_keys_on_distinct_paths():
 
     assert design_slot["object_path"] == "Template/Output_main/Design/Design03/slot_name"
     assert design_slot["anchor_path"] == "Template/Output_main/Design/Design03/anchor_name"
+    assert design_slot["style_source"] == {
+        "group": "font",
+        "slot_key": "slot_name",
+        "paths_by_option": {"F10": "Template/Output_main/Font/F10/slot_name"},
+    }
     assert font_slot["object_path"] == "Template/Output_main/Font/F10/slot_name"
     assert font_slot["font_dependencies"] == ["Milkshake"]
+    font_copy = next(action for action in task["outputs"][0]["actions"] if action["type"] == "copy_option_group" and action["group"] == "font")
+    assert font_copy["source_only"] is True
 
 
 def test_rejects_duplicate_scan_object_keys_in_same_scope():
@@ -385,6 +392,24 @@ def test_records_multi_output_order_from_contract_order():
     ]
     assert task["outputs"][0]["actions"][0]["object_path"] == "Template/Output_SideA/Design/Design03"
     assert task["outputs"][1]["actions"][0]["object_path"] == "Template/Output_SideB/Font/F10"
+    assert all("style_source" not in action for output in task["outputs"] for action in output["actions"])
+
+
+def test_pure_font_output_does_not_mark_font_copy_as_source_only():
+    config = render_config()
+    config["outputs"][0]["design"] = {"field": "", "options": []}
+    config["field_bindings"] = {"font": "Font", "name": "Name"}
+    config["option_mappings"] = [
+        {"field": "font", "source_value": "F10", "target": "F10", "output": "Output_main", "group": "font"}
+    ]
+    scan = scan_evidence()
+    scan["outputs"][0]["designs"] = []
+
+    task = compile_task(config=config, scan=scan)
+
+    font_copy = next(action for action in task["outputs"][0]["actions"] if action["type"] == "copy_option_group" and action["group"] == "font")
+    assert "source_only" not in font_copy
+    assert all("style_source" not in action for action in task["outputs"][0]["actions"])
 
 
 def test_compiles_from_store_draft_revision_and_source_version(tmp_path):

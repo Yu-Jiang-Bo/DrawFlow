@@ -226,6 +226,65 @@ if (slot.styleToken !== 'Year-style') throw new Error('design slot style was not
     assert result.returncode == 0, result.stderr
 
 
+def test_v2_renderer_combines_design_slot_with_selected_font_style_source():
+    task = {
+        "$schema": "custom-renderer/v2-render-execution",
+        "template_ai": "template.ai",
+        "output_ai": "out.ai",
+        "values": {"design": "03", "font": "F10", "name": "Carla"},
+        "selections": {"Output_main": {"design": "Design03", "font": "F10"}},
+        "render_task": {
+            "$schema": "custom-renderer/v2-render-task",
+            "outputs": [
+                {
+                    "key": "Output_main",
+                    "actions": [
+                        {
+                            "type": "copy_option_group",
+                            "group": "design",
+                            "option_key": "Design03",
+                            "object_path": "Template/Output_main/Design/Design03",
+                        },
+                        {
+                            "type": "copy_option_group",
+                            "group": "font",
+                            "option_key": "F10",
+                            "object_path": "Template/Output_main/Font/F10",
+                            "source_only": True,
+                        },
+                        {
+                            "type": "replace_slot_text",
+                            "group": "design",
+                            "option_key": "Design03",
+                            "object_path": "Template/Output_main/Design/Design03/slot_name",
+                            "source_field": "name",
+                            "required": True,
+                            "tail_paths": [],
+                            "style_source": {
+                                "group": "font",
+                                "slot_key": "slot_name",
+                                "paths_by_option": {"F10": "Template/Output_main/Font/F10/slot_name"},
+                            },
+                        },
+                    ],
+                }
+            ],
+        },
+    }
+    harness = node_mock_harness(task, """
+const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
+if (!designCopy) throw new Error('Design03 was not copied');
+if (outputLayer.pageItems.find(item => item.name === 'F10')) throw new Error('source-only F10 copy was not removed');
+const slot = child(designCopy, 'slot_name');
+if (slot.contents !== 'Carla') throw new Error('combo slot not replaced: ' + slot.contents);
+if (slot.styleToken !== 'F10-style') throw new Error('combo slot did not inherit F10 style: ' + slot.styleToken);
+""")
+
+    result = run_node(harness)
+
+    assert result.returncode == 0, result.stderr
+
+
 def test_v2_renderer_removes_optional_blank_slot_inside_copied_group():
     task = {
         "$schema": "custom-renderer/v2-render-execution",

@@ -112,6 +112,8 @@ def _normalize_contract(config: Mapping[str, Any]) -> dict[str, Any]:
 def _compile_output(output: Mapping[str, Any], scan_index: Mapping[tuple[str, ...], Mapping[str, Any]], order: int) -> dict[str, Any]:
     output_key = str(output.get("key") or "")
     output_scan = _scan_ref(scan_index, ("output", output_key), f"$.outputs.{output_key}")
+    font_style_sources = _font_style_sources(output_key, output, scan_index)
+    source_only_font = bool(font_style_sources)
     actions = []
     for group in ("style", "design", "font"):
         group_config = dict(output.get(group) or {})
@@ -132,16 +134,21 @@ def _compile_output(output: Mapping[str, Any], scan_index: Mapping[tuple[str, ..
                 if dimensions:
                     actions.append(_action("fit_output_bounds", style_key=option_key, dimensions=deepcopy(dimensions)))
                 continue
+            copy_action = {
+                "group": group,
+                "option_key": option_key,
+                "object_path": option_scan["path"],
+                "content_preset": str(dict(option).get("content_preset") or ""),
+            }
+            if group == "font" and source_only_font:
+                copy_action["source_only"] = True
             actions.append(
                 _action(
                     "copy_option_group",
-                    group=group,
-                    option_key=option_key,
-                    object_path=option_scan["path"],
-                    content_preset=str(dict(option).get("content_preset") or ""),
+                    **copy_action,
                 )
             )
-            actions.extend(_slot_actions(output_key, group, dict(option), option_scan, scan_index))
+            actions.extend(_slot_actions(output_key, group, dict(option), option_scan, scan_index, font_style_sources))
             actions.extend(_asset_actions(output_key, group, dict(option), scan_index))
     return {
         "key": output_key,
@@ -157,6 +164,7 @@ def _slot_actions(
     option: Mapping[str, Any],
     option_scan: Mapping[str, Any],
     scan_index: Mapping[tuple[str, ...], Mapping[str, Any]],
+    font_style_sources: Mapping[str, Mapping[str, str]],
 ) -> list[dict[str, Any]]:
     actions = []
     option_key = str(option.get("key") or "")
@@ -175,23 +183,27 @@ def _slot_actions(
             _path_by_key(option_scan.get("tails", []), key, f"$.{output_key}.{group}.{option_key}.{slot_key}.tails.{key}")
             for key in tail_keys
         ]
-        actions.append(
-            _action(
-                "replace_slot_text",
-                group=group,
-                option_key=option_key,
-                slot_key=slot_key,
-                object_path=slot_scan["path"],
-                source_field=str(slot_data.get("source_field") or ""),
-                required=bool(slot_data.get("required", True)),
-                preset=str(slot_data.get("preset") or "direct_text"),
-                anchor_path=anchor_path,
-                tail_paths=tail_paths,
-                asset_key=str(slot_data.get("asset_key") or ""),
-                font_dependencies=list(slot_data.get("font_dependencies") or []),
-                color_binding=str(slot_data.get("color_binding") or ""),
-            )
-        )
+        action = {
+            "group": group,
+            "option_key": option_key,
+            "slot_key": slot_key,
+            "object_path": slot_scan["path"],
+            "source_field": str(slot_data.get("source_field") or ""),
+            "required": bool(slot_data.get("required", True)),
+            "preset": str(slot_data.get("preset") or "direct_text"),
+            "anchor_path": anchor_path,
+            "tail_paths": tail_paths,
+            "asset_key": str(slot_data.get("asset_key") or ""),
+            "font_dependencies": list(slot_data.get("font_dependencies") or []),
+            "color_binding": str(slot_data.get("color_binding") or ""),
+        }
+        if group == "design" and slot_key in font_style_sources:
+            action["style_source"] = {
+                "group": "font",
+                "slot_key": slot_key,
+                "paths_by_option": dict(font_style_sources[slot_key]),
+            }
+        actions.append(_action("replace_slot_text", **action))
     return actions
 
 
@@ -221,6 +233,42 @@ def _asset_actions(
             )
         )
     return actions
+
+
+def _font_style_sources(
+    output_key: str,
+    output: Mapping[str, Any],
+    scan_index: Mapping[tuple[str, ...], Mapping[str, Any]],
+) -> dict[str, dict[str, str]]:
+    design = dict(output.get("design") or {})
+    font = dict(output.get("font") or {})
+    design_field = str(design.get("field") or "")
+    font_field = str(font.get("field") or "")
+    if not design_field or not font_field or design_field == font_field:
+        return {}
+    design_slot_keys = {
+        str(dict(slot).get("key") or "")
+        for option in design.get("options", [])
+        for slot in dict(option).get("slots", [])
+        if isinstance(slot, Mapping)
+    }
+    result: dict[str, dict[str, str]] = {}
+    for font_option in font.get("options", []):
+        font_data = dict(font_option)
+        font_key = str(font_data.get("key") or "")
+        for font_slot in font_data.get("slots", []):
+            slot_key = str(dict(font_slot).get("key") or "")
+            if not slot_key:
+                continue
+            if slot_key not in design_slot_keys:
+                continue
+            font_slot_scan = _scan_ref(
+                scan_index,
+                ("slot", output_key, "font", font_key, slot_key),
+                f"$.outputs.{output_key}.font.{font_key}.{slot_key}",
+            )
+            result.setdefault(slot_key, {})[font_key] = font_slot_scan["path"]
+    return result
 
 
 def _build_scan_index(scan: Mapping[str, Any]) -> dict[tuple[str, ...], Mapping[str, Any]]:
