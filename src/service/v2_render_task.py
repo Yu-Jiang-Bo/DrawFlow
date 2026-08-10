@@ -185,6 +185,8 @@ def _slot_actions(
         ]
         preset = str(slot_data.get("preset") or slot_scan.get("preset") or "direct_text")
         text_kind = str(slot_scan.get("text_kind") or slot_scan.get("textKind") or "")
+        if preset == "asset_replace" or slot_data.get("asset_key"):
+            continue
         if preset == "path_text" and "path" not in text_kind.lower():
             raise V2RenderTaskError(
                 "path_text_slot_invalid",
@@ -205,6 +207,7 @@ def _slot_actions(
             "asset_key": str(slot_data.get("asset_key") or ""),
             "font_dependencies": list(slot_data.get("font_dependencies") or []),
             "color_binding": str(slot_data.get("color_binding") or ""),
+            "value_key": _value_key(output_key, group, option_key, "slot", slot_key),
         }
         if group == "design" and slot_key in font_style_sources:
             action["style_source"] = {
@@ -226,22 +229,63 @@ def _asset_actions(
         return []
     actions = []
     option_key = str(option.get("key") or "")
-    for asset in option.get("assets", []):
+    consumed_assets: set[tuple[str, str]] = set()
+    for slot in option.get("slots", []):
+        slot_data = dict(slot)
+        slot_key = str(slot_data.get("key") or "")
+        asset_key = str(slot_data.get("asset_key") or "")
+        if not asset_key:
+            continue
+        asset = _asset_for_slot(option, asset_key, slot_key)
+        if not asset:
+            raise V2RenderTaskError(
+                "asset_slot_missing",
+                f"素材库 {asset_key} 缺少对应槽位 {slot_key}。",
+                path=f"$.{output_key}.design.{option_key}.assets.{asset_key}.slot",
+            )
         asset_data = dict(asset)
-        asset_key = str(asset_data.get("asset_key") or "")
+        consumed_assets.add((asset_key, slot_key))
         asset_scan = _scan_ref(scan_index, ("asset", output_key, option_key, asset_key), f"$.{output_key}.design.{option_key}.assets.{asset_key}")
+        slot_scan = _scan_ref(scan_index, ("slot", output_key, group, option_key, slot_key), f"$.{output_key}.design.{option_key}.{slot_key}")
         actions.append(
             _action(
                 "bind_asset_library",
                 group=group,
                 option_key=option_key,
                 asset_key=asset_key,
-                slot_key=str(asset_data.get("slot") or ""),
+                slot_key=slot_key,
                 object_path=asset_scan["path"],
+                target_path=slot_scan["path"],
+                source_field=str(slot_data.get("source_field") or ""),
+                required=bool(slot_data.get("required", True)),
                 supported_values=list(asset_data.get("supported_values") or []),
+                value_key=_value_key(output_key, group, option_key, "asset", asset_key),
             )
         )
+    for asset in option.get("assets", []):
+        if not isinstance(asset, Mapping):
+            continue
+        key = (str(asset.get("asset_key") or ""), str(asset.get("slot") or ""))
+        if key not in consumed_assets:
+            raise V2RenderTaskError(
+                "asset_slot_missing",
+                f"素材库 {key[0]} 没有匹配的素材槽位 {key[1]}。",
+                path=f"$.{output_key}.design.{option_key}.assets.{key[0]}.slot",
+            )
     return actions
+
+
+def _asset_for_slot(option: Mapping[str, Any], asset_key: str, slot_key: str) -> dict[str, Any]:
+    for asset in option.get("assets", []):
+        if not isinstance(asset, Mapping):
+            continue
+        if str(asset.get("asset_key") or "") == asset_key and str(asset.get("slot") or "") == slot_key:
+            return dict(asset)
+    return {}
+
+
+def _value_key(output_key: str, group: str, option_key: str, kind: str, key: str) -> str:
+    return "|".join([output_key, group, option_key, kind, key])
 
 
 def _font_style_sources(

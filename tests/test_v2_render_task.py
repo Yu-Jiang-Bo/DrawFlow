@@ -261,6 +261,65 @@ def test_compiles_path_text_preset_with_scanned_path_text_kind():
     assert path_action["object_path"] == "Template/Output_main/Font/F10/slot_title"
 
 
+def test_compiles_design_asset_libraries_as_asset_actions_not_text_replacements():
+    task = compile_task()
+    actions = task["outputs"][0]["actions"]
+
+    asset_action = next(action for action in actions if action["type"] == "bind_asset_library")
+
+    assert asset_action == {
+        "type": "bind_asset_library",
+        "group": "design",
+        "option_key": "Design03",
+        "asset_key": "initial_top",
+        "slot_key": "slot_initial",
+        "object_path": "Template/Output_main/Design/Design03/Assets/initial_top",
+        "target_path": "Template/Output_main/Design/Design03/slot_initial",
+        "source_field": "initial",
+        "required": True,
+        "supported_values": ["A", "B"],
+        "value_key": "Output_main|design|Design03|asset|initial_top",
+    }
+    assert not any(
+        action["type"] == "replace_slot_text" and action.get("slot_key") == "slot_initial"
+        for action in actions
+    )
+
+
+def test_compiles_multi_initial_asset_actions_in_slot_binding_order_not_asset_list_order():
+    config = render_config()
+    design = config["outputs"][0]["design"]["options"][0]
+    design["content_preset"] = "multi_initials"
+    design["slots"] = [
+        {"key": "slot_initial_top", "source_field": "names", "preset": "asset_replace", "asset_key": "initial_top"},
+        {"key": "slot_initial_bottom", "source_field": "names", "preset": "asset_replace", "asset_key": "initial_bottom"},
+    ]
+    design["assets"] = [
+        {"asset_key": "initial_bottom", "slot": "slot_initial_bottom", "supported_values": ["B"]},
+        {"asset_key": "initial_top", "slot": "slot_initial_top", "supported_values": ["A"]},
+    ]
+    config["field_bindings"]["names"] = "Names"
+    scan = scan_evidence()
+    scan["outputs"][0]["designs"][0]["slots"] = [
+        {"key": "slot_initial_top", "path": "Template/Output_main/Design/Design03/slot_initial_top"},
+        {"key": "slot_initial_bottom", "path": "Template/Output_main/Design/Design03/slot_initial_bottom"},
+    ]
+    scan["outputs"][0]["designs"][0]["anchors"] = []
+    scan["outputs"][0]["designs"][0]["assets"] = [
+        {"asset_key": "initial_bottom", "path": "Template/Output_main/Design/Design03/Assets/initial_bottom"},
+        {"asset_key": "initial_top", "path": "Template/Output_main/Design/Design03/Assets/initial_top"},
+    ]
+
+    task = compile_task(config=config, scan=scan)
+    asset_actions = [action for action in task["outputs"][0]["actions"] if action["type"] == "bind_asset_library"]
+
+    assert [(action["asset_key"], action["slot_key"]) for action in asset_actions] == [
+        ("initial_top", "slot_initial_top"),
+        ("initial_bottom", "slot_initial_bottom"),
+    ]
+    assert [action["supported_values"] for action in asset_actions] == [["A"], ["B"]]
+
+
 def test_rejects_path_text_preset_for_non_path_text_scan_slot():
     config = render_config()
     config["outputs"][0]["font"]["options"][0]["slots"][0]["preset"] = "path_text"

@@ -39,6 +39,7 @@ def test_v2_renderer_static_contract_uses_paths_and_safe_actions():
     assert "function findPageItemByRelativePath" in source
     assert "function copyOptionGroup" in source
     assert "function replaceSlotText" in source
+    assert "function bindAssetLibrary" in source
     assert "function splitPipeValue" in source
     assert "function removePageItem" in source
     assert "function saveAsAI8" in source
@@ -219,6 +220,71 @@ if (!designCopy) throw new Error('Design03 was not copied');
 const slot = child(designCopy, 'slot_year');
 if (slot.contents !== '2027') throw new Error('design slot not replaced: ' + slot.contents);
 if (slot.styleToken !== 'Year-style') throw new Error('design slot style was not preserved');
+""")
+
+    result = run_node(harness)
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_v2_renderer_copies_design_local_dual_asset_libraries_without_cross_use():
+    task = {
+        "$schema": "custom-renderer/v2-render-execution",
+        "template_ai": "template.ai",
+        "output_ai": "out.ai",
+        "values": {"design": "03", "top": "K", "bottom": "A"},
+        "selections": {"Output_main": {"design": "Design03"}},
+        "render_task": {
+            "$schema": "custom-renderer/v2-render-task",
+            "outputs": [
+                {
+                    "key": "Output_main",
+                    "actions": [
+                        {
+                            "type": "copy_option_group",
+                            "group": "design",
+                            "option_key": "Design03",
+                            "object_path": "Template/Output_main/Design/Design03",
+                        },
+                        {
+                            "type": "bind_asset_library",
+                            "group": "design",
+                            "option_key": "Design03",
+                            "asset_key": "initial_top",
+                            "slot_key": "slot_initial_top",
+                            "object_path": "Template/Output_main/Design/Design03/Assets/initial_top",
+                            "target_path": "Template/Output_main/Design/Design03/slot_initial_top",
+                            "source_field": "top",
+                            "required": True,
+                        },
+                        {
+                            "type": "bind_asset_library",
+                            "group": "design",
+                            "option_key": "Design03",
+                            "asset_key": "initial_bottom",
+                            "slot_key": "slot_initial_bottom",
+                            "object_path": "Template/Output_main/Design/Design03/Assets/initial_bottom",
+                            "target_path": "Template/Output_main/Design/Design03/slot_initial_bottom",
+                            "source_field": "bottom",
+                            "required": True,
+                        },
+                    ],
+                }
+            ],
+        },
+    }
+    harness = node_mock_harness(task, """
+const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
+if (!designCopy) throw new Error('Design03 was not copied');
+if (designCopy.pageItems.find(item => item.name === 'Assets')) throw new Error('Assets helper group was not removed');
+if (designCopy.pageItems.find(item => item.name === 'slot_initial_top')) throw new Error('top asset slot was not removed');
+if (designCopy.pageItems.find(item => item.name === 'slot_initial_bottom')) throw new Error('bottom asset slot was not removed');
+const top = child(designCopy, 'K');
+const bottom = child(designCopy, 'A');
+if (!child(top, 'top_line')) throw new Error('top asset decoration was not preserved');
+if (!child(bottom, 'bottom_line')) throw new Error('bottom asset decoration was not preserved');
+if (child(top, 'top_letter').contents !== 'K') throw new Error('top library selected wrong letter');
+if (child(bottom, 'bottom_letter').contents !== 'A') throw new Error('bottom library selected wrong letter');
 """)
 
     result = run_node(harness)
@@ -1029,6 +1095,8 @@ const f10 = item('GroupItem', 'F10', '', [
 ]);
 const design03 = item('GroupItem', 'Design03', '', [
   item('TextFrame', 'slot_name', 'Design sample', [], 'Design-style'),
+  item('PathItem', 'slot_initial_top', '', [], '', [300, 80, 340, 20]),
+  item('PathItem', 'slot_initial_bottom', '', [], '', [300, 0, 340, -60]),
   item('PathItem', 'anchor_name', '', []),
   item('GroupItem', 'slot_group', '', [
     item('TextFrame', 'slot_group_text', 'Group sample', [], 'Group-style'),
@@ -1037,6 +1105,26 @@ const design03 = item('GroupItem', 'Design03', '', [
   item('TextFrame', 'tail_name_1', 'Tail 1', [], 'Tail-style'),
   item('TextFrame', 'tail_name_2', 'Tail 2', [], 'Tail-style'),
   item('TextFrame', 'slot_year', '2026', [], 'Year-style'),
+  item('GroupItem', 'Assets', '', [
+    item('GroupItem', 'initial_top', '', [
+      item('GroupItem', 'K', '', [
+        item('TextFrame', 'top_letter', 'K', [], 'Top-asset-style', [10, 50, 42, 10]),
+        item('PathItem', 'top_line', '', [], '', [10, 8, 42, 5])
+      ]),
+      item('GroupItem', 'A', '', [
+        item('TextFrame', 'top_letter', 'A', [], 'Top-asset-style', [10, 50, 42, 10])
+      ])
+    ]),
+    item('GroupItem', 'initial_bottom', '', [
+      item('GroupItem', 'A', '', [
+        item('TextFrame', 'bottom_letter', 'A', [], 'Bottom-asset-style', [10, -10, 42, -50]),
+        item('PathItem', 'bottom_line', '', [], '', [10, -52, 42, -55])
+      ]),
+      item('GroupItem', 'K', '', [
+        item('TextFrame', 'bottom_letter', 'K', [], 'Bottom-asset-style', [10, -10, 42, -50])
+      ])
+    ])
+  ]),
   item('PathItem', 'fixed_heart', '', []),
   item('PathItem', '', '', [])
 ]);

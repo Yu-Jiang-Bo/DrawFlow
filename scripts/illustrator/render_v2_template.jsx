@@ -18,12 +18,13 @@
     var layer = doc.layers[0];
     layer.name = "V2_OUTPUT";
     var values = execution.values || {};
+    var resolvedValues = execution.resolved_values || {};
     var selections = execution.selections || {};
     var layoutWarnings = [];
 
     try {
         for (var outputIndex = 0; outputIndex < (task.outputs || []).length; outputIndex++) {
-            renderOutput(templateDoc, layer, task.outputs[outputIndex], values, selections);
+            renderOutput(templateDoc, layer, task.outputs[outputIndex], values, resolvedValues, selections);
         }
         var output = File(String(execution.output_ai));
         ensureFolder(output.parent);
@@ -36,7 +37,7 @@
         try { doc.close(SaveOptions.DONOTSAVECHANGES); } catch (closeOutputError) {}
     }
 
-    function renderOutput(sourceDoc, targetLayer, output, valuesByField, selectionsByOutput) {
+    function renderOutput(sourceDoc, targetLayer, output, valuesByField, resolvedValuesByKey, selectionsByOutput) {
         var outputKey = String(output.key || "");
         var selected = selectionsByOutput[outputKey] || {};
         var copied = {};
@@ -52,7 +53,13 @@
         for (var replaceIndex = 0; replaceIndex < actions.length; replaceIndex++) {
             var replaceAction = actions[replaceIndex] || {};
             if (replaceAction.type === "replace_slot_text" && isSelected(replaceAction, selected)) {
-                replaceSlotText(copied, outputKey, replaceAction, valuesByField, selected);
+                replaceSlotText(copied, outputKey, replaceAction, valuesByField, resolvedValuesByKey, selected);
+            }
+        }
+        for (var assetIndex = 0; assetIndex < actions.length; assetIndex++) {
+            var assetAction = actions[assetIndex] || {};
+            if (assetAction.type === "bind_asset_library" && isSelected(assetAction, selected)) {
+                bindAssetLibrary(copied, outputKey, assetAction, valuesByField, resolvedValuesByKey);
             }
         }
         cleanupAuxiliaryObjects(renderedItems);
@@ -78,12 +85,12 @@
         return { item: copy, source_path: String(objectPath || ""), source_only: sourceOnly === true };
     }
 
-    function replaceSlotText(copied, outputKey, action, valuesByField, selected) {
+    function replaceSlotText(copied, outputKey, action, valuesByField, resolvedValuesByKey, selected) {
         var holder = copied[copyKey(outputKey, action)];
         if (!holder || !holder.item) throw new Error("Selected option was not copied: " + copyKey(outputKey, action));
         var slot = findPageItemByRelativePath(holder.item, relativePath(String(action.object_path || ""), holder.source_path));
         var fitBounds = localFitBounds(holder.item, holder.source_path, action, slot);
-        var value = String(valuesByField[String(action.source_field || "")] || "");
+        var value = resolvedActionValue(action, valuesByField, resolvedValuesByKey);
         var parts = splitPipeValue(value);
         if (!hasText(value)) {
             if (action.required !== false) throw new Error("Required V2 slot has no value: " + action.source_field);
@@ -107,6 +114,34 @@
                 removePageItem(tail);
             }
         }
+    }
+
+    function bindAssetLibrary(copied, outputKey, action, valuesByField, resolvedValuesByKey) {
+        var holder = copied[copyKey(outputKey, action)];
+        if (!holder || !holder.item) throw new Error("Selected design was not copied: " + copyKey(outputKey, action));
+        var value = resolvedActionValue(action, valuesByField, resolvedValuesByKey);
+        var targetPath = String(action.target_path || "");
+        var target = findPageItemByRelativePath(holder.item, relativePath(targetPath, holder.source_path));
+        if (!hasText(value)) {
+            if (action.required !== false) throw new Error("Required V2 asset has no value: " + action.source_field);
+            removePageItem(target);
+            return;
+        }
+        var library = findPageItemByRelativePath(holder.item, relativePath(String(action.object_path || ""), holder.source_path));
+        var source = findChildByName(library, String(value || ""));
+        if (!source) throw new Error("V2 asset value not found: " + String(action.asset_key || "") + "/" + String(value || ""));
+        var parent = target.parent || holder.item;
+        var copy = source.duplicate(parent, ElementPlacement.PLACEATEND);
+        fitItemWithinBounds(copy, measuredBounds(target), action);
+        removePageItem(target);
+    }
+
+    function resolvedActionValue(action, valuesByField, resolvedValuesByKey) {
+        var valueKey = String(action.value_key || "");
+        if (valueKey && resolvedValuesByKey && resolvedValuesByKey.hasOwnProperty(valueKey)) {
+            return String(resolvedValuesByKey[valueKey] || "");
+        }
+        return String(valuesByField[String(action.source_field || "")] || "");
     }
 
     function localFitBounds(root, sourcePath, action, slot) {
@@ -411,7 +446,7 @@
 
     function isAuxiliaryObject(item) {
         var name = String(item && item.name || "");
-        return name.indexOf("anchor_") === 0 || name.indexOf("size_") === 0 || name.indexOf("dimension_") === 0;
+        return name === "Assets" || name.indexOf("anchor_") === 0 || name.indexOf("size_") === 0 || name.indexOf("dimension_") === 0;
     }
 
     function mmToPt(mm) {
