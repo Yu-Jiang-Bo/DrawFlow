@@ -1,0 +1,414 @@
+import hashlib
+
+import pytest
+
+from src.service.v2_render_task import (
+    ALLOWED_V2_ACTIONS,
+    V2_RENDER_TASK_SCHEMA,
+    V2RenderTaskError,
+    compile_v2_render_task,
+    stable_v2_render_task_json,
+)
+from src.service.v2_template_contract import V2_CONTRACT_SCHEMA, V2_CONTRACT_VERSION
+from src.service.v2_template_store import V2TemplateStore
+
+
+TEMPLATE_SHA = "a" * 64
+
+
+def render_config():
+    return {
+        "$schema": V2_CONTRACT_SCHEMA,
+        "schema_version": V2_CONTRACT_VERSION,
+        "template": {"template_id": "V2RENDER001", "name": "Render demo", "shop_name": ""},
+        "outputs": [
+            {
+                "key": "Output_main",
+                "style": {
+                    "field": "size",
+                    "options": [
+                        {"key": "style1", "dimensions": {"mode": "style", "width_mm": 80, "height_mm": 50}}
+                    ],
+                },
+                "design": {
+                    "field": "design",
+                    "options": [
+                        {
+                            "key": "Design03",
+                            "content_preset": "initial_with_text",
+                            "slots": [
+                                {
+                                    "key": "slot_name",
+                                    "source_field": "name",
+                                    "preset": "direct_text",
+                                    "anchor": "anchor_name",
+                                },
+                                {
+                                    "key": "slot_initial",
+                                    "source_field": "initial",
+                                    "preset": "asset_replace",
+                                    "asset_key": "initial_top",
+                                },
+                            ],
+                            "assets": [
+                                {
+                                    "asset_key": "initial_top",
+                                    "slot": "slot_initial",
+                                    "supported_values": ["A", "B"],
+                                }
+                            ],
+                        }
+                    ],
+                },
+                "font": {
+                    "field": "font",
+                    "options": [
+                        {
+                            "key": "F10",
+                            "content_preset": "design_font_combo",
+                            "slots": [
+                                {
+                                    "key": "slot_name",
+                                    "source_field": "name",
+                                    "preset": "direct_text",
+                                    "font_dependencies": ["Milkshake"],
+                                }
+                            ],
+                        }
+                    ],
+                },
+            }
+        ],
+        "field_bindings": {"size": "Size", "design": "Design", "font": "Font", "name": "Name", "initial": "Initial"},
+        "option_mappings": [
+            {"field": "font", "source_value": "F10", "target": "F10", "output": "Output_main", "group": "font"},
+            {"field": "design", "source_value": "03", "target": "Design03", "output": "Output_main", "group": "design"},
+            {"field": "size", "source_value": "small", "target": "style1", "output": "Output_main", "group": "style"},
+        ],
+        "checks": {key: "confirmed" for key in ("output", "fields", "options", "slots", "content", "dimensions", "colors", "preview")},
+        "audit": {"scan_version": "scan-1", "template_sha256": TEMPLATE_SHA, "config_version": 3},
+    }
+
+
+def multi_output_config():
+    config = render_config()
+    config["outputs"] = [
+        {
+            "key": "Output_SideA",
+            "design": {
+                "field": "front_design",
+                "options": [{"key": "Design03", "slots": [{"key": "slot_name", "source_field": "front_name"}]}],
+            },
+        },
+        {
+            "key": "Output_SideB",
+            "font": {
+                "field": "inside_font",
+                "options": [{"key": "F10", "slots": [{"key": "slot_name", "source_field": "inside_name"}]}],
+            },
+        },
+    ]
+    config["field_bindings"] = {"front_design": "FrontDesign", "inside_font": "InsideFont", "front_name": "FrontName", "inside_name": "InsideName"}
+    config["option_mappings"] = [
+        {"field": "inside_font", "source_value": "F10", "target": "F10", "output": "Output_SideB", "group": "font"},
+        {"field": "front_design", "source_value": "03", "target": "Design03", "output": "Output_SideA", "group": "design"},
+    ]
+    return config
+
+
+def scan_evidence():
+    return {
+        "$schema": "custom-renderer/v2-template-scan",
+        "scan_protocol_version": 1,
+        "evidence": {
+            "template_sha256": TEMPLATE_SHA,
+            "scan_protocol_version": 1,
+            "illustrator_version": "29.0",
+            "scanned_at": "2026-08-07T00:00:00Z",
+            "object_path_digest": "b" * 64,
+        },
+        "template": {"path": "Template"},
+        "outputs": [
+            {
+                "key": "Output_main",
+                "path": "Template/Output_main",
+                "styles": [{"key": "style1", "path": "Template/Output_main/Style/style1"}],
+                "designs": [
+                    {
+                        "key": "Design03",
+                        "path": "Template/Output_main/Design/Design03",
+                        "slots": [
+                            {"key": "slot_name", "path": "Template/Output_main/Design/Design03/slot_name"},
+                            {"key": "slot_initial", "path": "Template/Output_main/Design/Design03/slot_initial"},
+                        ],
+                        "anchors": [{"key": "anchor_name", "path": "Template/Output_main/Design/Design03/anchor_name"}],
+                        "tails": [],
+                        "assets": [{"asset_key": "initial_top", "path": "Template/Output_main/Design/Design03/Assets/initial_top"}],
+                    }
+                ],
+                "fonts": [
+                    {
+                        "key": "F10",
+                        "path": "Template/Output_main/Font/F10",
+                        "slots": [{"key": "slot_name", "path": "Template/Output_main/Font/F10/slot_name"}],
+                        "anchors": [],
+                        "tails": [],
+                    }
+                ],
+            }
+        ],
+        "dependencies": {"fonts": [{"scope": "slot", "path": "Template/Output_main/Font/F10/slot_name", "font_name": "Milkshake"}]},
+        "issues": [],
+        "blocked": False,
+    }
+
+
+def multi_output_scan():
+    scan = scan_evidence()
+    scan["outputs"] = [
+        {
+            "key": "Output_SideA",
+            "path": "Template/Output_SideA",
+            "designs": [
+                {
+                    "key": "Design03",
+                    "path": "Template/Output_SideA/Design/Design03",
+                    "slots": [{"key": "slot_name", "path": "Template/Output_SideA/Design/Design03/slot_name"}],
+                    "anchors": [],
+                    "tails": [],
+                    "assets": [],
+                }
+            ],
+            "styles": [],
+            "fonts": [],
+        },
+        {
+            "key": "Output_SideB",
+            "path": "Template/Output_SideB",
+            "fonts": [
+                {
+                    "key": "F10",
+                    "path": "Template/Output_SideB/Font/F10",
+                    "slots": [{"key": "slot_name", "path": "Template/Output_SideB/Font/F10/slot_name"}],
+                    "anchors": [],
+                    "tails": [],
+                }
+            ],
+            "styles": [],
+            "designs": [],
+        },
+    ]
+    return scan
+
+
+def compile_task(config=None, scan=None, **overrides):
+    kwargs = {
+        "template_id": "V2RENDER001",
+        "template_version": "v0007",
+        "template_sha256": TEMPLATE_SHA,
+        "config_version": "d0012",
+        "font_check": {"ok": True, "missing": []},
+    }
+    kwargs.update(overrides)
+    return compile_v2_render_task(config or render_config(), scan or scan_evidence(), **kwargs)
+
+
+def test_compiles_v2_render_task_with_stable_json_and_whitelisted_actions():
+    first = compile_task()
+    second = compile_task()
+
+    assert first == second
+    assert stable_v2_render_task_json(first) == stable_v2_render_task_json(second)
+    assert first["$schema"] == V2_RENDER_TASK_SCHEMA
+    assert first["template"] == {"template_id": "V2RENDER001", "version": "v0007", "sha256": TEMPLATE_SHA}
+    assert first["scan"]["object_path_digest"] == "b" * 64
+    assert first["font_check"] == {"ok": True, "missing": []}
+    assert len(first["task_sha256"]) == 64
+    task_hash_payload = dict(first)
+    task_hash_payload.pop("task_sha256")
+    assert first["task_sha256"] == hashlib.sha256(stable_v2_render_task_json(task_hash_payload).encode("utf-8")).hexdigest()
+    actions = first["outputs"][0]["actions"]
+    assert {action["type"] for action in actions} <= ALLOWED_V2_ACTIONS
+    assert all("jsx" not in str(action).lower() and "script" not in str(action).lower() for action in actions)
+    assert [item["group"] for item in first["option_mappings"]] == ["design", "font", "style"]
+
+
+def test_rejects_template_sha_mismatch_before_illustrator_task_creation():
+    config = render_config()
+    config["audit"]["template_sha256"] = "c" * 64
+
+    with pytest.raises(V2RenderTaskError) as exc_info:
+        compile_v2_render_task(
+            config,
+            scan_evidence(),
+            template_id="V2RENDER001",
+            template_version="v0007",
+            template_sha256=TEMPLATE_SHA,
+            config_version="d0012",
+        )
+
+    assert exc_info.value.code == "template_sha256_mismatch"
+    assert exc_info.value.path == "$.evidence.template_sha256"
+
+
+def test_rejects_missing_config_audit_template_sha_before_illustrator_task_creation():
+    config = render_config()
+    config["audit"].pop("template_sha256")
+
+    with pytest.raises(V2RenderTaskError) as exc_info:
+        compile_task(config=config)
+
+    assert exc_info.value.code == "template_sha256_mismatch"
+
+
+def test_rejects_scan_sha_mismatch_before_illustrator_task_creation():
+    scan = scan_evidence()
+    scan["evidence"]["template_sha256"] = "d" * 64
+
+    with pytest.raises(V2RenderTaskError) as exc_info:
+        compile_task(scan=scan)
+
+    assert exc_info.value.code == "template_sha256_mismatch"
+
+
+def test_rejects_scan_with_blocking_issue_status_even_if_flag_is_false():
+    scan = scan_evidence()
+    scan["blocked"] = False
+    scan["issues"] = [{"status": "blocked", "code": "duplicate_name"}]
+
+    with pytest.raises(V2RenderTaskError) as exc_info:
+        compile_task(scan=scan)
+
+    assert exc_info.value.code == "scan_blocked"
+
+
+@pytest.mark.parametrize(
+    ("font_check", "code"),
+    [
+        (None, "font_check_missing"),
+        ({}, "font_check_invalid"),
+        ({"ok": True, "missing": ["Milkshake"]}, "font_check_failed"),
+        ({"ok": False, "missing": []}, "font_check_failed"),
+        ({"ok": True, "missing": [123]}, "font_check_invalid"),
+    ],
+)
+def test_rejects_missing_invalid_or_failed_font_check(font_check, code):
+    with pytest.raises(V2RenderTaskError) as exc_info:
+        compile_task(font_check=font_check)
+
+    assert exc_info.value.code == code
+
+
+def test_rejects_config_references_missing_scan_object_path():
+    scan = scan_evidence()
+    scan["outputs"][0]["fonts"][0]["slots"] = []
+
+    with pytest.raises(V2RenderTaskError) as exc_info:
+        compile_task(scan=scan)
+
+    assert exc_info.value.code == "scan_object_missing"
+    assert "F10/slot_name" in str(exc_info.value)
+
+
+def test_rejects_config_anchor_without_scan_path():
+    scan = scan_evidence()
+    scan["outputs"][0]["designs"][0]["anchors"] = []
+
+    with pytest.raises(V2RenderTaskError) as exc_info:
+        compile_task(scan=scan)
+
+    assert exc_info.value.code == "scan_object_missing"
+    assert exc_info.value.path.endswith(".anchor")
+
+
+def test_keeps_design_and_font_same_slot_keys_on_distinct_paths():
+    task = compile_task()
+
+    slot_actions = [action for action in task["outputs"][0]["actions"] if action["type"] == "replace_slot_text"]
+    design_slot = next(action for action in slot_actions if action["group"] == "design" and action["slot_key"] == "slot_name")
+    font_slot = next(action for action in slot_actions if action["group"] == "font" and action["slot_key"] == "slot_name")
+
+    assert design_slot["object_path"] == "Template/Output_main/Design/Design03/slot_name"
+    assert design_slot["anchor_path"] == "Template/Output_main/Design/Design03/anchor_name"
+    assert font_slot["object_path"] == "Template/Output_main/Font/F10/slot_name"
+    assert font_slot["font_dependencies"] == ["Milkshake"]
+
+
+def test_rejects_duplicate_scan_object_keys_in_same_scope():
+    scan = scan_evidence()
+    scan["outputs"][0]["fonts"][0]["slots"].append({"key": "slot_name", "path": "Template/other"})
+
+    with pytest.raises(V2RenderTaskError) as exc_info:
+        compile_task(scan=scan)
+
+    assert exc_info.value.code == "scan_object_duplicate"
+    assert "Font/F10/slot_name" in str(exc_info.value)
+
+
+def test_rejects_duplicate_scan_anchor_keys_in_same_option_scope():
+    scan = scan_evidence()
+    scan["outputs"][0]["designs"][0]["anchors"].append(
+        {"key": "anchor_name", "path": "Template/Output_main/Design/Design03/other_anchor"}
+    )
+
+    with pytest.raises(V2RenderTaskError) as exc_info:
+        compile_task(scan=scan)
+
+    assert exc_info.value.code == "scan_object_duplicate"
+    assert "anchor_name" in str(exc_info.value)
+
+
+def test_rejects_duplicate_scan_tail_keys_in_same_option_scope():
+    config = render_config()
+    config["outputs"][0]["design"]["options"][0]["slots"][0]["tails"] = [
+        {"key": "tail_name", "position": "last", "sample": "a"}
+    ]
+    scan = scan_evidence()
+    scan["outputs"][0]["designs"][0]["tails"] = [
+        {"key": "tail_name", "path": "Template/Output_main/Design/Design03/tail_name"},
+        {"key": "tail_name", "path": "Template/Output_main/Design/Design03/tail_name_copy"},
+    ]
+
+    with pytest.raises(V2RenderTaskError) as exc_info:
+        compile_task(config=config, scan=scan)
+
+    assert exc_info.value.code == "scan_object_duplicate"
+    assert "tail_name" in str(exc_info.value)
+
+
+def test_records_multi_output_order_from_contract_order():
+    task = compile_task(config=multi_output_config(), scan=multi_output_scan())
+
+    assert [(output["key"], output["order"]) for output in task["outputs"]] == [
+        ("Output_SideA", 1),
+        ("Output_SideB", 2),
+    ]
+    assert task["outputs"][0]["actions"][0]["object_path"] == "Template/Output_SideA/Design/Design03"
+    assert task["outputs"][1]["actions"][0]["object_path"] == "Template/Output_SideB/Font/F10"
+
+
+def test_compiles_from_store_draft_revision_and_source_version(tmp_path):
+    store = V2TemplateStore(tmp_path / "v2")
+    store.save_draft(
+        "V2RENDER001",
+        metadata={"template_id": "V2RENDER001", "name": "Render demo"},
+        config=render_config(),
+        scan=scan_evidence(),
+        source_version="v0007",
+    )
+    draft = store.read_draft("V2RENDER001")
+
+    task = compile_task(
+        config=draft["config"],
+        scan=draft["scan"],
+        template_id=draft["metadata"]["template_id"],
+        template_version=draft["manifest"]["source_version"],
+        config_version=draft["manifest"]["draft_revision"],
+        config_sha256=draft["manifest"]["config_sha256"],
+        scan_sha256=draft["manifest"]["scan_sha256"],
+    )
+
+    assert task["template"]["version"] == "v0007"
+    assert task["config"]["version"] == "d0001"
+    assert task["config"]["sha256"] == draft["manifest"]["config_sha256"]
+    assert task["scan"]["sha256"] == draft["manifest"]["scan_sha256"]
