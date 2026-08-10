@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from typing import Any, Dict, Iterable, Mapping
 
-from .v2_order_preflight_content import check_split_by_pipe_values
+from .v2_order_preflight_content import (
+    check_initial_with_text_values,
+    check_multi_initial_values,
+    check_split_by_pipe_values,
+)
 from .v2_template_contract import check_v2_template_contract
 from .v2_order_preflight_issues import preflight_issue as _issue
 
@@ -200,8 +204,35 @@ def _check_required_slot_values(
                         expected_format=f"请填写 {header}。",
                     )
                 )
-        if str(option.get("content_preset") or "") == "split_by_pipe":
+        content_preset = str(option.get("content_preset") or "")
+        if content_preset == "split_by_pipe":
             check_split_by_pipe_values(
+                contract,
+                output,
+                option,
+                group_name,
+                slots,
+                row,
+                row_index,
+                order_id,
+                output_path,
+                issues,
+            )
+        if content_preset == "initial_with_text":
+            check_initial_with_text_values(
+                contract,
+                output,
+                option,
+                group_name,
+                slots,
+                row,
+                row_index,
+                order_id,
+                output_path,
+                issues,
+            )
+        if content_preset == "multi_initials":
+            check_multi_initial_values(
                 contract,
                 output,
                 option,

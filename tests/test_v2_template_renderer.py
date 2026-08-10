@@ -64,6 +64,118 @@ def compiled_task():
     }
 
 
+def initial_render_task():
+    return {
+        "$schema": V2_RENDER_TASK_SCHEMA,
+        "task_sha256": "e" * 64,
+        "option_mappings": [
+            {"output": "Output_main", "group": "design", "field": "design", "source_value": "03", "target": "Design03"},
+        ],
+        "outputs": [
+            {
+                "key": "Output_main",
+                "actions": [
+                    {
+                        "type": "copy_option_group",
+                        "group": "design",
+                        "option_key": "Design03",
+                        "object_path": "Template/Output_main/Design/Design03",
+                        "content_preset": "initial_with_text",
+                    },
+                    {
+                        "type": "replace_slot_text",
+                        "group": "design",
+                        "option_key": "Design03",
+                        "slot_key": "slot_name",
+                        "object_path": "Template/Output_main/Design/Design03/slot_name",
+                        "source_field": "personalization",
+                        "required": True,
+                        "preset": "direct_text",
+                        "tail_paths": [],
+                        "value_key": "Output_main|design|Design03|slot|slot_name",
+                    },
+                    {
+                        "type": "bind_asset_library",
+                        "group": "design",
+                        "option_key": "Design03",
+                        "asset_key": "initial",
+                        "slot_key": "slot_initial",
+                        "object_path": "Template/Output_main/Design/Design03/Assets/initial",
+                        "target_path": "Template/Output_main/Design/Design03/slot_initial",
+                        "source_field": "personalization",
+                        "required": True,
+                        "supported_values": ["A", "B", "K"],
+                        "value_key": "Output_main|design|Design03|asset|initial",
+                    },
+                ],
+            }
+        ],
+    }
+
+
+def multi_initial_render_task():
+    return {
+        "$schema": V2_RENDER_TASK_SCHEMA,
+        "task_sha256": "d" * 64,
+        "option_mappings": [
+            {"output": "Output_main", "group": "design", "field": "design", "source_value": "03", "target": "Design03"},
+        ],
+        "outputs": [
+            {
+                "key": "Output_main",
+                "actions": [
+                    {
+                        "type": "copy_option_group",
+                        "group": "design",
+                        "option_key": "Design03",
+                        "object_path": "Template/Output_main/Design/Design03",
+                        "content_preset": "multi_initials",
+                    },
+                    {
+                        "type": "bind_asset_library",
+                        "group": "design",
+                        "option_key": "Design03",
+                        "asset_key": "initial_top",
+                        "slot_key": "slot_initial_top",
+                        "object_path": "Template/Output_main/Design/Design03/Assets/initial_top",
+                        "target_path": "Template/Output_main/Design/Design03/slot_initial_top",
+                        "source_field": "names",
+                        "required": True,
+                        "supported_values": ["A", "B", "C"],
+                        "value_key": "Output_main|design|Design03|asset|initial_top",
+                    },
+                    {
+                        "type": "bind_asset_library",
+                        "group": "design",
+                        "option_key": "Design03",
+                        "asset_key": "initial_middle",
+                        "slot_key": "slot_initial_middle",
+                        "object_path": "Template/Output_main/Design/Design03/Assets/initial_middle",
+                        "target_path": "Template/Output_main/Design/Design03/slot_initial_middle",
+                        "source_field": "names",
+                        "required": True,
+                        "supported_values": ["A", "B", "C"],
+                        "value_key": "Output_main|design|Design03|asset|initial_middle",
+                    },
+                    {
+                        "type": "bind_asset_library",
+                        "group": "design",
+                        "option_key": "Design03",
+                        "asset_key": "initial_bottom",
+                        "slot_key": "slot_initial_bottom",
+                        "object_path": "Template/Output_main/Design/Design03/Assets/initial_bottom",
+                        "target_path": "Template/Output_main/Design/Design03/slot_initial_bottom",
+                        "source_field": "names",
+                        "required": True,
+                        "supported_values": ["A", "B", "C"],
+                        "value_key": "Output_main|design|Design03|asset|initial_bottom",
+                    },
+                ],
+            }
+        ],
+    }
+
+
 class FakeBridge:
     def __init__(self):
         self.calls = []
@@ -85,6 +197,62 @@ def test_builds_execution_task_with_derived_option_selections(tmp_path):
     assert execution["render_task_sha256"] == "f" * 64
     assert execution["selections"] == {"Output_main": {"font": "F10", "design": "Design03"}}
     assert execution["values"]["name"] == "Alice"
+    assert execution["resolved_values"] == {}
+
+
+@pytest.mark.parametrize(
+    ("personalization", "initial", "body"),
+    [
+        ("K|Kenneth", "K", "Kenneth"),
+        ("Back|K", "K", "Back"),
+        ("Kenneth", "K", "Kenneth"),
+    ],
+)
+def test_builds_execution_task_with_resolved_initial_and_body_text(tmp_path, personalization, initial, body):
+    execution = build_v2_execution_task(
+        initial_render_task(),
+        template_ai=tmp_path / "template.ai",
+        output_ai=tmp_path / "out.ai",
+        values={"design": "03", "personalization": personalization},
+    )
+
+    assert execution["resolved_values"] == {
+        "Output_main|design|Design03|asset|initial": initial,
+        "Output_main|design|Design03|slot|slot_name": body,
+    }
+
+
+@pytest.mark.parametrize(
+    ("names", "expected"),
+    [
+        ("Amy|Bob|Chris", ["A", "B", "C"]),
+        ("A|B|C", ["A", "B", "C"]),
+        ("ABC", ["A", "B", "C"]),
+        ("Amy|B|Chris", ["A", "B", "C"]),
+    ],
+)
+def test_builds_execution_task_with_resolved_multi_initials(tmp_path, names, expected):
+    execution = build_v2_execution_task(
+        multi_initial_render_task(),
+        template_ai=tmp_path / "template.ai",
+        output_ai=tmp_path / "out.ai",
+        values={"design": "03", "names": names},
+    )
+
+    assert list(execution["resolved_values"].values()) == expected
+
+
+@pytest.mark.parametrize(("personalization", "code"), [("A|B", "initial_content_ambiguous"), ("Zelda", "asset_value_missing")])
+def test_ambiguous_or_unsupported_initial_content_does_not_enter_illustrator(tmp_path, personalization, code):
+    with pytest.raises(V2TemplateRendererError) as exc_info:
+        build_v2_execution_task(
+            initial_render_task(),
+            template_ai=tmp_path / "template.ai",
+            output_ai=tmp_path / "out.ai",
+            values={"design": "03", "personalization": personalization},
+        )
+
+    assert exc_info.value.code == code
 
 
 def test_explicit_option_selections_are_accepted_without_mapping_values(tmp_path):

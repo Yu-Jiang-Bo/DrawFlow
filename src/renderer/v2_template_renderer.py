@@ -8,6 +8,12 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from .illustrator_bridge import IllustratorBridge
+from src.service.v2_content_presets import (
+    V2ContentPresetError,
+    match_supported_asset_value,
+    resolve_initial_with_text,
+    resolve_multi_initials,
+)
 from src.service.v2_render_task import V2_RENDER_TASK_SCHEMA, stable_v2_render_task_json
 
 
@@ -93,7 +99,8 @@ def build_v2_execution_task(
     normalized_values = {str(key): _string_value(value) for key, value in values.items()}
     normalized_selections = _normalize_selections(task, normalized_values, selections)
     _preflight_renderable_options(task, normalized_selections)
-    _preflight_required_slots(task, normalized_values, normalized_selections)
+    resolved_values = _resolve_content_values(task, normalized_values, normalized_selections)
+    _preflight_required_slots(task, normalized_values, resolved_values, normalized_selections)
     return {
         "$schema": V2_RENDER_EXECUTION_SCHEMA,
         "execution_protocol_version": V2_RENDER_EXECUTION_VERSION,
@@ -102,6 +109,7 @@ def build_v2_execution_task(
         "template_ai": str(Path(template_ai)),
         "output_ai": str(Path(output_ai)),
         "values": normalized_values,
+        "resolved_values": resolved_values,
         "selections": normalized_selections,
     }
 
@@ -150,6 +158,7 @@ def _normalize_selections(
 def _preflight_required_slots(
     render_task: Mapping[str, Any],
     values: Mapping[str, str],
+    resolved_values: Mapping[str, str],
     selections: Mapping[str, dict[str, str]],
 ) -> None:
     for output_index, output in enumerate(render_task.get("outputs", [])):
@@ -158,19 +167,96 @@ def _preflight_required_slots(
         output_key = str(output.get("key") or "")
         selected = selections.get(output_key, {})
         for action_index, action in enumerate(output.get("actions", [])):
-            if not isinstance(action, Mapping) or action.get("type") != "replace_slot_text":
+            if not isinstance(action, Mapping) or action.get("type") not in {"replace_slot_text", "bind_asset_library"}:
                 continue
             group = str(action.get("group") or "")
             option_key = str(action.get("option_key") or "")
             if selected.get(group) != option_key:
                 continue
             source_field = str(action.get("source_field") or "")
-            if bool(action.get("required", True)) and not _has_text(values.get(source_field, "")):
+            if bool(action.get("required", True)) and not _has_text(_action_value(action, values, resolved_values)):
                 raise V2TemplateRendererError(
                     "required_slot_empty",
                     f"Required V2 slot has no value: {source_field}.",
                     path=f"$.render_task.outputs[{output_index}].actions[{action_index}]",
                 )
+
+
+def _resolve_content_values(
+    render_task: Mapping[str, Any],
+    values: Mapping[str, str],
+    selections: Mapping[str, dict[str, str]],
+) -> dict[str, str]:
+    resolved: dict[str, str] = {}
+    for output_index, output in enumerate(render_task.get("outputs", [])):
+        if not isinstance(output, Mapping):
+            continue
+        output_key = str(output.get("key") or "")
+        selected = selections.get(output_key, {})
+        actions = [action for action in output.get("actions", []) if isinstance(action, Mapping)]
+        for action_index, action in enumerate(actions):
+            if action.get("type") != "copy_option_group":
+                continue
+            group = str(action.get("group") or "")
+            option_key = str(action.get("option_key") or "")
+            if selected.get(group) != option_key:
+                continue
+            preset = str(action.get("content_preset") or "")
+            option_actions = [
+                item for item in actions
+                if str(item.get("group") or "") == group and str(item.get("option_key") or "") == option_key
+            ]
+            try:
+                if preset == "initial_with_text":
+                    _resolve_initial_option_values(option_actions, values, resolved)
+                elif preset == "multi_initials":
+                    _resolve_multi_initial_option_values(option_actions, values, resolved)
+            except V2ContentPresetError as exc:
+                raise V2TemplateRendererError(
+                    exc.code,
+                    str(exc),
+                    path=f"$.render_task.outputs[{output_index}].actions[{action_index}]",
+                ) from exc
+    return resolved
+
+
+def _resolve_initial_option_values(
+    actions: list[Mapping[str, Any]],
+    values: Mapping[str, str],
+    resolved: dict[str, str],
+) -> None:
+    asset_actions = [action for action in actions if action.get("type") == "bind_asset_library"]
+    text_actions = [action for action in actions if action.get("type") == "replace_slot_text"]
+    if len(asset_actions) != 1 or not text_actions:
+        raise V2ContentPresetError("initial_preset_incomplete", "首字母素材加正文必须包含一个素材槽位和一个正文槽位。")
+    asset_action = asset_actions[0]
+    text_action = text_actions[0]
+    asset_field = str(asset_action.get("source_field") or "")
+    text_field = str(text_action.get("source_field") or "")
+    parsed = resolve_initial_with_text(
+        asset_value=values.get(asset_field, ""),
+        text_value=values.get(text_field, ""),
+        asset_field=asset_field,
+        text_field=text_field,
+    )
+    resolved[str(asset_action.get("value_key") or "")] = match_supported_asset_value(parsed.initial, asset_action.get("supported_values") or [])
+    for action in text_actions:
+        resolved[str(action.get("value_key") or "")] = parsed.text
+
+
+def _resolve_multi_initial_option_values(
+    actions: list[Mapping[str, Any]],
+    values: Mapping[str, str],
+    resolved: dict[str, str],
+) -> None:
+    asset_actions = [action for action in actions if action.get("type") == "bind_asset_library"]
+    if len(asset_actions) < 2:
+        raise V2ContentPresetError("multi_initials_incomplete", "多首字母提取必须包含至少两个素材槽位。")
+    fields = [str(action.get("source_field") or "") for action in asset_actions]
+    raw_values = [values.get(fields[0], "")] if len(set(fields)) == 1 else [values.get(field, "") for field in fields]
+    initials = resolve_multi_initials(raw_values, len(asset_actions))
+    for action, initial in zip(asset_actions, initials):
+        resolved[str(action.get("value_key") or "")] = match_supported_asset_value(initial, action.get("supported_values") or [])
 
 
 def _preflight_renderable_options(
@@ -231,6 +317,13 @@ def _string_value(value: Any) -> str:
 
 def _has_text(value: str) -> bool:
     return bool(str(value or "").strip())
+
+
+def _action_value(action: Mapping[str, Any], values: Mapping[str, str], resolved_values: Mapping[str, str]) -> str:
+    value_key = str(action.get("value_key") or "")
+    if value_key and value_key in resolved_values:
+        return str(resolved_values.get(value_key) or "")
+    return str(values.get(str(action.get("source_field") or ""), ""))
 
 
 def _validate_runtime_paths(*, template_ai: Path | str, output_ai: Path | str) -> None:
