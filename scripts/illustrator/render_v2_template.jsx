@@ -19,6 +19,7 @@
     layer.name = "V2_OUTPUT";
     var values = execution.values || {};
     var selections = execution.selections || {};
+    var layoutWarnings = [];
 
     try {
         for (var outputIndex = 0; outputIndex < (task.outputs || []).length; outputIndex++) {
@@ -28,6 +29,7 @@
         ensureFolder(output.parent);
         if (output.exists) output.remove();
         saveAsAI8(doc, output);
+        writeLayoutWarnings(execution.layout_warning_file, layoutWarnings);
         return output.fsName;
     } finally {
         try { templateDoc.close(SaveOptions.DONOTSAVECHANGES); } catch (closeTemplateError) {}
@@ -70,6 +72,7 @@
         var holder = copied[copyKey(outputKey, action)];
         if (!holder || !holder.item) throw new Error("Selected option was not copied: " + copyKey(outputKey, action));
         var slot = findPageItemByRelativePath(holder.item, relativePath(String(action.object_path || ""), holder.source_path));
+        var fitBounds = localFitBounds(holder.item, holder.source_path, action, slot);
         var value = String(valuesByField[String(action.source_field || "")] || "");
         var parts = splitPipeValue(value);
         if (!hasText(value)) {
@@ -81,17 +84,28 @@
         if (action.style_source) {
             target = replaceWithFontStyleSource(copied, outputKey, action, selected, slot);
         }
-        writeTextToItem(target, parts[0]);
+        var textFrame = writeTextToItem(target, parts[0]);
+        fitItemWithinBounds(textFrame, fitBounds, action);
         var tailPaths = action.tail_paths || [];
         for (var index = 0; index < tailPaths.length; index++) {
             var tail = findPageItemByRelativePath(holder.item, relativePath(String(tailPaths[index] || ""), holder.source_path));
             var tailText = parts[index + 1] || "";
             if (hasText(tailText)) {
-                writeTextToItem(tail, tailText);
+                var tailFrame = writeTextToItem(tail, tailText);
+                fitItemWithinBounds(tailFrame, measuredBounds(tail), action);
             } else {
                 removePageItem(tail);
             }
         }
+    }
+
+    function localFitBounds(root, sourcePath, action, slot) {
+        var anchorPath = String(action.anchor_path || "");
+        if (anchorPath) {
+            var anchor = findPageItemByRelativePath(root, relativePath(anchorPath, sourcePath));
+            return measuredBounds(anchor);
+        }
+        return measuredBounds(slot);
     }
 
     function replaceWithFontStyleSource(copied, outputKey, action, selected, targetSlot) {
@@ -105,10 +119,12 @@
         var sourceHolder = copied[outputKey + "|" + group + "|" + fontOption];
         if (!sourceHolder || !sourceHolder.item) throw new Error("V2 font style source was not copied: " + fontOption);
         var sourceItem = findPageItemByRelativePath(sourceHolder.item, relativePath(sourcePath, sourceHolder.source_path));
-        var parent = targetSlot.parent || sourceHolder.item.parent;
+        var targetFrame = firstTextFrame(targetSlot);
+        if (!targetFrame) throw new Error("V2 design slot has no text frame for style source");
+        var parent = targetSlot.typename === "TextFrame" ? (targetSlot.parent || sourceHolder.item.parent) : targetSlot;
         var replacement = sourceItem.duplicate(parent, ElementPlacement.PLACEATEND);
-        alignItemToItem(replacement, targetSlot);
-        removePageItem(targetSlot);
+        alignItemToItem(replacement, targetFrame);
+        removePageItem(targetFrame);
         return replacement;
     }
 
@@ -124,6 +140,7 @@
         var frame = firstTextFrame(item);
         if (!frame) throw new Error("V2 slot has no text frame: " + String(item && item.name || ""));
         frame.contents = String(text || "");
+        return frame;
     }
 
     function firstTextFrame(item) {
@@ -156,6 +173,81 @@
             var targetCenterY = (Number(targetBounds[1]) + Number(targetBounds[3])) / 2;
             item.translate(targetCenterX - itemCenterX, targetCenterY - itemCenterY);
         } catch (alignError) {}
+    }
+
+    function fitItemWithinBounds(item, bounds, action) {
+        if (!bounds) return;
+        var targetWidth = Math.abs(Number(bounds[2]) - Number(bounds[0]));
+        var targetHeight = Math.abs(Number(bounds[1]) - Number(bounds[3]));
+        if (targetWidth <= 0 || targetHeight <= 0) return;
+        var shrinkCount = 0;
+        var smallestScale = 1;
+        for (var index = 0; index < 20; index++) {
+            var current = measuredBounds(item);
+            var width = Math.abs(Number(current[2]) - Number(current[0]));
+            var height = Math.abs(Number(current[1]) - Number(current[3]));
+            if (width <= targetWidth && height <= targetHeight) break;
+            var scale = Math.min(targetWidth / width, targetHeight / height) * 0.98;
+            if (!isFinite(scale) || scale <= 0 || scale >= 1) break;
+            shrinkCount += 1;
+            smallestScale = Math.min(smallestScale, scale);
+            try { item.resize(scale * 100, scale * 100, true, true, true, true, 100, Transformation.CENTER); }
+            catch (resizeError1) {
+                try { item.resize(scale * 100, scale * 100); } catch (resizeError2) { break; }
+            }
+        }
+        centerItemInBounds(item, bounds);
+        var finalBounds = measuredBounds(item);
+        var finalWidth = Math.abs(Number(finalBounds[2]) - Number(finalBounds[0]));
+        var finalHeight = Math.abs(Number(finalBounds[1]) - Number(finalBounds[3]));
+        if (finalWidth > targetWidth || finalHeight > targetHeight) {
+            layoutWarnings.push({
+                code: "text_fit_extreme",
+                severity: "warning",
+                slot_key: String(action && action.slot_key || ""),
+                object_path: String(action && action.object_path || ""),
+                actual_width: finalWidth,
+                actual_height: finalHeight,
+                target_width: targetWidth,
+                target_height: targetHeight
+            });
+        } else if (shrinkCount > 0 && smallestScale < 0.35) {
+            layoutWarnings.push({
+                code: "text_fit_extreme",
+                severity: "warning",
+                slot_key: String(action && action.slot_key || ""),
+                object_path: String(action && action.object_path || ""),
+                shrink_count: shrinkCount,
+                min_scale: smallestScale,
+                target_width: targetWidth,
+                target_height: targetHeight
+            });
+        }
+    }
+
+    function centerItemInBounds(item, bounds) {
+        var current = measuredBounds(item);
+        var itemCenterX = (Number(current[0]) + Number(current[2])) / 2;
+        var itemCenterY = (Number(current[1]) + Number(current[3])) / 2;
+        var targetCenterX = (Number(bounds[0]) + Number(bounds[2])) / 2;
+        var targetCenterY = (Number(bounds[1]) + Number(bounds[3])) / 2;
+        item.translate(targetCenterX - itemCenterX, targetCenterY - itemCenterY);
+    }
+
+    function measuredBounds(item) {
+        try {
+            var visible = item.visibleBounds;
+            if (validBounds(visible)) return visible;
+        } catch (visibleError) {}
+        try {
+            var geometric = item.geometricBounds;
+            if (validBounds(geometric)) return geometric;
+        } catch (geometricError) {}
+        throw new Error("Cannot measure V2 item bounds");
+    }
+
+    function validBounds(bounds) {
+        return bounds && bounds.length >= 4 && isFinite(Number(bounds[0])) && isFinite(Number(bounds[1])) && isFinite(Number(bounds[2])) && isFinite(Number(bounds[3]));
     }
 
     function findPageItemByPath(root, objectPath) {
@@ -250,5 +342,15 @@
         if (!folder || folder.exists) return;
         ensureFolder(folder.parent);
         folder.create();
+    }
+
+    function writeLayoutWarnings(path, warnings) {
+        if (!path) return;
+        var file = File(String(path));
+        ensureFolder(file.parent);
+        file.encoding = "UTF-8";
+        if (!file.open("w")) throw new Error("Cannot write V2 layout warnings: " + file.fsName);
+        file.write(JSON.stringify({warnings: warnings || []}));
+        file.close();
     }
 }());

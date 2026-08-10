@@ -329,6 +329,302 @@ if (designCopy.pageItems.find(item => item.name === 'slot_year')) throw new Erro
     assert result.returncode == 0, result.stderr
 
 
+def test_v2_renderer_fits_short_and_long_text_inside_local_slot_bounds():
+    task = {
+        "$schema": "custom-renderer/v2-render-execution",
+        "template_ai": "template.ai",
+        "output_ai": "out.ai",
+        "values": {"design": "03", "name": "Alexandria-Catherine-Very-Long-Name"},
+        "selections": {"Output_main": {"design": "Design03"}},
+        "render_task": {
+            "$schema": "custom-renderer/v2-render-task",
+            "outputs": [
+                {
+                    "key": "Output_main",
+                    "actions": [
+                        {
+                            "type": "copy_option_group",
+                            "group": "design",
+                            "option_key": "Design03",
+                            "object_path": "Template/Output_main/Design/Design03",
+                        },
+                        {
+                            "type": "replace_slot_text",
+                            "group": "design",
+                            "option_key": "Design03",
+                            "object_path": "Template/Output_main/Design/Design03/slot_name",
+                            "source_field": "name",
+                            "required": True,
+                            "tail_paths": [],
+                        },
+                    ],
+                }
+            ],
+        },
+    }
+    harness = node_mock_harness(task, """
+const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
+const slot = child(designCopy, 'slot_name');
+const width = slot.visibleBounds[2] - slot.visibleBounds[0];
+const height = slot.visibleBounds[1] - slot.visibleBounds[3];
+if (width > 100.01) throw new Error('long text escaped local slot width: ' + width);
+if (height > 30.01) throw new Error('long text escaped local slot height: ' + height);
+if (slot.resizeCalls < 1) throw new Error('long text was not shrunk');
+const centerX = (slot.visibleBounds[0] + slot.visibleBounds[2]) / 2;
+const centerY = (slot.visibleBounds[1] + slot.visibleBounds[3]) / 2;
+if (Math.abs(centerX - 50) > 0.1 || Math.abs(centerY - 15) > 0.1) throw new Error('text not centered in slot');
+""")
+
+    result = run_node(harness)
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_v2_renderer_short_text_centers_without_resizing():
+    task = {
+        "$schema": "custom-renderer/v2-render-execution",
+        "template_ai": "template.ai",
+        "output_ai": "out.ai",
+        "values": {"design": "03", "name": "Amy"},
+        "selections": {"Output_main": {"design": "Design03"}},
+        "render_task": {
+            "$schema": "custom-renderer/v2-render-task",
+            "outputs": [
+                {
+                    "key": "Output_main",
+                    "actions": [
+                        {
+                            "type": "copy_option_group",
+                            "group": "design",
+                            "option_key": "Design03",
+                            "object_path": "Template/Output_main/Design/Design03",
+                        },
+                        {
+                            "type": "replace_slot_text",
+                            "group": "design",
+                            "option_key": "Design03",
+                            "object_path": "Template/Output_main/Design/Design03/slot_name",
+                            "source_field": "name",
+                            "required": True,
+                            "tail_paths": [],
+                        },
+                    ],
+                }
+            ],
+        },
+    }
+    harness = node_mock_harness(task, """
+const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
+const slot = child(designCopy, 'slot_name');
+if (slot.resizeCalls !== 0) throw new Error('short text should not resize');
+const centerX = (slot.visibleBounds[0] + slot.visibleBounds[2]) / 2;
+const centerY = (slot.visibleBounds[1] + slot.visibleBounds[3]) / 2;
+if (Math.abs(centerX - 50) > 0.1 || Math.abs(centerY - 15) > 0.1) throw new Error('short text not centered');
+""")
+
+    result = run_node(harness)
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_v2_renderer_normal_text_stays_proportional_without_resizing():
+    task = {
+        "$schema": "custom-renderer/v2-render-execution",
+        "template_ai": "template.ai",
+        "output_ai": "out.ai",
+        "values": {"design": "03", "name": "Normal"},
+        "selections": {"Output_main": {"design": "Design03"}},
+        "render_task": {
+            "$schema": "custom-renderer/v2-render-task",
+            "outputs": [
+                {
+                    "key": "Output_main",
+                    "actions": [
+                        {
+                            "type": "copy_option_group",
+                            "group": "design",
+                            "option_key": "Design03",
+                            "object_path": "Template/Output_main/Design/Design03",
+                        },
+                        {
+                            "type": "replace_slot_text",
+                            "group": "design",
+                            "option_key": "Design03",
+                            "object_path": "Template/Output_main/Design/Design03/slot_name",
+                            "source_field": "name",
+                            "required": True,
+                            "tail_paths": [],
+                        },
+                    ],
+                }
+            ],
+        },
+    }
+    harness = node_mock_harness(task, """
+const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
+const slot = child(designCopy, 'slot_name');
+if (slot.resizeCalls !== 0) throw new Error('normal text should keep template scale');
+const width = slot.visibleBounds[2] - slot.visibleBounds[0];
+if (width > 100.01) throw new Error('normal text escaped slot width');
+""")
+
+    result = run_node(harness)
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_v2_renderer_uses_anchor_bounds_without_moving_fixed_art():
+    task = {
+        "$schema": "custom-renderer/v2-render-execution",
+        "template_ai": "template.ai",
+        "output_ai": "out.ai",
+        "values": {"design": "03", "name": "Anchored-Long-Name"},
+        "selections": {"Output_main": {"design": "Design03"}},
+        "render_task": {
+            "$schema": "custom-renderer/v2-render-task",
+            "outputs": [
+                {
+                    "key": "Output_main",
+                    "actions": [
+                        {
+                            "type": "copy_option_group",
+                            "group": "design",
+                            "option_key": "Design03",
+                            "object_path": "Template/Output_main/Design/Design03",
+                        },
+                        {
+                            "type": "replace_slot_text",
+                            "group": "design",
+                            "option_key": "Design03",
+                            "object_path": "Template/Output_main/Design/Design03/slot_name",
+                            "source_field": "name",
+                            "required": True,
+                            "anchor_path": "Template/Output_main/Design/Design03/anchor_name",
+                            "tail_paths": [],
+                        },
+                    ],
+                }
+            ],
+        },
+    }
+    harness = node_mock_harness(task, """
+const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
+const slot = child(designCopy, 'slot_name');
+const fixed = child(designCopy, 'fixed_heart');
+const width = slot.visibleBounds[2] - slot.visibleBounds[0];
+const height = slot.visibleBounds[1] - slot.visibleBounds[3];
+if (width > 60.01) throw new Error('anchored text escaped anchor width: ' + width);
+if (height > 20.01) throw new Error('anchored text escaped anchor height: ' + height);
+const centerX = (slot.visibleBounds[0] + slot.visibleBounds[2]) / 2;
+const centerY = (slot.visibleBounds[1] + slot.visibleBounds[3]) / 2;
+if (Math.abs(centerX - 230) > 0.1 || Math.abs(centerY - 110) > 0.1) throw new Error('text not centered in anchor');
+if (fixed.translateCalls !== 0 || fixed.resizeCalls !== 0) throw new Error('fixed art moved or resized');
+""")
+
+    result = run_node(harness)
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_v2_renderer_extreme_text_keeps_shrinking_without_touching_fixed_art():
+    task = {
+        "$schema": "custom-renderer/v2-render-execution",
+        "template_ai": "template.ai",
+        "output_ai": "out.ai",
+        "layout_warning_file": "warnings.json",
+        "values": {"design": "03", "name": "X" * 160},
+        "selections": {"Output_main": {"design": "Design03"}},
+        "render_task": {
+            "$schema": "custom-renderer/v2-render-task",
+            "outputs": [
+                {
+                    "key": "Output_main",
+                    "actions": [
+                        {
+                            "type": "copy_option_group",
+                            "group": "design",
+                            "option_key": "Design03",
+                            "object_path": "Template/Output_main/Design/Design03",
+                        },
+                        {
+                            "type": "replace_slot_text",
+                            "group": "design",
+                            "option_key": "Design03",
+                            "object_path": "Template/Output_main/Design/Design03/slot_name",
+                            "source_field": "name",
+                            "required": True,
+                            "tail_paths": [],
+                        },
+                    ],
+                }
+            ],
+        },
+    }
+    harness = node_mock_harness(task, """
+const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
+const slot = child(designCopy, 'slot_name');
+const fixed = child(designCopy, 'fixed_heart');
+const width = slot.visibleBounds[2] - slot.visibleBounds[0];
+if (width > 100.01) throw new Error('extreme text escaped slot width: ' + width);
+if (slot.resizeCalls < 1) throw new Error('extreme text was not shrunk');
+if (fixed.translateCalls !== 0 || fixed.resizeCalls !== 0) throw new Error('fixed art moved or resized for extreme text');
+const warning = JSON.parse(writtenFiles['warnings.json']);
+if (!warning.warnings || warning.warnings[0].code !== 'text_fit_extreme') throw new Error('extreme text warning missing');
+""")
+
+    result = run_node(harness)
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_v2_renderer_group_slot_fits_text_without_moving_slot_decoration():
+    task = {
+        "$schema": "custom-renderer/v2-render-execution",
+        "template_ai": "template.ai",
+        "output_ai": "out.ai",
+        "values": {"design": "03", "group_name": "Grouped-Slot-Long-Name"},
+        "selections": {"Output_main": {"design": "Design03"}},
+        "render_task": {
+            "$schema": "custom-renderer/v2-render-task",
+            "outputs": [
+                {
+                    "key": "Output_main",
+                    "actions": [
+                        {
+                            "type": "copy_option_group",
+                            "group": "design",
+                            "option_key": "Design03",
+                            "object_path": "Template/Output_main/Design/Design03",
+                        },
+                        {
+                            "type": "replace_slot_text",
+                            "group": "design",
+                            "option_key": "Design03",
+                            "object_path": "Template/Output_main/Design/Design03/slot_group",
+                            "source_field": "group_name",
+                            "required": True,
+                            "tail_paths": [],
+                        },
+                    ],
+                }
+            ],
+        },
+    }
+    harness = node_mock_harness(task, """
+const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
+const slotGroup = child(designCopy, 'slot_group');
+const text = child(slotGroup, 'slot_group_text');
+const deco = child(slotGroup, 'slot_group_decoration');
+if (text.resizeCalls < 1) throw new Error('group slot text was not fitted');
+if (deco.translateCalls !== 0 || deco.resizeCalls !== 0) throw new Error('slot decoration moved or resized');
+if (!slotGroup.pageItems.includes(deco)) throw new Error('slot decoration was removed');
+""")
+
+    result = run_node(harness)
+
+    assert result.returncode == 0, result.stderr
+
+
 def node_mock_harness(task, assertions):
     return f"""
 const fs = require('fs');
@@ -336,6 +632,7 @@ const source = {jsx_source_expression()};
 const task = {json.dumps(task)};
 const folder = {{ exists: true, parent: null, create: () => true }};
 let savedAs = '';
+const writtenFiles = {{}};
 global.$ = {{ getenv: () => 'task.json' }};
 global.File = function(path) {{
   return {{
@@ -344,6 +641,7 @@ global.File = function(path) {{
     parent: folder,
     open: () => true,
     read: () => JSON.stringify(task),
+    write: text => {{ writtenFiles[path] = (writtenFiles[path] || '') + String(text); }},
     close: () => undefined,
     remove: () => undefined
   }};
@@ -354,13 +652,17 @@ global.ElementPlacement = {{ PLACEATEND: 1 }};
 global.SaveOptions = {{ DONOTSAVECHANGES: 0 }};
 global.Compatibility = {{ ILLUSTRATOR8: 8 }};
 global.IllustratorSaveOptions = function() {{}};
-function item(typename, name, contents, children, styleToken) {{
+global.Transformation = {{ CENTER: 0 }};
+function item(typename, name, contents, children, styleToken, bounds) {{
+  let text = contents || '';
+  let box = (bounds || defaultBounds(typename, name, text)).slice();
   const node = {{
     typename,
     name,
-    contents: contents || '',
     styleToken: styleToken || '',
     pageItems: children || [],
+    translateCalls: 0,
+    resizeCalls: 0,
     duplicate: function(targetLayer) {{
       const copy = clone(this);
       attach(targetLayer, copy);
@@ -370,13 +672,50 @@ function item(typename, name, contents, children, styleToken) {{
       if (!this.parent || !this.parent.pageItems) return;
       const index = this.parent.pageItems.indexOf(this);
       if (index >= 0) this.parent.pageItems.splice(index, 1);
+    }},
+    translate: function(dx, dy) {{
+      this.translateCalls++;
+      box = [box[0] + dx, box[1] + dy, box[2] + dx, box[3] + dy];
+    }},
+    resize: function(horizontalPercent, verticalPercent) {{
+      this.resizeCalls++;
+      const cx = (box[0] + box[2]) / 2;
+      const cy = (box[1] + box[3]) / 2;
+      const width = (box[2] - box[0]) * horizontalPercent / 100;
+      const height = (box[1] - box[3]) * verticalPercent / 100;
+      box = [cx - width / 2, cy + height / 2, cx + width / 2, cy - height / 2];
     }}
   }};
+  Object.defineProperty(node, 'contents', {{
+    get: () => text,
+    set: value => {{
+      text = String(value || '');
+      if (typename === 'TextFrame') {{
+        const left = box[0];
+        const top = box[1];
+        const height = Math.max(8, box[1] - box[3]);
+        const width = Math.max(10, text.length * 8);
+        box = [left, top, left + width, top - height];
+      }}
+    }}
+  }});
+  Object.defineProperty(node, 'visibleBounds', {{
+    get: () => box.slice(),
+    set: value => {{ box = value.slice(); }}
+  }});
+  Object.defineProperty(node, 'geometricBounds', {{ get: () => box.slice() }});
   for (const childNode of node.pageItems) childNode.parent = node;
   return node;
 }}
+function defaultBounds(typename, name, contents) {{
+  if (name === 'anchor_name') return [200, 120, 260, 100];
+  if (typename === 'TextFrame' && name === 'slot_name') return [0, 30, 100, 0];
+  if (typename === 'TextFrame') return [0, 20, Math.max(10, String(contents || '').length * 8), 0];
+  if (typename === 'PathItem') return [130, 40, 150, 20];
+  return [0, 100, 100, 0];
+}}
 function clone(node) {{
-  return item(node.typename, node.name, node.contents, node.pageItems.map(clone), node.styleToken);
+  return item(node.typename, node.name, node.contents, node.pageItems.map(clone), node.styleToken, node.visibleBounds);
 }}
 function attach(parent, childNode) {{
   childNode.parent = parent;
@@ -394,9 +733,15 @@ const f10 = item('GroupItem', 'F10', '', [
 ]);
 const design03 = item('GroupItem', 'Design03', '', [
   item('TextFrame', 'slot_name', 'Design sample', [], 'Design-style'),
+  item('PathItem', 'anchor_name', '', []),
+  item('GroupItem', 'slot_group', '', [
+    item('TextFrame', 'slot_group_text', 'Group sample', [], 'Group-style'),
+    item('PathItem', 'slot_group_decoration', '', [])
+  ]),
   item('TextFrame', 'tail_name_1', 'Tail 1', [], 'Tail-style'),
   item('TextFrame', 'tail_name_2', 'Tail 2', [], 'Tail-style'),
   item('TextFrame', 'slot_year', '2026', [], 'Year-style'),
+  item('PathItem', 'fixed_heart', '', []),
   item('PathItem', '', '', [])
 ]);
 const fontGroup = item('GroupItem', 'Font', '', [f1, f10]);
