@@ -625,11 +625,178 @@ if (!slotGroup.pageItems.includes(deco)) throw new Error('slot decoration was re
     assert result.returncode == 0, result.stderr
 
 
+def test_v2_renderer_fits_final_output_bounds_and_removes_auxiliary_items():
+    task = {
+        "$schema": "custom-renderer/v2-render-execution",
+        "template_ai": "template.ai",
+        "output_ai": "out.ai",
+        "values": {"design": "03", "style": "small", "name": "Amy"},
+        "selections": {"Output_main": {"design": "Design03", "style": "style1"}},
+        "render_task": {
+            "$schema": "custom-renderer/v2-render-task",
+            "outputs": [
+                {
+                    "key": "Output_main",
+                    "actions": [
+                        {
+                            "type": "copy_option_group",
+                            "group": "design",
+                            "option_key": "Design03",
+                            "object_path": "Template/Output_main/Design/Design03",
+                        },
+                        {
+                            "type": "replace_slot_text",
+                            "group": "design",
+                            "option_key": "Design03",
+                            "object_path": "Template/Output_main/Design/Design03/slot_name",
+                            "source_field": "name",
+                            "required": True,
+                            "tail_paths": [],
+                        },
+                        {
+                            "type": "fit_output_bounds",
+                            "group": "style",
+                            "style_key": "style1",
+                            "dimensions": {"width_mm": 35.2777777778, "height_mm": 10.5833333333},
+                        },
+                    ],
+                }
+            ],
+        },
+    }
+    harness = node_mock_harness(task, """
+const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
+if (designCopy.pageItems.find(item => item.name === 'anchor_name')) throw new Error('anchor auxiliary was not removed');
+const width = designCopy.visibleBounds[2] - designCopy.visibleBounds[0];
+const height = designCopy.visibleBounds[1] - designCopy.visibleBounds[3];
+if (Math.abs(width - 100) > 0.04) throw new Error('final width mismatch: ' + width);
+if (Math.abs(height - 30) > 0.04) throw new Error('final height mismatch: ' + height);
+if (width > 100 || height > 30) throw new Error('final output exceeded target');
+if (designCopy.resizeCalls < 1) throw new Error('final output was not resized');
+""")
+
+    result = run_node(harness)
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_v2_renderer_blocks_unmeasurable_final_output():
+    task = {
+        "$schema": "custom-renderer/v2-render-execution",
+        "template_ai": "template.ai",
+        "output_ai": "out.ai",
+        "values": {"style": "small"},
+        "selections": {"Output_main": {"style": "style1"}},
+        "render_task": {
+            "$schema": "custom-renderer/v2-render-task",
+            "outputs": [
+                {
+                    "key": "Output_main",
+                    "actions": [
+                        {
+                            "type": "fit_output_bounds",
+                            "group": "style",
+                            "style_key": "style1",
+                            "dimensions": {"width_mm": 35.2777777778, "height_mm": 10.5833333333},
+                        }
+                    ],
+                }
+            ],
+        },
+    }
+    harness = node_mock_harness(task, "")
+
+    result = run_node(harness)
+
+    assert result.returncode != 0
+    assert "V2 output has no rendered items" in result.stderr
+
+
+def test_v2_renderer_rejects_final_output_when_visible_bounds_fail():
+    task = {
+        "$schema": "custom-renderer/v2-render-execution",
+        "template_ai": "template.ai",
+        "output_ai": "out.ai",
+        "values": {"design": "03", "style": "small"},
+        "selections": {"Output_main": {"design": "Design03", "style": "style1"}},
+        "visible_bounds_failures": ["Design03"],
+        "render_task": {
+            "$schema": "custom-renderer/v2-render-task",
+            "outputs": [
+                {
+                    "key": "Output_main",
+                    "actions": [
+                        {
+                            "type": "copy_option_group",
+                            "group": "design",
+                            "option_key": "Design03",
+                            "object_path": "Template/Output_main/Design/Design03",
+                        },
+                        {
+                            "type": "fit_output_bounds",
+                            "group": "style",
+                            "style_key": "style1",
+                            "dimensions": {"width_mm": 35.2777777778, "height_mm": 10.5833333333},
+                        },
+                    ],
+                }
+            ],
+        },
+    }
+    harness = node_mock_harness(task, "")
+
+    result = run_node(harness)
+
+    assert result.returncode != 0
+    assert "Cannot measure V2 output visible bounds" in result.stderr
+
+
+def test_v2_renderer_rejects_final_output_that_exceeds_target():
+    task = {
+        "$schema": "custom-renderer/v2-render-execution",
+        "template_ai": "template.ai",
+        "output_ai": "out.ai",
+        "values": {"design": "03", "style": "small"},
+        "selections": {"Output_main": {"design": "Design03", "style": "style1"}},
+        "visible_bounds_padding_after_resize": {"Design03": 0.01},
+        "render_task": {
+            "$schema": "custom-renderer/v2-render-task",
+            "outputs": [
+                {
+                    "key": "Output_main",
+                    "actions": [
+                        {
+                            "type": "copy_option_group",
+                            "group": "design",
+                            "option_key": "Design03",
+                            "object_path": "Template/Output_main/Design/Design03",
+                        },
+                        {
+                            "type": "fit_output_bounds",
+                            "group": "style",
+                            "style_key": "style1",
+                            "dimensions": {"width_mm": 35.2777777778, "height_mm": 10.5833333333},
+                        },
+                    ],
+                }
+            ],
+        },
+    }
+    harness = node_mock_harness(task, "")
+
+    result = run_node(harness)
+
+    assert result.returncode != 0
+    assert "V2 output exceeds target bounds" in result.stderr
+
+
 def node_mock_harness(task, assertions):
     return f"""
 const fs = require('fs');
 const source = {jsx_source_expression()};
 const task = {json.dumps(task)};
+const visibleBoundsFailures = new Set(task.visible_bounds_failures || []);
+const visibleBoundsPaddingAfterResize = task.visible_bounds_padding_after_resize || {{}};
 const folder = {{ exists: true, parent: null, create: () => true }};
 let savedAs = '';
 const writtenFiles = {{}};
@@ -675,10 +842,21 @@ function item(typename, name, contents, children, styleToken, bounds) {{
     }},
     translate: function(dx, dy) {{
       this.translateCalls++;
+      if (this.pageItems.length) {{
+        for (const childNode of this.pageItems) childNode.translate(dx, dy);
+        return;
+      }}
       box = [box[0] + dx, box[1] + dy, box[2] + dx, box[3] + dy];
     }},
     resize: function(horizontalPercent, verticalPercent) {{
       this.resizeCalls++;
+      if (this.pageItems.length) {{
+        const bounds = this.visibleBounds;
+        const cx = (bounds[0] + bounds[2]) / 2;
+        const cy = (bounds[1] + bounds[3]) / 2;
+        for (const childNode of this.pageItems) scaleNode(childNode, cx, cy, horizontalPercent / 100, verticalPercent / 100);
+        return;
+      }}
       const cx = (box[0] + box[2]) / 2;
       const cy = (box[1] + box[3]) / 2;
       const width = (box[2] - box[0]) * horizontalPercent / 100;
@@ -700,7 +878,12 @@ function item(typename, name, contents, children, styleToken, bounds) {{
     }}
   }});
   Object.defineProperty(node, 'visibleBounds', {{
-    get: () => box.slice(),
+    get: () => {{
+      if (node.fromCopy && visibleBoundsFailures.has(node.name)) throw new Error('visible bounds unavailable: ' + node.name);
+      const bounds = node.pageItems.length ? union(node.pageItems.map(item => item.visibleBounds)) : box.slice();
+      const padding = node.fromCopy && node.resizeCalls > 0 ? Number(visibleBoundsPaddingAfterResize[node.name] || 0) : 0;
+      return padding > 0 ? [bounds[0] - padding, bounds[1] + padding, bounds[2] + padding, bounds[3] - padding] : bounds;
+    }},
     set: value => {{ box = value.slice(); }}
   }});
   Object.defineProperty(node, 'geometricBounds', {{ get: () => box.slice() }});
@@ -714,8 +897,30 @@ function defaultBounds(typename, name, contents) {{
   if (typename === 'PathItem') return [130, 40, 150, 20];
   return [0, 100, 100, 0];
 }}
+function union(boundsList) {{
+  return boundsList.reduce((result, bounds) => [
+    Math.min(result[0], bounds[0]),
+    Math.max(result[1], bounds[1]),
+    Math.max(result[2], bounds[2]),
+    Math.min(result[3], bounds[3])
+  ]);
+}}
+function scaleNode(node, cx, cy, sx, sy) {{
+  const bounds = node.visibleBounds;
+  const childCx = (bounds[0] + bounds[2]) / 2;
+  const childCy = (bounds[1] + bounds[3]) / 2;
+  const targetCx = cx + (childCx - cx) * sx;
+  const targetCy = cy + (childCy - cy) * sy;
+  node.resize(sx * 100, sy * 100);
+  const resized = node.visibleBounds;
+  const resizedCx = (resized[0] + resized[2]) / 2;
+  const resizedCy = (resized[1] + resized[3]) / 2;
+  node.translate(targetCx - resizedCx, targetCy - resizedCy);
+}}
 function clone(node) {{
-  return item(node.typename, node.name, node.contents, node.pageItems.map(clone), node.styleToken, node.visibleBounds);
+  const copy = item(node.typename, node.name, node.contents, node.pageItems.map(clone), node.styleToken, node.visibleBounds);
+  copy.fromCopy = true;
+  return copy;
 }}
 function attach(parent, childNode) {{
   childNode.parent = parent;

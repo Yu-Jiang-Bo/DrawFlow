@@ -187,10 +187,16 @@ def _preflight_renderable_options(
         options_by_group: dict[str, set[str]] = {}
         for action in output.get("actions", []):
             if not isinstance(action, Mapping) or action.get("type") != "copy_option_group":
-                continue
-            group = str(action.get("group") or "")
-            option_key = str(action.get("option_key") or "")
+                if not isinstance(action, Mapping) or action.get("type") != "fit_output_bounds":
+                    continue
+                group = str(action.get("group") or "")
+                option_key = str(action.get("style_key") or "")
+            else:
+                group = str(action.get("group") or "")
+                option_key = str(action.get("option_key") or "")
             if group in {"design", "font"} and option_key:
+                options_by_group.setdefault(group, set()).add(option_key)
+            if group == "style" and option_key:
                 options_by_group.setdefault(group, set()).add(option_key)
         if not options_by_group:
             raise V2TemplateRendererError(

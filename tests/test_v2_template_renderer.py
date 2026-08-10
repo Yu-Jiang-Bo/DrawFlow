@@ -180,6 +180,33 @@ def test_missing_option_selection_does_not_enter_illustrator(tmp_path):
     assert not (tmp_path / "task.json").exists()
 
 
+def test_missing_style_selection_for_final_fit_does_not_enter_illustrator(tmp_path):
+    task = compiled_task()
+    task["outputs"][0]["actions"].append(
+        {
+            "type": "fit_output_bounds",
+            "group": "style",
+            "style_key": "style1",
+            "dimensions": {"mode": "style", "width_mm": 80, "height_mm": 50},
+        }
+    )
+    bridge = FakeBridge()
+    renderer = V2TemplateRenderer(bridge=bridge, script_path=tmp_path / "render_v2_template.jsx")
+
+    with pytest.raises(V2TemplateRendererError) as exc_info:
+        renderer.render(
+            task,
+            template_ai=tmp_path / "template.ai",
+            output_ai=tmp_path / "out.ai",
+            values={"font": "F10", "design": "03", "name": "Alice"},
+            task_file=tmp_path / "task.json",
+        )
+
+    assert exc_info.value.code == "option_selection_missing"
+    assert bridge.calls == []
+    assert not (tmp_path / "task.json").exists()
+
+
 def test_optional_empty_slot_is_passed_to_jsx_for_removal(tmp_path):
     bridge = FakeBridge()
     renderer = V2TemplateRenderer(bridge=bridge, script_path=tmp_path / "render_v2_template.jsx")

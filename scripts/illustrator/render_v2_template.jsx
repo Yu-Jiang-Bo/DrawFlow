@@ -40,11 +40,13 @@
         var outputKey = String(output.key || "");
         var selected = selectionsByOutput[outputKey] || {};
         var copied = {};
+        var renderedItems = [];
         var actions = output.actions || [];
         for (var index = 0; index < actions.length; index++) {
             var action = actions[index] || {};
             if (action.type === "copy_option_group" && isSelected(action, selected)) {
                 copied[copyKey(outputKey, action)] = copyOptionGroup(sourceDoc, targetLayer, action.object_path, action.source_only === true);
+                if (action.source_only !== true) renderedItems.push(copied[copyKey(outputKey, action)].item);
             }
         }
         for (var replaceIndex = 0; replaceIndex < actions.length; replaceIndex++) {
@@ -53,12 +55,20 @@
                 replaceSlotText(copied, outputKey, replaceAction, valuesByField, selected);
             }
         }
+        cleanupAuxiliaryObjects(renderedItems);
+        for (var fitIndex = 0; fitIndex < actions.length; fitIndex++) {
+            var fitAction = actions[fitIndex] || {};
+            if (fitAction.type === "fit_output_bounds" && isSelected(fitAction, selected)) {
+                fitRenderedOutput(renderedItems, fitAction);
+            }
+        }
+        cleanupAuxiliaryObjects(renderedItems);
         removeSourceOnlyCopies(copied);
     }
 
     function isSelected(action, selected) {
         var group = String(action.group || "");
-        var optionKey = String(action.option_key || "");
+        var optionKey = String(action.option_key || action.style_key || "");
         return group && optionKey && String(selected[group] || "") === optionKey;
     }
 
@@ -246,8 +256,106 @@
         throw new Error("Cannot measure V2 item bounds");
     }
 
+    function visibleBoundsStrict(item) {
+        try {
+            var visible = item.visibleBounds;
+            if (validBounds(visible)) return visible;
+        } catch (visibleError) {}
+        throw new Error("Cannot measure V2 output visible bounds");
+    }
+
     function validBounds(bounds) {
         return bounds && bounds.length >= 4 && isFinite(Number(bounds[0])) && isFinite(Number(bounds[1])) && isFinite(Number(bounds[2])) && isFinite(Number(bounds[3]));
+    }
+
+    function fitRenderedOutput(items, action) {
+        var dimensions = action.dimensions || {};
+        var targetWidth = mmToPt(Number(dimensions.width_mm || 0));
+        var targetHeight = mmToPt(Number(dimensions.height_mm || 0));
+        if (targetWidth <= 0 || targetHeight <= 0) throw new Error("V2 output target dimensions are invalid");
+        var bounds = unionBounds(items, true);
+        var width = Math.abs(Number(bounds[2]) - Number(bounds[0]));
+        var height = Math.abs(Number(bounds[1]) - Number(bounds[3]));
+        if (width <= 0 || height <= 0) throw new Error("V2 output visible bounds are not measurable");
+        var fitInset = Math.min(mmToPt(0.001), targetWidth / 1000, targetHeight / 1000);
+        var fitTargetWidth = targetWidth - fitInset;
+        var fitTargetHeight = targetHeight - fitInset;
+        var scaleX = fitTargetWidth / width * 100;
+        var scaleY = fitTargetHeight / height * 100;
+        for (var index = 0; index < items.length; index++) {
+            try { items[index].resize(scaleX, scaleY, true, true, true, true, 100, Transformation.CENTER); }
+            catch (resizeError1) {
+                try { items[index].resize(scaleX, scaleY); } catch (resizeError2) { throw resizeError2; }
+            }
+        }
+        var fitted = unionBounds(items, true);
+        var targetLeft = Number(bounds[0]);
+        var targetTop = Number(bounds[1]);
+        translateItems(items, targetLeft - Number(fitted[0]), targetTop - Number(fitted[1]));
+        validateOutputBounds(items, targetWidth, targetHeight);
+    }
+
+    function validateOutputBounds(items, targetWidth, targetHeight) {
+        var bounds = unionBounds(items, true);
+        var width = Math.abs(Number(bounds[2]) - Number(bounds[0]));
+        var height = Math.abs(Number(bounds[1]) - Number(bounds[3]));
+        var tolerance = mmToPt(0.007);
+        if (width > targetWidth || height > targetHeight) {
+            throw new Error("V2 output exceeds target bounds");
+        }
+        if (width < targetWidth - tolerance || height < targetHeight - tolerance) {
+            throw new Error("V2 output is below target tolerance");
+        }
+    }
+
+    function unionBounds(items, strictVisible) {
+        if (!items || !items.length) throw new Error("V2 output has no rendered items");
+        var result = null;
+        for (var index = 0; index < items.length; index++) {
+            var bounds = strictVisible ? visibleBoundsStrict(items[index]) : measuredBounds(items[index]);
+            if (!result) {
+                result = [Number(bounds[0]), Number(bounds[1]), Number(bounds[2]), Number(bounds[3])];
+            } else {
+                result[0] = Math.min(result[0], Number(bounds[0]));
+                result[1] = Math.max(result[1], Number(bounds[1]));
+                result[2] = Math.max(result[2], Number(bounds[2]));
+                result[3] = Math.min(result[3], Number(bounds[3]));
+            }
+        }
+        return result;
+    }
+
+    function translateItems(items, dx, dy) {
+        for (var index = 0; index < items.length; index++) {
+            items[index].translate(dx, dy);
+        }
+    }
+
+    function cleanupAuxiliaryObjects(items) {
+        for (var index = 0; index < items.length; index++) {
+            cleanupAuxiliaryIn(items[index]);
+        }
+    }
+
+    function cleanupAuxiliaryIn(item) {
+        var children = item.pageItems || [];
+        for (var index = children.length - 1; index >= 0; index--) {
+            var child = children[index];
+            if (isAuxiliaryObject(child)) {
+                removePageItem(child);
+            } else {
+                cleanupAuxiliaryIn(child);
+            }
+        }
+    }
+
+    function isAuxiliaryObject(item) {
+        var name = String(item && item.name || "");
+        return name.indexOf("anchor_") === 0 || name.indexOf("size_") === 0 || name.indexOf("dimension_") === 0;
+    }
+
+    function mmToPt(mm) {
+        return mm * 72 / 25.4;
     }
 
     function findPageItemByPath(root, objectPath) {

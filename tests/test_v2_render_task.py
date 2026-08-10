@@ -231,6 +231,10 @@ def test_compiles_v2_render_task_with_stable_json_and_whitelisted_actions():
     assert {action["type"] for action in actions} <= ALLOWED_V2_ACTIONS
     assert all("jsx" not in str(action).lower() and "script" not in str(action).lower() for action in actions)
     assert [item["group"] for item in first["option_mappings"]] == ["design", "font", "style"]
+    fit_action = next(action for action in actions if action["type"] == "fit_output_bounds")
+    assert fit_action["group"] == "style"
+    assert fit_action["style_key"] == "style1"
+    assert fit_action["dimensions"] == {"mode": "style", "width_mm": 80, "height_mm": 50}
 
 
 def test_rejects_template_sha_mismatch_before_illustrator_task_creation():

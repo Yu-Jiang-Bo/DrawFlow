@@ -132,7 +132,7 @@ def _compile_output(output: Mapping[str, Any], scan_index: Mapping[tuple[str, ..
                 )
                 dimensions = dict(option).get("dimensions") or {}
                 if dimensions:
-                    actions.append(_action("fit_output_bounds", style_key=option_key, dimensions=deepcopy(dimensions)))
+                    actions.append(_action("fit_output_bounds", group=group, style_key=option_key, dimensions=deepcopy(dimensions)))
                 continue
             copy_action = {
                 "group": group,
