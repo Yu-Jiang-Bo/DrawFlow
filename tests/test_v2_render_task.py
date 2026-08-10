@@ -237,6 +237,41 @@ def test_compiles_v2_render_task_with_stable_json_and_whitelisted_actions():
     assert fit_action["dimensions"] == {"mode": "style", "width_mm": 80, "height_mm": 50}
 
 
+def test_compiles_path_text_preset_with_scanned_path_text_kind():
+    config = render_config()
+    config["field_bindings"]["title"] = "Title"
+    config["outputs"][0]["font"]["options"][0]["slots"].append(
+        {"key": "slot_title", "source_field": "title", "preset": "path_text"}
+    )
+    scan = scan_evidence()
+    scan["outputs"][0]["fonts"][0]["slots"].append(
+        {
+            "key": "slot_title",
+            "path": "Template/Output_main/Font/F10/slot_title",
+            "text_kind": "path_text",
+            "preset": "path_text",
+        }
+    )
+
+    task = compile_task(config=config, scan=scan)
+
+    path_action = next(action for action in task["outputs"][0]["actions"] if action.get("slot_key") == "slot_title")
+    assert path_action["preset"] == "path_text"
+    assert path_action["text_kind"] == "path_text"
+    assert path_action["object_path"] == "Template/Output_main/Font/F10/slot_title"
+
+
+def test_rejects_path_text_preset_for_non_path_text_scan_slot():
+    config = render_config()
+    config["outputs"][0]["font"]["options"][0]["slots"][0]["preset"] = "path_text"
+
+    with pytest.raises(V2RenderTaskError) as exc_info:
+        compile_task(config=config)
+
+    assert exc_info.value.code == "path_text_slot_invalid"
+    assert exc_info.value.path == "$.Output_main.font.F10.slot_name.preset"
+
+
 def test_rejects_template_sha_mismatch_before_illustrator_task_creation():
     config = render_config()
     config["audit"]["template_sha256"] = "c" * 64

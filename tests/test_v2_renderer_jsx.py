@@ -625,6 +625,60 @@ if (!slotGroup.pageItems.includes(deco)) throw new Error('slot decoration was re
     assert result.returncode == 0, result.stderr
 
 
+def test_v2_renderer_preserves_path_text_geometry_while_fitting_content():
+    task = {
+        "$schema": "custom-renderer/v2-render-execution",
+        "template_ai": "template.ai",
+        "output_ai": "out.ai",
+        "values": {"font": "F10", "title": "Alexandria Catherine"},
+        "selections": {"Output_main": {"font": "F10"}},
+        "render_task": {
+            "$schema": "custom-renderer/v2-render-task",
+            "outputs": [
+                {
+                    "key": "Output_main",
+                    "actions": [
+                        {
+                            "type": "copy_option_group",
+                            "group": "font",
+                            "option_key": "F10",
+                            "object_path": "Template/Output_main/Font/F10",
+                        },
+                        {
+                            "type": "replace_slot_text",
+                            "group": "font",
+                            "option_key": "F10",
+                            "slot_key": "slot_title",
+                            "object_path": "Template/Output_main/Font/F10/slot_title",
+                            "source_field": "title",
+                            "required": True,
+                            "preset": "path_text",
+                            "text_kind": "path_text",
+                            "tail_paths": [],
+                        },
+                    ],
+                }
+            ],
+        },
+    }
+    harness = node_mock_harness(task, """
+const fontCopy = outputLayer.pageItems.find(item => item.name === 'F10');
+const slotTitle = child(fontCopy, 'slot_title');
+if (slotTitle.contents !== 'Alexandria Catherine') throw new Error('path text was not replaced');
+if (slotTitle.kind !== 'PATHTEXT') throw new Error('path text kind changed');
+if (slotTitle.pathToken !== 'arc-main') throw new Error('path geometry token changed');
+if (slotTitle.resizeCalls !== 0) throw new Error('path text object was resized');
+if (slotTitle.translateCalls !== 0) throw new Error('path text object was translated');
+if (slotTitle.textSize >= 18) throw new Error('path text size was not reduced');
+const width = slotTitle.visibleBounds[2] - slotTitle.visibleBounds[0];
+if (width > 100) throw new Error('path text exceeded original path bounds: ' + width);
+""")
+
+    result = run_node(harness)
+
+    assert result.returncode == 0, result.stderr
+
+
 def test_v2_renderer_fits_final_output_bounds_and_removes_auxiliary_items():
     task = {
         "$schema": "custom-renderer/v2-render-execution",
@@ -820,12 +874,17 @@ global.SaveOptions = {{ DONOTSAVECHANGES: 0 }};
 global.Compatibility = {{ ILLUSTRATOR8: 8 }};
 global.IllustratorSaveOptions = function() {{}};
 global.Transformation = {{ CENTER: 0 }};
-function item(typename, name, contents, children, styleToken, bounds) {{
+function item(typename, name, contents, children, styleToken, bounds, options) {{
   let text = contents || '';
+  const opts = options || {{}};
+  let textSize = Number(opts.textSize || 18);
   let box = (bounds || defaultBounds(typename, name, text)).slice();
+  const baseBox = box.slice();
   const node = {{
     typename,
     name,
+    kind: opts.kind || '',
+    pathToken: opts.pathToken || '',
     styleToken: styleToken || '',
     pageItems: children || [],
     translateCalls: 0,
@@ -872,8 +931,35 @@ function item(typename, name, contents, children, styleToken, bounds) {{
         const left = box[0];
         const top = box[1];
         const height = Math.max(8, box[1] - box[3]);
-        const width = Math.max(10, text.length * 8);
+        const width = opts.kind === 'PATHTEXT' ? Math.max(10, text.length * textSize * 0.45) : Math.max(10, text.length * 8);
         box = [left, top, left + width, top - height];
+      }}
+    }}
+  }});
+  Object.defineProperty(node, 'textSize', {{ get: () => textSize }});
+  node.textRange = {{
+    characterAttributes: {{}}
+  }};
+  Object.defineProperty(node.textRange.characterAttributes, 'size', {{
+    get: () => textSize,
+    set: value => {{
+      const next = Number(value);
+      if (!Number.isFinite(next) || next <= 0) return;
+      const ratio = next / textSize;
+      textSize = next;
+      if (typename === 'TextFrame') {{
+        if (opts.kind === 'PATHTEXT') {{
+          const left = box[0];
+          const top = box[1];
+          const width = Math.max(10, text.length * textSize * 0.45);
+          box = [left, top, left + width, baseBox[3]];
+        }} else {{
+          const cx = (box[0] + box[2]) / 2;
+          const cy = (box[1] + box[3]) / 2;
+          const width = (box[2] - box[0]) * ratio;
+          const height = (box[1] - box[3]) * ratio;
+          box = [cx - width / 2, cy + height / 2, cx + width / 2, cy - height / 2];
+        }}
       }}
     }}
   }});
@@ -918,7 +1004,11 @@ function scaleNode(node, cx, cy, sx, sy) {{
   node.translate(targetCx - resizedCx, targetCy - resizedCy);
 }}
 function clone(node) {{
-  const copy = item(node.typename, node.name, node.contents, node.pageItems.map(clone), node.styleToken, node.visibleBounds);
+  const copy = item(node.typename, node.name, node.contents, node.pageItems.map(clone), node.styleToken, node.visibleBounds, {{
+    kind: node.kind,
+    pathToken: node.pathToken,
+    textSize: node.textSize
+  }});
   copy.fromCopy = true;
   return copy;
 }}
@@ -934,6 +1024,7 @@ function child(parent, name) {{
 const f1 = item('GroupItem', 'F1', '', [item('TextFrame', 'slot_name', 'F1 sample', [], 'F1-style')]);
 const f10 = item('GroupItem', 'F10', '', [
   item('TextFrame', 'slot_name', 'F10 sample', [], 'F10-style'),
+  item('TextFrame', 'slot_title', 'Arc sample', [], 'Arc-style', [0, 40, 100, 20], {{ kind: 'PATHTEXT', pathToken: 'arc-main', textSize: 18 }}),
   item('PathItem', '', '', [])
 ]);
 const design03 = item('GroupItem', 'Design03', '', [

@@ -190,6 +190,10 @@
         var targetWidth = Math.abs(Number(bounds[2]) - Number(bounds[0]));
         var targetHeight = Math.abs(Number(bounds[1]) - Number(bounds[3]));
         if (targetWidth <= 0 || targetHeight <= 0) return;
+        if (isPathTextFrame(item)) {
+            fitPathTextWithinBounds(item, bounds, action, targetWidth, targetHeight);
+            return;
+        }
         var shrinkCount = 0;
         var smallestScale = 1;
         for (var index = 0; index < 20; index++) {
@@ -233,6 +237,62 @@
                 target_height: targetHeight
             });
         }
+    }
+
+    function fitPathTextWithinBounds(item, bounds, action, targetWidth, targetHeight) {
+        var shrinkCount = 0;
+        var smallestScale = 1;
+        for (var index = 0; index < 20; index++) {
+            var current = measuredBounds(item);
+            var width = Math.abs(Number(current[2]) - Number(current[0]));
+            var height = Math.abs(Number(current[1]) - Number(current[3]));
+            if (width <= targetWidth && height <= targetHeight) break;
+            var scale = Math.min(targetWidth / width, targetHeight / height) * 0.98;
+            if (!isFinite(scale) || scale <= 0 || scale >= 1) break;
+            if (!scaleTextSize(item, scale)) break;
+            shrinkCount += 1;
+            smallestScale = Math.min(smallestScale, scale);
+        }
+        var finalBounds = measuredBounds(item);
+        var finalWidth = Math.abs(Number(finalBounds[2]) - Number(finalBounds[0]));
+        var finalHeight = Math.abs(Number(finalBounds[1]) - Number(finalBounds[3]));
+        if (finalWidth > targetWidth || finalHeight > targetHeight) {
+            throw new Error("V2 path text exceeds anchor bounds: " + String(action && action.slot_key || ""));
+        }
+        if (shrinkCount > 0 && smallestScale < 0.35) {
+            layoutWarnings.push({
+                code: "path_text_fit_extreme",
+                severity: "warning",
+                slot_key: String(action && action.slot_key || ""),
+                object_path: String(action && action.object_path || ""),
+                shrink_count: shrinkCount,
+                min_scale: smallestScale,
+                target_width: targetWidth,
+                target_height: targetHeight
+            });
+        }
+    }
+
+    function isPathTextFrame(item) {
+        if (!item || item.typename !== "TextFrame") return false;
+        try {
+            if (typeof TextType !== "undefined" && item.kind === TextType.PATHTEXT) return true;
+        } catch (typeError) {}
+        try {
+            return String(item.kind || "").toLowerCase().indexOf("path") >= 0;
+        } catch (kindError) {}
+        return false;
+    }
+
+    function scaleTextSize(item, scale) {
+        try {
+            var attributes = item.textRange.characterAttributes;
+            var size = Number(attributes.size);
+            if (!isFinite(size) || size <= 0) return false;
+            attributes.size = size * scale;
+            return true;
+        } catch (sizeError) {}
+        return false;
     }
 
     function centerItemInBounds(item, bounds) {

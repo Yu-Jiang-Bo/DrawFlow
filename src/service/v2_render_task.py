@@ -183,6 +183,14 @@ def _slot_actions(
             _path_by_key(option_scan.get("tails", []), key, f"$.{output_key}.{group}.{option_key}.{slot_key}.tails.{key}")
             for key in tail_keys
         ]
+        preset = str(slot_data.get("preset") or slot_scan.get("preset") or "direct_text")
+        text_kind = str(slot_scan.get("text_kind") or slot_scan.get("textKind") or "")
+        if preset == "path_text" and "path" not in text_kind.lower():
+            raise V2RenderTaskError(
+                "path_text_slot_invalid",
+                "路径文字预设必须绑定扫描识别的路径文字 slot。",
+                path=f"$.{output_key}.{group}.{option_key}.{slot_key}.preset",
+            )
         action = {
             "group": group,
             "option_key": option_key,
@@ -190,7 +198,8 @@ def _slot_actions(
             "object_path": slot_scan["path"],
             "source_field": str(slot_data.get("source_field") or ""),
             "required": bool(slot_data.get("required", True)),
-            "preset": str(slot_data.get("preset") or "direct_text"),
+            "preset": preset,
+            "text_kind": text_kind,
             "anchor_path": anchor_path,
             "tail_paths": tail_paths,
             "asset_key": str(slot_data.get("asset_key") or ""),
