@@ -208,6 +208,7 @@
 
 
   function safeStatus(value) {
+    if (value === "passed") return "confirmed";
     return ["confirmed", "pending", "blocked"].includes(value) ? value : "pending";
   }
 

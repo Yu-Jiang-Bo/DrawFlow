@@ -288,9 +288,9 @@ INDEX_HTML = """<!doctype html>
           <div class="pane-body option-rule-editor">
             <div class="option-rule-controls">
               <label><span>内容处理预设</span><select id="optionContentPreset"></select></label>
-              <label><span>内容分隔</span><select id="optionContentSeparator"><option value="pipe">按 | 顺序拆分</option><option value="none">不拆分</option></select></label>
             </div>
             <h4>槽位要求</h4>
+            <p class="v2-help">系统会按选项预设推荐槽位处理；只有混合文字、路径、尾巴或素材槽位时才需要逐项调整。</p>
             <div class="content-option-list" id="contentOptionRows" aria-live="polite"></div>
             <h4>素材库绑定</h4>
             <div class="asset-binding-list" id="assetBindingRows" aria-live="polite"></div>
@@ -343,11 +343,12 @@ INDEX_HTML = """<!doctype html>
     </div>
 
     <footer class="bottom-action-bar" aria-label="底部操作栏">
-      <div class="v2-publish-state">
-        <strong>发布状态</strong>
-        <span id="publishBlockerText">完成八项确认后可发布新版本。</span>
+      <div class="v2-publish-state" data-role="summary">
+        <div><strong>草稿状态</strong><span id="draftSaveStatusText">尚未保存本次修改。</span></div>
+        <div><strong>发布状态</strong><span id="publishBlockerText">完成八项确认后可发布新版本。</span></div>
       </div>
       <div class="v2-bottom-actions">
+        <button id="confirmStageBtn" type="button">确认本页核验</button>
         <button id="saveAndNextOptionBtn" type="button">保存并配置下一个选项</button>
         <button id="saveDraftBtn" type="button">保存草稿</button>
         <button id="trialRenderBtn" type="button">使用样例试渲染</button>

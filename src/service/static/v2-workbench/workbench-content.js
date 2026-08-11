@@ -49,7 +49,7 @@
     header.className = "content-option-header";
     header.appendChild(lineNode(`${output} · ${groupLabel(group)} ${optionKey}`, group === "design" ? "具体 Design 独立配置" : "具体 F 独立配置"));
     const optionPreset = safeOptionPreset(existing.content_preset, recommendedOptionPreset(output, group, optionKey, model));
-    header.appendChild(selectCell("option-content-preset", presetOptions(OPTION_PRESETS), optionPreset));
+    section.dataset.contentPreset = optionPreset;
     section.appendChild(header);
 
     const rows = document.createElement("div");
@@ -65,7 +65,7 @@
     row.append(
       metaCell("slot"),
       metaCell("内容来源"),
-      metaCell("业务渲染类型"),
+      metaCell("槽位处理（按需覆盖）"),
       metaCell("状态"),
       metaCell("素材库键"),
       metaCell("X 宽"),
@@ -111,7 +111,7 @@
       const option = safeOptionKey(groupRow.dataset.option, group);
       if (!group || !output || !option) return;
       result[contentOptionMapKey(output, group, option)] = {
-        content_preset: safeOptionPreset(rowValue(groupRow, "option-content-preset"), "direct_text"),
+        content_preset: safeOptionPreset(groupRow.dataset.contentPreset, "direct_text"),
         slots: []
       };
     });

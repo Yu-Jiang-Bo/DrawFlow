@@ -123,7 +123,9 @@
 
   function updateDraftButtons() {
     const hasBasics = Boolean(formBasics().template_id && formBasics().name);
-    setDisabled("saveDraftBtn", !hasBasics || state.isScanning);
+    setDisabled("saveDraftBtn", !hasBasics || state.isScanning || state.isSavingDraft);
+    setDisabled("confirmStageBtn", state.isScanning || state.isSavingDraft);
+    setDisabled("saveAndNextOptionBtn", state.isScanning || state.isSavingDraft);
     setDisabled("scanTemplateBtn", !hasBasics || !state.uploadFile || state.isScanning);
     setDisabled("rescanTemplateBtn", !hasBasics || state.isScanning);
     const hasScan = scanSummary(state.scan || {}).total > 0 || Object.keys(state.scan || {}).length > 0;

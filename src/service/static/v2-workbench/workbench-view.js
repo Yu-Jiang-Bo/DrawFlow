@@ -160,7 +160,11 @@
     const target = $("optionMappingRows");
     if (!target) return;
     const mappings = effectiveOptionMappings();
-    target.replaceChildren(tableHeader(["字段", "订单原值", "目标选项", "输出", "类型"]));
+    const multiOutput = (configOutputs().length ? configOutputs() : inferredOutputs()).length > 1;
+    const header = tableHeader(multiOutput ? ["字段", "订单原值", "目标选项", "输出", "类型"] : ["字段", "订单原值", "目标选项", "类型"]);
+    header.classList.add("option-mapping-layout");
+    if (!multiOutput) header.classList.add("single-output");
+    target.replaceChildren(header);
     (mappings.length ? mappings : [{ field: "", source_value: "", target: "", output: "Output_main", group: "design" }]).forEach((mapping) => {
       target.appendChild(optionMappingRow(mapping));
     });
@@ -173,13 +177,15 @@
   function optionMappingRow(mapping) {
     const group = mapping.group || "design";
     const row = tableRow("option-mapping-row");
-    row.append(
+    const cells = [
       inputCell("mapping-field", mapping.field || ""),
       inputCell("mapping-source", mapping.source_value || ""),
-      selectCell("mapping-target", mappingTargetOptions(group, mapping.target), mapping.target || ""),
-      selectCell("mapping-output", outputOptions(mapping.output), mapping.output || "Output_main"),
-      selectCell("mapping-group", [["style", "样式"], ["design", "设计"], ["font", "字体"], ["color", "颜色"]], group)
-    );
+      selectCell("mapping-target", mappingTargetOptions(group, mapping.target), mapping.target || "")
+    ];
+    if ((configOutputs().length ? configOutputs() : inferredOutputs()).length > 1) cells.push(selectCell("mapping-output", outputOptions(mapping.output), mapping.output || "Output_main"));
+    else row.classList.add("single-output");
+    cells.push(selectCell("mapping-group", [["style", "样式"], ["design", "设计"], ["font", "字体"], ["color", "颜色"]], group));
+    row.append(...cells);
     return row;
   }
 
@@ -191,13 +197,14 @@
   }
 
   function outputOptions(selected) {
-    const options = [["Output_main", "Output_main"]];
+    const options = [];
     (configOutputs().length ? configOutputs() : inferredOutputs()).forEach((output) => {
       const key = safeOutputKey(output.key || output.name, "Output_main", options.length - 1);
-      if (key && !options.some(([value]) => value === key)) options.push([key, key]);
+      const label = cleanText(output.display_name) || (key === "Output_main" ? "主效果图" : key);
+      if (key && !options.some(([value]) => value === key)) options.push([key, label]);
     });
     if (selected && !options.some(([value]) => value === selected)) options.push([selected, selected]);
-    return options;
+    return options.length ? options : [["Output_main", "主效果图"]];
   }
 
 
@@ -243,12 +250,10 @@
   function updateBlockers(validation) {
     const target = $("blockerList");
     const checks = normalizeChecks(validation && validation.checks ? validation.checks : configChecks());
-    const issues = Array.isArray(validation && validation.issues) ? validation.issues : [];
     const blockers = [];
     CHECK_KEYS.forEach((key) => {
       if (checks[key].status !== "confirmed") blockers.push(`${CHECK_LABELS[key]}：${checks[key].reason || STATUS_LABELS[checks[key].status]}`);
     });
-    issues.slice(0, 8).forEach((issue) => blockers.push(cleanText(issue.reason || issue.message || "有未完成核验项")));
     if (target) {
       target.replaceChildren();
       (blockers.length ? unique(blockers) : ["已完成核验，可进入下一步。"]).forEach((text) => {
@@ -270,12 +275,9 @@
     el.textContent = text;
     el.dataset.status = status || "pending";
   }
-
-
   function showTransientStatus(text) {
     setText("publishBlockerText", text);
   }
-
   Object.assign(globalThis, {
     renderTemplateList,
     fillDraftFields,

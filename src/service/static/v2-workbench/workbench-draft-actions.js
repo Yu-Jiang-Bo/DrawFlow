@@ -67,8 +67,12 @@
     const basics = formBasics();
     if (!basics.template_id || !basics.name) {
       showScanFailure("请先填写模板 ID 和模板名称。");
-      return;
+      setText("draftSaveStatusText", "草稿未保存：请先填写模板 ID 和名称。");
+      return { saved: false, failure: "basics" };
     }
+    if (state.isSavingDraft) return { saved: false, failure: "busy" };
+    state.isSavingDraft = true;
+    updateDraftButtons();
     setDraftStatus("正在保存", "pending");
     try {
       await ensureDraftExists();
@@ -79,7 +83,8 @@
       if (validation.can_save === false) {
         updateBlockers(validation);
         setDraftStatus("配置未通过校验", "blocked");
-        return;
+        setText("draftSaveStatusText", "草稿未保存：当前配置未通过保存校验。");
+        return { saved: false, failure: "validation" };
       }
       const payload = await postJson(`${API_ROOT}/${encodeURIComponent(basics.template_id)}/draft`, {
         name: basics.name,
@@ -90,11 +95,37 @@
       state.scan = normalizeScanFromDraft(state.draft);
       await loadTemplates(basics.template_id);
       setDraftStatus("草稿已保存", "confirmed");
+      setText("draftSaveStatusText", "草稿已保存；发布核验状态见下方。");
       renderAll();
+      return { saved: true, failure: "" };
     } catch (error) {
       setDraftStatus("保存失败", "blocked");
+      setText("draftSaveStatusText", "草稿保存失败，请按错误提示修正后重试。");
       showScanFailure(friendlyError(error, "草稿保存失败，请检查当前配置。"));
+      return { saved: false, failure: "request" };
+    } finally {
+      state.isSavingDraft = false;
+      updateDraftButtons();
     }
+  }
+
+  async function confirmCurrentStage() {
+    if (state.isSavingDraft) return;
+    const previousChecks = collectChecks();
+    const keys = {
+      structure: ["output", "fields", "options"],
+      rules: ["slots", "content", "dimensions", "colors"],
+      preview: ["preview"]
+    }[state.stage] || [];
+    keys.forEach((key) => {
+      const item = document.querySelector('#v2CheckRail .check-item[data-check-key="' + key + '"]');
+      if (!item) return;
+      item.dataset.status = "confirmed";
+      item.dataset.reason = "本页已人工核验";
+    });
+    updateCheckRail(collectChecks());
+    const result = await saveDraft();
+    if ((!result || !result.saved) && (!result || result.failure !== "validation")) updateCheckRail(previousChecks);
   }
 
 
@@ -158,6 +189,7 @@
     clearDraftView,
     renderAll,
     saveDraft,
+    confirmCurrentStage,
     validateCurrentConfig,
     validateConfig,
     ensureDraftExists,

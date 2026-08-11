@@ -222,6 +222,8 @@ th { color: var(--v2-muted); background: #f7f9fc; font-size: 12px; font-weight: 
   display: grid; grid-template-columns: repeat(5, minmax(120px, 1fr)); gap: 8px;
   min-width: 560px; padding: 10px; border-bottom: 1px solid var(--v2-border); align-items: end;
 }
+.structured-row.option-mapping-layout.single-output,
+.structured-row.option-mapping-row.single-output { grid-template-columns: repeat(4, minmax(120px, 1fr)); }
 .structured-row.table-head { color: var(--v2-muted); background: #f7f9fc; font-size: 12px; font-weight: 700; }
 #outputConfigRows .structured-row.table-head,
 .structured-row.output-row {
@@ -248,7 +250,7 @@ th { color: var(--v2-muted); background: #f7f9fc; font-size: 12px; font-weight: 
   background: var(--v2-surface);
 }
 .content-option-header {
-  display: grid; grid-template-columns: minmax(180px, 1fr) minmax(220px, 320px); gap: 10px; align-items: end;
+  display: grid; grid-template-columns: minmax(180px, 1fr); gap: 10px; align-items: end;
   min-width: 0; padding: 10px; border-bottom: 1px solid var(--v2-border); background: #f7f9fc;
 }
 .content-slot-table { min-width: 0; overflow-x: auto; }
@@ -280,7 +282,7 @@ th { color: var(--v2-muted); background: #f7f9fc; font-size: 12px; font-weight: 
   color: var(--v2-muted); font-size: 12px;
 }
 .option-rule-controls {
-  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-bottom: 18px;
+  display: grid; grid-template-columns: minmax(0, 420px); gap: 14px; margin-bottom: 18px;
 }
 .option-rule-editor h4 { margin: 18px 0 8px; font-size: 14px; }
 .option-capability-pane h4 {
@@ -359,6 +361,8 @@ th { color: var(--v2-muted); background: #f7f9fc; font-size: 12px; font-weight: 
 .bottom-action-bar .summary, .bottom-action-bar [data-role="summary"] {
   flex: 1 1 260px; min-width: 0; margin-right: auto; color: var(--v2-muted); overflow-wrap: anywhere;
 }
+.v2-publish-state { display: grid; gap: 4px; }
+.v2-publish-state > div { display: grid; grid-template-columns: 78px minmax(0, 1fr); gap: 8px; }
 
 .modal-overlay, #scanFailedOverlay {
   position: fixed; inset: 0; z-index: 60; display: flex; align-items: center; justify-content: center;

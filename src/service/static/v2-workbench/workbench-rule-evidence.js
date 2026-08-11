@@ -97,18 +97,17 @@
   function applySelectedOptionControls() {
     const item = filteredRuleOptions()[state.optionRules.selectedIndex] || ruleOptionItems()[0];
     if (!item) return;
-    const preset = valueOf("optionContentSeparator") === "pipe" ? "split_by_pipe" : valueOf("optionContentPreset");
+    const preset = valueOf("optionContentPreset");
     const group = Array.from(document.querySelectorAll("#contentOptionRows .content-option-group")).find((row) => (
       row.dataset.output === item.output && row.dataset.group === item.group && row.dataset.option === item.key
     ));
-    const select = group && group.querySelector('[data-field="option-content-preset"]');
-    if (!select) return;
-    select.value = safeOptionPreset(preset, "direct_text");
+    if (!group) return;
+    group.dataset.contentPreset = safeOptionPreset(preset, "direct_text");
     Array.from(document.querySelectorAll("#contentOptionRows .content-slot-row"))
       .filter((row) => row.dataset.output === item.output && row.dataset.group === item.group && row.dataset.option === item.key)
       .forEach((row) => {
         const slotSelect = row.querySelector('[data-field="slot-preset"]');
-        if (slotSelect) slotSelect.value = syncedSlotPreset(row, slotSelect, select.value);
+        if (slotSelect) slotSelect.value = syncedSlotPreset(row, slotSelect, group.dataset.contentPreset);
       });
     validateCurrentConfig(false).catch(() => updateCheckRail(collectChecks()));
   }

@@ -12,7 +12,7 @@
 
   function defaultChecks() {
     return CHECK_KEYS.reduce((result, key) => {
-      result[key] = { status: "pending", reason: "等待人工核验" };
+      result[key] = { status: "pending", reason: "" };
       return result;
     }, {});
   }

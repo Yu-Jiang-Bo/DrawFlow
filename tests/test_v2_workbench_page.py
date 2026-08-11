@@ -152,7 +152,6 @@ def test_v2_workbench_has_independent_rules_stage_contract():
         "selectedOptionTitle",
         "selectedOptionPendingBadge",
         "optionContentPreset",
-        "optionContentSeparator",
         "contentOptionRows",
         "assetBindingRows",
         "templateCapabilityPanel",
@@ -160,6 +159,7 @@ def test_v2_workbench_has_independent_rules_stage_contract():
         "colorRuleRows",
         "dimensionRuleRows",
         "fontDependencyRows",
+        "confirmStageBtn",
         "saveAndNextOptionBtn",
     ]:
         assert f'id="{element_id}"' in INDEX_HTML
@@ -208,6 +208,8 @@ def test_v2_workbench_uses_controlled_business_inputs():
     assert "field_bindings" in JS
     assert "option_mappings" in JS
     assert "content_preset" in JS
+    assert 'id="optionContentSeparator"' not in INDEX_HTML
+    assert 'id="draftSaveStatusText"' in INDEX_HTML
     assert "styleDimensionRows" in INDEX_HTML
     assert "0.007mm" in INDEX_HTML
     assert "dimensionRuleFromValues" in JS

@@ -13,6 +13,7 @@
     renderAssetBindingRows(current);
     renderCapabilityEvidence(current);
     renderRuleEvidencePanels(current);
+    updateStageActionButtons();
   }
 
   function renderOptionRuleList(items, current) {
@@ -32,7 +33,6 @@
     setText("selectedOptionTitle", item ? `${item.output} · ${item.label}` : "选择一个 Design 或 F 选项");
     setText("selectedOptionPendingBadge", item ? statusLabel(item.status) : "待处理");
     fillSelect("optionContentPreset", presetOptions(ctx.OPTION_PRESETS), item ? item.preset : "direct_text");
-    fillSelect("optionContentSeparator", [["pipe", "按 | 顺序拆分"], ["none", "不拆分"]], item && item.preset === "split_by_pipe" ? "pipe" : "none");
   }
 
   function optionRuleNode(item, index, current) {
@@ -60,15 +60,36 @@
   async function saveDraftAndSelectNextOption() {
     const wasRuleStage = state.stage === "rules";
     const visible = filteredRuleOptions();
-    if (typeof globalThis.saveDraft === "function") await globalThis.saveDraft();
+    const selectedIndex = state.optionRules.selectedIndex;
+    const selectedId = visible[selectedIndex] && visible[selectedIndex].id;
+    const saveResult = typeof globalThis.saveDraft === "function" ? await globalThis.saveDraft() : null;
+    const saved = saveResult === true || Boolean(saveResult && saveResult.saved);
+    if (!saved) return;
     if (!wasRuleStage) {
       state.optionRules.selectedIndex = 0;
       if (typeof globalThis.setWorkbenchStage === "function") globalThis.setWorkbenchStage("rules");
       return;
     }
-    const nextLength = filteredRuleOptions().length || visible.length;
-    state.optionRules.selectedIndex = nextLength ? (state.optionRules.selectedIndex + 1) % nextLength : 0;
+    const refreshed = filteredRuleOptions();
+    const refreshedIndex = refreshed.findIndex((item) => item.id === selectedId);
+    const nextIndex = refreshedIndex >= 0 ? refreshedIndex + 1 : selectedIndex;
+    if (!refreshed.length || nextIndex >= refreshed.length) {
+      if (typeof globalThis.setWorkbenchStage === "function") globalThis.setWorkbenchStage("preview");
+      return;
+    }
+    state.optionRules.selectedIndex = nextIndex;
     renderOptionRuleStage();
+  }
+
+  function updateStageActionButtons() {
+    const stage = state.stage;
+    setHidden("confirmStageBtn", !["structure", "rules", "preview"].includes(stage));
+    setHidden("saveAndNextOptionBtn", !["structure", "rules"].includes(stage));
+    if (stage === "structure") setText("saveAndNextOptionBtn", "保存并开始配置选项");
+    if (stage === "rules") {
+      const items = filteredRuleOptions();
+      setText("saveAndNextOptionBtn", !items.length || state.optionRules.selectedIndex >= items.length - 1 ? "保存并进入样例预览" : "保存并配置下一个选项");
+    }
   }
 
   function filteredRuleOptions() {
@@ -98,6 +119,7 @@
     keys.forEach((key) => {
       const safeKey = safeOptionKey(key, group);
       if (!safeKey) return;
+      const configured = findConfigOption(output, group, safeKey);
       result.push({
         id: `${output}:${group}:${safeKey}`,
         output,
@@ -105,7 +127,7 @@
         key: safeKey,
         label: safeKey,
         status: optionStatus(output, group, safeKey),
-        preset: recommendedOptionPreset(output, group, safeKey, model)
+        preset: safeOptionPreset(configured.content_preset, recommendedOptionPreset(output, group, safeKey, model))
       });
     });
   }
@@ -161,6 +183,7 @@
     filteredRuleOptions,
     ruleOptionItems,
     togglePendingOnlyOptions,
-    saveDraftAndSelectNextOption
+    saveDraftAndSelectNextOption,
+    updateStageActionButtons
   });
 })();

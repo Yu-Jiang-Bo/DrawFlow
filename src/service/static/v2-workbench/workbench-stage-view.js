@@ -113,6 +113,7 @@
       updateCheckRail(defaultChecks());
     }
     updateDraftButtons();
+    if (typeof updateStageActionButtons === "function") updateStageActionButtons();
   }
 
   function stageTitle(stage) {

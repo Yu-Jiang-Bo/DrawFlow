@@ -38,6 +38,7 @@
     uploadFile: null,
     lastUploadFile: null,
     isScanning: false,
+    isSavingDraft: false,
     stage: "upload",
     optionRules: { pendingOnly: false, selectedIndex: 0 }
   };
@@ -88,7 +89,7 @@
     on("pendingOnlyBtn", "click", togglePendingOnlyOptions);
     on("optionRuleSearch", "input", renderOptionRuleStage);
     on("optionContentPreset", "change", applySelectedOptionControls);
-    on("optionContentSeparator", "change", applySelectedOptionControls);
+    on("confirmStageBtn", "click", confirmCurrentStage);
     on("saveAndNextOptionBtn", "click", saveDraftAndSelectNextOption);
     on("rerunTrialRenderBtn", "click", showPreflightFailure);
     on("closePreflightFailedBtn", "click", closePreflightFailure);
@@ -119,6 +120,7 @@
     renderScanProgress("等待选择 .ai 文件", "idle");
     renderScanSummary();
     setText("publishBlockerText", "请先完成草稿配置与人工核验。");
+    setText("draftSaveStatusText", "尚未保存本次修改。");
     setDisabled("publishVersionBtn", true);
     setDisabled("trialRenderBtn", true);
     globalThis.setWorkbenchStage("upload");

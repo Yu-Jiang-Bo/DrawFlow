@@ -14,10 +14,10 @@ const ids = [
   "scanSummary", "scanEmptyState", "structureSearch", "structureTree", "toggleDesignsBtn",
   "toggleFontsBtn", "outputConfigRows", "fieldBindingRows", "optionMappingRows", "selectedNodeSummary",
   "styleDimensionRows", "contentOptionRows", "blockerList", "draftSummary", "saveDraftBtn", "trialRenderBtn", "publishVersionBtn",
-  "publishBlockerText", "scanRunningOverlay", "scanRunningMessage", "scanFailedOverlay", "scanFailedMessage", "retryScanBtn", "closeScanFailedBtn",
+  "publishBlockerText", "draftSaveStatusText", "scanRunningOverlay", "scanRunningMessage", "scanFailedOverlay", "scanFailedMessage", "retryScanBtn", "closeScanFailedBtn",
   "optionRuleSearch", "optionRuleList", "optionRuleStats", "optionRuleCount", "pendingOnlyBtn", "selectedOptionTitle",
-  "selectedOptionPendingBadge", "optionContentPreset", "optionContentSeparator", "assetBindingRows", "templateCapabilityPanel",
-  "capabilityEvidenceRows", "colorRuleRows", "dimensionRuleRows", "fontDependencyRows", "saveAndNextOptionBtn", "rerunTrialRenderBtn", "preflightFailedOverlay", "preflightFailedMessage",
+  "selectedOptionPendingBadge", "optionContentPreset", "assetBindingRows", "templateCapabilityPanel",
+  "capabilityEvidenceRows", "colorRuleRows", "dimensionRuleRows", "fontDependencyRows", "confirmStageBtn", "saveAndNextOptionBtn", "rerunTrialRenderBtn", "preflightFailedOverlay", "preflightFailedMessage",
   "preflightIssueList", "closePreflightFailedBtn", "returnToSampleDataBtn", "previewSampleRows", "previewValidationRows"
 ];
 
@@ -122,8 +122,8 @@ function makeDocument() {
   ids.forEach((id) => { elements[id] = new Element("div", id); });
   ["aiFile"].forEach((id) => { elements[id].tagName = "INPUT"; });
   ["templateSearch", "templateId", "templateName", "shopName", "structureSearch", "optionRuleSearch"].forEach((id) => { elements[id].tagName = "INPUT"; });
-  ["optionContentPreset", "optionContentSeparator"].forEach((id) => { elements[id].tagName = "SELECT"; });
-  ["scanTemplateBtn", "rescanTemplateBtn", "saveDraftBtn", "trialRenderBtn", "publishVersionBtn", "retryScanBtn", "closeScanFailedBtn", "toggleDesignsBtn", "toggleFontsBtn", "pendingOnlyBtn", "saveAndNextOptionBtn", "rerunTrialRenderBtn", "closePreflightFailedBtn", "returnToSampleDataBtn"].forEach((id) => { elements[id].tagName = "BUTTON"; });
+  ["optionContentPreset"].forEach((id) => { elements[id].tagName = "SELECT"; });
+  ["scanTemplateBtn", "rescanTemplateBtn", "saveDraftBtn", "trialRenderBtn", "publishVersionBtn", "retryScanBtn", "closeScanFailedBtn", "toggleDesignsBtn", "toggleFontsBtn", "pendingOnlyBtn", "confirmStageBtn", "saveAndNextOptionBtn", "rerunTrialRenderBtn", "closePreflightFailedBtn", "returnToSampleDataBtn"].forEach((id) => { elements[id].tagName = "BUTTON"; });
   const checkKeys = ["output", "fields", "options", "slots", "content", "dimensions", "colors", "preview"];
   checkKeys.forEach((key) => {
     const item = new Element("button");
@@ -559,6 +559,9 @@ def test_v2_workbench_single_output_does_not_invent_style_or_font_fields():
           assert.strictEqual(outputRow.querySelector('[data-field="output-design-field"]'), null);
           assert.strictEqual(outputRow.querySelector('[data-field="output-font-field"]'), null);
           assert.strictEqual(document.querySelectorAll("#styleDimensionRows .style-dimension-row").length, 0);
+          const mappingRows = document.querySelectorAll("#optionMappingRows .option-mapping-row");
+          assert(mappingRows.length > 0);
+          assert(mappingRows.every((row) => row.querySelector('[data-field="mapping-output"]') === null));
 
           const config = buildControlledConfig();
           assert.strictEqual(config.outputs[0].style.field, "");
@@ -567,6 +570,7 @@ def test_v2_workbench_single_output_does_not_invent_style_or_font_fields():
           assert.strictEqual(config.outputs[0].style.options.length, 0);
           assert.strictEqual(config.outputs[0].font.options.length, 0);
           assert.strictEqual(config.outputs[0].design.options[0].key, "Design01");
+          assert(config.option_mappings.every((mapping) => mapping.output === "Output_main"));
         })().catch((error) => { console.error(error); process.exit(1); });
         """
     )
@@ -789,8 +793,8 @@ def test_v2_workbench_keeps_same_slot_independent_per_design_and_font_option():
           const fontGroup = groups.find((row) => row.dataset.group === "font" && row.dataset.option === "F1");
           assert(designGroup);
           assert(fontGroup);
-          designGroup.querySelector('[data-field="option-content-preset"]').value = "split_by_pipe";
-          fontGroup.querySelector('[data-field="option-content-preset"]').value = "path_text";
+          designGroup.dataset.contentPreset = "split_by_pipe";
+          fontGroup.dataset.contentPreset = "path_text";
 
           const slotRows = document.querySelectorAll("#contentOptionRows .content-slot-row");
           const designSlot = slotRows.find((row) => row.dataset.group === "design" && row.dataset.option === "Design03" && row.dataset.slotKey === "slot_name");
@@ -1056,11 +1060,11 @@ def test_v2_workbench_split_pipe_recommendation_saves_slot_presets():
             ["slot_name2", "name", "split_by_pipe"]
           ]);
 
-          app.elements.optionContentSeparator.value = "none";
-          app.elements.optionContentSeparator.dispatch("change");
+          app.elements.optionContentPreset.value = "direct_text";
+          app.elements.optionContentPreset.dispatch("change");
           await flush();
-          app.elements.optionContentSeparator.value = "pipe";
-          app.elements.optionContentSeparator.dispatch("change");
+          app.elements.optionContentPreset.value = "split_by_pipe";
+          app.elements.optionContentPreset.dispatch("change");
           await flush();
           const rows = document.querySelectorAll("#contentOptionRows .content-slot-row");
           assert(rows.every((row) => row.querySelector('[data-field="slot-preset"]').value === "split_by_pipe"));
@@ -1144,6 +1148,13 @@ def test_v2_workbench_roundtrips_multi_output_dimensions_assets_tails_fonts_colo
           await flush();
           global.setWorkbenchStage("structure");
           await flush();
+
+          const mappingRows = document.querySelectorAll("#optionMappingRows .option-mapping-row");
+          assert.strictEqual(mappingRows.length, 3);
+          assert(mappingRows.every((row) => row.querySelector('[data-field="mapping-output"]')));
+          const outputSelect = mappingRows[0].querySelector('[data-field="mapping-output"]');
+          assert.deepStrictEqual(outputSelect.children.map((option) => option.value), ["Output_SideA", "Output_SideB"]);
+          assert.strictEqual(outputSelect.children[0].textContent, currentDraft.config.outputs[0].display_name);
 
           const styleRow = document.querySelectorAll("#styleDimensionRows .style-dimension-row")[0];
           assert(styleRow);
@@ -1319,6 +1330,7 @@ def test_v2_workbench_rules_stage_filters_pending_and_saves_next_option():
         r"""
         (async () => {
           let saveCount = 0;
+          let savedConfig = null;
           const confirmedChecks = ["output", "fields", "options", "slots", "content", "dimensions", "colors", "preview"].reduce((checks, key) => {
             checks[key] = { status: "confirmed", reason: "" };
             return checks;
@@ -1333,10 +1345,10 @@ def test_v2_workbench_rules_stage_filters_pending_and_saves_next_option():
                 scan: {
                   outputs: [{ key: "Output_main" }],
                   slots: [{ key: "slot_name", source_field: "name" }],
-                  designs: [{ key: "Design03" }, { key: "Design08" }],
+                  designs: [{ key: "Design03" }, { key: "Design08" }, { key: "Design09" }],
                   fonts: [{ key: "F1" }]
                 },
-                config: {
+                config: savedConfig || {
                   outputs: [{
                     key: "Output_main",
                     display_name: "涓绘晥鏋滃浘",
@@ -1351,10 +1363,12 @@ def test_v2_workbench_rules_stage_filters_pending_and_saves_next_option():
             if (textUrl.endsWith("/validate")) return response({ validation: { can_save: true, can_publish: true, checks: confirmedChecks } });
             if (textUrl.endsWith("/draft") && options.method === "POST") {
               saveCount += 1;
+              savedConfig = JSON.parse(options.body).config;
+              if (saveCount === 1) savedConfig.outputs[0].design.options = savedConfig.outputs[0].design.options.filter((item) => item.key !== "Design09");
               return response({ draft: {
                 metadata: { template_id: "V2RULES", name: "Rules Demo", shop_name: "" },
                 manifest: {},
-                config: JSON.parse(options.body).config,
+                config: savedConfig,
                 scan: global.DrawFlowV2WorkbenchContext.state.scan
               }});
             }
@@ -1369,22 +1383,29 @@ def test_v2_workbench_rules_stage_filters_pending_and_saves_next_option():
           assert(app.elements.optionRuleList.textContent.includes("Design03"));
           assert(app.elements.optionRuleList.textContent.includes("Design08"));
           assert(app.elements.optionRuleList.textContent.includes("F1"));
-          app.elements.optionContentSeparator.value = "pipe";
-          app.elements.optionContentSeparator.dispatch("change");
+          app.elements.optionContentPreset.value = "split_by_pipe";
+          app.elements.optionContentPreset.dispatch("change");
           await flush();
           const selectedGroup = document.querySelectorAll("#contentOptionRows .content-option-group").find((row) => row.dataset.group === "design" && row.dataset.option === "Design03");
-          assert.strictEqual(selectedGroup.querySelector('[data-field="option-content-preset"]').value, "split_by_pipe");
+          assert.strictEqual(selectedGroup.dataset.contentPreset, "split_by_pipe");
+          assert.strictEqual(selectedGroup.querySelector('[data-field="option-content-preset"]'), null);
+          assert(app.elements.contentOptionRows.textContent.includes("\u6309\u9700\u8986\u76d6"));
           app.elements.pendingOnlyBtn.dispatch("click");
           await flush();
           assert.strictEqual(app.elements.pendingOnlyBtn.attributes["aria-pressed"], "true");
           assert(!app.elements.optionRuleList.textContent.includes("Design03"));
           assert(app.elements.optionRuleList.textContent.includes("Design08"));
-          const firstTitle = app.elements.selectedOptionTitle.textContent;
+          assert(app.elements.optionRuleList.textContent.includes("Design09"));
           app.elements.saveAndNextOptionBtn.dispatch("click");
-          await flush();
+          for (let index = 0; index < 6; index += 1) await flush();
           assert.strictEqual(saveCount, 1);
-          assert.notStrictEqual(app.elements.selectedOptionTitle.textContent, "");
-          assert(app.elements.selectedOptionTitle.textContent === firstTitle || app.elements.selectedOptionTitle.textContent.includes("Design08"));
+          assert.strictEqual(global.DrawFlowV2WorkbenchContext.state.stage, "rules");
+          assert(app.elements.selectedOptionTitle.textContent.includes("Design09"));
+          app.elements.saveAndNextOptionBtn.dispatch("click");
+          for (let index = 0; index < 6; index += 1) await flush();
+          assert.strictEqual(saveCount, 2);
+          assert.strictEqual(global.DrawFlowV2WorkbenchContext.state.stage, "preview");
+          assert.strictEqual(app.elements.saveAndNextOptionBtn.hidden, true);
         })().catch((error) => { console.error(error); process.exit(1); });
         """
     )
@@ -1460,8 +1481,157 @@ def test_v2_workbench_save_next_from_structure_enters_rules_and_strips_manual_re
           assert.strictEqual(saveCount, 1);
           assert.strictEqual(global.DrawFlowV2WorkbenchContext.state.stage, "rules");
           assert(app.elements.selectedOptionTitle.textContent.includes("Design01"));
-          assert.strictEqual(draftSaveBody.config.checks.output.reason, pendingText);
+          assert.strictEqual(draftSaveBody.config.checks.output.status, "confirmed");
+          assert.strictEqual(draftSaveBody.config.checks.output.reason, "\u5355 Output_main \u81ea\u52a8\u786e\u8ba4");
           assert(!draftSaveBody.config.checks.output.reason.includes(manualPrefix));
+        })().catch((error) => { console.error(error); process.exit(1); });
+        """
+    )
+
+
+def test_v2_workbench_normalizes_server_passed_as_confirmed():
+    run_node(
+        r"""
+        (async () => {
+          const app = createApp(async () => response({ templates: [] }));
+          await flush();
+          assert.strictEqual(safeStatus("passed"), "confirmed");
+          updateCheckRail({ output: { status: "passed", reason: "" } });
+          const outputCheck = app.elements.v2CheckRail.children.find((item) => item.dataset.checkKey === "output");
+          assert.strictEqual(outputCheck.dataset.status, "confirmed");
+        })().catch((error) => { console.error(error); process.exit(1); });
+        """
+    )
+
+
+def test_v2_workbench_save_failure_does_not_navigate_to_preview():
+    run_node(
+        r"""
+        (async () => {
+          let saveCount = 0;
+          async function fakeFetch(url, options = {}) {
+            const textUrl = String(url);
+            if (textUrl === "/api/v2/templates") return response({ templates: [{ template_id: "V2BLOCKED", name: "Blocked Demo" }] });
+            if (textUrl.endsWith("/draft") && (!options.method || options.method === "GET")) return response({ draft: {
+              metadata: { template_id: "V2BLOCKED", name: "Blocked Demo", shop_name: "" },
+              manifest: { draft_revision: "d0001" },
+              scan: { outputs: [{ key: "Output_main" }], designs: [{ key: "Design01", slots: [{ key: "slot_name", source_field: "name" }] }] },
+              config: { outputs: [{ key: "Output_main", display_name: "Main", component_key: "main", style: { field: "", options: [] }, design: { field: "design", options: [{ key: "Design01", content_preset: "direct_text", slots: [{ key: "slot_name", source_field: "name" }] }] }, font: { field: "", options: [] } }] }
+            }});
+            if (textUrl.endsWith("/validate")) return response({ validation: { can_save: false, can_publish: false, checks: {} } });
+            if (textUrl.endsWith("/draft") && options.method === "POST") { saveCount += 1; return response({}); }
+            return response({});
+          }
+          const app = createApp(fakeFetch);
+          await flush();
+          app.elements.templateList.children[0].dispatch("click");
+          await flush();
+          global.setWorkbenchStage("rules");
+          await flush();
+          app.elements.saveAndNextOptionBtn.dispatch("click");
+          for (let index = 0; index < 6; index += 1) await flush();
+          assert.strictEqual(saveCount, 0);
+          assert.strictEqual(global.DrawFlowV2WorkbenchContext.state.stage, "rules");
+          assert(app.elements.draftSaveStatusText.textContent.includes("\u672a\u4fdd\u5b58"));
+        })().catch((error) => { console.error(error); process.exit(1); });
+        """
+    )
+
+
+def test_v2_workbench_stage_confirmation_persists_only_current_stage_checks():
+    run_node(
+        r"""
+        (async () => {
+          let draftSaveBody = null;
+          let currentDraft = {
+            metadata: { template_id: "V2CONFIRM", name: "Confirm Demo", shop_name: "" },
+            manifest: { draft_revision: "d0001" },
+            scan: { outputs: [{ key: "Output_main" }], designs: [{ key: "Design01", slots: [{ key: "slot_name", source_field: "name" }] }] },
+            config: { outputs: [{ key: "Output_main", display_name: "Main", component_key: "main", style: { field: "", options: [] }, design: { field: "design", options: [{ key: "Design01", content_preset: "direct_text", slots: [{ key: "slot_name", source_field: "name" }] }] }, font: { field: "", options: [] } }] }
+          };
+          async function fakeFetch(url, options = {}) {
+            const textUrl = String(url);
+            if (textUrl === "/api/v2/templates") return response({ templates: [{ template_id: "V2CONFIRM", name: "Confirm Demo" }] });
+            if (textUrl.endsWith("/draft") && (!options.method || options.method === "GET")) return response({ draft: currentDraft });
+            if (textUrl.endsWith("/validate")) {
+              const checks = JSON.parse(options.body).config.checks;
+              return response({ validation: { can_save: true, can_publish: false, checks } });
+            }
+            if (textUrl.endsWith("/draft") && options.method === "POST") {
+              draftSaveBody = JSON.parse(options.body);
+              currentDraft = { ...currentDraft, config: draftSaveBody.config, manifest: { draft_revision: "d0002" } };
+              return response({ draft: currentDraft });
+            }
+            return response({});
+          }
+          const app = createApp(fakeFetch);
+          await flush();
+          app.elements.templateList.children[0].dispatch("click");
+          await flush();
+          global.setWorkbenchStage("structure");
+          await flush();
+          app.elements.confirmStageBtn.dispatch("click");
+          for (let index = 0; index < 8; index += 1) await flush();
+          assert(draftSaveBody);
+          assert.deepStrictEqual(["output", "fields", "options"].map((key) => draftSaveBody.config.checks[key].status), ["confirmed", "confirmed", "confirmed"]);
+          assert.deepStrictEqual(["slots", "content", "dimensions", "colors", "preview"].map((key) => draftSaveBody.config.checks[key].status), ["pending", "pending", "pending", "pending", "pending"]);
+          assert.strictEqual(draftSaveBody.config.checks.output.reason, "\u5355 Output_main \u81ea\u52a8\u786e\u8ba4");
+        })().catch((error) => { console.error(error); process.exit(1); });
+        """
+    )
+
+
+def test_v2_workbench_stage_confirmation_rolls_back_when_draft_write_fails():
+    run_node(
+        r"""
+        (async () => {
+          let draftPostCount = 0;
+          let finishDraftWrite;
+          const currentDraft = {
+            metadata: { template_id: "V2CONFIRMFAIL", name: "Confirm Fail Demo", shop_name: "" },
+            manifest: { draft_revision: "d0001" },
+            scan: { outputs: [{ key: "Output_main" }], designs: [{ key: "Design01", slots: [{ key: "slot_name", source_field: "name" }] }] },
+            config: { outputs: [{ key: "Output_main", display_name: "Main", component_key: "main", style: { field: "", options: [] }, design: { field: "design", options: [{ key: "Design01", content_preset: "direct_text", slots: [{ key: "slot_name", source_field: "name" }] }] }, font: { field: "", options: [] } }] }
+          };
+          async function fakeFetch(url, options = {}) {
+            const textUrl = String(url);
+            if (textUrl === "/api/v2/templates") return response({ templates: [{ template_id: "V2CONFIRMFAIL", name: "Confirm Fail Demo" }] });
+            if (textUrl.endsWith("/draft") && (!options.method || options.method === "GET")) return response({ draft: currentDraft });
+            if (textUrl.endsWith("/validate")) {
+              const checks = JSON.parse(options.body).config.checks;
+              return response({ validation: { can_save: true, can_publish: false, checks } });
+            }
+            if (textUrl.endsWith("/draft") && options.method === "POST") {
+              draftPostCount += 1;
+              return new Promise((resolve) => { finishDraftWrite = () => resolve(response({ error: { message: "write failed" } }, false)); });
+            }
+            return response({});
+          }
+          const app = createApp(fakeFetch);
+          await flush();
+          app.elements.templateList.children[0].dispatch("click");
+          await flush();
+          global.setWorkbenchStage("structure");
+          await flush();
+          const check = (key) => document.querySelector('#v2CheckRail .check-item[data-check-key="' + key + '"]');
+          assert.strictEqual(check("fields").dataset.status, "pending");
+          assert.strictEqual(check("options").dataset.status, "pending");
+          app.elements.confirmStageBtn.dispatch("click");
+          await flush();
+          assert.strictEqual(draftPostCount, 1);
+          assert.strictEqual(global.DrawFlowV2WorkbenchContext.state.isSavingDraft, true);
+          assert.strictEqual(app.elements.confirmStageBtn.disabled, true);
+          app.elements.confirmStageBtn.dispatch("click");
+          await flush();
+          assert.strictEqual(draftPostCount, 1);
+          finishDraftWrite();
+          for (let index = 0; index < 8; index += 1) await flush();
+          assert.strictEqual(check("output").dataset.status, "confirmed");
+          assert.strictEqual(check("fields").dataset.status, "pending");
+          assert.strictEqual(check("options").dataset.status, "pending");
+          assert.strictEqual(global.DrawFlowV2WorkbenchContext.state.isSavingDraft, false);
+          assert.strictEqual(app.elements.confirmStageBtn.disabled, false);
+          assert(app.elements.draftSaveStatusText.textContent.includes("\u4fdd\u5b58\u5931\u8d25"));
         })().catch((error) => { console.error(error); process.exit(1); });
         """
     )

@@ -165,6 +165,10 @@
       const status = item ? String(item.dataset.status || "") : "";
       if (["confirmed", "pending", "blocked"].includes(status)) result[key] = { status, reason: manualCheckReasonForConfig(item.dataset.reason || "") };
     });
+    const outputRows = Array.from(document.querySelectorAll("#outputConfigRows .output-row"));
+    if (outputRows.length === 1 && safeOutputKey(rowValue(outputRows[0], "output-key"), "Output_main", 0) === "Output_main") {
+      result.output = { status: "confirmed", reason: "单 Output_main 自动确认" };
+    }
     return result;
   }
 
