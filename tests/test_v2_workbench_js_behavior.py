@@ -907,6 +907,168 @@ def test_v2_workbench_rules_stage_shows_only_selected_option_content():
     )
 
 
+def test_v2_workbench_rules_prefill_anchor_dimensions_and_preserve_tail_proof():
+    run_node(
+        r"""
+        (async () => {
+          async function fakeFetch(url, options = {}) {
+            const textUrl = String(url);
+            if (textUrl === "/api/v2/templates") return response({ templates: [{ template_id: "V2ANCHOR", name: "Anchor Demo" }] });
+            if (textUrl.endsWith("/draft")) {
+              return response({ draft: {
+                metadata: { template_id: "V2ANCHOR", name: "Anchor Demo", shop_name: "" },
+                manifest: { draft_revision: "d0001" },
+                scan: {
+                  "$schema": "custom-renderer/v2-template-scan",
+                  outputs: [{
+                    key: "Output_main",
+                    design: { options: [{
+                      key: "Design02",
+                      recommended_preset: "tail_text",
+                      slots: [
+                        { key: "slot_name1", source_field: "name", tails: [{ key: "tail_name1_last_m", pua_base: 61440 }] },
+                        { key: "slot_name2", source_field: "name" }
+                      ],
+                      anchors: [
+                        { key: "anchor_name1", dimensions: { width_mm: 31, height_mm: 7 } },
+                        { key: "anchor_name2", dimensions: { width_mm: 28, height_mm: 6 } }
+                      ],
+                      tails: [{ key: "tail_name1_last_m", pua_base: 61440 }]
+                    }] },
+                    font: { options: [] },
+                    style: { options: [] },
+                    summary: { designs: 1, fonts: 0, styles: 0, slots: 2, anchors: 2, tails: 1, assets: 0, fixed_objects: 0 }
+                  }]
+                },
+                config: {
+                  outputs: [{
+                    key: "Output_main",
+                    display_name: "Main",
+                    component_key: "main",
+                    style: { field: "", options: [] },
+                    design: { field: "design", options: [] },
+                    font: { field: "", options: [] }
+                  }]
+                }
+              }});
+            }
+            if (textUrl.endsWith("/validate")) return response({ validation: { checks: {} } });
+            return response({});
+          }
+          const app = createApp(fakeFetch);
+          await flush();
+          app.elements.templateList.children[0].dispatch("click");
+          await flush();
+          global.setWorkbenchStage("rules");
+          await flush();
+
+          const rows = document.querySelectorAll("#contentOptionRows .content-slot-row");
+          const slot1 = rows.find((row) => row.dataset.slotKey === "slot_name1");
+          const slot2 = rows.find((row) => row.dataset.slotKey === "slot_name2");
+          assert(slot1);
+          assert(slot2);
+          assert.strictEqual(slot1.dataset.anchor, "anchor_name1");
+          assert.strictEqual(slot2.dataset.anchor, "anchor_name2");
+          assert.strictEqual(String(slot1.querySelector('[data-field="slot-width-mm"]').value), "31");
+          assert.strictEqual(String(slot1.querySelector('[data-field="slot-height-mm"]').value), "7");
+          assert.strictEqual(String(slot2.querySelector('[data-field="slot-width-mm"]').value), "28");
+          assert.strictEqual(String(slot2.querySelector('[data-field="slot-height-mm"]').value), "6");
+          const tailLast = slot1.querySelector('[data-field="slot-tail-last"]');
+          assert.strictEqual(tailLast.value, "m");
+          assert.strictEqual(tailLast.readOnly, true);
+
+          const config = buildControlledConfig();
+          const option = config.outputs[0].design.options.find((item) => item.key === "Design02");
+          const saved1 = option.slots.find((slot) => slot.key === "slot_name1");
+          const saved2 = option.slots.find((slot) => slot.key === "slot_name2");
+          assert.strictEqual(option.content_preset, "tail_text");
+          assert.strictEqual(saved1.preset, "tail_text");
+          assert.strictEqual(saved1.anchor, "anchor_name1");
+          assert.strictEqual(saved2.anchor, "anchor_name2");
+          assert.strictEqual(saved1.dimension_rule.width_mm, 31);
+          assert.strictEqual(saved1.dimension_rule.height_mm, 7);
+          assert.strictEqual(saved2.dimension_rule.width_mm, 28);
+          assert.strictEqual(saved2.dimension_rule.height_mm, 6);
+          assert.deepStrictEqual(saved1.tails, [{ key: "tail_name1_last_m", position: "last", sample: "m", pua_base: 61440 }]);
+        })().catch((error) => { console.error(error); process.exit(1); });
+        """
+    )
+
+
+def test_v2_workbench_split_pipe_recommendation_saves_slot_presets():
+    run_node(
+        r"""
+        (async () => {
+          async function fakeFetch(url, options = {}) {
+            const textUrl = String(url);
+            if (textUrl === "/api/v2/templates") return response({ templates: [{ template_id: "V2SPLIT", name: "Split Demo" }] });
+            if (textUrl.endsWith("/draft")) {
+              return response({ draft: {
+                metadata: { template_id: "V2SPLIT", name: "Split Demo", shop_name: "" },
+                manifest: { draft_revision: "d0001" },
+                scan: {
+                  "$schema": "custom-renderer/v2-template-scan",
+                  outputs: [{
+                    key: "Output_main",
+                    design: { options: [{
+                      key: "Design02",
+                      recommended_preset: "split_by_pipe",
+                      slots: [
+                        { key: "slot_name1", source_field: "name" },
+                        { key: "slot_name2", source_field: "name" }
+                      ],
+                      anchors: [],
+                      tails: []
+                    }] },
+                    font: { options: [] },
+                    style: { options: [] },
+                    summary: { designs: 1, fonts: 0, styles: 0, slots: 2, anchors: 0, tails: 0, assets: 0, fixed_objects: 0 }
+                  }]
+                },
+                config: {
+                  field_bindings: { name: "Name", design: "Design" },
+                  outputs: [{
+                    key: "Output_main",
+                    display_name: "Main",
+                    component_key: "main",
+                    style: { field: "", options: [] },
+                    design: { field: "design", options: [] },
+                    font: { field: "", options: [] }
+                  }]
+                }
+              }});
+            }
+            if (textUrl.endsWith("/validate")) return response({ validation: { checks: {} } });
+            return response({});
+          }
+          const app = createApp(fakeFetch);
+          await flush();
+          app.elements.templateList.children[0].dispatch("click");
+          await flush();
+          global.setWorkbenchStage("rules");
+          await flush();
+
+          const config = buildControlledConfig();
+          const option = config.outputs[0].design.options.find((item) => item.key === "Design02");
+          assert.strictEqual(option.content_preset, "split_by_pipe");
+          assert.deepStrictEqual(option.slots.map((slot) => [slot.key, slot.source_field, slot.preset]), [
+            ["slot_name1", "name", "split_by_pipe"],
+            ["slot_name2", "name", "split_by_pipe"]
+          ]);
+
+          app.elements.optionContentSeparator.value = "none";
+          app.elements.optionContentSeparator.dispatch("change");
+          await flush();
+          app.elements.optionContentSeparator.value = "pipe";
+          app.elements.optionContentSeparator.dispatch("change");
+          await flush();
+          const rows = document.querySelectorAll("#contentOptionRows .content-slot-row");
+          assert(rows.every((row) => row.querySelector('[data-field="slot-preset"]').value === "split_by_pipe"));
+        })().catch((error) => { console.error(error); process.exit(1); });
+        """
+    )
+
+
 def test_v2_workbench_roundtrips_multi_output_dimensions_assets_tails_fonts_colors():
     run_node(
         r"""
@@ -1146,7 +1308,7 @@ def test_v2_workbench_scopes_same_design_slots_by_output():
           assert.deepStrictEqual(frontOption.assets[0].supported_values, ["A", "B"]);
           assert.deepStrictEqual(backOption.assets[0].supported_values, ["X", "Z"]);
           assert.strictEqual(frontOption.slots[0].color_binding, "front_color");
-          assert.deepStrictEqual(backOption.slots[0].tails, [{ key: "tail_back_name_last_z", position: "last", sample: "z" }]);
+          assert.deepStrictEqual(backOption.slots[0].tails, [{ key: "tail_back_last_z", position: "last", sample: "z" }]);
         })().catch((error) => { console.error(error); process.exit(1); });
         """
     )
@@ -1223,6 +1385,83 @@ def test_v2_workbench_rules_stage_filters_pending_and_saves_next_option():
           assert.strictEqual(saveCount, 1);
           assert.notStrictEqual(app.elements.selectedOptionTitle.textContent, "");
           assert(app.elements.selectedOptionTitle.textContent === firstTitle || app.elements.selectedOptionTitle.textContent.includes("Design08"));
+        })().catch((error) => { console.error(error); process.exit(1); });
+        """
+    )
+
+
+def test_v2_workbench_save_next_from_structure_enters_rules_and_strips_manual_reason_nesting():
+    run_node(
+        r"""
+        (async () => {
+          let draftSaveBody = null;
+          let saveCount = 0;
+          const manualPrefix = "\u4eba\u5de5\u6838\u9a8c\u9879\u8fd8\u6ca1\u6709\u786e\u8ba4\uff1a";
+          const pendingText = "\u7b49\u5f85\u4eba\u5de5\u6838\u9a8c";
+          const nestedReason = manualPrefix + manualPrefix + pendingText;
+          const checks = ["output", "fields", "options", "slots", "content", "dimensions", "colors", "preview"].reduce((result, key) => {
+            result[key] = { status: key === "output" ? "pending" : "confirmed", reason: key === "output" ? nestedReason : "" };
+            return result;
+          }, {});
+          async function fakeFetch(url, options = {}) {
+            const textUrl = String(url);
+            if (textUrl === "/api/v2/templates") return response({ templates: [{ template_id: "V2NEXT", name: "Next Demo" }] });
+            if (textUrl.endsWith("/draft") && (!options.method || options.method === "GET")) {
+              return response({ draft: {
+                metadata: { template_id: "V2NEXT", name: "Next Demo", shop_name: "" },
+                manifest: { draft_revision: "d0001" },
+                scan: {
+                  "$schema": "custom-renderer/v2-template-scan",
+                  outputs: [{
+                    key: "Output_main",
+                    design: { options: [{ key: "Design01", slots: [{ key: "slot_name", source_field: "name" }] }] },
+                    font: { options: [] },
+                    style: { options: [] },
+                    summary: { designs: 1, fonts: 0, styles: 0, slots: 1, anchors: 0, tails: 0, assets: 0, fixed_objects: 0 }
+                  }]
+                },
+                config: {
+                  checks,
+                  field_bindings: { name: "Name", design: "Design" },
+                  outputs: [{
+                    key: "Output_main",
+                    display_name: "Main",
+                    component_key: "main",
+                    style: { field: "", options: [] },
+                    design: { field: "design", options: [] },
+                    font: { field: "", options: [] }
+                  }]
+                }
+              }});
+            }
+            if (textUrl.endsWith("/validate")) return response({ validation: { can_save: true, can_publish: false, checks } });
+            if (textUrl.endsWith("/draft") && options.method === "POST") {
+              saveCount += 1;
+              draftSaveBody = JSON.parse(options.body);
+              return response({ draft: {
+                metadata: { template_id: "V2NEXT", name: "Next Demo", shop_name: "" },
+                manifest: { draft_revision: "d0002" },
+                config: draftSaveBody.config,
+                scan: global.DrawFlowV2WorkbenchContext.state.scan
+              }});
+            }
+            return response({});
+          }
+          const app = createApp(fakeFetch);
+          await flush();
+          app.elements.templateList.children[0].dispatch("click");
+          await flush();
+          global.setWorkbenchStage("structure");
+          await flush();
+
+          app.elements.saveAndNextOptionBtn.dispatch("click");
+          for (let index = 0; index < 6; index += 1) await flush();
+
+          assert.strictEqual(saveCount, 1);
+          assert.strictEqual(global.DrawFlowV2WorkbenchContext.state.stage, "rules");
+          assert(app.elements.selectedOptionTitle.textContent.includes("Design01"));
+          assert.strictEqual(draftSaveBody.config.checks.output.reason, pendingText);
+          assert(!draftSaveBody.config.checks.output.reason.includes(manualPrefix));
         })().catch((error) => { console.error(error); process.exit(1); });
         """
     )

@@ -151,4 +151,18 @@ def _apply_manual_check_state(contract: Mapping[str, Any], issues: list[Dict[str
 
 
 def _manual_reason(prefix: str, reason: str) -> str:
-    return f"{prefix}：{reason}" if reason else f"{prefix}。"
+    normalized = _strip_manual_reason_prefix(reason)
+    return f"{prefix}：{normalized}" if normalized else f"{prefix}。"
+
+
+def _strip_manual_reason_prefix(reason: str) -> str:
+    text = str(reason or "").strip()
+    prefixes = ("人工核验项还没有确认：", "人工核验项被标记为阻断：")
+    changed = True
+    while changed:
+        changed = False
+        for prefix in prefixes:
+            if text.startswith(prefix):
+                text = text[len(prefix):].strip()
+                changed = True
+    return text

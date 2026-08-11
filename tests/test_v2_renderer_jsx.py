@@ -239,6 +239,64 @@ if (slot.styleToken !== 'Year-style') throw new Error('design slot style was not
     assert result.returncode == 0, result.stderr
 
 
+def test_v2_renderer_replaces_split_by_pipe_slots_by_source_part_index():
+    task = {
+        "$schema": "custom-renderer/v2-render-execution",
+        "template_ai": "template.ai",
+        "output_ai": "out.ai",
+        "values": {"design": "03", "name": "Alice|Beth"},
+        "selections": {"Output_main": {"design": "Design03"}},
+        "render_task": {
+            "$schema": "custom-renderer/v2-render-task",
+            "outputs": [
+                {
+                    "key": "Output_main",
+                    "actions": [
+                        {
+                            "type": "copy_option_group",
+                            "group": "design",
+                            "option_key": "Design03",
+                            "object_path": "Template/Output_main/Design/Design03",
+                        },
+                        {
+                            "type": "replace_slot_text",
+                            "group": "design",
+                            "option_key": "Design03",
+                            "object_path": "Template/Output_main/Design/Design03/slot_name",
+                            "source_field": "name",
+                            "source_part_index": 0,
+                            "required": True,
+                            "preset": "split_by_pipe",
+                            "tail_paths": [],
+                        },
+                        {
+                            "type": "replace_slot_text",
+                            "group": "design",
+                            "option_key": "Design03",
+                            "object_path": "Template/Output_main/Design/Design03/slot_year",
+                            "source_field": "name",
+                            "source_part_index": 1,
+                            "required": True,
+                            "preset": "split_by_pipe",
+                            "tail_paths": [],
+                        },
+                    ],
+                }
+            ],
+        },
+    }
+    harness = node_mock_harness(task, """
+const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
+if (!designCopy) throw new Error('Design03 was not copied');
+if (child(designCopy, 'slot_name').contents !== 'Alice') throw new Error('first split slot mismatch: ' + child(designCopy, 'slot_name').contents);
+if (child(designCopy, 'slot_year').contents !== 'Beth') throw new Error('second split slot mismatch: ' + child(designCopy, 'slot_year').contents);
+""")
+
+    result = run_node(harness)
+
+    assert result.returncode == 0, result.stderr
+
+
 def test_v2_renderer_combines_design_slot_with_selected_font_style_source():
     task = {
         "$schema": "custom-renderer/v2-render-execution",

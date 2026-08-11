@@ -1,4 +1,8 @@
 import hashlib
+import json
+from pathlib import Path
+import subprocess
+import textwrap
 
 import pytest
 
@@ -11,10 +15,12 @@ from src.service.v2_render_task import (
 )
 from src.service.v2_template_contract import V2_CONTRACT_SCHEMA, V2_CONTRACT_VERSION
 from src.service.v2_template_store import V2TemplateStore
+from tests.test_v2_workbench_js_behavior import HARNESS
 
 
 TEMPLATE_SHA = "a" * 64
 TAIL_PUA_BASE = 0xF000
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 def render_config():
@@ -214,6 +220,81 @@ def compile_task(config=None, scan=None, **overrides):
     return compile_v2_render_task(config or render_config(), scan or scan_evidence(), **kwargs)
 
 
+def _workbench_split_config() -> dict:
+    script = r"""
+        (async () => {
+          async function fakeFetch(url, options = {}) {
+            const textUrl = String(url);
+            if (textUrl === "/api/v2/templates") return response({ templates: [{ template_id: "V2RENDER001", name: "Workbench Split" }] });
+            if (textUrl.endsWith("/draft")) {
+              return response({ draft: {
+                metadata: { template_id: "V2RENDER001", name: "Workbench Split", shop_name: "" },
+                manifest: { draft_revision: "d0001" },
+                scan: {
+                  "$schema": "custom-renderer/v2-template-scan",
+                  outputs: [{
+                    key: "Output_main",
+                    design: { options: [{
+                      key: "Design02",
+                      recommended_preset: "split_by_pipe",
+                      slots: [
+                        { key: "slot_name1", source_field: "name" },
+                        { key: "slot_name2", source_field: "name" }
+                      ],
+                      anchors: [],
+                      tails: [],
+                      assets: []
+                    }] },
+                    font: { options: [] },
+                    style: { options: [] },
+                    summary: { designs: 1, fonts: 0, styles: 0, slots: 2, anchors: 0, tails: 0, assets: 0, fixed_objects: 0 }
+                  }]
+                },
+                config: {
+                  field_bindings: { name: "Name", design: "Design" },
+                  outputs: [{
+                    key: "Output_main",
+                    display_name: "Main",
+                    component_key: "main",
+                    style: { field: "", options: [] },
+                    design: { field: "design", options: [] },
+                    font: { field: "", options: [] }
+                  }]
+                }
+              }});
+            }
+            if (textUrl.endsWith("/validate")) return response({ validation: { checks: {} } });
+            return response({});
+          }
+          const app = createApp(fakeFetch);
+          await flush();
+          app.elements.templateList.children[0].dispatch("click");
+          await flush();
+          global.setWorkbenchStage("rules");
+          await flush();
+          console.log("WORKBENCH_CONFIG:" + JSON.stringify(buildControlledConfig()));
+        })().catch((error) => { console.error(error); process.exit(1); });
+    """
+    try:
+        completed = subprocess.run(
+            ["node", "-e", HARNESS + "\n" + textwrap.dedent(script)],
+            cwd=PROJECT_ROOT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            capture_output=True,
+            timeout=30,
+            check=False,
+        )
+    except FileNotFoundError:
+        pytest.skip("Node.js is unavailable")
+    assert completed.returncode == 0, completed.stderr + completed.stdout
+    marker = "WORKBENCH_CONFIG:"
+    line = next((item for item in completed.stdout.splitlines() if item.startswith(marker)), "")
+    assert line, completed.stdout
+    return json.loads(line[len(marker):])
+
+
 def test_compiles_v2_render_task_with_stable_json_and_whitelisted_actions():
     first = compile_task()
     second = compile_task()
@@ -260,6 +341,65 @@ def test_compiles_path_text_preset_with_scanned_path_text_kind():
     assert path_action["preset"] == "path_text"
     assert path_action["text_kind"] == "path_text"
     assert path_action["object_path"] == "Template/Output_main/Font/F10/slot_title"
+
+
+def test_compiles_split_by_pipe_slots_with_ordered_source_part_indices():
+    config = render_config()
+    design = config["outputs"][0]["design"]["options"][0]
+    design["content_preset"] = "split_by_pipe"
+    design["assets"] = []
+    design["slots"] = [
+        {"key": "slot_name", "source_field": "name", "preset": "split_by_pipe"},
+        {"key": "slot_year", "source_field": "name", "preset": "split_by_pipe"},
+    ]
+    scan = scan_evidence()
+    scan["outputs"][0]["designs"][0]["slots"] = [
+        {"key": "slot_name", "path": "Template/Output_main/Design/Design03/slot_name"},
+        {"key": "slot_year", "path": "Template/Output_main/Design/Design03/slot_year"},
+    ]
+
+    task = compile_task(config=config, scan=scan)
+
+    actions = [
+        action
+        for action in task["outputs"][0]["actions"]
+        if action["type"] == "replace_slot_text" and action["group"] == "design"
+    ]
+    assert [(action["slot_key"], action["source_field"], action["source_part_index"]) for action in actions] == [
+        ("slot_name", "name", 0),
+        ("slot_year", "name", 1),
+    ]
+
+
+def test_compiles_split_by_pipe_task_from_workbench_controlled_config():
+    config = _workbench_split_config()
+    config["audit"]["template_sha256"] = TEMPLATE_SHA
+    scan = scan_evidence()
+    scan["outputs"][0]["designs"] = [
+        {
+            "key": "Design02",
+            "path": "Template/Output_main/Design/Design02",
+            "slots": [
+                {"key": "slot_name1", "path": "Template/Output_main/Design/Design02/slot_name1"},
+                {"key": "slot_name2", "path": "Template/Output_main/Design/Design02/slot_name2"},
+            ],
+            "anchors": [],
+            "tails": [],
+            "assets": [],
+        }
+    ]
+
+    task = compile_task(config=config, scan=scan)
+
+    actions = [
+        action
+        for action in task["outputs"][0]["actions"]
+        if action["type"] == "replace_slot_text" and action["group"] == "design"
+    ]
+    assert [(action["slot_key"], action["preset"], action["source_part_index"]) for action in actions] == [
+        ("slot_name1", "split_by_pipe", 0),
+        ("slot_name2", "split_by_pipe", 1),
+    ]
 
 
 def test_rejects_path_text_preset_for_non_path_text_scan_slot():

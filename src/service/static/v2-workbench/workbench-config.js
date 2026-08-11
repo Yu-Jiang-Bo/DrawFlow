@@ -163,9 +163,25 @@
     CHECK_KEYS.forEach((key) => {
       const item = document.querySelector(`#v2CheckRail .check-item[data-check-key="${key}"]`);
       const status = item ? String(item.dataset.status || "") : "";
-      if (["confirmed", "pending", "blocked"].includes(status)) result[key] = { status, reason: cleanText(item.dataset.reason || "") };
+      if (["confirmed", "pending", "blocked"].includes(status)) result[key] = { status, reason: manualCheckReasonForConfig(item.dataset.reason || "") };
     });
     return result;
+  }
+
+  function manualCheckReasonForConfig(value) {
+    let reason = cleanText(value);
+    const prefixes = ["人工核验项还没有确认：", "人工核验项被标记为阻断："];
+    let changed = true;
+    while (changed) {
+      changed = false;
+      prefixes.forEach((prefix) => {
+        if (reason.indexOf(prefix) === 0) {
+          reason = cleanText(reason.slice(prefix.length));
+          changed = true;
+        }
+      });
+    }
+    return reason;
   }
 
 
@@ -386,6 +402,7 @@
     effectiveOptionMappings,
     scanBackedOptionMappings,
     collectChecks,
+    manualCheckReasonForConfig,
     collectControlledColors,
     nextAudit,
     styleOptionsFor,
@@ -394,6 +411,7 @@
     optionKeysFor,
     scopedScanItemsFor,
     collectStyleDimensionConfigs,
-    dimensionRuleFromValues
+    dimensionRuleFromValues,
+    normalizedDimensionRule
   });
 })();

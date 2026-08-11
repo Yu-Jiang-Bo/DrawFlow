@@ -48,9 +48,13 @@
 
   function renderAll() {
     renderScanSummary();
-    if (state.stage === "structure") {
+    if (state.stage === "structure" || state.stage === "rules") {
       renderStructureTree();
       renderTables();
+      if (state.stage === "rules" && typeof renderOptionRuleStage === "function") renderOptionRuleStage();
+      validateCurrentConfig(false).catch(() => updateCheckRail(configChecks()));
+    } else if (state.stage === "preview") {
+      renderPreviewStage();
       validateCurrentConfig(false).catch(() => updateCheckRail(configChecks()));
     } else {
       updateCheckRail(defaultChecks());

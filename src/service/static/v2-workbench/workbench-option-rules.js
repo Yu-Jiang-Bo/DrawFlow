@@ -58,8 +58,14 @@
   }
 
   async function saveDraftAndSelectNextOption() {
+    const wasRuleStage = state.stage === "rules";
     const visible = filteredRuleOptions();
     if (typeof globalThis.saveDraft === "function") await globalThis.saveDraft();
+    if (!wasRuleStage) {
+      state.optionRules.selectedIndex = 0;
+      if (typeof globalThis.setWorkbenchStage === "function") globalThis.setWorkbenchStage("rules");
+      return;
+    }
     const nextLength = filteredRuleOptions().length || visible.length;
     state.optionRules.selectedIndex = nextLength ? (state.optionRules.selectedIndex + 1) % nextLength : 0;
     renderOptionRuleStage();

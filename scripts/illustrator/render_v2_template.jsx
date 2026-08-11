@@ -86,7 +86,10 @@
         var fitBounds = localFitBounds(holder.item, holder.source_path, action, slot);
         var value = String(valuesByField[String(action.source_field || "")] || "");
         var parts = splitPipeValue(value);
-        if (!hasText(value)) {
+        var preset = String(action.preset || "");
+        var slotValue = preset === "split_by_pipe" ? splitPart(parts, action.source_part_index) : parts[0];
+        var requiredValue = preset === "split_by_pipe" ? slotValue : value;
+        if (!hasText(requiredValue)) {
             if (action.required !== false) throw new Error("Required V2 slot has no value: " + action.source_field);
             removePageItem(slot);
             return;
@@ -95,7 +98,7 @@
         if (action.style_source) {
             target = replaceWithFontStyleSource(copied, outputKey, action, selected, slot);
         }
-        if (String(action.preset || "") === "tail_text") {
+        if (preset === "tail_text") {
             V2TailText.replaceTailText(
                 tailTextEnvironment(),
                 holder.item,
@@ -107,7 +110,7 @@
             );
             return;
         }
-        var textFrame = writeTextToItem(target, parts[0]);
+        var textFrame = writeTextToItem(target, slotValue);
         fitItemWithinBounds(textFrame, fitBounds, action);
         var tailPaths = action.tail_paths || [];
         for (var index = 0; index < tailPaths.length; index++) {
@@ -498,6 +501,12 @@
         var parts = [];
         for (var index = 0; index < raw.length; index++) parts.push(raw[index]);
         return parts;
+    }
+
+    function splitPart(parts, rawIndex) {
+        var index = Number(rawIndex || 0);
+        if (!isFinite(index) || index < 0) index = 0;
+        return parts[Math.floor(index)] || "";
     }
 
     function hasText(value) {

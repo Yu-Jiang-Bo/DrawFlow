@@ -173,6 +173,7 @@ def _slot_actions(
 ) -> list[dict[str, Any]]:
     actions = []
     option_key = str(option.get("key") or "")
+    split_source_counts: dict[str, int] = {}
     for slot in option.get("slots", []):
         slot_data = dict(slot)
         slot_key = str(slot_data.get("key") or "")
@@ -181,6 +182,11 @@ def _slot_actions(
         tail_keys = [str(tail.get("key") or "") for tail in slot_data.get("tails", []) if isinstance(tail, Mapping)]
         preset = str(slot_data.get("preset") or slot_scan.get("preset") or "direct_text")
         text_kind = str(slot_scan.get("text_kind") or slot_scan.get("textKind") or "")
+        source_field = str(slot_data.get("source_field") or "")
+        source_part_index = 0
+        if preset == "split_by_pipe":
+            source_part_index = split_source_counts.get(source_field, 0)
+            split_source_counts[source_field] = source_part_index + 1
         anchor_path = _path_by_key(
             option_scan.get("anchors", []),
             anchor_key,
@@ -215,7 +221,8 @@ def _slot_actions(
             "option_key": option_key,
             "slot_key": slot_key,
             "object_path": slot_scan["path"],
-            "source_field": str(slot_data.get("source_field") or ""),
+            "source_field": source_field,
+            "source_part_index": source_part_index,
             "required": bool(slot_data.get("required", True)),
             "preset": preset,
             "text_kind": text_kind,

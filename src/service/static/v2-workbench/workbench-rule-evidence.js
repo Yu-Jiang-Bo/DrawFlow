@@ -104,7 +104,27 @@
     const select = group && group.querySelector('[data-field="option-content-preset"]');
     if (!select) return;
     select.value = safeOptionPreset(preset, "direct_text");
+    Array.from(document.querySelectorAll("#contentOptionRows .content-slot-row"))
+      .filter((row) => row.dataset.output === item.output && row.dataset.group === item.group && row.dataset.option === item.key)
+      .forEach((row) => {
+        const slotSelect = row.querySelector('[data-field="slot-preset"]');
+        if (slotSelect) slotSelect.value = syncedSlotPreset(row, slotSelect, select.value);
+      });
     validateCurrentConfig(false).catch(() => updateCheckRail(collectChecks()));
+  }
+
+  function syncedSlotPreset(row, slotSelect, optionPreset) {
+    const tails = [
+      rowValue(row, "slot-tail-first"),
+      rowValue(row, "slot-tail-last")
+    ].filter(Boolean).map((sample, index) => ({ key: `tail_sync_${index}_${sample}`, position: index ? "last" : "first", sample }));
+    const item = {
+      key: row && row.dataset ? row.dataset.slotKey : "",
+      preset: slotSelect.value,
+      asset_key: rowValue(row, "slot-asset-key"),
+      tails
+    };
+    return typeof slotPresetForOption === "function" ? slotPresetForOption(item, optionPreset) : safePreset(optionPreset, "direct_text");
   }
 
   function selectedDimensionRules(item) {

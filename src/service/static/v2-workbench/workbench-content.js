@@ -48,13 +48,14 @@
     const header = document.createElement("div");
     header.className = "content-option-header";
     header.appendChild(lineNode(`${output} · ${groupLabel(group)} ${optionKey}`, group === "design" ? "具体 Design 独立配置" : "具体 F 独立配置"));
-    header.appendChild(selectCell("option-content-preset", presetOptions(OPTION_PRESETS), safeOptionPreset(existing.content_preset, recommendedOptionPreset(output, group, optionKey, model))));
+    const optionPreset = safeOptionPreset(existing.content_preset, recommendedOptionPreset(output, group, optionKey, model));
+    header.appendChild(selectCell("option-content-preset", presetOptions(OPTION_PRESETS), optionPreset));
     section.appendChild(header);
 
     const rows = document.createElement("div");
     rows.className = "content-slot-table";
     rows.appendChild(contentSlotHeader());
-    contentSlotsFor(output, group, optionKey, model, existing).forEach((slot) => rows.appendChild(contentSlotRow(output, group, optionKey, slot)));
+    contentSlotsFor(output, group, optionKey, model, existing, optionPreset).forEach((slot) => rows.appendChild(contentSlotRow(output, group, optionKey, slot)));
     section.appendChild(rows);
     return section;
   }
@@ -66,11 +67,11 @@
       metaCell("内容来源"),
       metaCell("业务渲染类型"),
       metaCell("状态"),
-      metaCell("素材键"),
+      metaCell("素材库键"),
       metaCell("X 宽"),
       metaCell("Y 高"),
-      metaCell("首尾巴"),
-      metaCell("末尾巴"),
+      metaCell("首尾样本"),
+      metaCell("末尾样本"),
       metaCell("字体依赖"),
       metaCell("颜色绑定")
     );
@@ -84,6 +85,7 @@
     row.dataset.option = optionKey;
     row.dataset.slotKey = slot.key;
     row.dataset.anchor = slot.anchor || "";
+    row.__tailConfigs = normalizedTailConfigs(slot.tails);
     const dimensions = objectOf(slot.dimension_rule);
     row.append(
       metaCell(slot.key),
@@ -93,8 +95,8 @@
       inputCell("slot-asset-key", slot.asset_key || ""),
       inputCell("slot-width-mm", dimensions.width_mm || ""),
       inputCell("slot-height-mm", dimensions.height_mm || ""),
-      inputCell("slot-tail-first", tailSample(slot.tails, "first")),
-      inputCell("slot-tail-last", tailSample(slot.tails, "last")),
+      readonlyInputCell("slot-tail-first", tailSample(slot.tails, "first")),
+      readonlyInputCell("slot-tail-last", tailSample(slot.tails, "last")),
       inputCell("slot-font-dependencies", stringListValue(slot.font_dependencies)),
       inputCell("slot-color-binding", slot.color_binding || "")
     );
@@ -136,7 +138,7 @@
           if (!outputKey || !key) return;
           result[contentOptionMapKey(outputKey, group, key)] = {
             content_preset: safeOptionPreset(option.content_preset, "direct_text"),
-            slots: Array.isArray(option.slots) ? controlledSlots(option.slots) : []
+            slots: Array.isArray(option.slots) ? controlledSlots(option.slots, null, option.content_preset) : []
           };
         });
       });
@@ -161,22 +163,23 @@
     };
   }
 
-  function controlledSlots(slots) {
+  function controlledSlots(slots, optionContext, optionPreset) {
     const source = slots.length ? slots : [{ name: "name" }];
     return source.slice(0, 12).map((item) => {
       const raw = cleanText(item.key || item.name || item.label || "name");
       const key = slotKeyFor(raw);
       const suffix = key.replace(/^slot_/, "");
       const field = safeField(item.source_field || item.field || suffix) || "name";
+      const anchor = inferredAnchorForSlot(item, key, optionContext);
       return {
         key,
         source_field: field,
         required: item.required === false ? false : true,
-        preset: safePreset(item.preset, "direct_text"),
-        anchor: cleanText(item.anchor || ""),
-        tails: Array.isArray(item.tails) ? item.tails : [],
+        preset: slotPresetForOption(item, optionPreset),
+        anchor,
+        tails: normalizedTailConfigs(item.tails),
         asset_key: safeIdentifier(item.asset_key || inferredAssetKey(key, item), ""),
-        dimension_rule: objectOf(item.dimension_rule),
+        dimension_rule: slotDimensionRule(item, optionContext, key),
         font_dependencies: Array.isArray(item.font_dependencies) ? item.font_dependencies.map(cleanText).filter(Boolean) : [],
         color_binding: safeIdentifier(item.color_binding || "", "")
       };
@@ -193,7 +196,9 @@
 
   function contentOptionSlots(content, output, group, option, fallbackSlots, model) {
     const existing = content[contentOptionMapKey(output, group, option)];
-    return existing && existing.slots.length ? existing.slots : controlledSlots(existingOptionSlots(output, group, option, fallbackSlots, model));
+    if (existing && existing.slots.length) return existing.slots;
+    const optionContext = scannedOptionForContent(output, group, option, model);
+    return controlledSlots(existingOptionSlots(output, group, option, fallbackSlots, model), optionContext, contentOptionPreset(content, output, group, option, model));
   }
 
   function existingOptionPreset(output, group, option) {
@@ -218,16 +223,26 @@
     return objectOf(options.find((item) => safeOptionKey(item.key || item.name || item.label, group) === safeOptionKey(option, group)));
   }
 
-  function contentSlotsFor(output, group, optionKey, model, existing) {
-    if (Array.isArray(existing.slots) && existing.slots.length) return controlledSlots(existing.slots);
-    const scanned = scannedOptionSlots(output, group === "design" ? model.designs : model.fonts, group, optionKey);
+  function contentSlotsFor(output, group, optionKey, model, existing, optionPreset) {
+    const optionContext = scannedOptionForContent(output, group, optionKey, model);
+    if (Array.isArray(existing.slots) && existing.slots.length) return controlledSlots(existing.slots, optionContext, optionPreset || existing.content_preset);
+    const scanned = scannedOptionSlotsFromOption(optionContext);
     const fallbackSlots = scopedOptionItemsFor(output, group, optionKey, model.slots);
-    return controlledSlots(scanned.length ? scanned : fallbackSlots);
+    return controlledSlots(scanned.length ? scanned : fallbackSlots, optionContext, optionPreset);
   }
 
   function scannedOptionSlots(output, items, group, optionKey) {
     const option = objectOf(scopedScanItemsFor(output, items).find((item) => safeOptionKey(item.key || item.name || item.label, group) === optionKey));
-    return Array.isArray(option.slots) ? option.slots : [];
+    return scannedOptionSlotsFromOption(option);
+  }
+
+  function scannedOptionForContent(output, group, optionKey, model) {
+    const source = group === "design" ? model.designs : model.fonts;
+    return objectOf(scopedScanItemsFor(output, source).find((item) => safeOptionKey(item.key || item.name || item.label, group) === optionKey));
+  }
+
+  function scannedOptionSlotsFromOption(option) {
+    return Array.isArray(objectOf(option).slots) ? objectOf(option).slots : [];
   }
 
   function recommendedOptionPreset(output, group, optionKey, model) {
@@ -242,6 +257,18 @@
 
   function safeOptionPreset(value, fallback) {
     return OPTION_PRESETS.includes(value) ? value : (fallback || "direct_text");
+  }
+
+  function slotPresetForOption(item, optionPreset) {
+    const data = objectOf(item);
+    const preset = safeOptionPreset(optionPreset, "");
+    const hasAsset = Boolean(safeIdentifier(data.asset_key || inferredAssetKey(slotKeyFor(data.key || data.name || data.label || ""), data), ""));
+    const hasTail = normalizedTailConfigs(data.tails).length > 0;
+    if (preset === "split_by_pipe") return "split_by_pipe";
+    if (preset === "path_text") return "path_text";
+    if (preset === "tail_text" && hasTail) return "tail_text";
+    if (hasAsset) return safePreset(data.preset, "asset_replace");
+    return safePreset(data.preset, "direct_text");
   }
 
   function presetOptions(values) {
@@ -290,6 +317,9 @@
   }
 
   function tailConfigsFromRow(row, slotKey) {
+    if (Array.isArray(row.__tailConfigs) && row.__tailConfigs.length) {
+      return normalizedTailConfigs(row.__tailConfigs);
+    }
     return [
       tailConfig(slotKey, "first", rowValue(row, "slot-tail-first")),
       tailConfig(slotKey, "last", rowValue(row, "slot-tail-last"))
@@ -302,6 +332,47 @@
     const suffix = slotKey.replace(/^slot_/, "");
     const sampleKey = safeIdentifier(value.toLowerCase(), position);
     return { key: `tail_${suffix}_${position}_${sampleKey}`, position, sample: value };
+  }
+
+  function normalizedTailConfigs(tails) {
+    return (Array.isArray(tails) ? tails : []).map((tail) => {
+      const data = objectOf(tail);
+      const key = cleanText(data.key || data.name || "");
+      const parsed = parseTailKey(key);
+      const position = cleanText(data.position || parsed.position || "").toLowerCase();
+      const sample = cleanText(data.sample || data.text || parsed.sample || "");
+      if (!key || !["first", "last"].includes(position)) return null;
+      const result = { key, position, sample };
+      if (data.pua_base !== undefined && data.pua_base !== null && cleanText(data.pua_base) !== "") result.pua_base = data.pua_base;
+      if (data.glyph_map && typeof data.glyph_map === "object") result.glyph_map = data.glyph_map;
+      return result;
+    }).filter(Boolean);
+  }
+
+  function parseTailKey(key) {
+    const match = cleanText(key).match(/^tail_(.+)_(first|last)_([A-Za-z])$/i);
+    return match ? { field: match[1], position: match[2].toLowerCase(), sample: match[3] } : {};
+  }
+
+  function slotDimensionRule(item, optionContext, slotKey) {
+    const configured = objectOf(item.dimension_rule);
+    if (Object.keys(configured).length) return configured;
+    const scanned = normalizedDimensionRule(item.dimensions || item, "slot");
+    if (Object.keys(scanned).length) return scanned;
+    const anchorKey = inferredAnchorForSlot(item, slotKey, optionContext);
+    const anchors = Array.isArray(objectOf(optionContext).anchors) ? objectOf(optionContext).anchors : [];
+    const anchor = anchors.find((candidate) => cleanText(candidate.key || candidate.name || "") === anchorKey);
+    return normalizedDimensionRule(objectOf(anchor).dimensions || anchor, "slot");
+  }
+
+  function inferredAnchorForSlot(item, slotKey, optionContext) {
+    const explicit = cleanText(item.anchor || item.anchor_key || item.anchorKey || "");
+    if (explicit) return explicit;
+    const suffix = cleanText(slotKey).replace(/^slot_/, "");
+    if (!suffix) return "";
+    const candidateKey = `anchor_${suffix}`;
+    const anchors = Array.isArray(objectOf(optionContext).anchors) ? objectOf(optionContext).anchors : [];
+    return anchors.some((anchor) => cleanText(anchor.key || anchor.name || "") === candidateKey) ? candidateKey : "";
   }
 
   function stringListValue(value) {
@@ -324,6 +395,17 @@
     return cell;
   }
 
+  function readonlyInputCell(name, value) {
+    const wrap = document.createElement("label");
+    const input = document.createElement("input");
+    input.dataset.field = name;
+    input.value = value || "";
+    input.readOnly = true;
+    input.setAttribute("aria-readonly", "true");
+    wrap.appendChild(input);
+    return wrap;
+  }
+
   Object.assign(globalThis, {
     renderContentOptionRows,
     appendSelectedContentGroup,
@@ -338,8 +420,10 @@
     existingOptionPreset,
     existingOptionSlots,
     findConfigOption,
+    scannedOptionForContent,
     safePreset,
     safeOptionPreset,
+    slotPresetForOption,
     presetOptions,
     slotKeyFor,
     contentOptionMapKey,
