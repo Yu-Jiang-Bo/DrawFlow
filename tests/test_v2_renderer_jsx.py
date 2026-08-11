@@ -7,6 +7,8 @@ import pytest
 
 
 SCRIPT = Path("scripts/illustrator/render_v2_template.jsx")
+TAIL_INCLUDE = Path("scripts/illustrator/v2_tail_text.jsxinc")
+TAIL_PUA_BASE = 0xF000
 
 
 def run_node(script):
@@ -17,7 +19,11 @@ def run_node(script):
 
 
 def jsx_source_expression():
-    return f"fs.readFileSync({json.dumps(str(SCRIPT.resolve()))}, 'utf8').replace(/^#target.*\\r?\\n/, '')"
+    return (
+        f"fs.readFileSync({json.dumps(str(SCRIPT.resolve()))}, 'utf8')"
+        ".replace(/^#target.*\\r?\\n/, '')"
+        f".replace(/^#include\\s+\"v2_tail_text\\.jsxinc\"\\s*\\r?\\n/m, fs.readFileSync({json.dumps(str(TAIL_INCLUDE.resolve()))}, 'utf8') + '\\n')"
+    )
 
 
 def test_v2_renderer_jsx_parses_in_node():
@@ -41,11 +47,18 @@ def test_v2_renderer_static_contract_uses_paths_and_safe_actions():
     assert "function replaceSlotText" in source
     assert "function splitPipeValue" in source
     assert "function removePageItem" in source
+    assert '#include "v2_tail_text.jsxinc"' in source
+    assert TAIL_INCLUDE.exists()
     assert "function saveAsAI8" in source
     assert "findPageItemsByName" not in source
     assert "app.doScript" not in source
     assert "eval(" not in source
     assert "JJMB" not in source
+    assert "tailTextForSample" not in source
+    include = TAIL_INCLUDE.read_text(encoding="utf-8")
+    assert "var V2TailText" in include
+    assert "function tailGlyphForSpec" in include
+    assert "String.fromCharCode" in include
 
 
 def test_v2_renderer_copies_selected_groups_and_replaces_single_and_multi_slots():
@@ -679,6 +692,264 @@ if (width > 100) throw new Error('path text exceeded original path bounds: ' + w
     assert result.returncode == 0, result.stderr
 
 
+def tail_text_task(tails, value="Alice Smith"):
+    return {
+        "$schema": "custom-renderer/v2-render-execution",
+        "template_ai": "template.ai",
+        "output_ai": "out.ai",
+        "values": {"design": "03", "name": value},
+        "selections": {"Output_main": {"design": "Design03"}},
+        "render_task": {
+            "$schema": "custom-renderer/v2-render-task",
+            "outputs": [
+                {
+                    "key": "Output_main",
+                    "actions": [
+                        {
+                            "type": "copy_option_group",
+                            "group": "design",
+                            "option_key": "Design03",
+                            "object_path": "Template/Output_main/Design/Design03",
+                        },
+                        {
+                            "type": "replace_slot_text",
+                            "group": "design",
+                            "option_key": "Design03",
+                            "slot_key": "slot_name",
+                            "object_path": "Template/Output_main/Design/Design03/slot_name",
+                            "source_field": "name",
+                            "required": True,
+                            "preset": "tail_text",
+                            "tail_paths": [tail["path"] for tail in tails],
+                            "tails": tails,
+                        },
+                    ],
+                }
+            ],
+        },
+    }
+
+
+@pytest.mark.parametrize(
+    ("tails", "expected_slot", "expected_first", "expected_last", "assert_tail_presence"),
+    [
+        (
+            [
+                {
+                    "key": "tail_name_first_a",
+                    "position": "first",
+                    "sample": "a",
+                    "pua_base": TAIL_PUA_BASE,
+                    "path": "Template/Output_main/Design/Design03/tail_name_first_a",
+                }
+            ],
+            "lice Smith",
+            chr(TAIL_PUA_BASE),
+            None,
+            """
+const firstTail = designCopy.pageItems.find(item => item.name === 'tail_name_first_a');
+if (!firstTail || firstTail.contents !== expectedFirst) throw new Error('first tail mismatch');
+""",
+        ),
+        (
+            [
+                {
+                    "key": "tail_name_last_a",
+                    "position": "last",
+                    "sample": "a",
+                    "pua_base": TAIL_PUA_BASE,
+                    "path": "Template/Output_main/Design/Design03/tail_name_last_a",
+                }
+            ],
+            "Alice Smit",
+            None,
+            chr(TAIL_PUA_BASE + 7),
+            """
+const lastTail = designCopy.pageItems.find(item => item.name === 'tail_name_last_a');
+if (!lastTail || lastTail.contents !== expectedLast) throw new Error('last tail mismatch');
+""",
+        ),
+        (
+            [
+                {
+                    "key": "tail_name_first_a",
+                    "position": "first",
+                    "sample": "a",
+                    "pua_base": TAIL_PUA_BASE,
+                    "path": "Template/Output_main/Design/Design03/tail_name_first_a",
+                },
+                {
+                    "key": "tail_name_last_a",
+                    "position": "last",
+                    "sample": "a",
+                    "pua_base": TAIL_PUA_BASE,
+                    "path": "Template/Output_main/Design/Design03/tail_name_last_a",
+                },
+            ],
+            "lice Smit",
+            chr(TAIL_PUA_BASE),
+            chr(TAIL_PUA_BASE + 7),
+            """
+const firstTail = designCopy.pageItems.find(item => item.name === 'tail_name_first_a');
+const lastTail = designCopy.pageItems.find(item => item.name === 'tail_name_last_a');
+if (!firstTail || firstTail.contents !== expectedFirst) throw new Error('first tail mismatch');
+if (!lastTail || lastTail.contents !== expectedLast) throw new Error('last tail mismatch');
+""",
+        ),
+    ],
+)
+def test_v2_renderer_applies_tail_text_to_whole_content_endpoints(tails, expected_slot, expected_first, expected_last, assert_tail_presence):
+    harness = node_mock_harness(tail_text_task(tails), f"""
+const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
+if (child(designCopy, 'slot_name').contents !== {json.dumps(expected_slot)}) throw new Error('tail main text mismatch: ' + child(designCopy, 'slot_name').contents);
+const expectedFirst = {json.dumps(expected_first)};
+const expectedLast = {json.dumps(expected_last)};
+{assert_tail_presence}
+if (child(designCopy, 'slot_name').contents.indexOf('S') < 0) throw new Error('middle word was incorrectly treated as endpoint');
+""")
+
+    result = run_node(harness)
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_v2_renderer_rejects_tail_text_without_latin_endpoint():
+    tails = [
+        {
+            "key": "tail_name_first_a",
+            "position": "first",
+            "sample": "a",
+            "pua_base": TAIL_PUA_BASE,
+            "path": "Template/Output_main/Design/Design03/tail_name_first_a",
+        }
+    ]
+    harness = node_mock_harness(tail_text_task(tails, value="12345"), "")
+
+    result = run_node(harness)
+
+    assert result.returncode != 0
+    assert "V2 tail text requires latin endpoints" in result.stderr
+
+
+def test_v2_renderer_rejects_tail_text_without_glyph_coverage():
+    tails = [
+        {
+            "key": "tail_name_first_a",
+            "position": "first",
+            "sample": "a",
+            "path": "Template/Output_main/Design/Design03/tail_name_first_a",
+        }
+    ]
+    harness = node_mock_harness(tail_text_task(tails, value="Alice"), "")
+
+    result = run_node(harness)
+
+    assert result.returncode != 0
+    assert "V2 tail glyph coverage is missing" in result.stderr
+
+
+def test_v2_renderer_uses_tail_glyph_map_when_provided():
+    glyph_map = {chr(ord("a") + index): 0xE200 + index for index in range(26)}
+    tails = [
+        {
+            "key": "tail_name_first_a",
+            "position": "first",
+            "sample": "a",
+            "glyph_map": glyph_map,
+            "path": "Template/Output_main/Design/Design03/tail_name_first_a",
+        }
+    ]
+    harness = node_mock_harness(tail_text_task(tails, value="Zelda"), f"""
+const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
+const firstTail = designCopy.pageItems.find(item => item.name === 'tail_name_first_a');
+if (!firstTail || firstTail.contents !== {json.dumps(chr(0xE219))}) throw new Error('glyph map tail mismatch');
+if (child(designCopy, 'slot_name').contents !== 'elda') throw new Error('main tail removal mismatch');
+""")
+
+    result = run_node(harness)
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_v2_renderer_tail_text_slots_do_not_delete_other_slot_tail_samples():
+    task = {
+        "$schema": "custom-renderer/v2-render-execution",
+        "template_ai": "template.ai",
+        "output_ai": "out.ai",
+        "values": {"design": "03", "name": "Alice", "year": "YearZ"},
+        "selections": {"Output_main": {"design": "Design03"}},
+        "render_task": {
+            "$schema": "custom-renderer/v2-render-task",
+            "outputs": [
+                {
+                    "key": "Output_main",
+                    "actions": [
+                        {
+                            "type": "copy_option_group",
+                            "group": "design",
+                            "option_key": "Design03",
+                            "object_path": "Template/Output_main/Design/Design03",
+                        },
+                        {
+                            "type": "replace_slot_text",
+                            "group": "design",
+                            "option_key": "Design03",
+                            "slot_key": "slot_name",
+                            "object_path": "Template/Output_main/Design/Design03/slot_name",
+                            "source_field": "name",
+                            "required": True,
+                            "preset": "tail_text",
+                            "tail_paths": ["Template/Output_main/Design/Design03/tail_name_first_a"],
+                            "tails": [
+                                {
+                                    "key": "tail_name_first_a",
+                                    "position": "first",
+                                    "sample": "a",
+                                    "pua_base": TAIL_PUA_BASE,
+                                    "path": "Template/Output_main/Design/Design03/tail_name_first_a",
+                                }
+                            ],
+                        },
+                        {
+                            "type": "replace_slot_text",
+                            "group": "design",
+                            "option_key": "Design03",
+                            "slot_key": "slot_year_tail",
+                            "object_path": "Template/Output_main/Design/Design03/slot_year_tail",
+                            "source_field": "year",
+                            "required": True,
+                            "preset": "tail_text",
+                            "tail_paths": ["Template/Output_main/Design/Design03/tail_year_tail_last_a"],
+                            "tails": [
+                                {
+                                    "key": "tail_year_tail_last_a",
+                                    "position": "last",
+                                    "sample": "a",
+                                    "pua_base": TAIL_PUA_BASE,
+                                    "path": "Template/Output_main/Design/Design03/tail_year_tail_last_a",
+                                }
+                            ],
+                        },
+                    ],
+                }
+            ],
+        },
+    }
+    harness = node_mock_harness(task, f"""
+const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
+const nameTail = designCopy.pageItems.find(item => item.name === 'tail_name_first_a');
+const yearTail = designCopy.pageItems.find(item => item.name === 'tail_year_tail_last_a');
+if (!nameTail || nameTail.contents !== {json.dumps(chr(TAIL_PUA_BASE))}) throw new Error('name first tail missing');
+if (!yearTail || yearTail.contents !== {json.dumps(chr(TAIL_PUA_BASE + 25))}) throw new Error('year last tail was removed by another slot');
+if (child(designCopy, 'slot_name').contents !== 'lice') throw new Error('name main mismatch');
+if (child(designCopy, 'slot_year_tail').contents !== 'Year') throw new Error('year main mismatch');
+""")
+
+    result = run_node(harness)
+
+    assert result.returncode == 0, result.stderr
+
+
 def test_v2_renderer_fits_final_output_bounds_and_removes_auxiliary_items():
     task = {
         "$schema": "custom-renderer/v2-render-execution",
@@ -1029,11 +1300,15 @@ const f10 = item('GroupItem', 'F10', '', [
 ]);
 const design03 = item('GroupItem', 'Design03', '', [
   item('TextFrame', 'slot_name', 'Design sample', [], 'Design-style'),
+  item('TextFrame', 'slot_year_tail', 'Year sample', [], 'Year-style'),
   item('PathItem', 'anchor_name', '', []),
   item('GroupItem', 'slot_group', '', [
     item('TextFrame', 'slot_group_text', 'Group sample', [], 'Group-style'),
     item('PathItem', 'slot_group_decoration', '', [])
   ]),
+  item('TextFrame', 'tail_name_first_a', 'a', [], 'First-tail-style'),
+  item('TextFrame', 'tail_name_last_a', 'a', [], 'Last-tail-style'),
+  item('TextFrame', 'tail_year_tail_last_a', 'a', [], 'Year-last-tail-style'),
   item('TextFrame', 'tail_name_1', 'Tail 1', [], 'Tail-style'),
   item('TextFrame', 'tail_name_2', 'Tail 2', [], 'Tail-style'),
   item('TextFrame', 'slot_year', '2026', [], 'Year-style'),

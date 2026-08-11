@@ -194,7 +194,16 @@ def test_marker_visible_bounds_are_preserved():
             group("Template/Output_main/Design/Design03", "Design03"),
             text("Template/Output_main/Design/Design03/slot_name", "slot_name", visible_bounds=[0, 72, 144, 0]),
             path_item("Template/Output_main/Design/Design03/anchor_name", "anchor_name", visible_bounds=[1, 71, 143, 1]),
-            path_item("Template/Output_main/Design/Design03/tail_name_first_a", "tail_name_first_a", visible_bounds=[2, 70, 20, 2]),
+            text(
+                "Template/Output_main/Design/Design03/tail_name_first_a",
+                "tail_name_first_a",
+                visible_bounds=[2, 70, 20, 2],
+                position="first",
+                sample="a",
+                related_slot="slot_name",
+                text="a",
+                font_name="TailFont",
+            ),
         )
     )
 
@@ -203,6 +212,28 @@ def test_marker_visible_bounds_are_preserved():
     assert option["slots"][0]["dimensions"] == {"width_mm": 50.8, "height_mm": 25.4}
     assert option["anchors"][0]["visible_bounds"] == [1, 71, 143, 1]
     assert option["tails"][0]["visible_bounds"] == [2, 70, 20, 2]
+    assert option["tails"][0]["position"] == "first"
+    assert option["tails"][0]["sample"] == "a"
+    assert option["tails"][0]["related_slot"] == "slot_name"
+    assert option["tails"][0]["text"] == "a"
+    assert option["tails"][0]["font_dependencies"] == ["TailFont"]
+
+
+def test_tail_samples_match_slot_field_exactly_not_by_prefix():
+    result = normalize_v2_template_scan(
+        base_raw_scan(
+            group("Template", "Template"),
+            group("Template/Output_main", "Output_main"),
+            group("Template/Output_main/Design", "Design"),
+            group("Template/Output_main/Design/Design03", "Design03"),
+            text("Template/Output_main/Design/Design03/slot_name", "slot_name"),
+            text("Template/Output_main/Design/Design03/tail_name_first_a", "tail_name_first_a"),
+            text("Template/Output_main/Design/Design03/tail_name_extra_first_a", "tail_name_extra_first_a"),
+        )
+    )
+
+    slot = result["outputs"][0]["design"]["options"][0]["slots"][0]
+    assert [tail["key"] for tail in slot["tails"]] == ["tail_name_first_a"]
 
 
 def test_same_slot_name_under_different_designs_does_not_conflict():

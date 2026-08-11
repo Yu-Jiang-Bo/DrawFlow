@@ -166,6 +166,30 @@ def test_normalizes_pure_design_contract_with_dual_assets_and_tail_samples():
     ]
 
 
+def test_normalizes_tail_glyph_proof_fields():
+    payload = pure_design_contract()
+    tails = payload["outputs"][0]["design"]["options"][1]["slots"][0]["tails"]
+    tails[0]["pua_base"] = "0xF000"
+    tails[1]["glyph_map"] = {chr(ord("a") + index): 0xE100 + index for index in range(26)}
+
+    contract = normalize_v2_template_contract(payload)
+    normalized = contract["outputs"][0]["design"]["options"][1]["slots"][0]["tails"]
+
+    assert normalized[0]["pua_base"] == 0xF000
+    assert normalized[1]["glyph_map"]["a"] == 0xE100
+    assert normalized[1]["glyph_map"]["z"] == 0xE119
+
+
+def test_rejects_incomplete_tail_glyph_map():
+    payload = pure_design_contract()
+    payload["outputs"][0]["design"]["options"][1]["slots"][0]["tails"][0]["glyph_map"] = {"a": 0xE100}
+
+    result = check_v2_template_contract(payload)
+
+    assert result["ok"] is False
+    assert any(error["path"].endswith(".glyph_map") and "A-Z" in error["message"] for error in result["errors"])
+
+
 def test_normalizes_design_plus_font_in_same_output_sample():
     payload = pure_design_contract()
     payload["template"]["template_id"] = "V2COMBO001"

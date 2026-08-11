@@ -76,7 +76,7 @@ _SLOT_FIELDS = {
     "color_binding",
 }
 _ASSET_FIELDS = {"asset_key", "slot", "supported_values", "component_key", "scope"}
-_TAIL_FIELDS = {"key", "position", "sample"}
+_TAIL_FIELDS = {"key", "position", "sample", "pua_base", "glyph_map"}
 _DIMENSION_FIELDS = {"mode", "width_mm", "height_mm", "tolerance_mm"}
 _COLOR_FIELDS = {"key", "zh_name", "space", "value", "allow_recolor"}
 _OPTION_MAPPING_FIELDS = {"field", "source_value", "target", "output", "group"}
@@ -120,6 +120,9 @@ _SLOT_RE = re.compile(r"^slot_[A-Za-z0-9_]+$")
 _ANCHOR_RE = re.compile(r"^anchor_[A-Za-z0-9_]+$")
 _TAIL_RE = re.compile(r"^tail_[A-Za-z0-9_]+$")
 _FIELD_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
+_LATIN_LETTERS = "abcdefghijklmnopqrstuvwxyz"
+_PUA_MIN = 0xE000
+_PUA_MAX = 0xF8FF
 
 
 class V2ContractError(ValueError):
@@ -350,11 +353,55 @@ def _normalize_tail(value: Any, path: str, issues: list[Dict[str, str]]) -> Dict
     position = _required_string(data, "position", f"{path}.position", issues)
     if position and position not in {"first", "last"}:
         _issue(issues, f"{path}.position", "Tail position must be first or last.")
-    return {
+    sample = _required_string(data, "sample", f"{path}.sample", issues)
+    if sample and (len(sample) != 1 or not sample.isascii() or not sample.isalpha()):
+        _issue(issues, f"{path}.sample", "Tail sample must be one ASCII letter.")
+    normalized: Dict[str, Any] = {
         "key": key,
         "position": position,
-        "sample": _required_string(data, "sample", f"{path}.sample", issues),
+        "sample": sample,
     }
+    if "pua_base" in data and data.get("pua_base") not in (None, ""):
+        normalized["pua_base"] = _pua_codepoint(data.get("pua_base"), f"{path}.pua_base", issues, continuous_tail_base=True)
+    if "glyph_map" in data and data.get("glyph_map") not in (None, ""):
+        normalized["glyph_map"] = _normalize_tail_glyph_map(data.get("glyph_map"), f"{path}.glyph_map", issues)
+    return normalized
+
+
+def _normalize_tail_glyph_map(value: Any, path: str, issues: list[Dict[str, str]]) -> Dict[str, int]:
+    data = _mapping(value, path, issues)
+    result: Dict[str, int] = {}
+    for key, raw in data.items():
+        letter = str(key or "").strip().casefold()
+        if len(letter) != 1 or letter not in _LATIN_LETTERS:
+            _issue(issues, f"{path}.{key}", "Tail glyph map keys must be ASCII letters.")
+            continue
+        result[letter] = _pua_codepoint(raw, f"{path}.{key}", issues)
+    missing = [letter for letter in _LATIN_LETTERS if letter not in result]
+    if missing:
+        _issue(issues, path, "Tail glyph map must cover A-Z.")
+    return {letter: result[letter] for letter in _LATIN_LETTERS if letter in result}
+
+
+def _pua_codepoint(value: Any, path: str, issues: list[Dict[str, str]], *, continuous_tail_base: bool = False) -> int:
+    codepoint: int | None = None
+    if isinstance(value, bool):
+        codepoint = None
+    elif isinstance(value, int):
+        codepoint = value
+    elif isinstance(value, str):
+        text = value.strip().lower()
+        try:
+            codepoint = int(text[2:], 16) if text.startswith("0x") else int(text, 10)
+        except ValueError:
+            codepoint = None
+    if codepoint is None:
+        _issue(issues, path, "Expected a PUA codepoint integer or hex string.")
+        return 0
+    max_codepoint = codepoint + 25 if continuous_tail_base else codepoint
+    if codepoint < _PUA_MIN or max_codepoint > _PUA_MAX:
+        _issue(issues, path, "Tail glyph proof must stay inside the Unicode private-use area.")
+    return codepoint
 
 
 def _normalize_dimension_rule(value: Any, path: str, issues: list[Dict[str, str]]) -> Dict[str, Any]:

@@ -26,6 +26,7 @@ _OUTPUT_SIDE_RE = re.compile(r"^Output_Side([A-Z])$", re.I)
 _DESIGN_RE = re.compile(r"^Design\d{2,}$", re.I)
 _FONT_RE = re.compile(r"^F[1-9]\d*$", re.I)
 _STYLE_RE = re.compile(r"^style[1-9]\d*$", re.I)
+_TAIL_KEY_RE = re.compile(r"^tail_(?P<field>[A-Za-z0-9_]+)_(?P<position>first|last)_(?P<sample>[A-Za-z])$", re.I)
 
 
 class V2TemplateScannerError(RuntimeError):
@@ -375,7 +376,7 @@ def _normalize_option(
     for slot in slots:
         suffix = slot["key"][5:] if _norm(slot["key"]).startswith("slot_") else ""
         slot["anchor"] = _first_key(anchors, f"anchor_{suffix}")
-        slot["tails"] = [tail for tail in tails if _norm(tail["key"]).startswith(_norm(f"tail_{suffix}_"))]
+        slot["tails"] = [tail for tail in tails if _norm(_tail_field(tail["key"])) == _norm(suffix)]
     assets = _asset_records(items, asset_root, slot_by_norm, source_ai, issues)
     for asset in assets:
         slot = slot_by_norm.get(_norm(asset["slot"]))
@@ -725,6 +726,11 @@ def _marker_kind(name: str) -> str:
     return ""
 
 
+def _tail_field(name: str) -> str:
+    match = _TAIL_KEY_RE.match(str(name or "").strip())
+    return match.group("field") if match else ""
+
+
 def _inside_design_or_font_option(rel: list[str]) -> bool:
     return len(rel) >= 4 and _is_output_name(rel[0]) and _norm(rel[1]) in {"design", "font"}
 
@@ -747,12 +753,30 @@ def _slot_record(item: Mapping[str, Any]) -> Dict[str, Any]:
 
 
 def _marker_record(item: Mapping[str, Any]) -> Dict[str, Any]:
-    return {
+    record: Dict[str, Any] = {
         "key": str(item.get("name") or "").strip(),
         "path": str(item.get("path") or ""),
         "type": str(item.get("type") or ""),
         **_geometry_facts(item),
     }
+    for key in ("position", "sample", "related_slot"):
+        value = str(item.get(key) or "").strip()
+        if value:
+            record[key] = value
+    text = item.get("text")
+    if isinstance(text, Mapping):
+        sample_text = str(text.get("text") or "").strip()
+    else:
+        sample_text = str(text or "").strip()
+    if sample_text:
+        record["text"] = sample_text
+    text_kind = str(item.get("text_kind") or item.get("textKind") or "").strip()
+    if text_kind:
+        record["text_kind"] = text_kind
+    font = _font_name(item)
+    if font:
+        record["font_dependencies"] = [font]
+    return record
 
 
 def _geometry_facts(item: Mapping[str, Any]) -> Dict[str, Any]:

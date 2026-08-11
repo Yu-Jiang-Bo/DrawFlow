@@ -119,6 +119,23 @@ def _require_tail_text(slots: list[Mapping[str, Any]], option_path: str, issues:
         add_issue(issues, option_path + ".slots", "content", V2_STATUS_BLOCKED, "tail_text_source_missing", "尾巴文字槽位必须绑定订单字段。")
 
 
+    for slot_index, slot in enumerate(slots):
+        for tail_index, tail in enumerate(list_value(slot.get("tails"))):
+            if not _tail_has_glyph_proof(mapping(tail)):
+                add_issue(
+                    issues,
+                    f"{option_path}.slots[{slot_index}].tails[{tail_index}]",
+                    "content",
+                    V2_STATUS_BLOCKED,
+                    "tail_glyph_coverage_missing",
+                    "尾巴文字样本必须带有已验证的 PUA 连续码位或完整 A-Z 字形映射，无法证明覆盖范围时不得发布。",
+                )
+
+
+def _tail_has_glyph_proof(tail: Mapping[str, Any]) -> bool:
+    return tail.get("pua_base") not in (None, "") or bool(mapping(tail.get("glyph_map")))
+
+
 def _require_direct_text(slots: list[Mapping[str, Any]], option_path: str, issues: list[Dict[str, str]]) -> None:
     if len(slots) != 1:
         add_issue(issues, option_path + ".content_preset", "content", V2_STATUS_BLOCKED, "direct_text_requires_single_slot", "直接单槽替换必须且只能配置一个正文槽位。")

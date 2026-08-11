@@ -5,6 +5,7 @@ from __future__ import annotations
 from copy import deepcopy
 import hashlib
 import json
+import re
 from typing import Any, Mapping
 
 from .v2_template_contract import V2ContractError, normalize_v2_template_contract
@@ -22,6 +23,10 @@ ALLOWED_V2_ACTIONS = frozenset(
         "fit_output_bounds",
     }
 )
+_TAIL_KEY_RE = re.compile(r"^tail_(?P<field>[A-Za-z0-9_]+)_(?P<position>first|last)_(?P<sample>[A-Za-z])$", re.I)
+_LATIN_LETTERS = "abcdefghijklmnopqrstuvwxyz"
+_PUA_MIN = 0xE000
+_PUA_MAX = 0xF8FF
 
 
 class V2RenderTaskError(ValueError):
@@ -174,6 +179,8 @@ def _slot_actions(
         slot_scan = _scan_ref(scan_index, ("slot", output_key, group, option_key, slot_key), f"$.{output_key}.{group}.{option_key}.{slot_key}")
         anchor_key = str(slot_data.get("anchor") or "")
         tail_keys = [str(tail.get("key") or "") for tail in slot_data.get("tails", []) if isinstance(tail, Mapping)]
+        preset = str(slot_data.get("preset") or slot_scan.get("preset") or "direct_text")
+        text_kind = str(slot_scan.get("text_kind") or slot_scan.get("textKind") or "")
         anchor_path = _path_by_key(
             option_scan.get("anchors", []),
             anchor_key,
@@ -183,13 +190,25 @@ def _slot_actions(
             _path_by_key(option_scan.get("tails", []), key, f"$.{output_key}.{group}.{option_key}.{slot_key}.tails.{key}")
             for key in tail_keys
         ]
-        preset = str(slot_data.get("preset") or slot_scan.get("preset") or "direct_text")
-        text_kind = str(slot_scan.get("text_kind") or slot_scan.get("textKind") or "")
+        tails = _tail_specs(
+            slot_data.get("tails", []),
+            option_scan.get("tails", []),
+            slot_scan,
+            slot_key,
+            f"$.{output_key}.{group}.{option_key}.{slot_key}.tails",
+            require_glyphs=preset == "tail_text",
+        )
         if preset == "path_text" and "path" not in text_kind.lower():
             raise V2RenderTaskError(
                 "path_text_slot_invalid",
                 "路径文字预设必须绑定扫描识别的路径文字 slot。",
                 path=f"$.{output_key}.{group}.{option_key}.{slot_key}.preset",
+            )
+        if preset == "tail_text" and not tails:
+            raise V2RenderTaskError(
+                "tail_text_sample_missing",
+                "尾巴文字预设必须至少绑定一个首尾巴样本。",
+                path=f"$.{output_key}.{group}.{option_key}.{slot_key}.tails",
             )
         action = {
             "group": group,
@@ -202,6 +221,7 @@ def _slot_actions(
             "text_kind": text_kind,
             "anchor_path": anchor_path,
             "tail_paths": tail_paths,
+            "tails": tails,
             "asset_key": str(slot_data.get("asset_key") or ""),
             "font_dependencies": list(slot_data.get("font_dependencies") or []),
             "color_binding": str(slot_data.get("color_binding") or ""),
@@ -339,6 +359,165 @@ def _path_by_key(items: Any, key: str, path: str) -> str:
     if matches and matches[0]:
         return matches[0]
     raise V2RenderTaskError("scan_object_missing", f"扫描证据缺少对象路径：{key}。", path=path)
+
+
+def _tail_specs(
+    config_tails: Any,
+    scan_tails: Any,
+    slot_scan: Mapping[str, Any],
+    slot_key: str,
+    path: str,
+    *,
+    require_glyphs: bool,
+) -> list[dict[str, Any]]:
+    if not require_glyphs:
+        return []
+    result: list[dict[str, Any]] = []
+    seen_positions: set[str] = set()
+    slot_suffix = slot_key[5:] if slot_key.casefold().startswith("slot_") else ""
+    scan_slot_tail_keys = _scan_tail_keys_for_slot(slot_scan)
+    config_tail_keys = {
+        str(tail.get("key") or "")
+        for tail in config_tails
+        if isinstance(tail, Mapping) and str(tail.get("key") or "")
+    }
+    missing_confirmed = sorted(scan_slot_tail_keys - config_tail_keys, key=str.casefold)
+    if missing_confirmed:
+        raise V2RenderTaskError(
+            "tail_sample_unconfirmed",
+            "All scanned tail samples for a tail_text slot must be confirmed in config.",
+            path=path,
+        )
+    for index, tail in enumerate(config_tails if isinstance(config_tails, list) else []):
+        if not isinstance(tail, Mapping):
+            continue
+        key = str(tail.get("key") or "")
+        if not key:
+            continue
+        position = str(tail.get("position") or "").casefold()
+        sample = str(tail.get("sample") or "")
+        match = _TAIL_KEY_RE.match(key)
+        if not match:
+            raise V2RenderTaskError(
+                "tail_key_invalid",
+                "Tail samples must use tail_<field>_<first|last>_<sampleletter>.",
+                path=f"{path}[{index}].key",
+            )
+        if slot_suffix and match.group("field").casefold() != slot_suffix.casefold():
+            raise V2RenderTaskError(
+                "tail_slot_mismatch",
+                "Tail sample name must match the owning slot field.",
+                path=f"{path}[{index}].key",
+            )
+        if position not in {"first", "last"}:
+            raise V2RenderTaskError(
+                "tail_position_invalid",
+                "尾巴样本位置必须是 first 或 last。",
+                path=f"{path}[{index}].position",
+            )
+        if position in seen_positions:
+            raise V2RenderTaskError(
+                "tail_position_duplicate",
+                "同一槽位每个方向只能绑定一个尾巴样本。",
+                path=f"{path}[{index}].position",
+            )
+        seen_positions.add(position)
+        if len(sample) != 1 or not sample.isalpha() or not sample.isascii():
+            raise V2RenderTaskError(
+                "tail_sample_invalid",
+                "尾巴样本必须是单个拉丁字母。",
+                path=f"{path}[{index}].sample",
+            )
+        if match.group("position").casefold() != position:
+            raise V2RenderTaskError(
+                "tail_position_mismatch",
+                "Tail sample name position must match the selected tail position.",
+                path=f"{path}[{index}].position",
+            )
+        if match.group("sample").casefold() != sample.casefold():
+            raise V2RenderTaskError(
+                "tail_sample_mismatch",
+                "Tail sample name letter must match the selected sample letter.",
+                path=f"{path}[{index}].sample",
+            )
+        record: dict[str, Any] = {
+            "key": key,
+            "position": position,
+            "sample": sample,
+            "path": _path_by_key(scan_tails, key, f"{path}[{index}].key"),
+        }
+        record.update(_tail_glyph_proof(tail, f"{path}[{index}]"))
+        result.append(record)
+    return sorted(result, key=lambda item: (item["position"], item["key"]))
+
+
+def _scan_tail_keys_for_slot(slot_scan: Mapping[str, Any]) -> set[str]:
+    result: set[str] = set()
+    for tail in slot_scan.get("tails", []):
+        if isinstance(tail, Mapping):
+            key = str(tail.get("key") or "").strip()
+            if key:
+                result.add(key)
+    return result
+
+
+def _tail_glyph_proof(tail: Mapping[str, Any], path: str) -> dict[str, Any]:
+    if "pua_base" in tail and tail.get("pua_base") not in (None, ""):
+        base = _codepoint(tail.get("pua_base"), f"{path}.pua_base")
+        if base < _PUA_MIN or base + 25 > _PUA_MAX:
+            raise V2RenderTaskError(
+                "tail_glyph_coverage_invalid",
+                "Tail PUA base must cover A-Z inside the Unicode private-use area.",
+                path=f"{path}.pua_base",
+            )
+        return {"glyph_mode": "pua_contiguous", "pua_base": base, "coverage": "a-z"}
+    glyph_map = tail.get("glyph_map")
+    if isinstance(glyph_map, Mapping):
+        normalized = _tail_glyph_map(glyph_map, f"{path}.glyph_map")
+        return {"glyph_mode": "glyph_map", "glyph_map": normalized, "coverage": "a-z"}
+    raise V2RenderTaskError(
+        "tail_glyph_coverage_missing",
+        "Tail text requires verified glyph coverage through pua_base or glyph_map.",
+        path=path,
+    )
+
+
+def _tail_glyph_map(value: Mapping[str, Any], path: str) -> dict[str, int]:
+    normalized: dict[str, int] = {}
+    for letter in _LATIN_LETTERS:
+        if letter in value:
+            raw = value[letter]
+        elif letter.upper() in value:
+            raw = value[letter.upper()]
+        else:
+            raise V2RenderTaskError(
+                "tail_glyph_coverage_missing",
+                "Tail glyph map must cover A-Z.",
+                path=f"{path}.{letter}",
+            )
+        codepoint = _codepoint(raw, f"{path}.{letter}")
+        if codepoint < _PUA_MIN or codepoint > _PUA_MAX:
+            raise V2RenderTaskError(
+                "tail_glyph_coverage_invalid",
+                "Tail glyph codepoints must stay inside the Unicode private-use area.",
+                path=f"{path}.{letter}",
+            )
+        normalized[letter] = codepoint
+    return normalized
+
+
+def _codepoint(value: Any, path: str) -> int:
+    if isinstance(value, bool):
+        raise V2RenderTaskError("tail_glyph_coverage_invalid", "Tail glyph codepoint must be an integer.", path=path)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        text = value.strip().lower()
+        try:
+            return int(text[2:], 16) if text.startswith("0x") else int(text, 10)
+        except ValueError as exc:
+            raise V2RenderTaskError("tail_glyph_coverage_invalid", "Tail glyph codepoint must be an integer.", path=path) from exc
+    raise V2RenderTaskError("tail_glyph_coverage_invalid", "Tail glyph codepoint must be an integer.", path=path)
 
 
 def _action(action_type: str, **payload: Any) -> dict[str, Any]:

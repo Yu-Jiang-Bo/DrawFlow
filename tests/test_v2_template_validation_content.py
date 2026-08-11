@@ -37,6 +37,24 @@ def test_tail_text_preset_requires_source_field_on_tail_slot():
     assert _has_issue(result, "tail_text_source_missing", "订单字段")
 
 
+def test_tail_text_preset_requires_verified_glyph_coverage_before_publication():
+    payload = _tail_text_payload()
+    payload["outputs"][0]["design"]["options"][0]["slots"][0]["tails"][0].pop("pua_base")
+
+    result = validate_v2_template_configuration(payload)
+
+    assert result["can_publish"] is False
+    assert result["checks"]["content"]["status"] == V2_STATUS_BLOCKED
+    assert _has_issue(result, "tail_glyph_coverage_missing", "PUA 连续码位")
+
+
+def test_tail_text_preset_with_verified_pua_coverage_can_publish():
+    result = validate_v2_template_configuration(_tail_text_payload())
+
+    assert result["can_publish"] is True
+    assert result["issues"] == []
+
+
 def test_multi_initials_preset_requires_source_fields_for_each_asset_slot():
     payload = complete_contract()
     option = payload["outputs"][0]["design"]["options"][0]
@@ -92,3 +110,24 @@ def test_text_presets_reject_incompatible_slot_primitives():
 
 def _has_issue(result, code, reason):
     return any(issue["code"] == code and reason in issue["reason"] for issue in result["issues"])
+
+
+def _tail_text_payload():
+    payload = complete_contract()
+    payload["outputs"][0]["design"]["options"][0] = {
+        "key": "Design03",
+        "content_preset": "tail_text",
+        "font_dependencies": ["Milkshake"],
+        "slots": [
+            {
+                "key": "slot_name",
+                "source_field": "name",
+                "preset": "tail_text",
+                "tails": [{"key": "tail_name_first_a", "position": "first", "sample": "a", "pua_base": 0xF000}],
+                "dimension_rule": {"mode": "slot", "tolerance_mm": 0.007},
+                "font_dependencies": ["Milkshake"],
+            }
+        ],
+        "assets": [],
+    }
+    return payload

@@ -14,6 +14,7 @@ from src.service.v2_template_store import V2TemplateStore
 
 
 TEMPLATE_SHA = "a" * 64
+TAIL_PUA_BASE = 0xF000
 
 
 def render_config():
@@ -272,6 +273,190 @@ def test_rejects_path_text_preset_for_non_path_text_scan_slot():
     assert exc_info.value.path == "$.Output_main.font.F10.slot_name.preset"
 
 
+def test_compiles_tail_text_metadata_from_current_option_scope():
+    config = render_config()
+    design_slot = config["outputs"][0]["design"]["options"][0]["slots"][0]
+    design_slot["preset"] = "tail_text"
+    design_slot["tails"] = [
+        {"key": "tail_name_first_a", "position": "first", "sample": "a", "pua_base": TAIL_PUA_BASE},
+        {"key": "tail_name_last_a", "position": "last", "sample": "a", "pua_base": TAIL_PUA_BASE},
+    ]
+    scan = scan_evidence()
+    design = scan["outputs"][0]["designs"][0]
+    design["tails"] = [
+        {"key": "tail_name_first_a", "path": "Template/Output_main/Design/Design03/tail_name_first_a"},
+        {"key": "tail_name_last_a", "path": "Template/Output_main/Design/Design03/tail_name_last_a"},
+    ]
+
+    task = compile_task(config=config, scan=scan)
+
+    action = next(action for action in task["outputs"][0]["actions"] if action.get("slot_key") == "slot_name")
+    assert action["preset"] == "tail_text"
+    assert action["tail_paths"] == [
+        "Template/Output_main/Design/Design03/tail_name_first_a",
+        "Template/Output_main/Design/Design03/tail_name_last_a",
+    ]
+    assert action["tails"] == [
+        {
+            "key": "tail_name_first_a",
+            "position": "first",
+            "sample": "a",
+            "path": "Template/Output_main/Design/Design03/tail_name_first_a",
+            "glyph_mode": "pua_contiguous",
+            "pua_base": TAIL_PUA_BASE,
+            "coverage": "a-z",
+        },
+        {
+            "key": "tail_name_last_a",
+            "position": "last",
+            "sample": "a",
+            "path": "Template/Output_main/Design/Design03/tail_name_last_a",
+            "glyph_mode": "pua_contiguous",
+            "pua_base": TAIL_PUA_BASE,
+            "coverage": "a-z",
+        },
+    ]
+
+
+def test_rejects_tail_text_without_confirmed_tail_sample():
+    config = render_config()
+    config["outputs"][0]["design"]["options"][0]["slots"][0]["preset"] = "tail_text"
+
+    with pytest.raises(V2RenderTaskError) as exc_info:
+        compile_task(config=config)
+
+    assert exc_info.value.code == "tail_text_sample_missing"
+    assert exc_info.value.path == "$.Output_main.design.Design03.slot_name.tails"
+
+
+def test_rejects_tail_text_without_verified_glyph_coverage():
+    config = render_config()
+    design_slot = config["outputs"][0]["design"]["options"][0]["slots"][0]
+    design_slot["preset"] = "tail_text"
+    design_slot["tails"] = [{"key": "tail_name_first_a", "position": "first", "sample": "a"}]
+    scan = scan_evidence()
+    scan["outputs"][0]["designs"][0]["tails"] = [
+        {"key": "tail_name_first_a", "path": "Template/Output_main/Design/Design03/tail_name_first_a"}
+    ]
+
+    with pytest.raises(V2RenderTaskError) as exc_info:
+        compile_task(config=config, scan=scan)
+
+    assert exc_info.value.code == "tail_glyph_coverage_missing"
+    assert exc_info.value.path == "$.Output_main.design.Design03.slot_name.tails[0]"
+
+
+def test_rejects_tail_text_when_scanned_slot_tail_sample_is_not_confirmed():
+    config = render_config()
+    design_slot = config["outputs"][0]["design"]["options"][0]["slots"][0]
+    design_slot["preset"] = "tail_text"
+    design_slot["tails"] = [{"key": "tail_name_first_a", "position": "first", "sample": "a", "pua_base": TAIL_PUA_BASE}]
+    scan = scan_evidence()
+    design = scan["outputs"][0]["designs"][0]
+    design["slots"][0]["tails"] = [
+        {"key": "tail_name_first_a", "path": "Template/Output_main/Design/Design03/tail_name_first_a"},
+        {"key": "tail_name_last_a", "path": "Template/Output_main/Design/Design03/tail_name_last_a"},
+    ]
+    design["tails"] = [
+        {"key": "tail_name_first_a", "path": "Template/Output_main/Design/Design03/tail_name_first_a"},
+        {"key": "tail_name_last_a", "path": "Template/Output_main/Design/Design03/tail_name_last_a"},
+    ]
+
+    with pytest.raises(V2RenderTaskError) as exc_info:
+        compile_task(config=config, scan=scan)
+
+    assert exc_info.value.code == "tail_sample_unconfirmed"
+    assert exc_info.value.path == "$.Output_main.design.Design03.slot_name.tails"
+
+
+def test_compiles_tail_text_glyph_map_coverage():
+    config = render_config()
+    design_slot = config["outputs"][0]["design"]["options"][0]["slots"][0]
+    design_slot["preset"] = "tail_text"
+    design_slot["tails"] = [
+        {
+            "key": "tail_name_first_a",
+            "position": "first",
+            "sample": "a",
+            "glyph_map": {chr(ord("a") + index): 0xE200 + index for index in range(26)},
+        }
+    ]
+    scan = scan_evidence()
+    scan["outputs"][0]["designs"][0]["tails"] = [
+        {"key": "tail_name_first_a", "path": "Template/Output_main/Design/Design03/tail_name_first_a"}
+    ]
+
+    task = compile_task(config=config, scan=scan)
+
+    action = next(action for action in task["outputs"][0]["actions"] if action.get("slot_key") == "slot_name")
+    assert action["tails"][0]["glyph_mode"] == "glyph_map"
+    assert action["tails"][0]["glyph_map"]["a"] == 0xE200
+    assert action["tails"][0]["glyph_map"]["z"] == 0xE219
+
+
+def test_rejects_tail_text_invalid_sample_letter():
+    config = render_config()
+    design_slot = config["outputs"][0]["design"]["options"][0]["slots"][0]
+    design_slot["preset"] = "tail_text"
+    design_slot["tails"] = [{"key": "tail_name_first_a", "position": "first", "sample": "aa", "pua_base": TAIL_PUA_BASE}]
+    scan = scan_evidence()
+    scan["outputs"][0]["designs"][0]["tails"] = [
+        {"key": "tail_name_first_a", "path": "Template/Output_main/Design/Design03/tail_name_first_a"}
+    ]
+
+    with pytest.raises(V2RenderTaskError) as exc_info:
+        compile_task(config=config, scan=scan)
+
+    assert exc_info.value.code == "config_contract_invalid"
+    assert "$.outputs[0].design.options[0].slots[0].tails[0].sample" in str(exc_info.value)
+
+
+def test_rejects_tail_text_duplicate_position_samples():
+    config = render_config()
+    design_slot = config["outputs"][0]["design"]["options"][0]["slots"][0]
+    design_slot["preset"] = "tail_text"
+    design_slot["tails"] = [
+        {"key": "tail_name_first_a", "position": "first", "sample": "a", "pua_base": TAIL_PUA_BASE},
+        {"key": "tail_name_first_b", "position": "first", "sample": "b", "pua_base": TAIL_PUA_BASE},
+    ]
+    scan = scan_evidence()
+    scan["outputs"][0]["designs"][0]["tails"] = [
+        {"key": "tail_name_first_a", "path": "Template/Output_main/Design/Design03/tail_name_first_a"},
+        {"key": "tail_name_first_b", "path": "Template/Output_main/Design/Design03/tail_name_first_b"},
+    ]
+
+    with pytest.raises(V2RenderTaskError) as exc_info:
+        compile_task(config=config, scan=scan)
+
+    assert exc_info.value.code == "tail_position_duplicate"
+    assert exc_info.value.path == "$.Output_main.design.Design03.slot_name.tails[1].position"
+
+
+@pytest.mark.parametrize(
+    ("tail", "code", "path_suffix"),
+    [
+        ({"key": "tail_title_first_a", "position": "first", "sample": "a", "pua_base": TAIL_PUA_BASE}, "tail_slot_mismatch", ".key"),
+        ({"key": "tail_name_last_a", "position": "first", "sample": "a", "pua_base": TAIL_PUA_BASE}, "tail_position_mismatch", ".position"),
+        ({"key": "tail_name_first_b", "position": "first", "sample": "a", "pua_base": TAIL_PUA_BASE}, "tail_sample_mismatch", ".sample"),
+    ],
+)
+def test_rejects_tail_text_name_that_does_not_match_structured_fields(tail, code, path_suffix):
+    config = render_config()
+    design_slot = config["outputs"][0]["design"]["options"][0]["slots"][0]
+    design_slot["preset"] = "tail_text"
+    design_slot["tails"] = [tail]
+    scan = scan_evidence()
+    scan["outputs"][0]["designs"][0]["tails"] = [
+        {"key": tail["key"], "path": f"Template/Output_main/Design/Design03/{tail['key']}"}
+    ]
+
+    with pytest.raises(V2RenderTaskError) as exc_info:
+        compile_task(config=config, scan=scan)
+
+    assert exc_info.value.code == code
+    assert exc_info.value.path == "$.Output_main.design.Design03.slot_name.tails[0]" + path_suffix
+
+
 def test_rejects_template_sha_mismatch_before_illustrator_task_creation():
     config = render_config()
     config["audit"]["template_sha256"] = "c" * 64
@@ -406,20 +591,21 @@ def test_rejects_duplicate_scan_anchor_keys_in_same_option_scope():
 
 def test_rejects_duplicate_scan_tail_keys_in_same_option_scope():
     config = render_config()
+    config["outputs"][0]["design"]["options"][0]["slots"][0]["preset"] = "tail_text"
     config["outputs"][0]["design"]["options"][0]["slots"][0]["tails"] = [
-        {"key": "tail_name", "position": "last", "sample": "a"}
+        {"key": "tail_name_last_a", "position": "last", "sample": "a", "pua_base": TAIL_PUA_BASE}
     ]
     scan = scan_evidence()
     scan["outputs"][0]["designs"][0]["tails"] = [
-        {"key": "tail_name", "path": "Template/Output_main/Design/Design03/tail_name"},
-        {"key": "tail_name", "path": "Template/Output_main/Design/Design03/tail_name_copy"},
+        {"key": "tail_name_last_a", "path": "Template/Output_main/Design/Design03/tail_name_last_a"},
+        {"key": "tail_name_last_a", "path": "Template/Output_main/Design/Design03/tail_name_last_a_copy"},
     ]
 
     with pytest.raises(V2RenderTaskError) as exc_info:
         compile_task(config=config, scan=scan)
 
     assert exc_info.value.code == "scan_object_duplicate"
-    assert "tail_name" in str(exc_info.value)
+    assert "tail_name_last_a" in str(exc_info.value)
 
 
 def test_records_multi_output_order_from_contract_order():

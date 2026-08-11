@@ -1,4 +1,5 @@
 #target illustrator
+#include "v2_tail_text.jsxinc"
 
 (function () {
     var EXECUTION_SCHEMA = "custom-renderer/v2-render-execution";
@@ -94,6 +95,18 @@
         if (action.style_source) {
             target = replaceWithFontStyleSource(copied, outputKey, action, selected, slot);
         }
+        if (String(action.preset || "") === "tail_text") {
+            V2TailText.replaceTailText(
+                tailTextEnvironment(),
+                holder.item,
+                holder.source_path,
+                target,
+                value,
+                fitBounds,
+                action
+            );
+            return;
+        }
         var textFrame = writeTextToItem(target, parts[0]);
         fitItemWithinBounds(textFrame, fitBounds, action);
         var tailPaths = action.tail_paths || [];
@@ -107,6 +120,18 @@
                 removePageItem(tail);
             }
         }
+    }
+
+    function tailTextEnvironment() {
+        return {
+            writeTextToItem: writeTextToItem,
+            fitItemWithinBounds: fitItemWithinBounds,
+            measuredBounds: measuredBounds,
+            findPageItemByRelativePath: findPageItemByRelativePath,
+            relativePath: relativePath,
+            hasText: hasText,
+            removePageItem: removePageItem
+        };
     }
 
     function localFitBounds(root, sourcePath, action, slot) {
