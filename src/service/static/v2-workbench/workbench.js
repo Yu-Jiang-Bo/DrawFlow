@@ -129,8 +129,112 @@
 
   function renderStructureTreeFallback() {
     const target = $("structureTree");
-    if (target) target.replaceChildren(emptyNode("页面脚本未完整加载，请强制刷新页面后重试。"));
+    if (!target) return;
+    target.replaceChildren();
+    if (typeof scanModel !== "function") {
+      target.appendChild(emptyNode("页面正在加载，请稍后重试。"));
+      return;
+    }
+    const model = scanModel(state.scan || {}, state.draft && state.draft.config);
+    const search = valueOf("structureSearch").trim().toLowerCase();
+    if (!model || !modelHasItems(model)) {
+      target.appendChild(emptyNode("等待扫描结果"));
+      setText("selectedNodeSummary", "扫描接口未就绪或尚未返回结构。");
+      return;
+    }
+    const root = document.createElement("section");
+    root.className = "structure-tree-root";
+    const total = model.designs.length + model.fonts.length + model.styles.length + model.colors.length + model.slots.length + model.assets.length;
+    root.appendChild(fallbackTreeRow("Template", `${total} 个变量`, 0, "template", "Template 根组"));
+    fallbackOutputs(model).forEach((output, index) => appendFallbackOutput(root, model, output, index, search));
+    appendFallbackGroup(root, "Colors", model.colors, 1, "colors", search, false);
+    target.appendChild(root);
+    appendFallbackFixedObjects(target, model);
     if (globalThis.updateToggleButtons) globalThis.updateToggleButtons();
+  }
+
+
+  function fallbackOutputs(model) {
+    if (model.outputs && model.outputs.length) return model.outputs;
+    return [{ key: "Output_main", name: "Output_main", display_name: "主效果图" }];
+  }
+
+
+  function appendFallbackOutput(root, model, output, index, search) {
+    const key = outputKey(output, index);
+    root.appendChild(fallbackTreeRow(key, output.display_name || (key === "Output_main" ? "主效果图" : ""), 1, "output", `输出：${key}`));
+    appendFallbackGroup(root, "Style", scopedFallbackItems(model.styles, key, model.outputs.length), 2, "styles", search, false);
+    appendFallbackGroup(root, "Design", scopedFallbackItems(model.designs, key, model.outputs.length), 2, "designs", search, !state.expanded.designs);
+    appendFallbackGroup(root, "Font", scopedFallbackItems(model.fonts, key, model.outputs.length), 2, "fonts", search, !state.expanded.fonts);
+  }
+
+
+  function appendFallbackGroup(root, label, items, depth, kind, search, collapsed) {
+    const visible = filterFallbackItems(items || [], search);
+    if (!visible.length) return;
+    root.appendChild(fallbackTreeRow(label, `${items.length} 项`, depth, "group", `${label}：${items.length} 项`));
+    const shown = collapsed && !search ? visible.slice(0, 3) : visible;
+    shown.forEach((item) => {
+      const name = item.key || item.name || item.label || label;
+      const slots = Array.isArray(item.slots) ? item.slots.map((slot) => slot.key || slot.name).filter(Boolean).slice(0, 3).join(" · ") : "";
+      root.appendChild(fallbackTreeRow(name, slots, depth + 1, kind, fallbackSummary(kind, item)));
+    });
+  }
+
+
+  function appendFallbackFixedObjects(target, model) {
+    const count = fallbackFixedObjectTotal(model);
+    if (!count) return;
+    const summary = document.createElement("section");
+    summary.className = "structure-fixed-summary";
+    summary.append(lineNode("未命名固定对象", String(count)), metaNode("固定图案只计数，不展开显示"));
+    target.appendChild(summary);
+  }
+
+
+  function fallbackFixedObjectTotal(model) {
+    const outputs = Array.isArray(state.scan && state.scan.outputs) ? state.scan.outputs : [];
+    const fromSummary = outputs.reduce((total, output) => total + Number(objectOf(output).summary && objectOf(objectOf(output).summary).fixed_objects || 0), 0);
+    if (fromSummary) return fromSummary;
+    return (model.fixedObjects || []).reduce((total, item) => total + Number(item.count || item.fixed_object_count || 1), 0);
+  }
+
+
+  function fallbackTreeRow(title, meta, depth, kind, summary) {
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = `structure-tree-row depth-${Math.min(depth, 4)}`;
+    row.dataset.nodeKind = kind || "";
+    row.appendChild(lineNode(title, meta));
+    row.addEventListener("click", () => setText("selectedNodeSummary", summary || `${title}${meta ? `；${meta}` : ""}`));
+    return row;
+  }
+
+
+  function scopedFallbackItems(items, outputKey, outputCount) {
+    const scoped = (items || []).filter((item) => cleanText(item.output || item.output_key || "") === outputKey);
+    if (scoped.length) return scoped;
+    return outputCount > 1 ? [] : (items || []);
+  }
+
+
+  function filterFallbackItems(items, search) {
+    if (!search) return items;
+    return items.filter((item) => JSON.stringify(item).toLowerCase().includes(search));
+  }
+
+
+  function outputKey(output, index) {
+    const raw = cleanText(output.key || output.name || "");
+    if (raw) return raw;
+    return index ? `Output_Side${String.fromCharCode(65 + index)}` : "Output_main";
+  }
+
+
+  function fallbackSummary(kind, item) {
+    const name = item.key || item.name || item.label || "未命名";
+    const output = item.output ? `；输出：${item.output}` : "";
+    return `类型：${kind}；名称：${name}${output}`;
   }
 
 })();

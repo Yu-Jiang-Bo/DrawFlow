@@ -381,10 +381,25 @@ def test_v2_workbench_upload_survives_missing_structure_tree_bundle():
           app.elements.templateName.dispatch("input");
           app.elements.aiFile.dispatch("change", { target: { files: [{ name: "demo.ai" }] } });
           await flush();
+          global.DrawFlowV2WorkbenchContext.state.scan = {
+            "$schema": "custom-renderer/v2-template-scan",
+            outputs: [{
+              key: "Output_main",
+              design: { options: [{ key: "Design01", slots: [{ key: "slot_name" }] }] },
+              font: { options: [{ key: "F1", slots: [{ key: "slot_name" }] }] },
+              style: { options: [] },
+              summary: { designs: 1, fonts: 1, styles: 0, slots: 2, anchors: 0, tails: 0, assets: 0, fixed_objects: 5 }
+            }]
+          };
           assert.strictEqual(typeof global.renderStructureTree, "function");
           assert.strictEqual(app.elements.scanTemplateBtn.disabled, false);
           global.renderStructureTree();
-          assert(app.elements.structureTree.textContent.includes("页面脚本未完整加载"));
+          assert(app.elements.structureTree.textContent.includes("Template"));
+          assert(app.elements.structureTree.textContent.includes("Design01"));
+          assert(app.elements.structureTree.textContent.includes("F1"));
+          assert(app.elements.structureTree.textContent.includes("未命名固定对象"));
+          assert(app.elements.structureTree.textContent.includes("5"));
+          assert(!app.elements.structureTree.textContent.includes("页面脚本未完整加载"));
         })().catch((error) => { console.error(error); process.exit(1); });
         """
     )
