@@ -170,13 +170,13 @@ async function flush() {
   for (let index = 0; index < 8; index += 1) await Promise.resolve();
 }
 
-function createApp(fetchImpl) {
+function createApp(fetchImpl, fileNames) {
   const { document, elements } = makeDocument();
   global.document = document;
   global.window = global;
   global.FormData = FakeFormData;
   global.fetch = fetchImpl;
-  [
+  (fileNames || [
     "workbench.js",
     "workbench-dom.js",
     "workbench-api.js",
@@ -192,7 +192,7 @@ function createApp(fetchImpl) {
     "workbench-structure-tree.js",
     "workbench-draft-actions.js",
     "workbench-scan-actions.js"
-  ].forEach((fileName) => {
+  ]).forEach((fileName) => {
     eval(fs.readFileSync(`src/service/static/v2-workbench/${fileName}`, "utf8"));
   });
   document.fireReady();
@@ -344,6 +344,47 @@ def test_v2_workbench_scan_summary_dedupes_matching_scan_and_config_options():
           assert.strictEqual(summary.designs, 1);
           assert.strictEqual(summary.fonts, 1);
           assert.strictEqual(summary.slots, 2);
+        })().catch((error) => { console.error(error); process.exit(1); });
+        """
+    )
+
+
+def test_v2_workbench_upload_survives_missing_structure_tree_bundle():
+    run_node(
+        r"""
+        (async () => {
+          const files = [
+            "workbench.js",
+            "workbench-dom.js",
+            "workbench-api.js",
+            "workbench-scan-model.js",
+            "workbench-form-model.js",
+            "workbench-config.js",
+            "workbench-content.js",
+            "workbench-style-dimensions.js",
+            "workbench-option-rules.js",
+            "workbench-rule-evidence.js",
+            "workbench-stage-view.js",
+            "workbench-view.js",
+            "workbench-draft-actions.js",
+            "workbench-scan-actions.js"
+          ];
+          async function fakeFetch(url, options = {}) {
+            if (String(url) === "/api/v2/templates") return response({ templates: [] });
+            return response({});
+          }
+          const app = createApp(fakeFetch, files);
+          await flush();
+          app.elements.templateId.value = "STALEHTML";
+          app.elements.templateName.value = "Stale HTML Demo";
+          app.elements.templateId.dispatch("input");
+          app.elements.templateName.dispatch("input");
+          app.elements.aiFile.dispatch("change", { target: { files: [{ name: "demo.ai" }] } });
+          await flush();
+          assert.strictEqual(typeof global.renderStructureTree, "function");
+          assert.strictEqual(app.elements.scanTemplateBtn.disabled, false);
+          global.renderStructureTree();
+          assert(app.elements.structureTree.textContent.includes("页面脚本未完整加载"));
         })().catch((error) => { console.error(error); process.exit(1); });
         """
     )

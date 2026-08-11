@@ -57,6 +57,7 @@
     $
   };
   globalThis.$ = $;
+  globalThis.renderStructureTree = globalThis.renderStructureTree || renderStructureTreeFallback;
 
   document.addEventListener("DOMContentLoaded", initWorkbench);
 
@@ -123,6 +124,13 @@
     globalThis.setWorkbenchStage("upload");
     updateCheckRail(defaultChecks());
     updateDraftButtons();
+  }
+
+
+  function renderStructureTreeFallback() {
+    const target = $("structureTree");
+    if (target) target.replaceChildren(emptyNode("页面脚本未完整加载，请强制刷新页面后重试。"));
+    if (globalThis.updateToggleButtons) globalThis.updateToggleButtons();
   }
 
 })();
