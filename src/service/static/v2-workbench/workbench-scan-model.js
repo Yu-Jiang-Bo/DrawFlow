@@ -5,6 +5,7 @@
 
   function scanModel(scan, config) {
     const cfg = objectOf(config);
+    if (hasStructuredV2Outputs(scan)) return structuredV2ScanModel(scan, cfg);
     const outputs = normalizeItems([...(Array.isArray(cfg.outputs) ? cfg.outputs : []), ...collectDeep(scan, ["outputs", "output"])]);
     return {
       outputs: outputs.length ? outputs : normalizeItems(collectDeep(scan, ["artboards", "pages"])),
@@ -20,6 +21,115 @@
     };
   }
 
+  function structuredV2ScanModel(scan, config) {
+    const scanOutputs = topLevelArray(scan, "outputs");
+    const outputItems = mergeItemsByIdentity([...scanOutputs, ...topLevelArray(config, "outputs")]);
+    const styleOptions = mergeItemsByIdentity([...outputSectionOptions(scanOutputs, "style"), ...groupOptions(config, "style")]);
+    const designOptions = mergeItemsByIdentity([...outputSectionOptions(scanOutputs, "design"), ...groupOptions(config, "design")]);
+    const fontOptions = mergeItemsByIdentity([...outputSectionOptions(scanOutputs, "font"), ...groupOptions(config, "font")]);
+    const contentOptions = [...designOptions, ...fontOptions];
+    return {
+      outputs: normalizeItems(outputItems),
+      designs: normalizeItems(designOptions),
+      fonts: normalizeItems(fontOptions),
+      styles: normalizeItems(styleOptions),
+      assets: normalizeItems(mergeItemsByIdentity(optionChildren(designOptions, "assets"))),
+      colors: normalizeItems(mergeItemsByIdentity([...topLevelArray(config, "colors"), ...topLevelArray(scan, "colors")])),
+      slots: normalizeItems(mergeItemsByIdentity(optionChildren(contentOptions, "slots"))),
+      anchors: normalizeItems(mergeItemsByIdentity(optionChildren(contentOptions, "anchors"))),
+      tails: normalizeItems(mergeItemsByIdentity(optionChildren(contentOptions, "tails"))),
+      fixedObjects: normalizeItems(mergeItemsByIdentity(fixedObjectItems(contentOptions)))
+    };
+  }
+
+  function hasStructuredV2Outputs(scan) {
+    return topLevelArray(scan, "outputs").some((output) => {
+      const item = objectOf(output);
+      return ["style", "design", "font"].some((group) => Array.isArray(objectOf(item[group]).options))
+        || ["styles", "designs", "fonts"].some((key) => Array.isArray(item[key]))
+        || isPlainObject(item.summary);
+    });
+  }
+
+  function topLevelArray(source, key) {
+    const value = objectOf(source)[key];
+    return Array.isArray(value) ? value : [];
+  }
+
+  function outputSectionOptions(outputs, group) {
+    return outputs.flatMap((output, outputIndex) => {
+      const outputKey = cleanText(output.key || output.name || (outputIndex ? "" : "Output_main"));
+      const section = objectOf(output[group]);
+      const direct = Array.isArray(section.options) ? section.options : [];
+      const alias = Array.isArray(output[`${group}s`]) ? output[`${group}s`] : [];
+      const options = direct.length ? direct : alias;
+      return options.map((option) => tagScanItem(option, { output: outputKey, group }));
+    });
+  }
+
+  function optionChildren(options, key) {
+    return options.flatMap((option) => {
+      const optionKey = cleanText(option.key || option.name || "");
+      const children = Array.isArray(option[key]) ? option[key] : [];
+      return children.map((child) => tagScanItem(child, {
+        output: cleanText(option.output || ""),
+        group: cleanText(option.group || ""),
+        option: optionKey
+      }));
+    });
+  }
+
+  function fixedObjectItems(options) {
+    return options.flatMap((option) => {
+      const explicit = Array.isArray(option.fixed_objects) ? option.fixed_objects : [];
+      if (explicit.length) {
+        return explicit.map((child) => tagScanItem(child, {
+          output: cleanText(option.output || ""),
+          group: cleanText(option.group || ""),
+          option: cleanText(option.key || option.name || "")
+        }));
+      }
+      const count = Number(option.fixed_object_count || 0);
+      if (!Number.isFinite(count) || count <= 0) return [];
+      return [tagScanItem({
+        key: "unnamed_fixed_objects",
+        count,
+        path: option.path || ""
+      }, {
+        output: cleanText(option.output || ""),
+        group: cleanText(option.group || ""),
+        option: cleanText(option.key || option.name || "")
+      })];
+    });
+  }
+
+  function tagScanItem(item, tags) {
+    if (item && typeof item === "object") return { ...item, ...tags };
+    return { name: String(item || ""), ...tags };
+  }
+
+  function mergeItemsByIdentity(items) {
+    const seen = new Set();
+    const result = [];
+    items.forEach((item, index) => {
+      const data = item && typeof item === "object" ? item : { name: String(item || "") };
+      const identity = itemIdentity(data, index);
+      if (seen.has(identity)) return;
+      seen.add(identity);
+      result.push(item);
+    });
+    return result;
+  }
+
+  function itemIdentity(item, index) {
+    return [
+      cleanText(item.output || ""),
+      cleanText(item.group || ""),
+      cleanText(item.option || ""),
+      cleanText(item.path || item.key || item.name || item.label || item.field || item.file_name || item.filename || `item-${index}`)
+    ].join("\u0000").toLowerCase();
+  }
+
 
 
   function groupOptions(config, group) {
@@ -27,8 +137,8 @@
       const section = objectOf(output[group]);
       const outputKey = cleanText(output.key || output.name || "");
       return Array.isArray(section.options) ? section.options.map((option) => {
-        if (option && typeof option === "object") return { ...option, output: outputKey };
-        return { name: String(option || ""), output: outputKey };
+        if (option && typeof option === "object") return { ...option, output: outputKey, group };
+        return { name: String(option || ""), output: outputKey, group };
       }) : [];
     });
   }

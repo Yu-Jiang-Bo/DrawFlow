@@ -251,6 +251,100 @@ def test_v2_workbench_renders_scan_structure_groups_from_draft():
     )
 
 
+def test_v2_workbench_scan_summary_does_not_double_count_v2_aliases():
+    run_node(
+        r"""
+        (async () => {
+          const app = createApp(async (url) => {
+            if (String(url) === "/api/v2/templates") return response({ templates: [] });
+            return response({});
+          });
+          await flush();
+          const duplicatedDesigns = [
+            { key: "Design01", slots: [{ key: "slot_name", path: "Template/Output_main/Design/Design01/slot_name" }], anchors: [{ key: "anchor_name" }], tails: [] },
+            { key: "Design02", slots: [{ key: "slot_name1" }, { key: "slot_name2" }], anchors: [{ key: "anchor_name1" }, { key: "anchor_name2" }], tails: [{ key: "tail_name1_last_m" }] }
+          ];
+          const scan = {
+            "$schema": "custom-renderer/v2-template-scan",
+            outputs: [{
+              key: "Output_main",
+              design: { options: duplicatedDesigns },
+              designs: duplicatedDesigns,
+              font: { options: [] },
+              fonts: [],
+              summary: { styles: 0, designs: 2, fonts: 0, slots: 3, anchors: 3, tails: 1, assets: 0, fixed_objects: 0 }
+            }],
+            dependencies: {
+              fonts: [
+                { scope: "option", path: "Template/Output_main/Design/Design01", font_name: "Winterhome" },
+                { scope: "slot", path: "Template/Output_main/Design/Design01/slot_name", font_name: "Winterhome" },
+                { scope: "option", path: "Template/Output_main/Design/Design02", font_name: "TimesNewRomanPSMT" },
+                { scope: "slot", path: "Template/Output_main/Design/Design02/slot_name2", font_name: "TimesNewRomanPSMT" }
+              ]
+            }
+          };
+          global.DrawFlowV2WorkbenchContext.state.scan = scan;
+          const model = scanModel(scan, {});
+          const summary = scanSummary(scan);
+          assert.strictEqual(model.designs.length, 2);
+          assert.strictEqual(model.fonts.length, 0);
+          assert.strictEqual(model.slots.length, 3);
+          assert.strictEqual(model.anchors.length, 3);
+          assert.strictEqual(model.tails.length, 1);
+          assert.strictEqual(summary.designs, 2);
+          assert.strictEqual(summary.fonts, 0);
+          assert.strictEqual(summary.slots, 3);
+          renderScanSummary();
+          const metricValues = app.elements.scanSummaryMetrics.children.map((node) => node.children[1].textContent);
+          assert.deepStrictEqual(metricValues, ["1", "2", "0", "3", "0"]);
+        })().catch((error) => { console.error(error); process.exit(1); });
+        """
+    )
+
+
+def test_v2_workbench_scan_summary_dedupes_matching_scan_and_config_options():
+    run_node(
+        r"""
+        (async () => {
+          createApp(async (url) => {
+            if (String(url) === "/api/v2/templates") return response({ templates: [] });
+            return response({});
+          });
+          await flush();
+          const scan = {
+            "$schema": "custom-renderer/v2-template-scan",
+            outputs: [{
+              key: "Output_main",
+              design: { options: [{ key: "Design01", slots: [{ key: "slot_name", path: "Template/Output_main/Design/Design01/slot_name" }] }] },
+              font: { options: [{ key: "F10", slots: [{ key: "slot_name", path: "Template/Output_main/Font/F10/slot_name" }] }] },
+              summary: { styles: 0, designs: 1, fonts: 1, slots: 2, anchors: 0, tails: 0, assets: 0, fixed_objects: 0 }
+            }]
+          };
+          const config = {
+            outputs: [{
+              key: "Output_main",
+              design: { options: [{ key: "Design01", content_preset: "direct_text", slots: [{ key: "slot_name", source_field: "name" }] }] },
+              font: { options: [{ key: "F10", content_preset: "path_text", slots: [{ key: "slot_name", source_field: "name" }] }] },
+              style: { options: [] }
+            }]
+          };
+          global.DrawFlowV2WorkbenchContext.state.draft = { config };
+          const model = scanModel(scan, config);
+          const summary = scanSummary(scan);
+          assert.deepStrictEqual(model.designs.map((item) => `${item.output}:${item.group}:${item.key}`), ["Output_main:design:Design01"]);
+          assert.deepStrictEqual(model.fonts.map((item) => `${item.output}:${item.group}:${item.key}`), ["Output_main:font:F10"]);
+          assert.deepStrictEqual(model.slots.map((item) => `${item.output}:${item.group}:${item.option}:${item.key}`), [
+            "Output_main:design:Design01:slot_name",
+            "Output_main:font:F10:slot_name"
+          ]);
+          assert.strictEqual(summary.designs, 1);
+          assert.strictEqual(summary.fonts, 1);
+          assert.strictEqual(summary.slots, 2);
+        })().catch((error) => { console.error(error); process.exit(1); });
+        """
+    )
+
+
 def test_v2_workbench_save_draft_does_not_submit_scan_payload():
     run_node(
         r"""
