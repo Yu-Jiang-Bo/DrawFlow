@@ -168,6 +168,49 @@ th { color: var(--v2-muted); background: #f7f9fc; font-size: 12px; font-weight: 
 .tree-node.success::before, .structure-node.success::before { background: var(--v2-success); }
 .tree-node.warn::before, .structure-node.warn::before { background: var(--v2-warn); }
 .tree-node.error::before, .tree-node.blocked::before, .structure-node.error::before, .structure-node.blocked::before { background: var(--v2-error); }
+.structure-tree-root {
+  display: grid; gap: 2px; min-width: 0; padding: 4px 0;
+  border: 1px solid var(--v2-border); border-radius: 5px; background: #fbfcfe;
+}
+.structure-tree-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  width: 100%; min-width: 0; min-height: 30px; padding: 5px 8px; border: 0; border-radius: 4px;
+  color: var(--v2-text); background: transparent; text-align: left;
+}
+.structure-tree-row::before {
+  content: ""; flex: 0 0 8px; width: 8px; color: var(--v2-text);
+}
+.structure-tree-row:hover:not(:disabled), .structure-tree-row.active {
+  border-color: transparent; color: var(--v2-primary); background: #e9f0ff;
+}
+.structure-tree-row > span:first-child { min-width: 0; overflow-wrap: anywhere; }
+.structure-tree-row > span:first-child strong { display: inline; }
+.structure-tree-row > span:first-child .muted { display: inline; margin-left: 8px; }
+.structure-tree-row.depth-0 { padding-left: 8px; font-weight: 700; }
+.structure-tree-row.depth-1 { margin-top: 4px; padding-left: 18px; font-weight: 700; }
+.structure-tree-row.depth-2 { padding-left: 36px; font-size: 13px; font-weight: 700; }
+.structure-tree-row.depth-3 { padding-left: 58px; color: var(--v2-muted); font-size: 12px; }
+.structure-tree-row.depth-4 { padding-left: 76px; color: var(--v2-muted); font-size: 12px; }
+.structure-tree-row.expandable::before {
+  content: "›"; transform: rotate(90deg); transition: transform 0.15s ease;
+}
+.structure-tree-row.expandable[aria-expanded="false"]::before { transform: rotate(0deg); }
+.structure-tree-row:not(.expandable).depth-3::before,
+.structure-tree-row:not(.expandable).depth-4::before {
+  width: 4px; height: 4px; margin-left: 2px; border-radius: 50%; background: var(--v2-border);
+}
+.tree-badge {
+  flex: 0 0 auto; max-width: 96px; min-height: 20px; padding: 2px 7px; border: 1px solid #ead18a;
+  border-radius: 4px; color: var(--v2-warn); background: #fff5d7; font-size: 11px; font-weight: 700; overflow-wrap: anywhere;
+}
+.structure-fixed-summary {
+  display: grid; gap: 5px; min-width: 0; margin-top: 10px; padding: 12px 0 0;
+  border-top: 1px solid var(--v2-border); color: var(--v2-muted);
+}
+.structure-fixed-summary > span {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+}
+.structure-fixed-summary strong { color: var(--v2-text); }
 
 .config-table {
   width: 100%; min-width: 0; overflow-x: auto; border: 1px solid var(--v2-border);
@@ -184,7 +227,12 @@ th { color: var(--v2-muted); background: #f7f9fc; font-size: 12px; font-weight: 
   grid-template-columns: minmax(130px, 1fr) minmax(130px, 1fr) minmax(120px, 0.9fr) repeat(3, minmax(110px, 0.9fr));
   min-width: 760px;
 }
-.structured-row.field-binding-row { grid-template-columns: repeat(3, minmax(120px, 1fr)); min-width: 420px; }
+#fieldBindingRows .structured-row.table-head,
+.structured-row.field-binding-row { grid-template-columns: minmax(130px, 1fr) minmax(160px, 1.15fr) minmax(140px, 1fr) minmax(92px, 0.7fr); min-width: 560px; }
+.binding-status-cell, .binding-scope-cell {
+  display: flex; align-items: center; min-height: 36px; padding: 0 8px; font-size: 12px; font-weight: 700;
+}
+.binding-scope-cell { color: var(--v2-muted); font-weight: 600; }
 .structured-row.style-dimension-row {
   grid-template-columns: minmax(130px, 1fr) minmax(110px, 0.8fr) repeat(2, minmax(110px, 0.8fr)) minmax(180px, 1.2fr);
   min-width: 680px;

@@ -96,6 +96,9 @@ class Element {
   setAttribute(name, value) {
     this.attributes[name] = String(value);
   }
+  getAttribute(name) {
+    return this.attributes[name];
+  }
   querySelector(selector) {
     if (selector.includes("span")) return this.children.find((child) => child.tagName === "SPAN") || null;
     if (selector.includes("strong")) return this.children.find((child) => child.tagName === "STRONG") || null;
@@ -186,6 +189,7 @@ function createApp(fetchImpl) {
     "workbench-rule-evidence.js",
     "workbench-stage-view.js",
     "workbench-view.js",
+    "workbench-structure-tree.js",
     "workbench-draft-actions.js",
     "workbench-scan-actions.js"
   ].forEach((fileName) => {
@@ -340,6 +344,157 @@ def test_v2_workbench_scan_summary_dedupes_matching_scan_and_config_options():
           assert.strictEqual(summary.designs, 1);
           assert.strictEqual(summary.fonts, 1);
           assert.strictEqual(summary.slots, 2);
+        })().catch((error) => { console.error(error); process.exit(1); });
+        """
+    )
+
+
+def test_v2_workbench_structure_stage_uses_nested_template_tree():
+    run_node(
+        r"""
+        (async () => {
+          async function fakeFetch(url, options = {}) {
+            const textUrl = String(url);
+            if (textUrl === "/api/v2/templates") return response({ templates: [{ template_id: "V2TREE", name: "Tree Demo" }] });
+            if (textUrl.endsWith("/draft")) {
+              return response({ draft: {
+                metadata: { template_id: "V2TREE", name: "Tree Demo", shop_name: "" },
+                manifest: { draft_revision: "d0001" },
+                config: {},
+                scan: {
+                  "$schema": "custom-renderer/v2-template-scan",
+                  outputs: [{
+                    key: "Output_main",
+                    design: { options: [
+                      { key: "Design01", slots: [{ key: "slot_name" }], anchors: [{ key: "anchor_name" }], tails: [] },
+                      { key: "Design02", slots: [{ key: "slot_name1" }, { key: "slot_name2" }], anchors: [], tails: [{ key: "tail_name1_last_m" }] }
+                    ] },
+                    font: { options: [] },
+                    style: { options: [] },
+                    summary: { designs: 2, fonts: 0, styles: 0, slots: 3, anchors: 1, tails: 1, assets: 0, fixed_objects: 5 }
+                  }]
+                }
+              }});
+            }
+            if (textUrl.endsWith("/validate")) return response({ validation: { checks: {} } });
+            return response({});
+          }
+          const app = createApp(fakeFetch);
+          await flush();
+          app.elements.templateList.children[0].dispatch("click");
+          await flush();
+          global.setWorkbenchStage("structure");
+          await flush();
+
+          const rows = document.querySelectorAll("#structureTree .structure-tree-row");
+          assert(rows.length >= 5);
+          const templateRow = rows.find((row) => row.className.includes("depth-0") && row.textContent.includes("Template"));
+          assert(templateRow);
+          assert.strictEqual(templateRow.getAttribute("aria-expanded"), "true");
+          assert(rows.some((row) => row.dataset.nodeKind === "output" && row.textContent.includes("Output_main")));
+          assert(rows.some((row) => row.textContent.includes("Design")));
+          assert(rows.some((row) => row.textContent.includes("Design01") && row.textContent.includes("slot_name")));
+          assert(app.elements.structureTree.textContent.includes("未命名固定对象"));
+          assert(!app.elements.structureTree.textContent.includes("槽位（"));
+
+          const outputRow = rows.find((row) => row.dataset.nodeKind === "output");
+          outputRow.dispatch("click");
+          await flush();
+          const collapsedRows = document.querySelectorAll("#structureTree .structure-tree-row");
+          const collapsedOutput = collapsedRows.find((row) => row.dataset.nodeKind === "output");
+          assert.strictEqual(collapsedOutput.getAttribute("aria-expanded"), "false");
+          assert(!app.elements.structureTree.textContent.includes("Design01"));
+        })().catch((error) => { console.error(error); process.exit(1); });
+        """
+    )
+
+
+def test_v2_workbench_field_bindings_do_not_list_each_design_option():
+    run_node(
+        r"""
+        (async () => {
+          async function fakeFetch(url, options = {}) {
+            const textUrl = String(url);
+            if (textUrl === "/api/v2/templates") return response({ templates: [{ template_id: "V2FIELDS", name: "Fields Demo" }] });
+            if (textUrl.endsWith("/draft")) {
+              return response({ draft: {
+                metadata: { template_id: "V2FIELDS", name: "Fields Demo", shop_name: "" },
+                manifest: { draft_revision: "d0001" },
+                config: {},
+                scan: {
+                  "$schema": "custom-renderer/v2-template-scan",
+                  outputs: [{
+                    key: "Output_main",
+                    design: { options: [
+                      { key: "Design01", slots: [{ key: "slot_name" }] },
+                      { key: "Design02", slots: [{ key: "slot_name1" }, { key: "slot_name2" }] }
+                    ] },
+                    font: { options: [] },
+                    style: { options: [] },
+                    summary: { designs: 2, fonts: 0, styles: 0, slots: 3, anchors: 0, tails: 0, assets: 0, fixed_objects: 0 }
+                  }]
+                }
+              }});
+            }
+            if (textUrl.endsWith("/validate")) return response({ validation: { checks: {} } });
+            return response({});
+          }
+          const app = createApp(fakeFetch);
+          await flush();
+          app.elements.templateList.children[0].dispatch("click");
+          await flush();
+          global.setWorkbenchStage("structure");
+          await flush();
+
+          const fields = document.querySelectorAll("#fieldBindingRows .field-binding-row")
+            .map((row) => row.querySelector('[data-field="binding-field"]').value);
+          assert(fields.includes("design"));
+          assert(fields.includes("name"));
+          assert(fields.includes("name1"));
+          assert(fields.includes("name2"));
+          assert(!fields.includes("Design01"));
+          assert(!fields.includes("Design02"));
+          assert(fields.length <= 5);
+          assert(app.elements.fieldBindingRows.textContent.includes("待确认"));
+        })().catch((error) => { console.error(error); process.exit(1); });
+        """
+    )
+
+
+def test_v2_workbench_inferred_option_mappings_keep_output_scope():
+    run_node(
+        r"""
+        (async () => {
+          createApp(async (url) => {
+            if (String(url) === "/api/v2/templates") return response({ templates: [] });
+            return response({});
+          });
+          await flush();
+          const scan = {
+            "$schema": "custom-renderer/v2-template-scan",
+            outputs: [
+              {
+                key: "Output_SideA",
+                design: { options: [{ key: "Design08", slots: [{ key: "slot_name" }] }] },
+                font: { options: [] },
+                style: { options: [] },
+                summary: { designs: 1, fonts: 0, styles: 0, slots: 1, anchors: 0, tails: 0, assets: 0, fixed_objects: 0 }
+              },
+              {
+                key: "Output_SideB",
+                design: { options: [] },
+                font: { options: [{ key: "F1", slots: [{ key: "slot_name" }] }] },
+                style: { options: [] },
+                summary: { designs: 0, fonts: 1, styles: 0, slots: 1, anchors: 0, tails: 0, assets: 0, fixed_objects: 0 }
+              }
+            ]
+          };
+          global.DrawFlowV2WorkbenchContext.state.scan = scan;
+          const mappings = inferredMappings();
+          const design = mappings.find((item) => item.target === "Design08");
+          const font = mappings.find((item) => item.target === "F1");
+          assert.strictEqual(design.output, "Output_SideA");
+          assert.strictEqual(font.output, "Output_SideB");
         })().catch((error) => { console.error(error); process.exit(1); });
         """
     )

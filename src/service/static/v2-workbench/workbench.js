@@ -34,7 +34,7 @@
     draft: null,
     scan: {},
     validation: null,
-    expanded: { designs: false, fonts: false },
+    expanded: { designs: false, fonts: false, tree: {} },
     uploadFile: null,
     lastUploadFile: null,
     isScanning: false,

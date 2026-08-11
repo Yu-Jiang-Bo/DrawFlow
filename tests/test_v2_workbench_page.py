@@ -22,6 +22,7 @@ JS = "\n".join(
         "workbench-rule-evidence.js",
         "workbench-stage-view.js",
         "workbench-view.js",
+        "workbench-structure-tree.js",
         "workbench-draft-actions.js",
         "workbench-scan-actions.js",
     ]
@@ -106,6 +107,7 @@ def test_v2_workbench_page_exposes_independent_entry_contract():
     assert 'src="/static/v2-workbench/workbench-rule-evidence.js"' in INDEX_HTML
     assert 'src="/static/v2-workbench/workbench-stage-view.js"' in INDEX_HTML
     assert 'src="/static/v2-workbench/workbench-view.js"' in INDEX_HTML
+    assert 'src="/static/v2-workbench/workbench-structure-tree.js"' in INDEX_HTML
     assert 'class="v2-shell" id="v2WorkbenchApp" data-workbench-stage="upload"' in INDEX_HTML
     assert 'class="workspace-grid"' in INDEX_HTML
     assert 'class="bottom-action-bar"' in INDEX_HTML
@@ -264,4 +266,5 @@ def test_v2_workbench_routes_are_isolated_from_legacy_page():
     assert '"workbench-rule-evidence.js"' in SERVER
     assert '"workbench-stages.css"' in SERVER
     assert '"workbench-stage-view.js"' in SERVER
+    assert '"workbench-structure-tree.js"' in SERVER
     assert "self._send_html(WORKBENCH_HTML)" in SERVER

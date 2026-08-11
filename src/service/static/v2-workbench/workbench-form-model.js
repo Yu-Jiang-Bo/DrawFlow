@@ -69,11 +69,13 @@
   function inferredFields() {
     const model = scanModel(state.scan, state.draft && state.draft.config);
     const fields = ["name"];
-    ["styles", "designs", "fonts", "colors", "slots"].forEach((key) => {
-      model[key].forEach((item) => {
-        const field = safeField(item.field || item.source_field || item.name);
-        if (field) fields.push(field);
-      });
+    if (model.designs.length) fields.push("design");
+    if (model.fonts.length) fields.push("font");
+    if (model.styles.length) fields.push("style");
+    if (model.colors.length) fields.push("color");
+    model.slots.forEach((item) => {
+      const field = safeField(item.source_field || item.field || slotFieldName(item.key || item.name));
+      if (field) fields.push(field);
     });
     return unique(fields);
   }
@@ -91,7 +93,7 @@
       items.slice(0, 12).forEach((item) => {
         const target = safeOptionKey(item.key || item.name, group);
         if (!target) return;
-        rows.push({ field: inferredGroupField(group), source_value: displayOptionSource(target, group), target, output: "Output_main", group });
+        rows.push({ field: inferredGroupField(group), source_value: displayOptionSource(target, group), target, output: optionOutputKey(item), group });
       });
     });
     return rows;
@@ -104,6 +106,22 @@
     if (group === "design") return "design";
     if (group === "font") return "font";
     return "";
+  }
+
+
+  function slotFieldName(value) {
+    return cleanText(value || "").replace(/^slot_/, "");
+  }
+
+
+  function optionOutputKey(item) {
+    const data = objectOf(item);
+    const nested = objectOf(data.output);
+    const raw = cleanText(nested.key || nested.name || data.output_key || data.outputKey || data.parent_output || data.parentOutput || data.output);
+    if (raw) return safeOutputKey(raw, "Output_main", 0);
+    const outputs = configOutputs().length ? configOutputs() : inferredOutputs();
+    if (outputs.length === 1) return safeOutputKey(outputs[0].key || outputs[0].name, "Output_main", 0);
+    return "Output_main";
   }
 
 
@@ -126,6 +144,8 @@
     inferredFields,
     inferredMappings,
     inferredGroupField,
+    slotFieldName,
+    optionOutputKey,
     emptyOutput
   });
 })();

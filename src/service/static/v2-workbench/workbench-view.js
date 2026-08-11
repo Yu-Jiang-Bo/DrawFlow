@@ -69,41 +69,6 @@
   }
 
 
-  function renderStructureTree() {
-    const target = $("structureTree");
-    if (!target) return;
-    target.replaceChildren();
-    const scan = state.scan || {};
-    const model = scanModel(scan, state.draft && state.draft.config);
-    const search = valueOf("structureSearch").trim().toLowerCase();
-    if (!modelHasItems(model)) {
-      target.appendChild(emptyNode("等待扫描结果"));
-      setText("selectedNodeSummary", "扫描接口未就绪或尚未返回结构。");
-      updateToggleButtons();
-      return;
-    }
-    Object.keys(model).forEach((key) => {
-      const items = filterItems(model[key], search);
-      if (!items.length) return;
-      const section = document.createElement("section");
-      section.className = "structure-section";
-      section.appendChild(metaNode(sectionTitle(key, items.length)));
-      visibleSectionItems(key, items, Boolean(search)).forEach((item) => {
-        const row = document.createElement("button");
-        row.type = "button";
-        row.className = "structure-node";
-        row.dataset.nodeKind = key;
-        row.textContent = nodeTitle(item);
-        row.addEventListener("click", () => setText("selectedNodeSummary", nodeSummary(key, item)));
-        section.appendChild(row);
-      });
-      target.appendChild(section);
-    });
-    if (!target.children.length) target.appendChild(emptyNode("没有匹配的结构项"));
-    updateToggleButtons();
-  }
-
-
   function renderTables() {
     renderOutputRows();
     renderFieldBindingRows();
@@ -139,18 +104,56 @@
     const target = $("fieldBindingRows");
     if (!target) return;
     const bindings = objectOf(state.draft && state.draft.config && state.draft.config.field_bindings);
-    const fields = Object.keys(bindings).length ? Object.keys(bindings) : inferredFields();
-    target.replaceChildren(tableHeader(["内部字段", "订单表头", "状态"]));
+    const fields = unique([...inferredFields(), ...Object.keys(bindings)]);
+    target.replaceChildren(tableHeader(["模板对象", "订单字段", "处理作用范围", "状态"]));
     (fields.length ? fields : ["name"]).forEach((field) => {
       const row = tableRow("field-binding-row");
-      row.append(inputCell("binding-field", field), inputCell("binding-column", bindings[field] || ""), selectCell("binding-required", [["required", "必填"], ["optional", "可选"]], "required"));
+      row.append(
+        inputCell("binding-field", field),
+        inputCell("binding-column", bindings[field] || ""),
+        scopeCell(bindingScopeText(field)),
+        bindingStatusCell(Boolean(bindings[field]))
+      );
       target.appendChild(row);
     });
     target.appendChild(addRowButton("添加字段", () => {
       const row = tableRow("field-binding-row");
-      row.append(inputCell("binding-field", ""), inputCell("binding-column", ""), selectCell("binding-required", [["required", "必填"], ["optional", "可选"]], "required"));
+      row.append(inputCell("binding-field", ""), inputCell("binding-column", ""), scopeCell("全部 Output"), bindingStatusCell(false));
       target.insertBefore(row, target.lastElementChild);
     }));
+  }
+
+
+  function scopeCell(text) {
+    const cell = document.createElement("div");
+    cell.className = "binding-scope-cell";
+    cell.textContent = text || "全部 Output";
+    return cell;
+  }
+
+
+  function bindingScopeText(field) {
+    if (field === "color") return "全部文字";
+    if (["design", "font", "style"].includes(field)) return groupScopeText(field);
+    return "全部 Output";
+  }
+
+
+  function groupScopeText(group) {
+    const model = scanModel(state.scan, state.draft && state.draft.config);
+    const source = group === "design" ? model.designs : group === "font" ? model.fonts : model.styles;
+    const scopes = unique(source.map((item) => cleanText(item.output || item.output_key || ""))).filter(Boolean);
+    if (!scopes.length) return "全部 Output";
+    if (scopes.length === 1) return scopes[0].replace(/^Output_/, "") || scopes[0];
+    return "多个 Output";
+  }
+
+
+  function bindingStatusCell(bound) {
+    const cell = document.createElement("div");
+    cell.className = `binding-status-cell ${bound ? "success" : "warn"}`;
+    cell.textContent = bound ? "已绑定" : "待确认";
+    return cell;
   }
 
 
@@ -279,7 +282,6 @@
     fillDraftFields,
     templateContextText,
     renderScanSummary,
-    renderStructureTree,
     renderTables,
     renderOutputRows,
     renderFieldBindingRows,
