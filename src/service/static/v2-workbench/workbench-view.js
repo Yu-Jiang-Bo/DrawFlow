@@ -83,7 +83,8 @@
     const target = $("outputConfigRows");
     if (!target) return;
     const outputs = configOutputs().length ? configOutputs() : inferredOutputs();
-    target.replaceChildren(tableHeader(["输出", "名称", "用途", "样式字段", "设计字段", "字体字段"]));
+    const header = tableHeader(["输出", "名称", "用途"]);
+    target.replaceChildren(header);
     (outputs.length ? outputs : [emptyOutput()]).forEach((output, index) => {
       const key = output.key || (index ? `Output_Side${String.fromCharCode(65 + index)}` : "Output_main");
       const singleMain = outputs.length === 1 && key === "Output_main";
@@ -91,10 +92,7 @@
       row.append(
         inputCell("output-key", key),
         inputCell("output-name", output.display_name || (singleMain ? "主效果图" : "")),
-        inputCell("output-component", output.component_key || (singleMain ? "main" : "")),
-        inputCell("output-style-field", objectOf(output.style).field || ""),
-        inputCell("output-design-field", objectOf(output.design).field || ""),
-        inputCell("output-font-field", objectOf(output.font).field || "")
+        inputCell("output-component", output.component_key || (singleMain ? "main" : ""))
       );
       target.appendChild(row);
     });
@@ -104,8 +102,9 @@
     const target = $("fieldBindingRows");
     if (!target) return;
     const bindings = objectOf(state.draft && state.draft.config && state.draft.config.field_bindings);
-    const fields = unique([...inferredFields(), ...Object.keys(bindings)]);
-    target.replaceChildren(tableHeader(["模板对象", "订单字段", "处理作用范围", "状态"]));
+    const allowed = inferredFields();
+    const fields = unique([...allowed, ...Object.keys(bindings).filter((field) => fieldBindingAllowed(field, allowed))]);
+    target.replaceChildren(tableHeader(["模板对象", "订单字段", "适用范围", "状态"]));
     (fields.length ? fields : ["name"]).forEach((field) => {
       const row = tableRow("field-binding-row");
       row.append(
@@ -160,7 +159,7 @@
   function renderOptionMappingRows() {
     const target = $("optionMappingRows");
     if (!target) return;
-    const mappings = configOptionMappings().length ? configOptionMappings() : inferredMappings();
+    const mappings = effectiveOptionMappings();
     target.replaceChildren(tableHeader(["字段", "订单原值", "目标选项", "输出", "类型"]));
     (mappings.length ? mappings : [{ field: "", source_value: "", target: "", output: "Output_main", group: "design" }]).forEach((mapping) => {
       target.appendChild(optionMappingRow(mapping));

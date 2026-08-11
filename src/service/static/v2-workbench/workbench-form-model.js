@@ -56,9 +56,9 @@
       return model.outputs.slice(0, 12).map((item, index) => ({
         key: safeOutputKey(item.key || item.name, index ? `Output_Side${String.fromCharCode(65 + index)}` : "Output_main", index),
         display_name: cleanText(item.display_name || item.name || ""),
-        style: { field: inferredGroupField("style") },
-        design: { field: inferredGroupField("design") },
-        font: { field: inferredGroupField("font") }
+        style: { field: model.styles.length ? inferredGroupField("style") : "" },
+        design: { field: model.designs.length ? inferredGroupField("design") : "" },
+        font: { field: model.fonts.length ? inferredGroupField("font") : "" }
       }));
     }
     return [emptyOutput()];

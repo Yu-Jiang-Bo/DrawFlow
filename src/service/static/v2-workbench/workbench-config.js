@@ -32,22 +32,44 @@
 
 
   function collectOutputRows() {
-    const rows = Array.from(document.querySelectorAll("#outputConfigRows .output-row"));
+    const rows = Array.from(document.querySelectorAll("#outputConfigRows .output-row")).filter((row) => !row.className.includes("table-head"));
+    const model = scanModel(state.scan, state.draft && state.draft.config);
     const result = rows.map((row, index) => {
       const fallback = index ? `Output_Side${String.fromCharCode(65 + index)}` : "Output_main";
       const key = safeOutputKey(rowValue(row, "output-key"), fallback, index);
       const singleMain = rows.length === 1 && key === "Output_main";
+      const existing = existingOutputConfig(key);
       return {
         key,
         display_name: cleanText(rowValue(row, "output-name")) || (singleMain ? "主效果图" : ""),
         component_key: safeIdentifier(rowValue(row, "output-component"), singleMain ? "main" : ""),
         scope: "local",
-        style: { field: safeField(rowValue(row, "output-style-field")), options: [] },
-        design: { field: safeField(rowValue(row, "output-design-field")), options: [] },
-        font: { field: safeField(rowValue(row, "output-font-field")), options: [] }
+        style: { field: outputGroupField(key, "style", existing, model), options: [] },
+        design: { field: outputGroupField(key, "design", existing, model), options: [] },
+        font: { field: outputGroupField(key, "font", existing, model), options: [] }
       };
     }).filter((item) => item.key);
     return result.length ? result : [emptyOutput()];
+  }
+
+  function existingOutputConfig(key) {
+    return objectOf(configOutputs().find((item) => safeOutputKey(item.key || item.name, "Output_main", 0) === key));
+  }
+
+  function outputGroupField(output, group, existing, model) {
+    const existingGroup = objectOf(existing[group]);
+    const scannedItems = group === "style" ? model.styles : group === "font" ? model.fonts : model.designs;
+    if (!hasScanBackedGroupForOutput(output, group, scannedItems)) return "";
+    return safeField(existingGroup.field) || inferredGroupField(group);
+  }
+
+  function hasScanBackedGroupForOutput(output, group, scannedItems) {
+    if (scopedScanItemsFor(output, scannedItems).length) return true;
+    return configOptionMappings().some((mapping) => (
+      safeOutputKey(mapping.output, "Output_main", 0) === output
+      && mapping.group === group
+      && optionExistsInUnscopedScanItems(scannedItems, mapping.target, group)
+    ));
   }
 
 
@@ -65,19 +87,26 @@
 
 
   function collectFieldBindings() {
+    const allowed = inferredFields();
     const result = {};
     Array.from(document.querySelectorAll("#fieldBindingRows .field-binding-row")).forEach((row) => {
       const key = safeField(rowValue(row, "binding-field"));
       const value = cleanText(rowValue(row, "binding-column"));
-      if (key && value) result[key] = value;
+      if (key && value && fieldBindingAllowed(key, allowed)) result[key] = value;
     });
     return result;
+  }
+
+  function fieldBindingAllowed(field, allowed) {
+    const key = safeField(field);
+    if (["style", "font", "design", "color"].includes(key)) return allowed.includes(key);
+    return Boolean(key);
   }
 
 
 
   function collectOptionMappingRows() {
-    return Array.from(document.querySelectorAll("#optionMappingRows .option-mapping-row")).map((row) => {
+    const rows = Array.from(document.querySelectorAll("#optionMappingRows .option-mapping-row")).map((row) => {
       const group = rowValue(row, "mapping-group");
       const output = safeOutputKey(rowValue(row, "mapping-output"), "Output_main", 0);
       const target = safeOptionKey(rowValue(row, "mapping-target"), group);
@@ -89,8 +118,44 @@
         group: ["style", "design", "font", "color"].includes(group) ? group : "design"
       };
     }).filter((item) => item.field && item.source_value && item.target && item.output && item.group);
+    return scanBackedOptionMappings(rows);
   }
 
+  function effectiveOptionMappings() {
+    const configured = scanBackedOptionMappings(configOptionMappings());
+    return configured.length ? configured : inferredMappings();
+  }
+
+  function scanBackedOptionMappings(mappings) {
+    const model = scanModel(state.scan, state.draft && state.draft.config);
+    return (Array.isArray(mappings) ? mappings : []).map((mapping) => {
+      const group = ["style", "design", "font", "color"].includes(mapping.group) ? mapping.group : "design";
+      return {
+        field: safeField(mapping.field),
+        source_value: cleanText(mapping.source_value),
+        target: safeOptionKey(mapping.target, group),
+        output: safeOutputKey(mapping.output, "Output_main", 0),
+        group
+      };
+    }).filter((mapping) => mapping.field && mapping.source_value && mapping.target && optionMappingHasScannedTarget(mapping, model));
+  }
+
+  function optionMappingHasScannedTarget(mapping, model) {
+    if (mapping.group === "color") {
+      return model.colors.some((item) => safeOptionKey(item.key || item.name || item.label, "color") === mapping.target);
+    }
+    const source = mapping.group === "style" ? model.styles : mapping.group === "font" ? model.fonts : model.designs;
+    return scopedScanItemsFor(mapping.output, source)
+      .some((item) => safeOptionKey(item.key || item.name || item.label, mapping.group) === mapping.target)
+      || optionExistsInUnscopedScanItems(source, mapping.target, mapping.group);
+  }
+
+  function optionExistsInUnscopedScanItems(scanItems, target, group) {
+    const items = Array.isArray(scanItems) ? scanItems : [];
+    if (items.some((item) => outputScopeKey(item))) return false;
+    const safeTarget = safeOptionKey(target, group);
+    return items.some((item) => safeOptionKey(item.key || item.name || item.label, group) === safeTarget);
+  }
 
 
   function collectChecks() {
@@ -151,11 +216,11 @@
     const content = collectContentOptionConfigs();
     const model = scanModel(state.scan, state.draft && state.draft.config);
     return optionKeysFor(output, "design", mappings, designs).map((key) => {
-      const optionSlots = contentOptionSlots(content, output, "design", key, slots);
+      const optionSlots = contentOptionSlots(content, output, "design", key, slots, model);
       return {
         key: safeOptionKey(key, "design"),
         label: key,
-        content_preset: contentOptionPreset(content, output, "design", key),
+        content_preset: contentOptionPreset(content, output, "design", key, model),
         component_key: "",
         scope: "local",
         font_dependencies: optionFontDependencies(output, "design", key, optionSlots),
@@ -169,14 +234,15 @@
 
   function fontOptionsFor(output, mappings, fonts, slots) {
     const content = collectContentOptionConfigs();
+    const model = scanModel(state.scan, state.draft && state.draft.config);
     return optionKeysFor(output, "font", mappings, fonts).map((key) => ({
       key: safeOptionKey(key, "font"),
       label: key,
-      content_preset: contentOptionPreset(content, output, "font", key),
+      content_preset: contentOptionPreset(content, output, "font", key, model),
       component_key: "",
       scope: "local",
-      font_dependencies: optionFontDependencies(output, "font", key, contentOptionSlots(content, output, "font", key, slots), [key]),
-      slots: contentOptionSlots(content, output, "font", key, slots),
+      font_dependencies: optionFontDependencies(output, "font", key, contentOptionSlots(content, output, "font", key, slots, model), [key]),
+      slots: contentOptionSlots(content, output, "font", key, slots, model),
       assets: []
     })).filter((item) => item.key);
   }
@@ -184,8 +250,12 @@
 
 
   function optionKeysFor(output, group, mappings, scanItems) {
-    const mapped = mappings.filter((item) => item.output === output && item.group === group).map((item) => item.target);
-    const scanned = scopedScanItemsFor(output, scanItems).map((item) => item.key || item.name || item.label).filter(Boolean);
+    const scanned = scopedScanItemsFor(output, scanItems).map((item) => safeOptionKey(item.key || item.name || item.label, group)).filter(Boolean);
+    const scannedKeys = new Set(scanned);
+    const mapped = mappings
+      .filter((item) => item.output === output && item.group === group)
+      .map((item) => safeOptionKey(item.target, group))
+      .filter((target) => scannedKeys.has(target) || optionExistsInUnscopedScanItems(scanItems, target, group));
     return unique([...mapped, ...scanned]).slice(0, 30);
   }
 
@@ -229,7 +299,7 @@
 
   function collectStyleDimensionConfigs() {
     const result = {};
-    Array.from(document.querySelectorAll("#styleDimensionRows .style-dimension-row")).forEach((row) => {
+    Array.from(document.querySelectorAll("#styleDimensionRows .style-dimension-row")).filter((row) => !row.className.includes("table-head")).forEach((row) => {
       const output = safeOutputKey(rowValue(row, "style-output") || row.dataset.output, "Output_main", 0);
       const key = safeOptionKey(rowValue(row, "style-key") || row.dataset.styleKey, "style");
       if (!output || !key) return;
@@ -251,7 +321,7 @@
 
   function optionAssetsFor(output, group, key, slots, scannedAssets) {
     const existing = Array.isArray(findConfigOption(output, group, key).assets) ? findConfigOption(output, group, key).assets : [];
-    const scopedAssets = scopedScanItemsFor(output, scannedAssets);
+    const scopedAssets = scopedOptionItemsFor(output, group, key, scannedAssets);
     return slots.filter((slot) => slot.asset_key).map((slot) => {
       const assetKey = safeIdentifier(slot.asset_key, "");
       const existingAsset = objectOf(existing.find((asset) => asset.asset_key === assetKey));
@@ -310,7 +380,11 @@
     collectOutputRows,
     withControlledGroups,
     collectFieldBindings,
+    fieldBindingAllowed,
     collectOptionMappingRows,
+    hasScanBackedGroupForOutput,
+    effectiveOptionMappings,
+    scanBackedOptionMappings,
     collectChecks,
     collectControlledColors,
     nextAudit,

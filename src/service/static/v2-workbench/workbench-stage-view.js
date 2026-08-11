@@ -103,7 +103,7 @@
     if (next === "structure" || next === "rules") {
       renderStructureTree();
       renderTables();
-      if (typeof renderOptionRuleStage === "function") renderOptionRuleStage();
+      if (next === "rules" && typeof renderOptionRuleStage === "function") renderOptionRuleStage();
       validateCurrentConfig(false).catch(() => updateCheckRail(configChecks()));
     } else if (next === "preview") {
       renderPreviewStage();

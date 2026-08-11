@@ -213,7 +213,7 @@ INDEX_HTML = """<!doctype html>
             <h3>订单字段绑定</h3>
           </div>
           <div class="pane-body">
-            <p class="v2-help">使用输入框或下拉框绑定英文订单表头到 Design、Font、Style、Color 和 slot。</p>
+            <p class="v2-help">将扫描到的模板对象绑定到订单表头；多个槽位可以共用同一个订单字段。</p>
             <div class="config-table" id="fieldBindingRows" aria-live="polite"></div>
           </div>
         </section>
@@ -223,15 +223,15 @@ INDEX_HTML = """<!doctype html>
             <h3>订单原值映射</h3>
           </div>
           <div class="pane-body">
-            <p class="v2-help">支持将订单原值 03 映射为 Design03，将 F10 映射为 F10。</p>
+            <p class="v2-help">将订单中的设计、字体或颜色值映射到扫描到的模板选项；单 Output 默认使用 Output_main。</p>
             <div class="config-table" id="optionMappingRows" aria-live="polite"></div>
           </div>
         </section>
 
         <section class="pane">
           <div class="pane-header">
-            <h3>Style 与固定尺寸</h3>
-            <span class="muted">容差固定 0.007mm</span>
+            <h3>Style 与尺寸验收</h3>
+            <span class="muted">误差上限 0.007mm，禁止超出</span>
           </div>
           <div class="pane-body">
             <div class="config-table" id="styleDimensionRows" aria-live="polite"></div>

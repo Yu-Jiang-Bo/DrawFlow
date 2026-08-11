@@ -9,9 +9,9 @@
     const outputs = normalizeItems([...(Array.isArray(cfg.outputs) ? cfg.outputs : []), ...collectDeep(scan, ["outputs", "output"])]);
     return {
       outputs: outputs.length ? outputs : normalizeItems(collectDeep(scan, ["artboards", "pages"])),
-      designs: normalizeItems([...collectDeep(scan, ["designs", "design_options"]), ...groupOptions(cfg, "design")]),
-      fonts: normalizeItems([...collectDeep(scan, ["fonts", "font_options"]), ...groupOptions(cfg, "font")]),
-      styles: normalizeItems([...collectDeep(scan, ["styles", "style_options", "dimensions"]), ...groupOptions(cfg, "style")]),
+      designs: normalizeItems(collectDeep(scan, ["designs", "design_options"])),
+      fonts: normalizeItems(collectDeep(scan, ["fonts", "font_options"])),
+      styles: normalizeItems(collectDeep(scan, ["styles", "style_options", "dimensions"])),
       assets: normalizeItems(collectDeep(scan, ["assets", "files", "placed_items"])),
       colors: normalizeItems([...(Array.isArray(cfg.colors) ? cfg.colors : []), ...collectDeep(scan, ["colors", "swatches"])]),
       slots: normalizeItems(collectDeep(scan, ["slots", "text_slots", "variables", "items"])),
@@ -24,9 +24,9 @@
   function structuredV2ScanModel(scan, config) {
     const scanOutputs = topLevelArray(scan, "outputs");
     const outputItems = mergeItemsByIdentity([...scanOutputs, ...topLevelArray(config, "outputs")]);
-    const styleOptions = mergeItemsByIdentity([...outputSectionOptions(scanOutputs, "style"), ...groupOptions(config, "style")]);
-    const designOptions = mergeItemsByIdentity([...outputSectionOptions(scanOutputs, "design"), ...groupOptions(config, "design")]);
-    const fontOptions = mergeItemsByIdentity([...outputSectionOptions(scanOutputs, "font"), ...groupOptions(config, "font")]);
+    const styleOptions = mergeItemsByIdentity(outputSectionOptions(scanOutputs, "style"));
+    const designOptions = mergeItemsByIdentity(outputSectionOptions(scanOutputs, "design"));
+    const fontOptions = mergeItemsByIdentity(outputSectionOptions(scanOutputs, "font"));
     const contentOptions = [...designOptions, ...fontOptions];
     return {
       outputs: normalizeItems(outputItems),
@@ -128,19 +128,6 @@
       cleanText(item.option || ""),
       cleanText(item.path || item.key || item.name || item.label || item.field || item.file_name || item.filename || `item-${index}`)
     ].join("\u0000").toLowerCase();
-  }
-
-
-
-  function groupOptions(config, group) {
-    return (Array.isArray(config.outputs) ? config.outputs : []).flatMap((output) => {
-      const section = objectOf(output[group]);
-      const outputKey = cleanText(output.key || output.name || "");
-      return Array.isArray(section.options) ? section.options.map((option) => {
-        if (option && typeof option === "object") return { ...option, output: outputKey, group };
-        return { name: String(option || ""), output: outputKey, group };
-      }) : [];
-    });
   }
 
 
@@ -282,7 +269,6 @@
 
   Object.assign(globalThis, {
     scanModel,
-    groupOptions,
     collectDeep,
     walk,
     normalizeItems,

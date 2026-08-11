@@ -8,15 +8,16 @@
     if (!target) return;
     const outputs = configOutputs().length ? configOutputs() : inferredOutputs();
     const model = scanModel(state.scan, state.draft && state.draft.config);
-    target.replaceChildren(tableHeader(["输出", "Style", "X 宽 mm", "Y 高 mm", "最终适配"]));
+    const header = tableHeader(["输出", "Style", "X 宽 mm", "Y 高 mm", "尺寸验收"]);
+    target.replaceChildren(header);
+    let rendered = 0;
     (outputs.length ? outputs : [emptyOutput()]).forEach((output, index) => {
       const outputKey = safeOutputKey(
         output.key || output.name,
         index ? `Output_Side${String.fromCharCode(65 + index)}` : "Output_main",
         index
       );
-      const allowFixed = outputs.length === 1 && !model.styles.length && !optionKeysFromConfig(outputKey, "style").length;
-      styleDimensionKeys(outputKey, model.styles, allowFixed).forEach((key) => {
+      styleDimensionKeys(outputKey, model.styles).forEach((key) => {
         const row = tableRow("style-dimension-row");
         const dimensions = existingStyleDimensions(outputKey, key, model.styles);
         row.dataset.output = outputKey;
@@ -26,27 +27,20 @@
           inputCell("style-key", key),
           inputCell("style-width-mm", dimensions.width_mm || ""),
           inputCell("style-height-mm", dimensions.height_mm || ""),
-          staticMetaCell("X/Y 独立适配 · 0.007mm")
+          staticMetaCell("误差上限 0.007mm，禁止超出")
         );
         target.appendChild(row);
+        rendered += 1;
       });
     });
+    if (!rendered) target.appendChild(emptyNode("未扫描到 Style 尺寸框，当前模板无需填写固定尺寸。"));
   }
 
-  function styleDimensionKeys(output, styles, allowFixed) {
-    const mappings = configOptionMappings().length ? configOptionMappings() : inferredMappings();
-    const configured = optionKeysFromConfig(output, "style");
+  function styleDimensionKeys(output, styles) {
+    const mappings = effectiveOptionMappings();
     const scanned = scopedScanItemsFor(output, styles).map((item) => safeOptionKey(item.key || item.name || item.label, "style")).filter(Boolean);
-    const keys = unique([...optionKeysFor(output, "style", mappings, styles), ...configured, ...scanned]);
-    return (keys.length ? keys : (allowFixed ? ["style1"] : [])).slice(0, 12);
-  }
-
-  function optionKeysFromConfig(output, group) {
-    const found = configOutputs().find((item) => safeOutputKey(item.key, "Output_main", 0) === output);
-    const options = objectOf(objectOf(found)[group]).options;
-    return (Array.isArray(options) ? options : [])
-      .map((item) => safeOptionKey(item.key || item.name || item.label, group))
-      .filter(Boolean);
+    const keys = unique([...optionKeysFor(output, "style", mappings, styles), ...scanned]);
+    return keys.slice(0, 12);
   }
 
   function existingStyleDimensions(output, key, styles) {
@@ -64,7 +58,6 @@
 
   Object.assign(globalThis, {
     renderStyleDimensionRows,
-    styleDimensionKeys,
-    optionKeysFromConfig
+    styleDimensionKeys
   });
 })();

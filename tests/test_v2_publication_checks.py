@@ -66,6 +66,16 @@ def test_color_samples_are_optional_only_after_manual_confirmation():
     assert _has_issue(result, check="colors", code="color_samples_pending")
 
 
+def test_dimension_tolerance_allows_stricter_upper_bound():
+    payload = complete_contract()
+    payload["outputs"][0]["style"]["options"][0]["dimensions"]["tolerance_mm"] = 0.001
+
+    result = validate_v2_template_configuration(payload)
+
+    assert result["can_publish"] is True
+    assert not _has_issue(result, check="dimensions", code="dimension_tolerance_invalid")
+
+
 def _break_output_sequence(payload):
     original = payload["outputs"][0]
     side_a = deepcopy(original)

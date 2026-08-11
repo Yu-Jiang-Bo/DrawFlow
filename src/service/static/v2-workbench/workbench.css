@@ -223,19 +223,23 @@ th { color: var(--v2-muted); background: #f7f9fc; font-size: 12px; font-weight: 
   min-width: 560px; padding: 10px; border-bottom: 1px solid var(--v2-border); align-items: end;
 }
 .structured-row.table-head { color: var(--v2-muted); background: #f7f9fc; font-size: 12px; font-weight: 700; }
+#outputConfigRows .structured-row.table-head,
 .structured-row.output-row {
-  grid-template-columns: minmax(130px, 1fr) minmax(130px, 1fr) minmax(120px, 0.9fr) repeat(3, minmax(110px, 0.9fr));
-  min-width: 760px;
+  grid-template-columns: minmax(120px, 1fr) minmax(140px, 1.15fr) minmax(120px, 0.9fr);
+  min-width: 0;
 }
+#outputConfigRows input, #outputConfigRows select,
+#styleDimensionRows input, #styleDimensionRows select { min-width: 0; }
 #fieldBindingRows .structured-row.table-head,
 .structured-row.field-binding-row { grid-template-columns: minmax(130px, 1fr) minmax(160px, 1.15fr) minmax(140px, 1fr) minmax(92px, 0.7fr); min-width: 560px; }
 .binding-status-cell, .binding-scope-cell {
   display: flex; align-items: center; min-height: 36px; padding: 0 8px; font-size: 12px; font-weight: 700;
 }
 .binding-scope-cell { color: var(--v2-muted); font-weight: 600; }
+#styleDimensionRows .structured-row.table-head,
 .structured-row.style-dimension-row {
-  grid-template-columns: minmax(130px, 1fr) minmax(110px, 0.8fr) repeat(2, minmax(110px, 0.8fr)) minmax(180px, 1.2fr);
-  min-width: 680px;
+  grid-template-columns: minmax(105px, 0.9fr) minmax(90px, 0.75fr) repeat(2, minmax(82px, 0.7fr)) minmax(150px, 1.15fr);
+  min-width: 0;
 }
 .row-add-button { margin: 10px; }
 .content-option-list { display: grid; gap: 12px; min-width: 0; }

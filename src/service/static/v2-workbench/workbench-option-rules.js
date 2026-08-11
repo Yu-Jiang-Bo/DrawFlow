@@ -9,7 +9,7 @@
     const current = items[state.optionRules.selectedIndex] || ruleOptionItems()[0] || null;
     renderOptionRuleList(items, current);
     renderOptionRuleControls(current);
-    renderContentOptionRows();
+    renderContentOptionRows(current);
     renderAssetBindingRows(current);
     renderCapabilityEvidence(current);
     renderRuleEvidencePanels(current);
@@ -77,7 +77,7 @@
   function ruleOptionItems() {
     const model = scanModel(state.scan, state.draft && state.draft.config);
     const outputs = configOutputs().length ? configOutputs() : inferredOutputs();
-    const mappings = configOptionMappings().length ? configOptionMappings() : inferredMappings();
+    const mappings = effectiveOptionMappings();
     const result = [];
     outputs.forEach((output, outputIndex) => {
       const fallback = outputIndex ? `Output_Side${String.fromCharCode(65 + outputIndex)}` : "Output_main";

@@ -72,10 +72,10 @@ def _validate_slot_dimensions(
 def _validate_fixed_tolerance(rule: Mapping[str, Any], path: str, issues: list[Dict[str, str]]) -> None:
     tolerance = rule.get("tolerance_mm")
     if tolerance is None:
-        add_issue(issues, path, "dimensions", V2_STATUS_PENDING, "dimension_tolerance_pending", "最终边界容差固定为 0.007mm，当前还未确认。")
+        add_issue(issues, path, "dimensions", V2_STATUS_PENDING, "dimension_tolerance_pending", "最终边界误差上限为 0.007mm，当前还未确认。")
         return
-    if abs(float(tolerance) - DIMENSION_TOLERANCE_MM) > 0.0000001:
-        add_issue(issues, path, "dimensions", V2_STATUS_BLOCKED, "dimension_tolerance_invalid", "最终边界容差必须固定为 0.007mm，不允许改成其他值。")
+    if float(tolerance) < 0 or float(tolerance) - DIMENSION_TOLERANCE_MM > 0.0000001:
+        add_issue(issues, path, "dimensions", V2_STATUS_BLOCKED, "dimension_tolerance_invalid", "最终边界误差上限最多 0.007mm，不允许超出。")
 
 
 def _validate_asset_ranges(contract: Mapping[str, Any], issues: list[Dict[str, str]]) -> None:

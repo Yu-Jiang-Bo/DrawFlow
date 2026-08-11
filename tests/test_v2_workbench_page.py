@@ -199,7 +199,7 @@ def test_v2_workbench_uses_controlled_business_inputs():
     assert 'type="file" accept=".ai"' in INDEX_HTML
     assert "Output_main" in INDEX_HTML
     assert "Design03" in INDEX_HTML
-    assert "F10" in INDEX_HTML
+    assert "fontOptionsFor" in JS
     assert "字段绑定" in INDEX_HTML
     assert "订单原值映射" in INDEX_HTML
     assert "/local/templates/scan" in JS

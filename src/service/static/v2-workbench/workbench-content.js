@@ -3,20 +3,31 @@
   const ctx = globalThis.DrawFlowV2WorkbenchContext;
   const { state, OPTION_PRESETS, PRESETS } = ctx;
 
-  function renderContentOptionRows() {
+  function renderContentOptionRows(selected) {
     const target = $("contentOptionRows");
     if (!target) return;
     const model = scanModel(state.scan, state.draft && state.draft.config);
     const outputs = configOutputs().length ? configOutputs() : inferredOutputs();
-    const mappings = configOptionMappings().length ? configOptionMappings() : inferredMappings();
+    const mappings = effectiveOptionMappings();
     target.replaceChildren();
-    outputs.forEach((output, index) => {
-      const fallback = index ? `Output_Side${String.fromCharCode(65 + index)}` : "Output_main";
-      const outputKey = safeOutputKey(output.key || output.name, fallback, index);
-      appendContentGroups(target, outputKey, "design", optionKeysFor(outputKey, "design", mappings, model.designs), model);
-      appendContentGroups(target, outputKey, "font", optionKeysFor(outputKey, "font", mappings, model.fonts), model);
-    });
+    if (selected) {
+      appendSelectedContentGroup(target, selected, model);
+    } else {
+      outputs.forEach((output, index) => {
+        const fallback = index ? `Output_Side${String.fromCharCode(65 + index)}` : "Output_main";
+        const outputKey = safeOutputKey(output.key || output.name, fallback, index);
+        appendContentGroups(target, outputKey, "design", optionKeysFor(outputKey, "design", mappings, model.designs), model);
+        appendContentGroups(target, outputKey, "font", optionKeysFor(outputKey, "font", mappings, model.fonts), model);
+      });
+    }
     if (!target.children.length) target.appendChild(emptyNode("等待 Design 或 F 选项。"));
+  }
+
+  function appendSelectedContentGroup(target, selected, model) {
+    const group = contentGroupName(selected.group);
+    const output = safeOutputKey(selected.output, "Output_main", 0);
+    const option = safeOptionKey(selected.key, group);
+    if (group && output && option) target.appendChild(contentOptionGroup(output, group, option, model));
   }
 
   function appendContentGroups(target, output, group, optionKeys, model) {
@@ -91,7 +102,7 @@
   }
 
   function collectContentOptionConfigs() {
-    const result = {};
+    const result = existingContentOptionConfigs();
     Array.from(document.querySelectorAll("#contentOptionRows .content-option-group")).forEach((groupRow) => {
       const group = contentGroupName(groupRow.dataset.group);
       const output = safeOutputKey(groupRow.dataset.output, "Output_main", 0);
@@ -108,6 +119,27 @@
       const option = safeOptionKey(slotRow.dataset.option, group);
       const key = contentOptionMapKey(output, group, option);
       if (result[key]) result[key].slots.push(slotConfigFromRow(slotRow));
+    });
+    return result;
+  }
+
+  function existingContentOptionConfigs() {
+    const result = {};
+    configOutputs().forEach((output, outputIndex) => {
+      const fallback = outputIndex ? `Output_Side${String.fromCharCode(65 + outputIndex)}` : "Output_main";
+      const outputKey = safeOutputKey(output.key || output.name, fallback, outputIndex);
+      ["design", "font"].forEach((group) => {
+        const groupConfig = objectOf(output[group]);
+        const options = Array.isArray(groupConfig.options) ? groupConfig.options : [];
+        options.forEach((option) => {
+          const key = safeOptionKey(option.key || option.name || option.label, group);
+          if (!outputKey || !key) return;
+          result[contentOptionMapKey(outputKey, group, key)] = {
+            content_preset: safeOptionPreset(option.content_preset, "direct_text"),
+            slots: Array.isArray(option.slots) ? controlledSlots(option.slots) : []
+          };
+        });
+      });
     });
     return result;
   }
@@ -151,14 +183,17 @@
     });
   }
 
-  function contentOptionPreset(content, output, group, option) {
+  function contentOptionPreset(content, output, group, option, model) {
     const existing = content[contentOptionMapKey(output, group, option)];
-    return existing ? existing.content_preset : existingOptionPreset(output, group, option);
+    if (existing) return existing.content_preset;
+    const found = findConfigOption(output, group, option);
+    if (OPTION_PRESETS.includes(found.content_preset)) return found.content_preset;
+    return recommendedOptionPreset(output, group, option, model || scanModel(state.scan, state.draft && state.draft.config));
   }
 
-  function contentOptionSlots(content, output, group, option, fallbackSlots) {
+  function contentOptionSlots(content, output, group, option, fallbackSlots, model) {
     const existing = content[contentOptionMapKey(output, group, option)];
-    return existing && existing.slots.length ? existing.slots : controlledSlots(existingOptionSlots(output, group, option, fallbackSlots));
+    return existing && existing.slots.length ? existing.slots : controlledSlots(existingOptionSlots(output, group, option, fallbackSlots, model));
   }
 
   function existingOptionPreset(output, group, option) {
@@ -166,9 +201,14 @@
     return safeOptionPreset(found.content_preset, "direct_text");
   }
 
-  function existingOptionSlots(output, group, option, fallbackSlots) {
+  function existingOptionSlots(output, group, option, fallbackSlots, model) {
     const found = findConfigOption(output, group, option);
-    return Array.isArray(found.slots) && found.slots.length ? found.slots : scopedScanItemsFor(output, fallbackSlots);
+    if (Array.isArray(found.slots) && found.slots.length) return found.slots;
+    if (model) {
+      const scanned = scannedOptionSlots(output, group === "design" ? model.designs : model.fonts, group, option);
+      if (scanned.length) return scanned;
+    }
+    return scopedOptionItemsFor(output, group, option, fallbackSlots);
   }
 
   function findConfigOption(output, group, option) {
@@ -181,7 +221,7 @@
   function contentSlotsFor(output, group, optionKey, model, existing) {
     if (Array.isArray(existing.slots) && existing.slots.length) return controlledSlots(existing.slots);
     const scanned = scannedOptionSlots(output, group === "design" ? model.designs : model.fonts, group, optionKey);
-    const fallbackSlots = scopedScanItemsFor(output, model.slots);
+    const fallbackSlots = scopedOptionItemsFor(output, group, optionKey, model.slots);
     return controlledSlots(scanned.length ? scanned : fallbackSlots);
   }
 
@@ -220,6 +260,24 @@
 
   function contentGroupName(value) {
     return ["design", "font"].includes(value) ? value : "";
+  }
+
+  function scopedOptionItemsFor(output, group, option, scanItems) {
+    const scoped = scopedScanItemsFor(output, Array.isArray(scanItems) ? scanItems : []);
+    const safeGroup = contentGroupName(group);
+    const safeOption = safeOptionKey(option, safeGroup);
+    const tagged = scoped.filter((item) => optionScopeValue(item));
+    if (!tagged.length) return scoped;
+    return tagged.filter((item) => {
+      const itemGroup = cleanText(item.group || item.option_group || item.parent_group || item.parentGroup);
+      const groupMatches = !itemGroup || itemGroup === safeGroup;
+      return groupMatches && safeOptionKey(optionScopeValue(item), safeGroup) === safeOption;
+    });
+  }
+
+  function optionScopeValue(item) {
+    const data = objectOf(item);
+    return cleanText(data.option || data.option_key || data.optionKey || data.parent_option || data.parentOption);
   }
 
   function groupLabel(group) {
@@ -268,9 +326,11 @@
 
   Object.assign(globalThis, {
     renderContentOptionRows,
+    appendSelectedContentGroup,
     contentOptionGroup,
     contentSlotRow,
     collectContentOptionConfigs,
+    existingContentOptionConfigs,
     slotConfigFromRow,
     controlledSlots,
     contentOptionPreset,
@@ -283,6 +343,8 @@
     presetOptions,
     slotKeyFor,
     contentOptionMapKey,
-    contentGroupName
+    contentGroupName,
+    scopedOptionItemsFor,
+    optionScopeValue
   });
 })();

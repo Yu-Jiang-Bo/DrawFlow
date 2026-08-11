@@ -517,6 +517,141 @@ def test_v2_workbench_field_bindings_do_not_list_each_design_option():
     )
 
 
+def test_v2_workbench_single_output_does_not_invent_style_or_font_fields():
+    run_node(
+        r"""
+        (async () => {
+          async function fakeFetch(url, options = {}) {
+            const textUrl = String(url);
+            if (textUrl === "/api/v2/templates") return response({ templates: [{ template_id: "V2SIMPLE", name: "Simple Demo" }] });
+            if (textUrl.endsWith("/draft")) {
+              return response({ draft: {
+                metadata: { template_id: "V2SIMPLE", name: "Simple Demo", shop_name: "" },
+                manifest: { draft_revision: "d0001" },
+                config: {},
+                scan: {
+                  "$schema": "custom-renderer/v2-template-scan",
+                  outputs: [{
+                    key: "Output_main",
+                    design: { options: [{ key: "Design01", slots: [{ key: "slot_name" }, { key: "slot_name2" }] }] },
+                    font: { options: [] },
+                    style: { options: [] },
+                    summary: { designs: 1, fonts: 0, styles: 0, slots: 2, anchors: 0, tails: 0, assets: 0, fixed_objects: 0 }
+                  }]
+                }
+              }});
+            }
+            if (textUrl.endsWith("/validate")) return response({ validation: { checks: {} } });
+            return response({});
+          }
+          const app = createApp(fakeFetch);
+          await flush();
+          app.elements.templateList.children[0].dispatch("click");
+          await flush();
+          global.setWorkbenchStage("structure");
+          await flush();
+
+          const outputRows = document.querySelectorAll("#outputConfigRows .output-row");
+          assert.strictEqual(outputRows.length, 1);
+          const outputRow = outputRows[0];
+          assert.strictEqual(outputRow.querySelector('[data-field="output-component"]').value, "main");
+          assert.strictEqual(outputRow.querySelector('[data-field="output-style-field"]'), null);
+          assert.strictEqual(outputRow.querySelector('[data-field="output-design-field"]'), null);
+          assert.strictEqual(outputRow.querySelector('[data-field="output-font-field"]'), null);
+          assert.strictEqual(document.querySelectorAll("#styleDimensionRows .style-dimension-row").length, 0);
+
+          const config = buildControlledConfig();
+          assert.strictEqual(config.outputs[0].style.field, "");
+          assert.strictEqual(config.outputs[0].font.field, "");
+          assert.strictEqual(config.outputs[0].design.field, "design");
+          assert.strictEqual(config.outputs[0].style.options.length, 0);
+          assert.strictEqual(config.outputs[0].font.options.length, 0);
+          assert.strictEqual(config.outputs[0].design.options[0].key, "Design01");
+        })().catch((error) => { console.error(error); process.exit(1); });
+        """
+    )
+
+
+def test_v2_workbench_stale_style_font_config_does_not_pollute_scan_structure():
+    run_node(
+        r"""
+        (async () => {
+          async function fakeFetch(url, options = {}) {
+            const textUrl = String(url);
+            if (textUrl === "/api/v2/templates") return response({ templates: [{ template_id: "V2STALE", name: "Stale Demo" }] });
+            if (textUrl.endsWith("/draft")) {
+              return response({ draft: {
+                metadata: { template_id: "V2STALE", name: "Stale Demo", shop_name: "" },
+                manifest: { draft_revision: "d0001" },
+                config: {
+                  field_bindings: { name: "Name", design: "Design", style: "Size", font: "Font" },
+                  option_mappings: [
+                    { field: "style", source_value: "small", target: "style1", output: "Output_main", group: "style" },
+                    { field: "font", source_value: "F10", target: "F10", output: "Output_main", group: "font" }
+                  ],
+                  outputs: [{
+                    key: "Output_main",
+                    display_name: "Old Main",
+                    component_key: "main",
+                    style: { field: "style", options: [{ key: "style1", dimensions: { mode: "fixed", width_mm: 80, height_mm: 50, tolerance_mm: 0.007 } }] },
+                    design: { field: "design", options: [] },
+                    font: { field: "font", options: [{ key: "F10", slots: [{ key: "slot_name", source_field: "name" }] }] }
+                  }]
+                },
+                scan: {
+                  "$schema": "custom-renderer/v2-template-scan",
+                  outputs: [{
+                    key: "Output_main",
+                    design: { options: [{ key: "Design01", slots: [{ key: "slot_name" }, { key: "slot_name2" }] }] },
+                    font: { options: [] },
+                    style: { options: [] },
+                    summary: { designs: 1, fonts: 0, styles: 0, slots: 2, anchors: 0, tails: 0, assets: 0, fixed_objects: 0 }
+                  }]
+                }
+              }});
+            }
+            if (textUrl.endsWith("/validate")) return response({ validation: { checks: {} } });
+            return response({});
+          }
+          const app = createApp(fakeFetch);
+          await flush();
+          app.elements.templateList.children[0].dispatch("click");
+          await flush();
+          global.setWorkbenchStage("structure");
+          await flush();
+
+          const model = scanModel(global.DrawFlowV2WorkbenchContext.state.scan, global.DrawFlowV2WorkbenchContext.state.draft.config);
+          assert.strictEqual(model.styles.length, 0, "scan model must not include stale style config");
+          assert.strictEqual(model.fonts.length, 0, "scan model must not include stale font config");
+          assert(!app.elements.structureTree.textContent.includes("style1"));
+          assert(!app.elements.structureTree.textContent.includes("F10"));
+          assert.strictEqual(document.querySelectorAll("#styleDimensionRows .style-dimension-row").length, 0, "style dimensions must not render stale config rows");
+
+          const fields = document.querySelectorAll("#fieldBindingRows .field-binding-row")
+            .map((row) => row.querySelector('[data-field="binding-field"]').value);
+          assert(fields.includes("design"));
+          assert(!fields.includes("style"));
+          assert(!fields.includes("font"));
+          const mappingGroups = document.querySelectorAll("#optionMappingRows .option-mapping-row")
+            .map((row) => row.querySelector('[data-field="mapping-group"]').value);
+          assert(mappingGroups.includes("design"));
+          assert(!mappingGroups.includes("style"));
+          assert(!mappingGroups.includes("font"));
+
+          const config = buildControlledConfig();
+          assert.strictEqual(config.outputs[0].style.field, "");
+          assert.strictEqual(config.outputs[0].font.field, "");
+          assert.strictEqual(config.outputs[0].style.options.length, 0, "saved config must drop stale style options");
+          assert.strictEqual(config.outputs[0].font.options.length, 0, "saved config must drop stale font options");
+          assert.strictEqual(config.field_bindings.style, undefined);
+          assert.strictEqual(config.field_bindings.font, undefined);
+          assert.strictEqual(config.field_bindings.design, "Design");
+          assert(!config.option_mappings.some((item) => item.group === "style" || item.group === "font"));
+        })().catch((error) => { console.error(error); process.exit(1); });
+        """
+    )
+
+
 def test_v2_workbench_inferred_option_mappings_keep_output_scope():
     run_node(
         r"""
@@ -689,6 +824,89 @@ def test_v2_workbench_keeps_same_slot_independent_per_design_and_font_option():
     )
 
 
+def test_v2_workbench_rules_stage_shows_only_selected_option_content():
+    run_node(
+        r"""
+        (async () => {
+          async function fakeFetch(url, options = {}) {
+            const textUrl = String(url);
+            if (textUrl === "/api/v2/templates") return response({ templates: [{ template_id: "V2SELECTED", name: "Selected Demo" }] });
+            if (textUrl.endsWith("/draft")) {
+              return response({ draft: {
+                metadata: { template_id: "V2SELECTED", name: "Selected Demo", shop_name: "" },
+                manifest: { draft_revision: "d0001" },
+                scan: {
+                  "$schema": "custom-renderer/v2-template-scan",
+                  outputs: [{
+                    key: "Output_main",
+                    design: { options: [
+                      {
+                        key: "Design01",
+                        slots: [{ key: "slot_name", source_field: "name" }],
+                        assets: [{ asset_key: "initial_top", slot: "slot_name", supported_values: ["A"] }]
+                      },
+                      {
+                        key: "Design02",
+                        slots: [{ key: "slot_title", source_field: "title" }, { key: "slot_subtitle", source_field: "subtitle" }],
+                        assets: [{ asset_key: "badge", slot: "slot_title", supported_values: ["B"] }, { asset_key: "ornament", slot: "slot_subtitle", supported_values: ["C"] }]
+                      }
+                    ] },
+                    font: { options: [] },
+                    style: { options: [] },
+                    summary: { designs: 2, fonts: 0, styles: 0, slots: 2, anchors: 0, tails: 0, assets: 2, fixed_objects: 0 }
+                  }]
+                },
+                config: {
+                  outputs: [{
+                    key: "Output_main",
+                    display_name: "主效果图",
+                    component_key: "main",
+                    style: { field: "", options: [] },
+                    design: { field: "design", options: [] },
+                    font: { field: "", options: [] }
+                  }]
+                }
+              }});
+            }
+            if (textUrl.endsWith("/validate")) return response({ validation: { checks: {} } });
+            return response({});
+          }
+          const app = createApp(fakeFetch);
+          await flush();
+          app.elements.templateList.children[0].dispatch("click");
+          await flush();
+          global.setWorkbenchStage("rules");
+          await flush();
+
+          let groups = document.querySelectorAll("#contentOptionRows .content-option-group");
+          assert.strictEqual(groups.length, 1);
+          assert.strictEqual(groups[0].dataset.option, "Design01");
+          assert(app.elements.contentOptionRows.textContent.includes("slot_name"));
+          assert(!app.elements.contentOptionRows.textContent.includes("Design02"));
+          assert(!app.elements.contentOptionRows.textContent.includes("slot_title"));
+          assert(app.elements.assetBindingRows.textContent.includes("initial_top"));
+          assert(!app.elements.assetBindingRows.textContent.includes("badge"));
+          assert(app.elements.capabilityEvidenceRows.textContent.includes("1 个可控槽位"));
+          assert(app.elements.capabilityEvidenceRows.textContent.includes("1 个可替换资产"));
+
+          global.selectRuleOption(1);
+          await flush();
+
+          groups = document.querySelectorAll("#contentOptionRows .content-option-group");
+          assert.strictEqual(groups.length, 1);
+          assert.strictEqual(groups[0].dataset.option, "Design02");
+          assert(!app.elements.contentOptionRows.textContent.includes("Design01"));
+          assert(app.elements.contentOptionRows.textContent.includes("slot_title"));
+          assert(!app.elements.contentOptionRows.textContent.includes("slot_name"));
+          assert(app.elements.assetBindingRows.textContent.includes("badge"));
+          assert(!app.elements.assetBindingRows.textContent.includes("initial_top"));
+          assert(app.elements.capabilityEvidenceRows.textContent.includes("2 个可控槽位"));
+          assert(app.elements.capabilityEvidenceRows.textContent.includes("2 个可替换资产"));
+        })().catch((error) => { console.error(error); process.exit(1); });
+        """
+    )
+
+
 def test_v2_workbench_roundtrips_multi_output_dimensions_assets_tails_fonts_colors():
     run_node(
         r"""
@@ -781,6 +999,8 @@ def test_v2_workbench_roundtrips_multi_output_dimensions_assets_tails_fonts_colo
           assert(draftSaveBody);
           const sideA = draftSaveBody.config.outputs.find((output) => output.key === "Output_SideA");
           const sideB = draftSaveBody.config.outputs.find((output) => output.key === "Output_SideB");
+          assert.strictEqual(sideA.style.field, "style");
+          assert.strictEqual(sideB.font.field, "font");
           assert.strictEqual(sideA.style.options[0].dimensions.tolerance_mm, 0.007);
           const option = sideA.design.options.find((item) => item.key === "Design03");
           assert.deepStrictEqual(option.assets[0].supported_values, ["A", "B", "C"]);

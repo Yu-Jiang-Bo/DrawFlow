@@ -14,7 +14,7 @@
     const found = findConfigOption(item.output, item.group, item.key);
     const configured = Array.isArray(found.assets) ? found.assets : [];
     const scanned = scanModel(state.scan, state.draft && state.draft.config).assets;
-    const source = configured.length ? configured : scopedScanItemsFor(item.output, scanned);
+    const source = configured.length ? configured : scopedOptionItemsFor(item.output, item.group, item.key, scanned);
     if (!source.length) {
       target.appendChild(emptyNode("等待 Assets 扫描或在槽位行填写素材键。"));
       return;
@@ -36,10 +36,12 @@
     if (!target) return;
     target.replaceChildren();
     const model = scanModel(state.scan, state.draft && state.draft.config);
+    const slots = item ? selectedOptionSlotsForEvidence(item, model) : model.slots;
+    const assets = item && item.group === "design" ? selectedOptionAssetsForEvidence(item, model) : [];
     [
       ["Output", item ? item.output : "Output_main"],
-      ["槽位", `${model.slots.length || 1} 个可控槽位`],
-      ["资产", `${model.assets.length} 个可替换资产`],
+      ["槽位", `${slots.length || 1} 个可控槽位`],
+      ["资产", `${assets.length} 个可替换资产`],
       ["状态", item ? statusLabel(item.status) : "等待选择"]
     ].forEach(([label, value]) => target.appendChild(evidenceRow(label, value)));
   }
@@ -113,7 +115,7 @@
       if (!rule.width_mm || !rule.height_mm) return [];
       return [{
         label: `${objectOf(style).key || "style"} · 最终边界`,
-        value: `${rule.width_mm} x ${rule.height_mm} mm · X/Y 独立 · 容差 ${rule.tolerance_mm || 0.007}mm`
+        value: `${rule.width_mm} x ${rule.height_mm} mm · 误差上限 ${rule.tolerance_mm || 0.007}mm，禁止超出`
       }];
     });
     const slots = Array.isArray(found.slots) ? found.slots : [];
@@ -122,7 +124,7 @@
       if (!rule.width_mm || !rule.height_mm) return [];
       return [{
         label: slot.key || "slot",
-        value: `${rule.width_mm} x ${rule.height_mm} mm · X/Y 独立 · 容差 ${rule.tolerance_mm || 0.007}mm`
+        value: `${rule.width_mm} x ${rule.height_mm} mm · 误差上限 ${rule.tolerance_mm || 0.007}mm，禁止超出`
       }];
     });
     return [...styleRules, ...slotRules];
@@ -132,9 +134,35 @@
     const model = scanModel(state.scan, state.draft && state.draft.config);
     const found = item ? findConfigOption(item.output, item.group, item.key) : {};
     const optionFonts = Array.isArray(found.font_dependencies) ? found.font_dependencies : [];
-    const slotFonts = (Array.isArray(found.slots) ? found.slots : []).flatMap((slot) => Array.isArray(slot.font_dependencies) ? slot.font_dependencies : []);
-    const scanned = item && item.group === "font" ? [item.key] : scopedScanItemsFor(item && item.output, model.fonts).map((font) => cleanText(font.font || font.name || font.key)).filter(Boolean);
+    const slots = item ? selectedOptionSlotsForEvidence(item, model) : [];
+    const slotFonts = slots.flatMap((slot) => Array.isArray(slot.font_dependencies) ? slot.font_dependencies : []);
+    const scannedOption = item ? selectedScanOptionForEvidence(item, model) : {};
+    const scannedOptionFonts = [scannedOption.font_name, scannedOption.font].map(cleanText).filter(Boolean);
+    const scanned = item && item.group === "font" ? [item.key] : scannedOptionFonts;
     return unique([...optionFonts, ...slotFonts, ...scanned]);
+  }
+
+  function selectedOptionSlotsForEvidence(item, model) {
+    const found = findConfigOption(item.output, item.group, item.key);
+    if (Array.isArray(found.slots) && found.slots.length) return found.slots;
+    const scannedOption = selectedScanOptionForEvidence(item, model);
+    if (Array.isArray(scannedOption.slots) && scannedOption.slots.length) return scannedOption.slots;
+    return scopedOptionItemsFor(item.output, item.group, item.key, model.slots);
+  }
+
+  function selectedOptionAssetsForEvidence(item, model) {
+    const found = findConfigOption(item.output, item.group, item.key);
+    if (Array.isArray(found.assets) && found.assets.length) return found.assets;
+    const scannedOption = selectedScanOptionForEvidence(item, model);
+    if (Array.isArray(scannedOption.assets) && scannedOption.assets.length) return scannedOption.assets;
+    return scopedOptionItemsFor(item.output, item.group, item.key, model.assets);
+  }
+
+  function selectedScanOptionForEvidence(item, model) {
+    const source = item.group === "font" ? model.fonts : model.designs;
+    return objectOf(scopedScanItemsFor(item.output, source).find((option) => (
+      safeOptionKey(option.key || option.name || option.label, item.group) === item.key
+    )));
   }
 
   function supportedValuesLabel(asset) {
