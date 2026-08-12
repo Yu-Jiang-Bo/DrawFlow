@@ -32,7 +32,10 @@
   function renderOptionRuleControls(item) {
     setText("selectedOptionTitle", item ? `${item.output} · ${item.label}` : "选择一个 Design 或 F 选项");
     setText("selectedOptionPendingBadge", item ? statusLabel(item.status) : "待处理");
-    fillSelect("optionContentPreset", presetOptions(ctx.OPTION_PRESETS), item ? item.preset : "direct_text");
+    const options = item && typeof contentOptionPresetOptions === "function"
+      ? contentOptionPresetOptions(item.output, item.group, item.key)
+      : presetOptions(ctx.OPTION_PRESETS);
+    fillSelect("optionContentPreset", options, item ? item.preset : "direct_text");
   }
 
   function optionRuleNode(item, index, current) {
@@ -152,7 +155,9 @@
   function recommendedOptionPreset(output, group, optionKey, model) {
     const source = group === "design" ? model.designs : model.fonts;
     const option = objectOf(scopedScanItemsFor(output, source).find((item) => safeOptionKey(item.key || item.name || item.label, group) === optionKey));
-    return safeOptionPreset(option.content_preset || option.recommended_preset || option.preset, "direct_text");
+    return typeof recommendedPresetForOption === "function"
+      ? recommendedPresetForOption(option)
+      : safeOptionPreset(option.content_preset || option.recommended_preset || option.preset, "direct_text");
   }
 
   function fillSelect(id, options, value) {
@@ -165,7 +170,8 @@
       option.textContent = label;
       select.appendChild(option);
     });
-    select.value = value || (options[0] && options[0][0]) || "";
+    const selected = options.some(([optionValue]) => optionValue === value) ? value : ((options[0] && options[0][0]) || "");
+    select.value = selected;
   }
 
   function syncPendingOnlyButton() {

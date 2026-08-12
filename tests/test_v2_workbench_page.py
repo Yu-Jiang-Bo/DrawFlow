@@ -156,6 +156,7 @@ def test_v2_workbench_has_independent_rules_stage_contract():
         "assetBindingRows",
         "templateCapabilityPanel",
         "capabilityEvidenceRows",
+        "colorRuleTitle",
         "colorRuleRows",
         "dimensionRuleRows",
         "fontDependencyRows",
@@ -217,6 +218,10 @@ def test_v2_workbench_uses_controlled_business_inputs():
     assert "slot-tail-first" in JS
     assert "slot-font-dependencies" in JS
     assert "slot-color-binding" in JS
+    assert "尾巴样本" in JS
+    assert "尾巴文字（已识别）" in JS
+    assert "displayDimension" in JS
+    assert "readonlyRawValue" in JS
     assert "output-component" in JS
     assert "component_key" in JS
     assert "替换文本" in JS
@@ -231,7 +236,7 @@ def test_v2_workbench_uses_controlled_business_inputs():
 
 def test_v2_workbench_does_not_expose_forbidden_ui_concepts():
     combined = "\n".join([INDEX_HTML, CSS, JS])
-    for text in ["磁盘使用量", "JSON 编辑", "自然语言规则", "JSX"]:
+    for text in ["磁盘使用量", "JSON 编辑", "自然语言规则", "JSX", "Template/Colors"]:
         assert text not in combined
     assert 'id="publishVersionBtn" type="button" disabled' in INDEX_HTML
 

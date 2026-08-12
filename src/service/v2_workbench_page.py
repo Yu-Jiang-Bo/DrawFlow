@@ -304,7 +304,7 @@ INDEX_HTML = """<!doctype html>
           <div class="pane-body" id="templateCapabilityPanel">
             <div class="capability-tags"><span>双素材库</span><span>可替换文本</span><span>尺寸边界</span></div>
             <div class="capability-evidence" id="capabilityEvidenceRows"></div>
-            <h4>颜色规则</h4>
+            <h4 id="colorRuleTitle">颜色规则</h4>
             <div class="capability-evidence" id="colorRuleRows"></div>
             <h4>尺寸边界</h4>
             <div class="capability-evidence" id="dimensionRuleRows"></div>

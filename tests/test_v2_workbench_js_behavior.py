@@ -17,7 +17,7 @@ const ids = [
   "publishBlockerText", "draftSaveStatusText", "scanRunningOverlay", "scanRunningMessage", "scanFailedOverlay", "scanFailedMessage", "retryScanBtn", "closeScanFailedBtn",
   "optionRuleSearch", "optionRuleList", "optionRuleStats", "optionRuleCount", "pendingOnlyBtn", "selectedOptionTitle",
   "selectedOptionPendingBadge", "optionContentPreset", "assetBindingRows", "templateCapabilityPanel",
-  "capabilityEvidenceRows", "colorRuleRows", "dimensionRuleRows", "fontDependencyRows", "confirmStageBtn", "saveAndNextOptionBtn", "rerunTrialRenderBtn", "preflightFailedOverlay", "preflightFailedMessage",
+  "capabilityEvidenceRows", "colorRuleTitle", "colorRuleRows", "dimensionRuleRows", "fontDependencyRows", "confirmStageBtn", "saveAndNextOptionBtn", "rerunTrialRenderBtn", "preflightFailedOverlay", "preflightFailedMessage",
   "preflightIssueList", "closePreflightFailedBtn", "returnToSampleDataBtn", "previewSampleRows", "previewValidationRows"
 ];
 
@@ -1063,9 +1063,8 @@ def test_v2_workbench_rules_prefill_anchor_dimensions_and_preserve_tail_proof():
           assert.strictEqual(String(slot1.querySelector('[data-field="slot-height-mm"]').value), "7");
           assert.strictEqual(String(slot2.querySelector('[data-field="slot-width-mm"]').value), "28");
           assert.strictEqual(String(slot2.querySelector('[data-field="slot-height-mm"]').value), "6");
-          const tailLast = slot1.querySelector('[data-field="slot-tail-last"]');
-          assert.strictEqual(tailLast.value, "m");
-          assert.strictEqual(tailLast.readOnly, true);
+          assert(slot1.textContent.includes("尾字 m"));
+          assert.strictEqual(slot1.querySelector('[data-field="slot-tail-last"]'), null);
 
           const config = buildControlledConfig();
           const option = config.outputs[0].design.options.find((item) => item.key === "Design02");
@@ -1155,8 +1154,13 @@ def test_v2_workbench_rules_prefer_anchor_dimensions_over_saved_slot_dimensions(
           const slot = document.querySelectorAll("#contentOptionRows .content-slot-row").find((row) => row.dataset.option === "Design05" && row.dataset.slotKey === "slot_name");
           assert(slot);
           assert.strictEqual(slot.dataset.anchor, "anchor_name");
-          assert.strictEqual(String(slot.querySelector('[data-field="slot-width-mm"]').value), "150.231");
-          assert.strictEqual(String(slot.querySelector('[data-field="slot-height-mm"]').value), "47.231");
+          const width = slot.querySelector('[data-field="slot-width-mm"]');
+          const height = slot.querySelector('[data-field="slot-height-mm"]');
+          assert.strictEqual(String(width.value), "150");
+          assert.strictEqual(String(height.value), "47");
+          assert.strictEqual(width.dataset.rawValue, "150.231");
+          assert.strictEqual(height.dataset.rawValue, "47.231");
+          assert(width.title.includes("精确边界"));
 
           const config = buildControlledConfig();
           const savedSlot = config.outputs[0].design.options.find((item) => item.key === "Design05").slots[0];
@@ -1165,6 +1169,107 @@ def test_v2_workbench_rules_prefer_anchor_dimensions_over_saved_slot_dimensions(
           assert.strictEqual(savedSlot.dimension_rule.width_mm, 150.231);
           assert.strictEqual(savedSlot.dimension_rule.height_mm, 47.231);
         })().catch((error) => { console.error(error); process.exit(1); });
+        """
+    )
+
+
+def test_v2_workbench_reverts_unverified_tail_samples_to_safe_preset():
+    run_node(
+        r"""
+        (async () => {
+          async function fakeFetch(url, options = {}) {
+            const textUrl = String(url);
+            if (textUrl === "/api/v2/templates") return response({ templates: [{ template_id: "V2TAILHINT", name: "Tail Hint Demo" }] });
+            if (textUrl.endsWith("/draft")) {
+              return response({ draft: {
+                metadata: { template_id: "V2TAILHINT", name: "Tail Hint Demo", shop_name: "" },
+                manifest: { draft_revision: "d0001" },
+                scan: {
+                  "$schema": "custom-renderer/v2-template-scan",
+                  outputs: [{
+                    key: "Output_main",
+                    design: { options: [{
+                      key: "Design01",
+                      slots: [{ key: "slot_name", source_field: "name", tails: [{ key: "tail_name_last_m" }] }],
+                      tails: [{ key: "tail_name_last_m" }]
+                    }] },
+                    font: { options: [] },
+                    style: { options: [] },
+                    summary: { designs: 1, fonts: 0, styles: 0, slots: 1, anchors: 0, tails: 1, assets: 0, fixed_objects: 0 }
+                  }]
+                },
+                config: {
+                  field_bindings: { name: "Name", design: "Design" },
+                  outputs: [{
+                    key: "Output_main",
+                    display_name: "主效果图",
+                    component_key: "main",
+                    style: { field: "", options: [] },
+                    design: { field: "design", options: [{
+                      key: "Design01",
+                      content_preset: "tail_text",
+                      slots: [{ key: "slot_name", source_field: "name", preset: "tail_text" }]
+                    }] },
+                    font: { field: "", options: [] }
+                  }]
+                }
+              }});
+            }
+            if (textUrl.endsWith("/validate")) return response({ validation: { checks: {} } });
+            return response({});
+          }
+          const app = createApp(fakeFetch);
+          await flush();
+          app.elements.templateList.children[0].dispatch("click");
+          await flush();
+          global.setWorkbenchStage("rules");
+          await flush();
+
+          const group = document.querySelectorAll("#contentOptionRows .content-option-group")[0];
+          const slot = document.querySelectorAll("#contentOptionRows .content-slot-row")[0];
+          const slotPreset = slot.querySelector('[data-field="slot-preset"]');
+          const directOption = app.elements.optionContentPreset.children.find((option) => option.value === "direct_text");
+          assert.strictEqual(group.dataset.contentPreset, "direct_text");
+          assert(group.textContent.includes("尾巴样式"));
+          assert(group.textContent.includes("无需手动填写样本"));
+          assert.strictEqual(slotPreset.value, "direct_text");
+          assert(slotPreset.children.find((option) => option.value === "direct_text").textContent.includes("尾巴文字（已识别）"));
+          assert(directOption.textContent.includes("尾巴文字（已识别）"));
+          assert.strictEqual(slotPreset.children.find((option) => option.value === "tail_text"), undefined);
+          assert.strictEqual(app.elements.optionContentPreset.children.find((option) => option.value === "tail_text"), undefined);
+          assert(slot.textContent.includes("尾字 m"));
+          assert.strictEqual(slot.querySelector('[data-field="slot-tail-last"]'), null);
+          assert.strictEqual(slot.querySelector('[data-field="slot-color-binding"]'), null);
+          assert.strictEqual(app.elements.colorRuleRows.hidden, true);
+          assert.strictEqual(app.elements.colorRuleTitle.hidden, true);
+
+          const saved = buildControlledConfig().outputs[0].design.options[0];
+          assert.strictEqual(saved.content_preset, "direct_text");
+          assert.strictEqual(saved.slots[0].preset, "direct_text");
+          assert.deepStrictEqual(saved.slots[0].tails, [{ key: "tail_name_last_m", position: "last", sample: "m" }]);
+        })().catch((error) => { console.error(error); process.exit(1); });
+        """
+    )
+
+
+def test_v2_workbench_requires_complete_valid_tail_proof_before_recommending_tail_text():
+    run_node(
+        r"""
+        createApp(async () => response({ templates: [] }));
+        const partialGlyphMap = { a: 57344 };
+        const completeGlyphMap = "abcdefghijklmnopqrstuvwxyz".split("").reduce((result, letter, index) => {
+          result[letter] = 57344 + index;
+          return result;
+        }, {});
+        const optionWith = (tail) => ({
+          recommended_preset: "direct_text",
+          slots: [{ key: "slot_name", tails: [tail] }]
+        });
+
+        assert.strictEqual(global.recommendedPresetForOption(optionWith({ key: "tail_name_last_m", glyph_map: partialGlyphMap })), "direct_text");
+        assert.strictEqual(global.recommendedPresetForOption(optionWith({ key: "tail_name_last_m", pua_base: 1 })), "direct_text");
+        assert.strictEqual(global.recommendedPresetForOption(optionWith({ key: "tail_name_last_m", pua_base: 57344 })), "tail_text");
+        assert.strictEqual(global.recommendedPresetForOption(optionWith({ key: "tail_name_last_m", glyph_map: completeGlyphMap })), "tail_text");
         """
     )
 
@@ -1403,8 +1508,8 @@ def test_v2_workbench_roundtrips_multi_output_dimensions_assets_tails_fonts_colo
           assert.strictEqual(String(styleRow.querySelector('[data-field="style-width-mm"]').value), "80");
           const designSlot = document.querySelectorAll("#contentOptionRows .content-slot-row").find((row) => row.dataset.output === "Output_SideA" && row.dataset.option === "Design03" && row.dataset.slotKey === "slot_name");
           assert(designSlot);
-          assert.strictEqual(designSlot.querySelector('[data-field="slot-tail-first"]').value, "a");
-          assert.strictEqual(designSlot.querySelector('[data-field="slot-tail-first"]').readOnly, true);
+          assert(designSlot.textContent.includes("首字 a"));
+          assert.strictEqual(designSlot.querySelector('[data-field="slot-tail-first"]'), null);
           assert.strictEqual(designSlot.querySelector('[data-field="slot-width-mm"]').readOnly, true);
           assert.strictEqual(designSlot.querySelector('[data-field="slot-height-mm"]').readOnly, true);
           assert.strictEqual(designSlot.querySelector('[data-field="slot-font-dependencies"]').value, "Cinzel Decorative");
@@ -1436,7 +1541,7 @@ def test_v2_workbench_roundtrips_multi_output_dimensions_assets_tails_fonts_colo
 
           const reloadedSlot = document.querySelectorAll("#contentOptionRows .content-slot-row").find((row) => row.dataset.output === "Output_SideA" && row.dataset.option === "Design03" && row.dataset.slotKey === "slot_name");
           assert(reloadedSlot);
-          assert.strictEqual(reloadedSlot.querySelector('[data-field="slot-tail-first"]').value, "a");
+          assert(reloadedSlot.textContent.includes("首字 a"));
           assert.strictEqual(String(reloadedSlot.querySelector('[data-field="slot-width-mm"]').value), "42");
         })().catch((error) => { console.error(error); process.exit(1); });
         """
@@ -1482,7 +1587,7 @@ def test_v2_workbench_scopes_same_design_slots_by_output():
                     preset: "tail_text",
                     asset_key: "back_letters",
                     dimension_rule: { mode: "slot", width_mm: 44, height_mm: 11, tolerance_mm: 0.007 },
-                    tails: [{ key: "tail_back_last_z", position: "last", sample: "z" }]
+                    tails: [{ key: "tail_back_last_z", position: "last", sample: "z", pua_base: 57344 }]
                   }]
                 }
               ],
@@ -1542,7 +1647,7 @@ def test_v2_workbench_scopes_same_design_slots_by_output():
           assert(backSlot);
           assert.strictEqual(frontSlot.querySelector('[data-field="slot-asset-key"]').value, "front_letters");
           assert.strictEqual(backSlot.querySelector('[data-field="slot-asset-key"]').value, "back_letters");
-          assert.strictEqual(backSlot.querySelector('[data-field="slot-tail-last"]').value, "z");
+          assert(backSlot.textContent.includes("尾字 z"));
 
           global.setWorkbenchStage("rules");
           await flush();
@@ -1566,7 +1671,7 @@ def test_v2_workbench_scopes_same_design_slots_by_output():
           assert.deepStrictEqual(frontOption.assets[0].supported_values, ["A", "B"]);
           assert.deepStrictEqual(backOption.assets[0].supported_values, ["X", "Z"]);
           assert.strictEqual(frontOption.slots[0].color_binding, "front_color");
-          assert.deepStrictEqual(backOption.slots[0].tails, [{ key: "tail_back_last_z", position: "last", sample: "z" }]);
+          assert.deepStrictEqual(backOption.slots[0].tails, [{ key: "tail_back_last_z", position: "last", sample: "z", pua_base: 57344 }]);
         })().catch((error) => { console.error(error); process.exit(1); });
         """
     )

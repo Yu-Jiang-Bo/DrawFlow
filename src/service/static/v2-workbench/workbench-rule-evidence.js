@@ -47,7 +47,10 @@
   }
 
   function renderRuleEvidencePanels(item) {
-    renderColorRuleRows();
+    const showColorRules = typeof hasActiveColorRules === "function" && hasActiveColorRules();
+    setHidden("colorRuleTitle", !showColorRules);
+    setHidden("colorRuleRows", !showColorRules);
+    if (showColorRules) renderColorRuleRows();
     renderDimensionRuleRows(item);
     renderFontDependencyRows(item);
   }
@@ -58,7 +61,7 @@
     target.replaceChildren();
     const colors = scanModel(state.scan, state.draft && state.draft.config).colors;
     if (!colors.length) {
-      target.appendChild(actionEvidenceRow("无可配置颜色样本", "Template/Colors 未扫描到色块，可确认为仅做生产颜色标注。", "确认无需颜色规则", () => {
+      target.appendChild(actionEvidenceRow("无可配置颜色样本", "未扫描到可替换颜色样本，可确认为仅做生产颜色标注。", "确认无需颜色规则", () => {
         setManualCheck("colors", "confirmed", "无可配置颜色项，仅由公共输出层处理颜色标注");
       }));
       return;
@@ -113,7 +116,7 @@
   }
 
   function syncedSlotPreset(row, slotSelect, optionPreset) {
-    const tails = [
+    const tails = Array.isArray(row.__tailConfigs) ? row.__tailConfigs : [
       rowValue(row, "slot-tail-first"),
       rowValue(row, "slot-tail-last")
     ].filter(Boolean).map((sample, index) => ({ key: `tail_sync_${index}_${sample}`, position: index ? "last" : "first", sample }));
@@ -134,7 +137,7 @@
       if (!rule.width_mm || !rule.height_mm) return [];
       return [{
         label: `${objectOf(style).key || "style"} · 最终边界`,
-        value: `${rule.width_mm} x ${rule.height_mm} mm · 误差上限 ${rule.tolerance_mm || 0.007}mm，禁止超出`
+        value: `${displayDimensionValue(rule.width_mm)} × ${displayDimensionValue(rule.height_mm)} mm · 误差上限 ${rule.tolerance_mm || 0.007}mm，禁止超出`
       }];
     });
     const slots = Array.isArray(found.slots) ? found.slots : [];
@@ -143,7 +146,7 @@
       if (!rule.width_mm || !rule.height_mm) return [];
       return [{
         label: slot.key || "slot",
-        value: `${rule.width_mm} x ${rule.height_mm} mm · 误差上限 ${rule.tolerance_mm || 0.007}mm，禁止超出`
+        value: `${displayDimensionValue(rule.width_mm)} × ${displayDimensionValue(rule.height_mm)} mm · 误差上限 ${rule.tolerance_mm || 0.007}mm，禁止超出`
       }];
     });
     return [...styleRules, ...slotRules];
@@ -159,6 +162,12 @@
     const scannedOptionFonts = [scannedOption.font_name, scannedOption.font].map(cleanText).filter(Boolean);
     const scanned = item && item.group === "font" ? [item.key] : scannedOptionFonts;
     return unique([...optionFonts, ...slotFonts, ...scanned]);
+  }
+
+  function displayDimensionValue(value) {
+    if (typeof displayDimension === "function") return displayDimension(value);
+    const number = Number(value);
+    return Number.isFinite(number) && number > 0 ? String(Math.trunc(number)) : "";
   }
 
   function selectedOptionSlotsForEvidence(item, model) {

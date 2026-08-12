@@ -45,23 +45,34 @@
     section.dataset.group = group;
     section.dataset.option = optionKey;
 
+    const requestedOptionPreset = safeOptionPreset(existing.content_preset, recommendedOptionPreset(output, group, optionKey, model));
+    let slots = contentSlotsFor(output, group, optionKey, model, existing, requestedOptionPreset);
+    const tailPresentation = tailPresentationForSlots(slots);
+    const optionPreset = safeTailPreset(requestedOptionPreset, tailPresentation);
+    if (optionPreset !== requestedOptionPreset) slots = contentSlotsFor(output, group, optionKey, model, existing, optionPreset);
+    const layout = contentSlotLayout(slots, model);
+
     const header = document.createElement("div");
     header.className = "content-option-header";
-    header.appendChild(lineNode(`${output} · ${groupLabel(group)} ${optionKey}`, group === "design" ? "具体 Design 独立配置" : "具体 F 独立配置"));
-    const optionPreset = safeOptionPreset(existing.content_preset, recommendedOptionPreset(output, group, optionKey, model));
+    header.appendChild(lineNode(
+      `${output} · ${groupLabel(group)} ${optionKey}`,
+      tailPresentation.detected ? tailTreatmentDescription(tailPresentation) : (group === "design" ? "具体 Design 独立配置" : "具体 F 独立配置")
+    ));
     section.dataset.contentPreset = optionPreset;
+    section.dataset.tailPresentation = tailPresentation.detected ? (tailPresentation.verified ? "verified" : "detected") : "none";
     section.appendChild(header);
 
     const rows = document.createElement("div");
     rows.className = "content-slot-table";
-    rows.appendChild(contentSlotHeader());
-    contentSlotsFor(output, group, optionKey, model, existing, optionPreset).forEach((slot) => rows.appendChild(contentSlotRow(output, group, optionKey, slot)));
+    rows.appendChild(contentSlotHeader(layout));
+    slots.forEach((slot) => rows.appendChild(contentSlotRow(output, group, optionKey, slot, layout)));
     section.appendChild(rows);
     return section;
   }
 
-  function contentSlotHeader() {
+  function contentSlotHeader(layout) {
     const row = tableRow("content-slot-head");
+    applyContentSlotLayout(row, layout);
     row.append(
       metaCell("slot"),
       metaCell("内容来源"),
@@ -70,15 +81,14 @@
       metaCell("素材键（仅素材）"),
       metaCell("适配宽"),
       metaCell("适配高"),
-      metaCell("首字证据"),
-      metaCell("尾字证据"),
-      metaCell("字体依赖"),
-      metaCell("颜色绑定")
+      metaCell("字体依赖")
     );
+    if (layout && layout.showTailSamples) row.appendChild(metaCell("尾巴样本"));
+    if (layout && layout.showColorBinding) row.appendChild(metaCell("颜色绑定"));
     return row;
   }
 
-  function contentSlotRow(output, group, optionKey, slot) {
+  function contentSlotRow(output, group, optionKey, slot, layout) {
     const row = tableRow("content-slot-row");
     row.dataset.output = output;
     row.dataset.group = group;
@@ -86,21 +96,24 @@
     row.dataset.slotKey = slot.key;
     row.dataset.anchor = slot.anchor || "";
     row.__tailConfigs = normalizedTailConfigs(slot.tails);
+    row.__colorBinding = safeIdentifier(slot.color_binding || "", "");
     const dimensions = objectOf(slot.dimension_rule);
     row.dataset.dimensionMode = cleanText(dimensions.mode || "") || (slot.anchor ? "anchor" : "slot");
+    applyContentSlotLayout(row, layout);
+    const tailPresentation = tailPresentationForSlots([slot]);
+    const slotPreset = safeTailPreset(safePreset(slot.preset, "direct_text"), tailPresentation);
     row.append(
       metaCell(slot.key),
       inputCell("slot-source-field", slot.source_field || ""),
-      selectCell("slot-preset", presetOptions(PRESETS), safePreset(slot.preset, "direct_text")),
+      selectCell("slot-preset", presetOptions(PRESETS, tailPresentation), slotPreset),
       selectCell("slot-required", [["required", "必填"], ["optional", "可选"]], slot.required === false ? "optional" : "required"),
       readonlyInputCell("slot-asset-key", slot.asset_key || "", "素材替换槽位才会有素材键；普通文字槽位留空。"),
-      readonlyInputCell("slot-width-mm", dimensions.width_mm || "", "优先显示定位框宽度；没有定位框时显示槽位宽度，不需要手填。"),
-      readonlyInputCell("slot-height-mm", dimensions.height_mm || "", "优先显示定位框高度；没有定位框时显示槽位高度，不需要手填。"),
-      readonlyInputCell("slot-tail-first", tailSample(slot.tails, "first"), "扫描到的首字尾巴标注证据；渲染时按订单文字动态取首字。"),
-      readonlyInputCell("slot-tail-last", tailSample(slot.tails, "last"), "扫描到的尾字尾巴标注证据；渲染时按订单文字动态取尾字。"),
-      inputCell("slot-font-dependencies", stringListValue(slot.font_dependencies)),
-      inputCell("slot-color-binding", slot.color_binding || "")
+      readonlyInputCell("slot-width-mm", displayDimension(dimensions.width_mm), "按模板定位框取整显示；实际适配仍按模板的精确边界执行。", dimensions.width_mm),
+      readonlyInputCell("slot-height-mm", displayDimension(dimensions.height_mm), "按模板定位框取整显示；实际适配仍按模板的精确边界执行。", dimensions.height_mm),
+      inputCell("slot-font-dependencies", stringListValue(slot.font_dependencies))
     );
+    if (layout && layout.showTailSamples) row.appendChild(tailEvidenceCell(row.__tailConfigs));
+    if (layout && layout.showColorBinding) row.appendChild(inputCell("slot-color-binding", slot.color_binding || ""));
     return row;
   }
 
@@ -128,6 +141,7 @@
 
   function existingContentOptionConfigs() {
     const result = {};
+    const model = scanModel(state.scan, state.draft && state.draft.config);
     configOutputs().forEach((output, outputIndex) => {
       const fallback = outputIndex ? `Output_Side${String.fromCharCode(65 + outputIndex)}` : "Output_main";
       const outputKey = safeOutputKey(output.key || output.name, fallback, outputIndex);
@@ -137,9 +151,16 @@
         options.forEach((option) => {
           const key = safeOptionKey(option.key || option.name || option.label, group);
           if (!outputKey || !key) return;
+          const requestedPreset = safeOptionPreset(option.content_preset, "direct_text");
+          const optionContext = scannedOptionForContent(outputKey, group, key, model);
+          let slots = Array.isArray(option.slots) ? controlledSlots(option.slots, optionContext, requestedPreset) : [];
+          const preset = safeTailPreset(requestedPreset, tailPresentationForSlots(slots));
+          if (preset !== requestedPreset && Array.isArray(option.slots)) {
+            slots = controlledSlots(option.slots, optionContext, preset);
+          }
           result[contentOptionMapKey(outputKey, group, key)] = {
-            content_preset: safeOptionPreset(option.content_preset, "direct_text"),
-            slots: Array.isArray(option.slots) ? controlledSlots(option.slots, null, option.content_preset) : []
+            content_preset: preset,
+            slots
           };
         });
       });
@@ -160,9 +181,9 @@
       anchor,
       tails: tailConfigsFromRow(row, key),
       asset_key: safeIdentifier(rowValue(row, "slot-asset-key"), ""),
-      dimension_rule: dimensionRuleFromValues(rowValue(row, "slot-width-mm"), rowValue(row, "slot-height-mm"), dimensionMode),
+      dimension_rule: dimensionRuleFromValues(readonlyRawValue(row, "slot-width-mm"), readonlyRawValue(row, "slot-height-mm"), dimensionMode),
       font_dependencies: splitStringList(rowValue(row, "slot-font-dependencies")),
-      color_binding: safeIdentifier(rowValue(row, "slot-color-binding"), "")
+      color_binding: colorBindingFromRow(row)
     };
   }
 
@@ -173,14 +194,17 @@
       const key = slotKeyFor(raw);
       const suffix = key.replace(/^slot_/, "");
       const field = safeField(item.source_field || item.field || suffix) || "name";
+      const scannedSlot = scannedSlotForKey(optionContext, key);
+      const tails = mergedTailConfigs(item.tails, scannedSlot.tails);
+      const slotForPreset = { ...objectOf(item), tails };
       const anchor = inferredAnchorForSlot(item, key, optionContext);
       return {
         key,
         source_field: field,
         required: item.required === false ? false : true,
-        preset: slotPresetForOption(item, optionPreset),
+        preset: slotPresetForOption(slotForPreset, optionPreset),
         anchor,
-        tails: normalizedTailConfigs(item.tails),
+        tails,
         asset_key: safeIdentifier(item.asset_key || inferredAssetKey(key, item), ""),
         dimension_rule: slotDimensionRule(item, optionContext, key),
         font_dependencies: Array.isArray(item.font_dependencies) ? item.font_dependencies.map(cleanText).filter(Boolean) : [],
@@ -248,10 +272,16 @@
     return Array.isArray(objectOf(option).slots) ? objectOf(option).slots : [];
   }
 
+  function scannedSlotForKey(optionContext, slotKey) {
+    return objectOf(scannedOptionSlotsFromOption(optionContext).find((slot) => (
+      slotKeyFor(objectOf(slot).key || objectOf(slot).name || objectOf(slot).label || "") === slotKey
+    )));
+  }
+
   function recommendedOptionPreset(output, group, optionKey, model) {
     const source = group === "design" ? model.designs : model.fonts;
     const option = objectOf(scopedScanItemsFor(output, source).find((item) => safeOptionKey(item.key || item.name || item.label, group) === optionKey));
-    return safeOptionPreset(option.content_preset || option.recommended_preset || option.preset, "direct_text");
+    return recommendedPresetForOption(option);
   }
 
   function safePreset(value, fallback) {
@@ -274,9 +304,21 @@
     return safePreset(data.preset, "direct_text");
   }
 
-  function presetOptions(values) {
+  function presetOptions(values, tailPresentation) {
     const labels = ctx.PRESET_LABELS || {};
-    return values.map((value) => [value, labels[value] || value]);
+    const presentation = objectOf(tailPresentation);
+    return values.filter((value) => !(value === "tail_text" && presentation.detected && !presentation.verified)).map((value) => {
+      if (value === "direct_text" && presentation.detected && !presentation.verified) {
+        return [value, "尾巴文字（已识别）"];
+      }
+      return [value, labels[value] || value];
+    });
+  }
+
+  function safeTailPreset(value, tailPresentation) {
+    const preset = safePreset(value, "direct_text");
+    const presentation = objectOf(tailPresentation);
+    return preset === "tail_text" && presentation.detected && !presentation.verified ? "direct_text" : preset;
   }
 
   function slotKeyFor(value) {
@@ -314,11 +356,6 @@
     return group === "font" ? "F" : "Design";
   }
 
-  function tailSample(tails, position) {
-    const found = Array.isArray(tails) ? tails.find((tail) => objectOf(tail).position === position) : null;
-    return cleanText(objectOf(found).sample || "");
-  }
-
   function tailConfigsFromRow(row, slotKey) {
     if (Array.isArray(row.__tailConfigs) && row.__tailConfigs.length) {
       return normalizedTailConfigs(row.__tailConfigs);
@@ -352,9 +389,132 @@
     }).filter(Boolean);
   }
 
+  function mergedTailConfigs(configuredTails, scannedTails) {
+    const merged = new Map();
+    normalizedTailConfigs(scannedTails).forEach((tail) => merged.set(tail.key, tail));
+    normalizedTailConfigs(configuredTails).forEach((tail) => {
+      const scanned = merged.get(tail.key) || {};
+      merged.set(tail.key, { ...scanned, ...tail });
+    });
+    return Array.from(merged.values());
+  }
+
   function parseTailKey(key) {
     const match = cleanText(key).match(/^tail_(.+)_(first|last)_([A-Za-z])$/i);
     return match ? { field: match[1], position: match[2].toLowerCase(), sample: match[3] } : {};
+  }
+
+  function tailPresentationForSlots(slots) {
+    const tails = (Array.isArray(slots) ? slots : [])
+      .flatMap((slot) => normalizedTailConfigs(objectOf(slot).tails));
+    const positions = unique(tails.map((tail) => tail.position));
+    return {
+      detected: tails.length > 0,
+      verified: tails.length > 0 && tails.every(tailHasGlyphProof),
+      positions
+    };
+  }
+
+  function tailHasGlyphProof(tail) {
+    const data = objectOf(tail);
+    if (data.pua_base !== undefined && data.pua_base !== null && cleanText(data.pua_base) !== "") {
+      return validTailPuaBase(data.pua_base);
+    }
+    return validTailGlyphMap(data.glyph_map);
+  }
+
+  function validTailPuaBase(value) {
+    const codepoint = tailCodepoint(value);
+    return codepoint !== null && codepoint >= 0xE000 && codepoint + 25 <= 0xF8FF;
+  }
+
+  function validTailGlyphMap(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+    return "abcdefghijklmnopqrstuvwxyz".split("").every((letter) => {
+      const valueForLetter = Object.prototype.hasOwnProperty.call(value, letter) ? value[letter] : value[letter.toUpperCase()];
+      const codepoint = tailCodepoint(valueForLetter);
+      return codepoint !== null && codepoint >= 0xE000 && codepoint <= 0xF8FF;
+    });
+  }
+
+  function tailCodepoint(value) {
+    if (typeof value === "number") return Number.isInteger(value) ? value : null;
+    if (typeof value !== "string") return null;
+    const text = value.trim().toLowerCase();
+    if (!/^(?:[+-]?\d+|0x[0-9a-f]+)$/.test(text)) return null;
+    const codepoint = Number(text);
+    return Number.isInteger(codepoint) ? codepoint : null;
+  }
+
+  function tailTreatmentDescription(presentation) {
+    const positions = Array.isArray(objectOf(presentation).positions) ? presentation.positions : [];
+    const endpoint = positions.includes("first") && positions.includes("last") ? "首字和尾字" : (positions.includes("first") ? "首字" : "尾字");
+    return `已识别尾巴样式，订单文字的${endpoint}会自动放入尾巴位置，无需手动填写样本。`;
+  }
+
+  function tailEvidenceCell(tails) {
+    const cell = metaCell(tailSampleSummary(tails));
+    cell.classList.add("tail-sample-cell");
+    cell.setAttribute("aria-readonly", "true");
+    cell.title = "模板尾巴样本仅用于识别；订单文字会自动取对应的首字或尾字。";
+    return cell;
+  }
+
+  function tailSampleSummary(tails) {
+    const labels = { first: "首字", last: "尾字" };
+    return normalizedTailConfigs(tails)
+      .map((tail) => `${labels[tail.position] || "尾巴"} ${tail.sample}`)
+      .join(" · ");
+  }
+
+  function contentSlotLayout(slots, model) {
+    return {
+      showTailSamples: (Array.isArray(slots) ? slots : []).some((slot) => normalizedTailConfigs(objectOf(slot).tails).length),
+      showColorBinding: hasActiveColorRules(slots, model)
+    };
+  }
+
+  function applyContentSlotLayout(row, layout) {
+    const current = objectOf(layout);
+    if (current.showTailSamples) row.classList.add("has-tail-samples");
+    if (current.showColorBinding) row.classList.add("has-color-binding");
+  }
+
+  function hasActiveColorRules(slots, model) {
+    const currentModel = model || scanModel(state.scan, state.draft && state.draft.config);
+    if (Array.isArray(currentModel.colors) && currentModel.colors.length) return true;
+    if (colorFieldIsBound()) return true;
+    if (configuredColorBindingsExist()) return true;
+    return (Array.isArray(slots) ? slots : []).some((slot) => Boolean(safeIdentifier(objectOf(slot).color_binding || "", "")));
+  }
+
+  function colorFieldIsBound() {
+    const bindings = objectOf(state.draft && state.draft.config && state.draft.config.field_bindings);
+    return Boolean(cleanText(bindings.color));
+  }
+
+  function configuredColorBindingsExist() {
+    return configOutputs().some((output) => ["design", "font"].some((group) => {
+      const options = Array.isArray(objectOf(output[group]).options) ? objectOf(output[group]).options : [];
+      return options.some((option) => Array.isArray(objectOf(option).slots) && objectOf(option).slots.some((slot) => Boolean(cleanText(objectOf(slot).color_binding))));
+    }));
+  }
+
+  function contentOptionPresetOptions(output, group, optionKey, model) {
+    const currentModel = model || scanModel(state.scan, state.draft && state.draft.config);
+    const existing = findConfigOption(output, group, optionKey);
+    const optionPreset = safeOptionPreset(existing.content_preset, recommendedOptionPreset(output, group, optionKey, currentModel));
+    const slots = contentSlotsFor(output, group, optionKey, currentModel, existing, optionPreset);
+    return presetOptions(OPTION_PRESETS, tailPresentationForSlots(slots));
+  }
+
+  function recommendedPresetForOption(option) {
+    const data = objectOf(option);
+    const recommended = safeOptionPreset(data.content_preset || data.recommended_preset || data.preset, "direct_text");
+    const tails = tailPresentationForSlots(scannedOptionSlotsFromOption(data));
+    if (recommended === "tail_text" && !tails.verified) return "direct_text";
+    if (recommended !== "direct_text") return recommended;
+    return tails.verified ? "tail_text" : "direct_text";
   }
 
   function slotDimensionRule(item, optionContext, slotKey) {
@@ -393,6 +553,22 @@
     return cleanText(value).split(/[,\n;]+/).map(cleanText).filter(Boolean);
   }
 
+  function displayDimension(value) {
+    const number = Number(value);
+    return Number.isFinite(number) && number > 0 ? String(Math.trunc(number)) : "";
+  }
+
+  function readonlyRawValue(row, field) {
+    const input = row.querySelector(`[data-field="${field}"]`);
+    if (!input) return "";
+    return Object.prototype.hasOwnProperty.call(input.dataset, "rawValue") ? input.dataset.rawValue : input.value;
+  }
+
+  function colorBindingFromRow(row) {
+    const input = row.querySelector('[data-field="slot-color-binding"]');
+    return safeIdentifier(input ? input.value : (row.__colorBinding || ""), "");
+  }
+
   function inferredAssetKey(slotKey, item) {
     if (item.preset === "asset_replace") return slotKey.replace(/^slot_/, "");
     return "";
@@ -405,11 +581,12 @@
     return cell;
   }
 
-  function readonlyInputCell(name, value, title) {
+  function readonlyInputCell(name, value, title, rawValue) {
     const wrap = document.createElement("label");
     const input = document.createElement("input");
     input.dataset.field = name;
     input.value = value || "";
+    if (rawValue !== undefined && rawValue !== null && rawValue !== "") input.dataset.rawValue = String(rawValue);
     input.readOnly = true;
     input.setAttribute("aria-readonly", "true");
     if (title) {
@@ -431,6 +608,7 @@
     controlledSlots,
     contentOptionPreset,
     contentOptionSlots,
+    contentOptionPresetOptions,
     existingOptionPreset,
     existingOptionSlots,
     findConfigOption,
@@ -439,6 +617,11 @@
     safeOptionPreset,
     slotPresetForOption,
     presetOptions,
+    recommendedPresetForOption,
+    tailPresentationForSlots,
+    tailTreatmentDescription,
+    hasActiveColorRules,
+    displayDimension,
     slotKeyFor,
     contentOptionMapKey,
     contentGroupName,

@@ -41,7 +41,8 @@
       option.textContent = label;
       select.appendChild(option);
     });
-    select.value = value || options[0][0];
+    const selected = options.some(([optionValue]) => optionValue === value) ? value : options[0][0];
+    select.value = selected;
     select.addEventListener("change", () => globalThis.validateCurrentConfig(false));
     wrap.appendChild(select);
     return wrap;
