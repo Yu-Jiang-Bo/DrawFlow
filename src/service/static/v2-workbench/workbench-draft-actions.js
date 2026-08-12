@@ -183,7 +183,9 @@
 
   async function validateConfig(config) {
     const payload = await postJson(`${API_ROOT}/${encodeURIComponent(config.template.template_id)}/validate`, { config }, "配置校验失败，请检查字段和选项。");
-    return payload.validation || payload;
+    const validation = objectOf(payload.validation || payload);
+    if (payload.service_contract) validation.service_contract = objectOf(payload.service_contract);
+    return validation;
   }
 
 

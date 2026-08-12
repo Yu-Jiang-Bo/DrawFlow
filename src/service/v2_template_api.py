@@ -40,6 +40,10 @@ from .v2_template_validation import validate_v2_template_configuration
 
 
 SCAN_TIMESTAMP_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
+V2_WORKBENCH_SERVICE_CONTRACT = {
+    "version": 2,
+    "capabilities": ["mixed_slot_processing", "editable_validation_targets"],
+}
 
 
 @dataclass(frozen=True)
@@ -116,10 +120,11 @@ class V2TemplateApi:
         config = dict(optional_mapping(payload, "config"))
         current_draft = optional_draft(self.store, template_id)
         scan = dict(current_draft.get("scan", {})) if current_draft else {}
+        assets = current_asset_sources(self.store, template_id, current_draft, replace_file_name="")
         self._apply_trusted_scan_audit(config, scan)
         config, validation = self._prepare_saveable_config(config)
         self._ensure_config_template_matches(template_id, validation)
-        state = self.store.save_draft(template_id, metadata=metadata, config=config, scan=scan)
+        state = self.store.save_draft(template_id, metadata=metadata, config=config, scan=scan, assets=assets)
         draft = self.store.read_draft(template_id)
         self._record_audit("draft_saved", state, draft)
         return {
@@ -266,7 +271,13 @@ class V2TemplateApi:
         if validation.get("ok"):
             state = {"template_id": str(dict(validation.get("contract", {}).get("template", {})).get("template_id") or "")}
             self._record_audit("draft_validated", state, details={"can_save": validation.get("can_save", False)})
-        return {"validation": validation}
+        return {
+            "validation": validation,
+            "service_contract": {
+                "version": V2_WORKBENCH_SERVICE_CONTRACT["version"],
+                "capabilities": list(V2_WORKBENCH_SERVICE_CONTRACT["capabilities"]),
+            },
+        }
 
     def read_versions(self, template_id: str) -> dict[str, Any]:
         state = self.store.get_state(template_id)

@@ -63,7 +63,7 @@
     if (!colors.length) {
       target.appendChild(actionEvidenceRow("无可配置颜色样本", "未扫描到可替换颜色样本，可确认为仅做生产颜色标注。", "确认无需颜色规则", () => {
         setManualCheck("colors", "confirmed", "无可配置颜色项，仅由公共输出层处理颜色标注");
-      }));
+      }, "confirmNoColorRulesBtn"));
       return;
     }
     colors.slice(0, 8).forEach((color) => {
@@ -215,11 +215,12 @@
     return row;
   }
 
-  function actionEvidenceRow(label, value, action, handler) {
+  function actionEvidenceRow(label, value, action, handler, buttonId) {
     const row = evidenceRow(label, value);
     const button = document.createElement("button");
     button.type = "button";
     button.className = "btn-subtle compact-btn";
+    if (buttonId) button.id = buttonId;
     button.textContent = action;
     button.addEventListener("click", handler);
     row.appendChild(button);

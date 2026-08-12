@@ -47,7 +47,7 @@
 
   function optionProcessingHelpText(preset) {
     if (preset === "mixed_slots") {
-      return "此设计有多种槽位处理，请在下方分别确认。内容不拆分，顶部不会改写下方设置。";
+      return "这是只读汇总，不需要在这里编辑。请在下方分别确认每个槽位；各槽位读取自己的订单字段，内容不会自动拆分。";
     }
     if (preset === "split_by_pipe") {
       return "两个槽位都填写同一个内容来源（例如 name）。系统按第 1 段、第 2 段分配；name1、name2 是独立内容来源。";

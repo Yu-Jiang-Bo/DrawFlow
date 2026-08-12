@@ -145,6 +145,38 @@ def test_v2_api_accepts_trusted_local_scan_for_current_ai_asset(tmp_path):
     assert result["draft"]["manifest"]["assets"][0]["sha256"] == uploaded["asset"]["sha256"]
 
 
+def test_v2_api_save_config_preserves_uploaded_ai_and_trusted_scan(tmp_path):
+    api = api_for(tmp_path)
+    api.create_template({"template_id": "V2API001", "name": "API Demo"})
+    uploaded = api.upload_asset("V2API001", "template.ai", TrackingStream(b"ai-bytes"), content_length=8, headers={})
+    evidence = scan_evidence(uploaded["asset"]["sha256"])
+    api.submit_scan("V2API001", {"evidence": evidence})
+
+    saved = api.save_draft("V2API001", {"config": saveable_config()})
+
+    assets = saved["draft"]["manifest"]["assets"]
+    assert len(assets) == 1
+    assert assets[0]["file_name"] == "template.ai"
+    assert assets[0]["sha256"] == uploaded["asset"]["sha256"]
+    assert saved["draft"]["scan"] == evidence
+    stored = api.store._draft_dir("V2API001", saved["draft"]["manifest"]["draft_revision"]) / assets[0]["path"]
+    assert stored.read_bytes() == b"ai-bytes"
+
+
+def test_v2_api_validation_advertises_current_workbench_capabilities(tmp_path):
+    api = api_for(tmp_path)
+
+    result = api.handle(
+        "POST",
+        ["api", "v2", "templates", "V2API001", "validate"],
+        {"config": saveable_config()},
+    ).payload
+
+    assert result["service_contract"]["version"] == 2
+    assert "mixed_slot_processing" in result["service_contract"]["capabilities"]
+    assert "editable_validation_targets" in result["service_contract"]["capabilities"]
+
+
 def test_v2_api_rejects_scan_missing_trusted_contract_fields(tmp_path):
     api = api_for(tmp_path)
     api.create_template({"template_id": "V2API001", "name": "API Demo"})

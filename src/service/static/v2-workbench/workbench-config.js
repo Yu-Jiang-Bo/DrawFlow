@@ -98,8 +98,7 @@
 
   function fieldBindingAllowed(field, allowed) {
     const key = safeField(field);
-    if (["style", "font", "design", "color"].includes(key)) return allowed.includes(key);
-    return Boolean(key);
+    return Boolean(key) && allowed.includes(key);
   }
 
 

@@ -73,28 +73,63 @@
     if (model.fonts.length) fields.push("font");
     if (model.styles.length) fields.push("style");
     if (model.colors.length) fields.push("color");
+    const configuredSources = configuredSlotSourceFields();
     model.slots.forEach((item) => {
-      const field = safeField(item.source_field || item.field || slotFieldName(item.key || item.name));
+      const field = inferredScannedSlotField(item);
       if (field) fields.push(field);
     });
-    configuredSlotSourceFields().forEach((field) => {
+    configuredSources.forEach((field) => {
       if (field) fields.push(field);
     });
     return unique(fields);
   }
 
 
+  function inferredScannedSlotField(slot) {
+    const data = objectOf(slot);
+    const slotField = safeField(slotFieldName(data.key || data.name || data.label));
+    if (!slotField) return safeField(data.source_field || data.field);
+    const group = cleanText(data.group);
+    const optionKey = safeOptionKey(data.option || data.option_key || data.optionKey, group);
+    const outputKey = safeOutputKey(data.output || data.output_key || data.outputKey, "Output_main", 0);
+    const output = configOutputs().find((item, index) => (
+      safeOutputKey(objectOf(item).key || objectOf(item).name, index ? `Output_Side${String.fromCharCode(65 + index)}` : "Output_main", index) === outputKey
+    ));
+    const options = Array.isArray(objectOf(objectOf(output)[group]).options) ? objectOf(objectOf(output)[group]).options : [];
+    const option = objectOf(options.find((item) => safeOptionKey(item.key || item.name || item.label, group) === optionKey));
+    const configuredSlots = Array.isArray(option.slots) ? option.slots : [];
+    const configuredSlot = configuredSlots.find((item) => (
+      safeField(slotFieldName(objectOf(item).key || objectOf(item).name || objectOf(item).label)) === slotField
+    ));
+    if (!configuredSlot) return slotField;
+    return canonicalSlotSourceField(configuredSlot, option, data);
+  }
+
+
   function configuredSlotSourceFields() {
     const fields = [];
-    configOutputs().forEach((output) => {
+    const model = scanModel(state.scan, state.draft && state.draft.config);
+    configOutputs().forEach((output, outputIndex) => {
+      const fallback = outputIndex ? `Output_Side${String.fromCharCode(65 + outputIndex)}` : "Output_main";
+      const outputKey = safeOutputKey(output.key || output.name, fallback, outputIndex);
       ["design", "font"].forEach((group) => {
         const section = objectOf(output[group]);
         const options = Array.isArray(section.options) ? section.options : [];
+        const scanItems = group === "design" ? model.designs : model.fonts;
+        const scopedItems = typeof scopedScanItemsFor === "function" ? scopedScanItemsFor(outputKey, scanItems) : scanItems;
         options.forEach((option) => {
           const optionData = objectOf(option);
+          const optionKey = safeOptionKey(optionData.key || optionData.name || optionData.label, group);
+          const scannedOption = objectOf(scopedItems.find((item) => (
+            safeOptionKey(item.key || item.name || item.label, group) === optionKey
+          )));
           const slots = Array.isArray(optionData.slots) ? optionData.slots : [];
           slots.forEach((slot) => {
-            const field = safeField(objectOf(slot).source_field);
+            const slotKey = safeField(slotFieldName(objectOf(slot).key || objectOf(slot).name || objectOf(slot).label));
+            const scannedSlot = objectOf((Array.isArray(scannedOption.slots) ? scannedOption.slots : []).find((item) => (
+              safeField(slotFieldName(objectOf(item).key || objectOf(item).name || objectOf(item).label)) === slotKey
+            )));
+            const field = canonicalSlotSourceField(slot, optionData, scannedSlot);
             if (field) fields.push(field);
           });
         });
@@ -139,6 +174,26 @@
   }
 
 
+  function canonicalSlotSourceField(slot, option, scannedSlot) {
+    const data = objectOf(slot);
+    const optionData = objectOf(option);
+    const scanData = objectOf(scannedSlot);
+    const slotField = safeField(slotFieldName(data.key || data.name || data.label));
+    const configured = safeField(data.source_field || data.field || slotField) || "name";
+    if (!slotField || configured === slotField) return configured;
+    const scannedField = safeField(slotFieldName(scanData.key || scanData.name || scanData.label));
+    if (!scannedField || scannedField !== slotField) return configured;
+    const slots = Array.isArray(optionData.slots) ? optionData.slots : [];
+    const mixed = cleanText(optionData.content_preset) === "mixed_slots"
+      || (slots.length > 1 && slots.some((item) => Array.isArray(objectOf(item).tails) && objectOf(item).tails.length));
+    if (!mixed) return configured;
+    const bindings = objectOf(state.draft && state.draft.config && state.draft.config.field_bindings);
+    const configuredColumn = cleanText(bindings[configured]);
+    const slotColumn = cleanText(bindings[slotField]);
+    return slotColumn && configuredColumn === slotColumn ? slotField : configured;
+  }
+
+
   function optionOutputKey(item) {
     const data = objectOf(item);
     const nested = objectOf(data.output);
@@ -171,6 +226,7 @@
     inferredMappings,
     inferredGroupField,
     slotFieldName,
+    canonicalSlotSourceField,
     optionOutputKey,
     emptyOutput
   });

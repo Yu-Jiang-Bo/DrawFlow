@@ -144,7 +144,7 @@ function makeDocument() {
   });
   const readyHandlers = [];
   const document = {
-    getElementById: (id) => elements[id] || null,
+    getElementById: (id) => elements[id] || Object.values(elements).flatMap((root) => allDescendants(root)).find((node) => node.id === id) || null,
     createElement: (tag) => new Element(tag),
     addEventListener: (type, handler) => {
       if (type === "DOMContentLoaded") readyHandlers.push(handler);
@@ -1292,7 +1292,7 @@ def test_v2_workbench_requires_complete_valid_tail_proof_before_recommending_tai
     )
 
 
-def test_v2_workbench_structure_lists_configured_slot_source_fields():
+def test_v2_workbench_migrates_proven_slot_sources_and_removes_orphan_title_binding():
     run_node(
         r"""
         (async () => {
@@ -1308,8 +1308,11 @@ def test_v2_workbench_structure_lists_configured_slot_source_fields():
                   outputs: [{
                     key: "Output_main",
                     design: { options: [{
-                      key: "Design04",
-                      slots: [{ key: "slot_name1", source_field: "name" }, { key: "slot_name2", source_field: "name2" }]
+                      key: "Design02",
+                      slots: [
+                        { key: "slot_name1", source_field: "name", tails: [{ key: "tail_name1_last_m", position: "last", sample: "m", pua_base: 61440 }] },
+                        { key: "slot_name2", source_field: "name2" }
+                      ]
                     }] },
                     font: { options: [] },
                     style: { options: [] },
@@ -1317,7 +1320,7 @@ def test_v2_workbench_structure_lists_configured_slot_source_fields():
                   }]
                 },
                 config: {
-                  field_bindings: { name: "Name", design: "Design", name1: "Name", name2: "Title" },
+                  field_bindings: { name: "Name", design: "Design", name1: "Name", name2: "Title", title: "Title" },
                   outputs: [{
                     key: "Output_main",
                     display_name: "Main",
@@ -1326,10 +1329,10 @@ def test_v2_workbench_structure_lists_configured_slot_source_fields():
                     design: {
                       field: "design",
                       options: [{
-                        key: "Design04",
+                        key: "Design02",
                         content_preset: "direct_text",
                         slots: [
-                          { key: "slot_name1", source_field: "name" },
+                          { key: "slot_name1", source_field: "name", preset: "direct_text", tails: [{ key: "tail_name1_last_m", position: "last", sample: "m", pua_base: 61440 }] },
                           { key: "slot_name2", source_field: "title" }
                         ]
                       }]
@@ -1349,14 +1352,135 @@ def test_v2_workbench_structure_lists_configured_slot_source_fields():
           global.setWorkbenchStage("structure");
           await flush();
 
-          const titleRow = document.querySelectorAll("#fieldBindingRows .field-binding-row").find((row) => row.querySelector('[data-field="binding-field"]').value === "title");
-          assert(titleRow);
-          const titleColumn = titleRow.querySelector('[data-field="binding-column"]');
-          assert.strictEqual(titleColumn.value, "");
-          titleColumn.value = "Title";
+          const rows = document.querySelectorAll("#fieldBindingRows .field-binding-row");
+          const fields = rows.map((row) => row.querySelector('[data-field="binding-field"]').value);
+          assert(fields.includes("name"));
+          assert(fields.includes("name1"));
+          assert(fields.includes("name2"));
+          assert(!fields.includes("title"));
 
           const config = buildControlledConfig();
-          assert.strictEqual(config.field_bindings.title, "Title");
+          assert.deepStrictEqual(config.field_bindings, { name: "Name", design: "Design", name1: "Name", name2: "Title" });
+          const option = config.outputs[0].design.options.find((item) => item.key === "Design02");
+          assert.deepStrictEqual(option.slots.map((slot) => [slot.key, slot.source_field, slot.preset]), [
+            ["slot_name1", "name1", "tail_text"],
+            ["slot_name2", "name2", "direct_text"]
+          ]);
+        })().catch((error) => { console.error(error); process.exit(1); });
+        """
+    )
+
+
+def test_v2_workbench_slot_source_migration_requires_matching_scan_option_and_slot():
+    run_node(
+        r"""
+        (async () => {
+          const app = createApp(async (url) => {
+            if (String(url) === "/api/v2/templates") return response({ templates: [] });
+            return response({});
+          });
+          await flush();
+          const state = global.DrawFlowV2WorkbenchContext.state;
+          const configured = {
+            field_bindings: { name: "Name", name1: "Name", name2: "Title", title: "Title", design: "Design" },
+            outputs: [{
+              key: "Output_main",
+              design: { field: "design", options: [{
+                key: "Design02",
+                content_preset: "mixed_slots",
+                slots: [
+                  { key: "slot_name1", source_field: "name", tails: [{ key: "tail_name1_last_m", position: "last", sample: "m", pua_base: 61440 }] },
+                  { key: "slot_name2", source_field: "title" }
+                ]
+              }] },
+              font: { field: "", options: [] },
+              style: { field: "", options: [] }
+            }]
+          };
+          state.draft = { config: configured };
+
+          state.scan = {};
+          assert.deepStrictEqual(global.configuredSlotSourceFields(), ["name", "title"]);
+
+          state.scan = { outputs: [{
+            key: "Output_main",
+            design: { options: [{ key: "Design04", slots: [{ key: "slot_name1" }, { key: "slot_name2" }] }] },
+            font: { options: [] },
+            style: { options: [] }
+          }] };
+          assert.deepStrictEqual(global.configuredSlotSourceFields(), ["name", "title"]);
+
+          state.scan = { outputs: [{
+            key: "Output_main",
+            design: { options: [{ key: "Design02", slots: [{ key: "slot_name1" }, { key: "slot_other" }] }] },
+            font: { options: [] },
+            style: { options: [] }
+          }] };
+          assert.deepStrictEqual(global.configuredSlotSourceFields(), ["name1", "title"]);
+
+          state.scan.outputs[0].design.options[0].slots[1] = { key: "slot_name2" };
+          assert.deepStrictEqual(global.configuredSlotSourceFields(), ["name1", "name2"]);
+        })().catch((error) => { console.error(error); process.exit(1); });
+        """
+    )
+
+
+def test_v2_workbench_rescan_adds_new_slot_field_and_preserves_it_in_config():
+    run_node(
+        r"""
+        (async () => {
+          async function fakeFetch(url) {
+            const textUrl = String(url);
+            if (textUrl === "/api/v2/templates") return response({ templates: [{ template_id: "V2INCREMENTAL", name: "Incremental" }] });
+            if (textUrl.endsWith("/draft")) return response({ draft: {
+              metadata: { template_id: "V2INCREMENTAL", name: "Incremental", shop_name: "Demo" },
+              manifest: { draft_revision: "d0002" },
+              scan: { outputs: [{
+                key: "Output_main",
+                design: { options: [{
+                  key: "Design02",
+                  slots: [{ key: "slot_name" }, { key: "slot_extra" }],
+                  anchors: [], tails: [], assets: []
+                }] },
+                font: { options: [] }, style: { options: [] }
+              }] },
+              config: {
+                field_bindings: { name: "Name", design: "Design" },
+                outputs: [{
+                  key: "Output_main", display_name: "Main", component_key: "main",
+                  style: { field: "", options: [] },
+                  design: { field: "design", options: [{
+                    key: "Design02", content_preset: "mixed_slots",
+                    slots: [{ key: "slot_name", source_field: "name", preset: "direct_text" }],
+                    assets: []
+                  }] },
+                  font: { field: "", options: [] }
+                }]
+              }
+            }});
+            if (textUrl.endsWith("/validate")) return response({ validation: { checks: {} } });
+            return response({});
+          }
+          const app = createApp(fakeFetch);
+          await flush();
+          app.elements.templateList.children[0].dispatch("click");
+          await flush();
+          global.setWorkbenchStage("structure");
+          await flush();
+
+          const rows = document.querySelectorAll("#fieldBindingRows .field-binding-row");
+          const byField = Object.fromEntries(rows.map((row) => [row.querySelector('[data-field="binding-field"]').value, row]));
+          assert(byField.name);
+          assert(byField.extra, "new scanned slot must appear in field bindings");
+          byField.extra.querySelector('[data-field="binding-column"]').value = "Title";
+
+          const config = buildControlledConfig();
+          assert.strictEqual(config.field_bindings.extra, "Title");
+          const option = config.outputs[0].design.options.find((item) => item.key === "Design02");
+          assert.deepStrictEqual(option.slots.map((slot) => [slot.key, slot.source_field]), [
+            ["slot_name", "name"],
+            ["slot_extra", "extra"]
+          ]);
         })().catch((error) => { console.error(error); process.exit(1); });
         """
     )
@@ -1436,7 +1560,7 @@ def test_v2_workbench_split_pipe_recommendation_saves_slot_presets():
     )
 
 
-def test_v2_workbench_locks_mixed_slots_and_preserves_name_and_title_rows():
+def test_v2_workbench_locks_mixed_summary_and_preserves_name1_name2_contract():
     run_node(
         r"""
         (async () => {
@@ -1454,8 +1578,8 @@ def test_v2_workbench_locks_mixed_slots_and_preserves_name_and_title_rows():
                     design: { options: [{
                       key: "Design02",
                       slots: [
-                        { key: "slot_name1", tails: [{ key: "tail_name1_last_m", position: "last", sample: "m" }] },
-                        { key: "slot_title" }
+                        { key: "slot_name1", tails: [{ key: "tail_name1_last_m", position: "last", sample: "m", pua_base: 61440 }] },
+                        { key: "slot_name2" }
                       ],
                       anchors: [],
                       tails: [{ key: "tail_name1_last_m", position: "last", sample: "m" }],
@@ -1467,7 +1591,7 @@ def test_v2_workbench_locks_mixed_slots_and_preserves_name_and_title_rows():
                   }]
                 },
                 config: {
-                  field_bindings: { name: "Name", title: "Title", design: "Design" },
+                  field_bindings: { name: "Name", name1: "Name", name2: "Title", title: "Title", design: "Design" },
                   outputs: [{
                     key: "Output_main",
                     display_name: "Main",
@@ -1477,8 +1601,8 @@ def test_v2_workbench_locks_mixed_slots_and_preserves_name_and_title_rows():
                       key: "Design02",
                       content_preset: "direct_text",
                       slots: [
-                        { key: "slot_name1", source_field: "name", preset: "direct_text", tails: [{ key: "tail_name1_last_m", position: "last", sample: "m" }] },
-                        { key: "slot_title", source_field: "title", preset: "direct_text" }
+                        { key: "slot_name1", source_field: "name", preset: "direct_text", tails: [{ key: "tail_name1_last_m", position: "last", sample: "m", pua_base: 61440 }] },
+                        { key: "slot_name2", source_field: "title", preset: "direct_text" }
                       ],
                       assets: []
                     }] },
@@ -1503,8 +1627,10 @@ def test_v2_workbench_locks_mixed_slots_and_preserves_name_and_title_rows():
           assert.strictEqual(select.disabled, true);
           assert.strictEqual(select.children.length, 1);
           assert.strictEqual(group.dataset.contentPreset, "mixed_slots");
-          assert(app.elements.optionProcessingHelp.textContent.includes("分别确认"));
-          assert(app.elements.optionProcessingHelp.textContent.includes("不拆分"));
+          assert(app.elements.optionProcessingHelp.textContent.includes("只读汇总"));
+          assert(app.elements.optionProcessingHelp.textContent.includes("自己的订单字段"));
+          assert(!select.classList.contains("v2-validation-control-error"));
+          assert.strictEqual(select.getAttribute("aria-invalid"), undefined);
 
           select.value = "split_by_pipe";
           select.dispatch("change");
@@ -1514,12 +1640,432 @@ def test_v2_workbench_locks_mixed_slots_and_preserves_name_and_title_rows():
           assert.deepStrictEqual(rows.map((row) => [
             row.querySelector('[data-field="slot-source-field"]').value,
             row.querySelector('[data-field="slot-preset"]').value
-          ]), [["name", "direct_text"], ["title", "direct_text"]]);
+          ]), [["name1", "tail_text"], ["name2", "direct_text"]]);
 
           const config = buildControlledConfig();
           const option = config.outputs[0].design.options.find((item) => item.key === "Design02");
           assert.strictEqual(option.content_preset, "mixed_slots");
-          assert.deepStrictEqual(option.slots.map((slot) => [slot.source_field, slot.preset]), [["name", "direct_text"], ["title", "direct_text"]]);
+          assert.deepStrictEqual(option.slots.map((slot) => [slot.source_field, slot.preset]), [["name1", "tail_text"], ["name2", "direct_text"]]);
+          assert.strictEqual(config.field_bindings.title, undefined);
+
+          const checks = Object.fromEntries(["output", "fields", "options", "slots", "content", "dimensions", "colors", "preview"]
+            .map((key) => [key, { status: "confirmed", reason: "" }]));
+          checks.content = { status: "blocked", reason: "请确认当前槽位处理。" };
+          global.updateBlockers({
+            can_publish: false,
+            service_contract: { version: 2, capabilities: ["mixed_slot_processing", "editable_validation_targets"] },
+            checks,
+            issues: [{ path: "$.outputs[0].design.options[0].content_preset", check: "content", status: "blocked", code: "contract_invalid", reason: "请确认当前槽位处理。" }]
+          });
+          const lowerPreset = document.querySelectorAll("#contentOptionRows .content-slot-row")[0].querySelector('[data-field="slot-preset"]');
+          assert(!select.classList.contains("v2-validation-control-error"));
+          assert.strictEqual(select.getAttribute("aria-invalid"), undefined);
+          assert(lowerPreset.classList.contains("v2-validation-control-error"));
+          const jump = app.elements.blockerList.children[0].children.find((child) => child.tagName === "BUTTON");
+          assert(jump);
+          jump.dispatch("click");
+          assert.strictEqual(lowerPreset.focused, true);
+
+          const lowerSource = document.querySelectorAll("#contentOptionRows .content-slot-row")[0].querySelector('[data-field="slot-source-field"]');
+          const latest = buildControlledConfig();
+          latest.outputs[0].design.options[0].slots[0].source_field = "";
+          global.DrawFlowV2WorkbenchContext.state.lastValidatedConfig = latest;
+          global.updateBlockers({
+            can_publish: false,
+            service_contract: { version: 2, capabilities: ["mixed_slot_processing", "editable_validation_targets"] },
+            checks,
+            issues: [{ path: "$.outputs[0].design.options[0].slots", check: "content", status: "blocked", code: "mixed_slots_source_missing", reason: "每个槽位都必须选择内容来源。" }]
+          });
+          assert(lowerSource.classList.contains("v2-validation-control-error"));
+          let slotAction = app.elements.blockerList.children[0].children.find((child) => child.tagName === "BUTTON");
+          assert(slotAction);
+          assert.strictEqual(slotAction.textContent, "前往修改");
+          assert(!app.elements.blockerList.textContent.includes("重新扫描"));
+          slotAction.dispatch("click");
+          assert.strictEqual(lowerSource.focused, true);
+
+          latest.outputs[0].design.options[0].slots[0].source_field = "name1";
+          latest.outputs[0].design.options[0].slots[0].preset = "split_by_pipe";
+          global.DrawFlowV2WorkbenchContext.state.lastValidatedConfig = latest;
+          global.updateBlockers({
+            can_publish: false,
+            service_contract: { version: 2, capabilities: ["mixed_slot_processing", "editable_validation_targets"] },
+            checks,
+            issues: [{ path: "$.outputs[0].design.options[0].slots", check: "content", status: "blocked", code: "mixed_slots_preset_invalid", reason: "请修改不适用的槽位处理方式。" }]
+          });
+          assert(lowerPreset.classList.contains("v2-validation-control-error"));
+          slotAction = app.elements.blockerList.children[0].children.find((child) => child.tagName === "BUTTON");
+          assert(slotAction);
+          assert.strictEqual(slotAction.textContent, "前往修改");
+          assert(!app.elements.blockerList.textContent.includes("重新扫描"));
+          slotAction.dispatch("click");
+          assert.strictEqual(lowerPreset.focused, true);
+        })().catch((error) => { console.error(error); process.exit(1); });
+        """
+    )
+
+
+def test_v2_workbench_routes_scan_owned_issues_to_real_rescan_action():
+    run_node(
+        r"""
+        (async () => {
+          async function fakeFetch(url) {
+            const textUrl = String(url);
+            if (textUrl === "/api/v2/templates") return response({ templates: [{ template_id: "V2RESCAN", name: "Rescan Demo" }] });
+            if (textUrl.endsWith("/draft")) return response({ draft: {
+              metadata: { template_id: "V2RESCAN", name: "Rescan Demo", shop_name: "Demo" },
+              manifest: { draft_revision: "d0001" },
+              scan: { outputs: [{
+                key: "Output_main",
+                design: { options: [{
+                  key: "Design02",
+                  slots: [{ key: "slot_name1", anchor: "anchor_name1", tails: [{ key: "tail_name1_last_m" }] }],
+                  assets: [{ asset_key: "icon", slot: "slot_icon", supported_values: ["star"] }]
+                }] },
+                font: { options: [] }, style: { options: [] }
+              }] },
+              config: {
+                field_bindings: { name1: "Name", design: "Design" },
+                outputs: [{
+                  key: "Output_main", display_name: "Main", component_key: "main",
+                  style: { field: "", options: [] },
+                  design: { field: "design", options: [{
+                    key: "Design02", content_preset: "tail_text",
+                    slots: [{
+                      key: "slot_name1", source_field: "name1", preset: "tail_text",
+                      anchor: "anchor_name1", asset_key: "icon",
+                      dimension_rule: { mode: "anchor", width_mm: 20, height_mm: 10, tolerance_mm: 0.007 },
+                      tails: [{ key: "tail_name1_last_m" }]
+                    }],
+                    assets: [{ asset_key: "icon", slot: "slot_icon", supported_values: ["star"] }]
+                  }] },
+                  font: { field: "", options: [] }
+                }]
+              }
+            }});
+            if (textUrl.endsWith("/validate")) return response({ validation: { checks: {} } });
+            return response({});
+          }
+          const app = createApp(fakeFetch);
+          await flush();
+          app.elements.templateList.children[0].dispatch("click");
+          await flush();
+          global.setWorkbenchStage("rules");
+          await flush();
+
+          const checks = Object.fromEntries(["output", "fields", "options", "slots", "content", "dimensions", "colors", "preview"]
+            .map((key) => [key, { status: "confirmed", reason: "" }]));
+          checks.slots = { status: "blocked", reason: "模板扫描结果需要修正。" };
+          checks.dimensions = { status: "blocked", reason: "槽位边界需要重新确认。" };
+          const validation = {
+            can_publish: false,
+            service_contract: { version: 2, capabilities: ["mixed_slot_processing", "editable_validation_targets"] },
+            checks,
+            issues: [
+              { path: "$.outputs[0].design.options[0].slots[0].asset_key", check: "slots", status: "blocked", code: "asset_missing", reason: "素材范围需要重新扫描。" },
+              { path: "$.outputs[0].design.options[0].slots[0].dimension_rule", check: "dimensions", status: "blocked", code: "dimension_tolerance_invalid", reason: "槽位边界需要重新扫描。" },
+              { path: "$.outputs[0].design.options[0].slots[0].tails[0].key", check: "slots", status: "blocked", code: "tail_belongs_to_slot", reason: "尾巴样本需要重新扫描。" }
+            ]
+          };
+          global.updateBlockers(validation);
+
+          const slotRow = document.querySelectorAll("#contentOptionRows .content-slot-row")[0];
+          const assetInput = slotRow.querySelector('[data-field="slot-asset-key"]');
+          const widthInput = slotRow.querySelector('[data-field="slot-width-mm"]');
+          assert(!slotRow.classList.contains("v2-validation-row-error"));
+          assert(!assetInput.classList.contains("v2-validation-control-error"));
+          assert(!widthInput.classList.contains("v2-validation-control-error"));
+          assert(app.elements.rescanTemplateBtn.classList.contains("v2-validation-control-error"));
+          assert(!app.elements.blockerList.textContent.includes("前往修改"));
+          const actions = app.elements.blockerList.children.map((item) => item.children.find((child) => child.tagName === "BUTTON"));
+          assert(actions.every((button) => button && button.textContent === "重新扫描"));
+          actions[0].dispatch("click");
+          assert.strictEqual(global.DrawFlowV2WorkbenchContext.state.stage, "upload");
+          assert.strictEqual(app.elements.rescanTemplateBtn.focused, true);
+
+          app.elements.rescanTemplateBtn.disabled = true;
+          global.updateBlockers(validation);
+          assert(app.elements.blockerList.children.every((item) => !item.children.some((child) => child.tagName === "BUTTON")));
+        })().catch((error) => { console.error(error); process.exit(1); });
+        """
+    )
+
+
+def test_v2_workbench_keeps_distinct_rescan_business_locations():
+    run_node(
+        r"""
+        (async () => {
+          const app = createApp(async (url) => {
+            if (String(url) === "/api/v2/templates") return response({ templates: [] });
+            return response({});
+          });
+          await flush();
+          app.elements.rescanTemplateBtn.disabled = false;
+          global.DrawFlowV2WorkbenchContext.state.lastValidatedConfig = {
+            outputs: [{
+              key: "Output_main",
+              design: { options: ["Design02", "Design04"].map((key) => ({
+                key,
+                content_preset: "asset_replace",
+                slots: [{ key: "slot_icon", source_field: "name", preset: "asset_replace", asset_key: "icon" }]
+              })) },
+              font: { options: [] }, style: { options: [] }
+            }]
+          };
+          const checks = Object.fromEntries(["output", "fields", "options", "slots", "content", "dimensions", "colors", "preview"]
+            .map((key) => [key, { status: "confirmed", reason: "" }]));
+          checks.slots = { status: "blocked", reason: "当前槽位缺少对应素材。" };
+          const first = {
+            path: "$.outputs[0].design.options[0].slots[0].asset_key",
+            check: "slots", status: "blocked", code: "asset_missing", reason: "当前槽位缺少对应素材。"
+          };
+          global.updateBlockers({
+            can_publish: false,
+            service_contract: { version: 2, capabilities: ["mixed_slot_processing", "editable_validation_targets"] },
+            checks,
+            issues: [
+              first,
+              { ...first },
+              { ...first, path: "$.outputs[0].design.options[1].slots[0].asset_key" }
+            ]
+          });
+
+          assert.strictEqual(app.elements.blockerList.children.length, 2, "same location dedupes, distinct options remain separate");
+          assert(app.elements.blockerList.textContent.includes("Design02 的第 1 个槽位"));
+          assert(app.elements.blockerList.textContent.includes("Design04 的第 1 个槽位"));
+          assert(!app.elements.blockerList.textContent.includes("$.outputs"));
+          app.elements.blockerList.children.forEach((item) => {
+            const button = item.children.find((child) => child.tagName === "BUTTON");
+            assert(button);
+            assert.strictEqual(button.textContent, "重新扫描");
+          });
+        })().catch((error) => { console.error(error); process.exit(1); });
+        """
+    )
+
+
+def test_v2_workbench_jumps_to_editable_slot_in_an_unselected_option():
+    run_node(
+        r"""
+        (async () => {
+          const options = ["Design02", "Design04"].map((key, index) => ({
+            key,
+            content_preset: "direct_text",
+            slots: [{ key: `slot_name${index + 1}`, source_field: `name${index + 1}`, preset: index ? "path_text" : "direct_text" }]
+          }));
+          async function fakeFetch(url) {
+            const textUrl = String(url);
+            if (textUrl === "/api/v2/templates") return response({ templates: [{ template_id: "V2CROSSOPTION", name: "Cross option" }] });
+            if (textUrl.endsWith("/draft")) return response({ draft: {
+              metadata: { template_id: "V2CROSSOPTION", name: "Cross option", shop_name: "Demo" },
+              manifest: { draft_revision: "d0001" },
+              scan: { outputs: [{
+                key: "Output_main",
+                design: { options: options.map((option) => ({ key: option.key, slots: option.slots })) },
+                font: { options: [] }, style: { options: [] }
+              }] },
+              config: {
+                field_bindings: { design: "Design", name1: "Name", name2: "Title" },
+                outputs: [{
+                  key: "Output_main", display_name: "Main", component_key: "main",
+                  style: { field: "", options: [] },
+                  design: { field: "design", options },
+                  font: { field: "", options: [] }
+                }]
+              }
+            }});
+            if (textUrl.endsWith("/validate")) return response({ validation: { checks: {} } });
+            return response({});
+          }
+          const app = createApp(fakeFetch);
+          await flush();
+          app.elements.templateList.children[0].dispatch("click");
+          await flush();
+          global.setWorkbenchStage("rules");
+          await flush();
+          assert(app.elements.selectedOptionTitle.textContent.includes("Design02"));
+
+          const checks = Object.fromEntries(["output", "fields", "options", "slots", "content", "dimensions", "colors", "preview"]
+            .map((key) => [key, { status: "confirmed", reason: "" }]));
+          checks.content = { status: "blocked", reason: "请修改槽位处理。" };
+          global.updateBlockers({
+            can_publish: false,
+            service_contract: { version: 2, capabilities: ["mixed_slot_processing", "editable_validation_targets"] },
+            checks,
+            issues: [{
+              path: "$.outputs[0].design.options[1].slots[0].preset",
+              check: "content", status: "blocked", code: "direct_text_slot_preset_invalid", reason: "请修改槽位处理。"
+            }]
+          });
+
+          const jump = app.elements.blockerList.children[0].children.find((child) => child.tagName === "BUTTON");
+          assert(jump, "unselected option still needs an actionable jump");
+          assert.strictEqual(jump.textContent, "前往修改");
+          jump.dispatch("click");
+          assert(app.elements.selectedOptionTitle.textContent.includes("Design04"));
+          const preset = document.querySelectorAll("#contentOptionRows .content-slot-row")[0].querySelector('[data-field="slot-preset"]');
+          assert.strictEqual(preset.value, "path_text");
+          assert.strictEqual(preset.focused, true);
+        })().catch((error) => { console.error(error); process.exit(1); });
+        """
+    )
+
+
+def test_v2_workbench_keeps_pending_field_and_mapping_issues_actionable():
+    run_node(
+        r"""
+        (async () => {
+          async function fakeFetch(url) {
+            const textUrl = String(url);
+            if (textUrl === "/api/v2/templates") return response({ templates: [{ template_id: "V2PENDING", name: "Pending" }] });
+            if (textUrl.endsWith("/draft")) return response({ draft: {
+              metadata: { template_id: "V2PENDING", name: "Pending", shop_name: "Demo" },
+              manifest: { draft_revision: "d0001" },
+              scan: { outputs: [{
+                key: "Output_main",
+                design: { options: [{ key: "Design02", slots: [{ key: "slot_name1" }] }] },
+                font: { options: [] }, style: { options: [] }
+              }] },
+              config: {
+                field_bindings: { design: "Design" },
+                option_mappings: [],
+                outputs: [{
+                  key: "Output_main", display_name: "Main", component_key: "main",
+                  style: { field: "", options: [] },
+                  design: { field: "design", options: [{
+                    key: "Design02", content_preset: "direct_text",
+                    slots: [{ key: "slot_name1", source_field: "name1", preset: "direct_text" }]
+                  }] },
+                  font: { field: "", options: [] }
+                }]
+              }
+            }});
+            if (textUrl.endsWith("/validate")) return response({ validation: { checks: {} } });
+            return response({});
+          }
+          const app = createApp(fakeFetch);
+          await flush();
+          app.elements.templateList.children[0].dispatch("click");
+          await flush();
+          global.setWorkbenchStage("structure");
+          await flush();
+
+          const checks = Object.fromEntries(["output", "fields", "options", "slots", "content", "dimensions", "colors", "preview"]
+            .map((key) => [key, { status: "confirmed", reason: "" }]));
+          checks.fields = { status: "pending", reason: "字段尚未绑定。" };
+          checks.options = { status: "pending", reason: "选项尚未映射。" };
+          global.updateBlockers({
+            can_publish: false,
+            service_contract: { version: 2, capabilities: ["mixed_slot_processing", "editable_validation_targets"] },
+            checks,
+            issues: [
+              { path: "$.outputs[0].design.options[0].slots[0].source_field", check: "fields", status: "pending", code: "field_binding_missing", reason: "槽位内容来源还没有绑定到真实表头。" },
+              { path: "$.checks.fields", check: "fields", status: "pending", code: "manual_check_pending", reason: "人工核验项还没有确认。" },
+              { path: "$.outputs[0].design.options[0].key", check: "options", status: "pending", code: "option_mapping_missing", reason: "当前选项还没有订单原值映射。" },
+              { path: "$.checks.options", check: "options", status: "pending", code: "manual_check_pending", reason: "人工核验项还没有确认。" }
+            ]
+          });
+
+          assert.strictEqual(app.elements.blockerList.children.length, 2, "specific pending issues suppress generic manual rows");
+          const bindingRow = document.querySelectorAll("#fieldBindingRows .field-binding-row")
+            .find((row) => row.querySelector('[data-field="binding-field"]').value === "name1");
+          const bindingColumn = bindingRow.querySelector('[data-field="binding-column"]');
+          const mappingRow = document.querySelectorAll("#optionMappingRows .option-mapping-row")
+            .find((row) => row.querySelector('[data-field="mapping-target"]').value === "Design02");
+          const mappingSource = mappingRow.querySelector('[data-field="mapping-source"]');
+          assert(bindingColumn.classList.contains("v2-validation-control-error"));
+          assert(mappingSource.classList.contains("v2-validation-control-error"));
+          assert(app.elements.blockerList.textContent.includes("字段 name1"));
+          assert(app.elements.blockerList.textContent.includes("Design02 的订单原值"));
+          const actions = app.elements.blockerList.children.map((item) => item.children.find((child) => child.tagName === "BUTTON"));
+          assert(actions.every((button) => button && button.textContent === "前往修改"));
+          actions[0].dispatch("click");
+          assert.strictEqual(bindingColumn.focused, true);
+          actions[1].dispatch("click");
+          assert.strictEqual(mappingSource.focused, true);
+        })().catch((error) => { console.error(error); process.exit(1); });
+        """
+    )
+
+
+def test_v2_workbench_routes_pending_scan_color_and_manual_checks_to_real_actions():
+    run_node(
+        r"""
+        (async () => {
+          async function fakeFetch(url) {
+            const textUrl = String(url);
+            if (textUrl === "/api/v2/templates") return response({ templates: [{ template_id: "V2ACTIONS", name: "Actions" }] });
+            if (textUrl.endsWith("/draft")) return response({ draft: {
+              metadata: { template_id: "V2ACTIONS", name: "Actions", shop_name: "Demo" },
+              manifest: { draft_revision: "d0001" },
+              scan: { outputs: [{ key: "Output_main", design: { options: [{ key: "Design02", slots: [{ key: "slot_name" }] }] }, font: { options: [] }, style: { options: [] } }] },
+              config: {
+                field_bindings: { design: "Design", name: "Name", color: "Color" },
+                outputs: [{ key: "Output_main", display_name: "Main", component_key: "main", style: { field: "", options: [] }, design: { field: "design", options: [{ key: "Design02", content_preset: "direct_text", slots: [{ key: "slot_name", source_field: "name", preset: "direct_text" }] }] }, font: { field: "", options: [] } }]
+              }
+            }});
+            if (textUrl.endsWith("/validate")) return response({ validation: { checks: {} } });
+            return response({});
+          }
+          const app = createApp(fakeFetch);
+          await flush();
+          app.elements.templateList.children[0].dispatch("click");
+          await flush();
+          global.setWorkbenchStage("rules");
+          await flush();
+
+          const confirmed = () => Object.fromEntries(["output", "fields", "options", "slots", "content", "dimensions", "colors", "preview"]
+            .map((key) => [key, { status: "confirmed", reason: "" }]));
+          let checks = confirmed();
+          checks.colors = { status: "pending", reason: "请确认颜色处理。" };
+          global.updateBlockers({
+            can_publish: false,
+            checks,
+            issues: [{ path: "$.colors", check: "colors", status: "pending", code: "color_samples_pending", reason: "没有扫描到可配置颜色样本。" }]
+          });
+          let action = app.elements.blockerList.children[0].children.find((child) => child.tagName === "BUTTON");
+          assert(action);
+          assert.strictEqual(action.textContent, "前往修改");
+          action.dispatch("click");
+          const noColorButton = document.getElementById("confirmNoColorRulesBtn");
+          assert(noColorButton);
+          assert.strictEqual(noColorButton.focused, true);
+
+          checks = confirmed();
+          checks.slots = { status: "pending", reason: "素材范围等待扫描。" };
+          checks.dimensions = { status: "pending", reason: "尺寸等待扫描。" };
+          checks.colors = { status: "blocked", reason: "颜色名称重复。" };
+          global.updateBlockers({
+            can_publish: false,
+            checks,
+            issues: [
+              { path: "$.outputs[0].design.options[0].assets[0].supported_values", check: "slots", status: "pending", code: "asset_range_pending", reason: "素材范围还没有扫描确认。" },
+              { path: "$.outputs", check: "dimensions", status: "pending", code: "dimension_pending", reason: "尺寸边界还没有扫描确认。" },
+              { path: "$.colors", check: "colors", status: "blocked", code: "duplicate_color", reason: "颜色样本存在重复名称。" }
+            ]
+          });
+          assert.strictEqual(app.elements.blockerList.children.length, 3);
+          assert(app.elements.rescanTemplateBtn.classList.contains("v2-validation-control-error"));
+          assert(!app.elements.colorRuleRows.classList.contains("v2-validation-row-error"));
+          assert(app.elements.blockerList.children.every((item) => {
+            const button = item.children.find((child) => child.tagName === "BUTTON");
+            return button && button.textContent === "重新扫描";
+          }));
+
+          checks = confirmed();
+          checks.preview = { status: "pending", reason: "请完成样例核验。" };
+          global.updateBlockers({
+            can_publish: false,
+            checks,
+            issues: [{ path: "$.checks.preview", check: "preview", status: "pending", code: "manual_check_pending", reason: "人工核验项还没有确认。" }]
+          });
+          action = app.elements.blockerList.children[0].children.find((child) => child.tagName === "BUTTON");
+          assert(action);
+          assert.strictEqual(action.textContent, "前往核验");
+          action.dispatch("click");
+          assert.strictEqual(global.DrawFlowV2WorkbenchContext.state.stage, "preview");
+          const previewCheck = app.elements.v2CheckRail.children.find((item) => item.dataset.checkKey === "preview");
+          assert.strictEqual(previewCheck.focused, true);
         })().catch((error) => { console.error(error); process.exit(1); });
         """
     )
@@ -2450,6 +2996,97 @@ def test_v2_workbench_marks_and_clears_the_exact_blocking_control():
         """
     )
 
+
+def test_v2_workbench_groups_stale_mixed_contract_failures_without_readonly_jump():
+    run_node(
+        r"""
+        (async () => {
+          const app = createApp(async (url) => {
+            if (String(url) === "/api/v2/templates") return response({ templates: [] });
+            return response({});
+          });
+          await flush();
+          const options = Array.from({ length: 10 }, (_, index) => ({
+            key: `Design${String((index + 1) * 2).padStart(2, "0")}`,
+            content_preset: "mixed_slots",
+            slots: [{ key: "slot_name1", source_field: "name1" }, { key: "slot_name2", source_field: "name2" }]
+          }));
+          global.DrawFlowV2WorkbenchContext.state.lastValidatedConfig = {
+            outputs: [{ key: "Output_main", design: { options }, font: { options: [] }, style: { options: [] } }]
+          };
+          app.elements.optionContentPreset.disabled = true;
+          app.elements.optionContentPreset.setAttribute("aria-readonly", "true");
+          const checks = Object.fromEntries(["output", "fields", "options", "slots", "content", "dimensions", "colors", "preview"]
+            .map((key) => [key, { status: "confirmed", reason: "" }]));
+          checks.output = { status: "blocked", reason: "请检查标红的设置。" };
+          global.updateBlockers({
+            can_publish: false,
+            checks,
+            issues: options.map((_, index) => ({
+              path: `$.outputs[0].design.options[${index}].content_preset`,
+              check: "output",
+              status: "blocked",
+              code: "contract_invalid",
+              reason: "配置契约无效。"
+            }))
+          });
+
+          assert.strictEqual(app.elements.blockerList.children.length, 1);
+          assert(app.elements.blockerList.textContent.includes("重启 DrawFlow"));
+          assert(app.elements.publishBlockerText.textContent.includes("还有 1 项"));
+          assert(!app.elements.blockerList.textContent.includes("mixed_slots"));
+          assert(!app.elements.blockerList.textContent.includes("$.outputs"));
+          assert(!app.elements.blockerList.children[0].children.some((child) => child.tagName === "BUTTON"));
+          assert(!app.elements.optionContentPreset.classList.contains("v2-validation-control-error"));
+          assert.strictEqual(app.elements.optionContentPreset.getAttribute("aria-invalid"), undefined);
+          assert.strictEqual(document.querySelectorAll(".v2-validation-control-error").length, 0);
+          assert.strictEqual(document.querySelectorAll(".v2-validation-row-error").length, 0);
+        })().catch((error) => { console.error(error); process.exit(1); });
+        """
+    )
+
+
+def test_v2_workbench_dedupes_same_business_target_but_keeps_distinct_options():
+    run_node(
+        r"""
+        (async () => {
+          const app = createApp(async (url) => {
+            if (String(url) === "/api/v2/templates") return response({ templates: [] });
+            return response({});
+          });
+          await flush();
+          global.DrawFlowV2WorkbenchContext.state.lastValidatedConfig = {
+            outputs: [{ key: "Output_main", design: { options: [
+              { key: "Design02", content_preset: "direct_text", slots: [] },
+              { key: "Design04", content_preset: "direct_text", slots: [] }
+            ] }, font: { options: [] }, style: { options: [] } }]
+          };
+          const checks = Object.fromEntries(["output", "fields", "options", "slots", "content", "dimensions", "colors", "preview"]
+            .map((key) => [key, { status: "confirmed", reason: "" }]));
+          checks.content = { status: "blocked", reason: "请选择内容处理方式。" };
+          const first = { path: "$.outputs[0].design.options[0].content_preset", check: "content", status: "blocked", code: "content_preset_missing", reason: "请选择内容处理方式。" };
+          global.updateBlockers({
+            can_publish: false,
+            service_contract: { version: 2, capabilities: ["mixed_slot_processing", "editable_validation_targets"] },
+            checks,
+            issues: [
+              first,
+              { ...first, code: "contract_invalid" },
+              { ...first, path: "$.outputs[0].design.options[1].content_preset" },
+              { ...first, reason: "请确认字体依赖。" }
+            ]
+          });
+
+          assert.strictEqual(app.elements.blockerList.children.length, 3);
+          assert(app.elements.blockerList.textContent.includes("Design02"));
+          assert(app.elements.blockerList.textContent.includes("Design04"));
+          assert(app.elements.blockerList.textContent.includes("请选择内容处理方式"));
+          assert(app.elements.blockerList.textContent.includes("请确认字体依赖"));
+          assert(app.elements.publishBlockerText.textContent.includes("还有 3 项"));
+        })().catch((error) => { console.error(error); process.exit(1); });
+        """
+    )
+
 def test_v2_workbench_marks_template_basics_and_mapping_area_from_root_validation_paths():
     run_node(
         r"""
@@ -2853,7 +3490,8 @@ def test_v2_workbench_uses_business_language_for_internal_validation_identifiers
               reason: "定位框必须归属同一槽位：Template/Output_main/Design/Design03/slot_name 只能引用 anchor_name。"
             }]
           });
-          assert(app.elements.blockerList.textContent.includes("定位框必须与当前槽位对应"));
+          assert(app.elements.blockerList.textContent.includes("定位框与当前槽位不对应"));
+          assert(app.elements.blockerList.textContent.includes("重新扫描"));
           ["Template/", "Output_main", "slot_name", "anchor_name"].forEach((value) => assert(!app.elements.blockerList.textContent.includes(value)));
         })().catch((error) => { console.error(error); process.exit(1); });
         """
