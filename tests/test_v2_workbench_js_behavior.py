@@ -99,6 +99,15 @@ class Element {
   getAttribute(name) {
     return this.attributes[name];
   }
+  removeAttribute(name) {
+    delete this.attributes[name];
+  }
+  focus() {
+    this.focused = true;
+  }
+  scrollIntoView() {
+    this.scrolled = true;
+  }
   querySelector(selector) {
     if (selector.includes("span")) return this.children.find((child) => child.tagName === "SPAN") || null;
     if (selector.includes("strong")) return this.children.find((child) => child.tagName === "STRONG") || null;
@@ -148,6 +157,15 @@ function makeDocument() {
       return null;
     },
     querySelectorAll: (selector) => {
+      const parts = selector.split(",").map((item) => item.trim());
+      const classNames = parts.map((item) => {
+        const match = item.match(/^\.([A-Za-z0-9_-]+)$/);
+        return match ? match[1] : "";
+      });
+      if (classNames.length && classNames.every(Boolean)) {
+        const nodes = Array.from(new Set(Object.values(elements).flatMap((root) => [root, ...allDescendants(root)])));
+        return nodes.filter((child) => classNames.some((name) => (child.className || "").split(/\s+/).includes(name)));
+      }
       const match = selector.match(/^#([^ ]+) \.([A-Za-z0-9_-]+)$/);
       if (!match || !elements[match[1]]) return [];
       return allDescendants(elements[match[1]]).filter((child) => (child.className || "").split(/\s+/).includes(match[2]));
@@ -2358,10 +2376,488 @@ def test_v2_workbench_can_confirm_label_only_color_rules_without_samples():
           assert.deepStrictEqual(draftSaveBody.config.colors, []);
           assert.strictEqual(draftSaveBody.config.checks.colors.status, "confirmed");
         })().catch((error) => { console.error(error); process.exit(1); });
+
+
+        """
+    )
+def test_v2_workbench_marks_and_clears_the_exact_blocking_control():
+    run_node(
+        r"""
+        (async () => {
+          const checkKeys = ["output", "fields", "options", "slots", "content", "dimensions", "colors", "preview"];
+          function confirmedChecks() {
+            return Object.fromEntries(checkKeys.map((key) => [key, { status: "confirmed", reason: "" }]));
+          }
+          async function fakeFetch(url, options = {}) {
+            const textUrl = String(url);
+            if (textUrl === "/api/v2/templates") return response({ templates: [{ template_id: "V2HIGHLIGHT", name: "Highlight Demo" }] });
+            if (textUrl.endsWith("/draft")) return response({ draft: {
+              metadata: { template_id: "V2HIGHLIGHT", name: "Highlight Demo", shop_name: "" },
+              manifest: { draft_revision: "d0001" },
+              scan: { outputs: [{ key: "Output_main" }] },
+              config: { outputs: [{ key: "Output_main", display_name: "主效果图", component_key: "main", style: { field: "", options: [] }, design: { field: "", options: [] }, font: { field: "", options: [] } }] }
+            }});
+            if (textUrl.endsWith("/validate")) {
+              const config = JSON.parse(options.body).config;
+              const invalid = config.outputs[0].key !== "Output_main";
+              const checks = confirmedChecks();
+              if (invalid) checks.output = { status: "blocked", reason: "效果图编号填写有误，请检查标红的效果图编号。" };
+              return response({ validation: {
+                can_save: !invalid,
+                can_publish: !invalid,
+                checks,
+                issues: invalid ? [{
+                  path: "$.outputs[0].key",
+                  check: "output",
+                  status: "blocked",
+                  code: "contract_invalid",
+                  reason: "效果图编号填写有误，请检查标红的效果图编号。"
+                }] : []
+              }});
+            }
+            return response({});
+          }
+          const app = createApp(fakeFetch);
+          await flush();
+          app.elements.templateList.children[0].dispatch("click");
+          await flush();
+          global.setWorkbenchStage("structure");
+          await flush();
+
+          const outputRow = document.querySelectorAll("#outputConfigRows .output-row")[0];
+          const outputInput = outputRow.querySelector('[data-field="output-key"]');
+          outputInput.value = "WrongOutput";
+          outputInput.dispatch("input");
+          await flush();
+
+          assert(outputInput.classList.contains("v2-validation-control-error"));
+          assert.strictEqual(outputInput.getAttribute("aria-invalid"), "true");
+          assert(outputInput.getAttribute("title").includes("效果图编号"));
+          const blocker = app.elements.blockerList.children[0];
+          const jump = blocker.children.find((child) => child.tagName === "BUTTON");
+          assert(jump);
+          assert.strictEqual(jump.textContent, "前往修改");
+          jump.dispatch("click");
+          assert.strictEqual(global.DrawFlowV2WorkbenchContext.state.stage, "structure");
+          assert.strictEqual(outputInput.focused, true);
+
+          outputInput.value = "Output_main";
+          outputInput.dispatch("input");
+          await flush();
+          assert(!outputInput.classList.contains("v2-validation-control-error"));
+          assert.strictEqual(outputInput.getAttribute("aria-invalid"), undefined);
+        })().catch((error) => { console.error(error); process.exit(1); });
+        """
+    )
+
+def test_v2_workbench_marks_template_basics_and_mapping_area_from_root_validation_paths():
+    run_node(
+        r"""
+        (async () => {
+          const app = createApp(async (url) => {
+            if (String(url) === "/api/v2/templates") return response({ templates: [] });
+            return response({});
+          });
+          await flush();
+          const checkKeys = ["output", "fields", "options", "slots", "content", "dimensions", "colors", "preview"];
+          const confirmedChecks = () => Object.fromEntries(checkKeys.map((key) => [key, { status: "confirmed", reason: "" }]));
+          const outputChecks = confirmedChecks();
+          outputChecks.output = { status: "blocked", reason: "模板信息未填写完整。" };
+          global.updateBlockers({
+            can_publish: false,
+            checks: outputChecks,
+            issues: [
+              { path: "$.template.template_id", check: "output", status: "blocked", code: "contract_invalid", reason: "模板编号未填写。" },
+              { path: "$.template.name", check: "output", status: "blocked", code: "contract_invalid", reason: "模板名称未填写。" },
+              { path: "$.template.shop_name", check: "output", status: "blocked", code: "contract_invalid", reason: "店铺名称未填写。" }
+            ]
+          });
+          [app.elements.templateId, app.elements.templateName, app.elements.shopName].forEach((control) => {
+            assert(control.classList.contains("v2-validation-control-error"));
+            assert.strictEqual(control.getAttribute("aria-invalid"), "true");
+          });
+          const nameJump = app.elements.blockerList.children[1].children.find((child) => child.tagName === "BUTTON");
+          assert(nameJump);
+          nameJump.dispatch("click");
+          assert.strictEqual(global.DrawFlowV2WorkbenchContext.state.stage, "upload");
+          assert.strictEqual(app.elements.templateName.focused, true);
+
+          const mappingChecks = confirmedChecks();
+          mappingChecks.options = { status: "blocked", reason: "订单映射需要补充。" };
+          global.updateBlockers({
+            can_publish: false,
+            checks: mappingChecks,
+            issues: [{ path: "$.option_mappings", check: "options", status: "blocked", code: "contract_invalid", reason: "订单映射填写有误。" }]
+          });
+          assert(app.elements.optionMappingRows.classList.contains("v2-validation-row-error"));
+          const mappingJump = app.elements.blockerList.children[0].children.find((child) => child.tagName === "BUTTON");
+          assert(mappingJump);
+        })().catch((error) => { console.error(error); process.exit(1); });
         """
     )
 
 
+def test_v2_workbench_clears_old_feedback_before_a_delayed_validation_returns():
+    run_node(
+        r"""
+        (async () => {
+          const checkKeys = ["output", "fields", "options", "slots", "content", "dimensions", "colors", "preview"];
+          const confirmedChecks = () => Object.fromEntries(checkKeys.map((key) => [key, { status: "confirmed", reason: "" }]));
+          let resolveUpdatedValidation;
+          let validationCalls = 0;
+          async function fakeFetch(url, options = {}) {
+            const textUrl = String(url);
+            if (textUrl === "/api/v2/templates") return response({ templates: [{ template_id: "V2DELAY", name: "Delay Demo" }] });
+            if (textUrl.endsWith("/draft")) return response({ draft: {
+              metadata: { template_id: "V2DELAY", name: "Delay Demo", shop_name: "" },
+              manifest: { draft_revision: "d0001" },
+              scan: { outputs: [{ key: "Output_main" }] },
+              config: { outputs: [{ key: "Output_main", display_name: "Main", component_key: "main", style: { field: "", options: [] }, design: { field: "", options: [] }, font: { field: "", options: [] } }] }
+            }});
+            if (textUrl.endsWith("/validate")) {
+              validationCalls += 1;
+              if (validationCalls === 1) {
+                const checks = confirmedChecks();
+                checks.output = { status: "blocked", reason: "效果图编号填写有误，请检查标红的效果图编号。" };
+                return response({ validation: {
+                  can_save: false,
+                  can_publish: false,
+                  checks,
+                  issues: [{ path: "$.outputs[0].key", check: "output", status: "blocked", code: "contract_invalid", reason: "效果图编号填写有误，请检查标红的效果图编号。" }]
+                }});
+              }
+              return new Promise((resolve) => { resolveUpdatedValidation = resolve; });
+            }
+            return response({});
+          }
+          const app = createApp(fakeFetch);
+          await flush();
+          app.elements.templateList.children[0].dispatch("click");
+          await flush();
+          global.setWorkbenchStage("structure");
+          await flush();
+
+          const input = document.querySelectorAll("#outputConfigRows .output-row")[0].querySelector('[data-field="output-key"]');
+          assert(input.classList.contains("v2-validation-control-error"));
+          assert(app.elements.blockerList.textContent.includes("效果图编号填写有误"));
+
+          input.value = "Output_main";
+          input.dispatch("input");
+          assert(!input.classList.contains("v2-validation-control-error"));
+          assert.strictEqual(input.getAttribute("aria-invalid"), undefined);
+          assert(!app.elements.blockerList.textContent.includes("效果图编号填写有误"));
+          assert(resolveUpdatedValidation);
+
+          resolveUpdatedValidation(response({ validation: { can_save: true, can_publish: true, checks: confirmedChecks(), issues: [] } }));
+          await flush();
+          assert(!input.classList.contains("v2-validation-control-error"));
+          assert.strictEqual(app.elements.publishVersionBtn.disabled, false);
+        })().catch((error) => { console.error(error); process.exit(1); });
+        """
+    )
+
+
+def test_v2_workbench_ignores_an_older_validation_response_after_a_newer_result():
+    run_node(
+        r"""
+        (async () => {
+          const checkKeys = ["output", "fields", "options", "slots", "content", "dimensions", "colors", "preview"];
+          const confirmedChecks = () => Object.fromEntries(checkKeys.map((key) => [key, { status: "confirmed", reason: "" }]));
+          let resolveOlderValidation;
+          let resolveNewerValidation;
+          let validationCalls = 0;
+          async function fakeFetch(url) {
+            const textUrl = String(url);
+            if (textUrl === "/api/v2/templates") return response({ templates: [{ template_id: "V2ORDER", name: "Order Demo" }] });
+            if (textUrl.endsWith("/draft")) return response({ draft: {
+              metadata: { template_id: "V2ORDER", name: "Order Demo", shop_name: "" },
+              manifest: { draft_revision: "d0001" },
+              scan: { outputs: [{ key: "Output_main" }] },
+              config: { outputs: [{ key: "Output_main", display_name: "Main", component_key: "main", style: { field: "", options: [] }, design: { field: "", options: [] }, font: { field: "", options: [] } }] }
+            }});
+            if (textUrl.endsWith("/validate")) {
+              validationCalls += 1;
+              if (validationCalls === 1) return response({ validation: { can_save: true, can_publish: true, checks: confirmedChecks(), issues: [] } });
+              if (validationCalls === 2) return new Promise((resolve) => { resolveOlderValidation = resolve; });
+              return new Promise((resolve) => { resolveNewerValidation = resolve; });
+            }
+            return response({});
+          }
+          const app = createApp(fakeFetch);
+          await flush();
+          app.elements.templateList.children[0].dispatch("click");
+          await flush();
+          global.setWorkbenchStage("structure");
+          await flush();
+
+          const input = document.querySelectorAll("#outputConfigRows .output-row")[0].querySelector('[data-field="output-key"]');
+          input.value = "First change";
+          input.dispatch("input");
+          input.value = "Second change";
+          input.dispatch("input");
+          assert(resolveOlderValidation);
+          assert(resolveNewerValidation);
+
+          resolveNewerValidation(response({ validation: { can_save: true, can_publish: true, checks: confirmedChecks(), issues: [] } }));
+          await flush();
+          resolveOlderValidation(response({ validation: {
+            can_save: false,
+            can_publish: false,
+            checks: { ...confirmedChecks(), output: { status: "blocked", reason: "旧结果" } },
+            issues: [{ path: "$.outputs[0].key", check: "output", status: "blocked", code: "contract_invalid", reason: "旧结果" }]
+          }}));
+          await flush();
+
+          assert(!input.classList.contains("v2-validation-control-error"));
+          assert(!app.elements.blockerList.textContent.includes("旧结果"));
+          assert.strictEqual(app.elements.publishVersionBtn.disabled, false);
+        })().catch((error) => { console.error(error); process.exit(1); });
+        """
+    )
+def test_v2_workbench_marks_ambiguous_output_issue_on_output_section():
+    run_node(
+        r"""
+        (async () => {
+          const checkKeys = ["output", "fields", "options", "slots", "content", "dimensions", "colors", "preview"];
+          const confirmedChecks = () => Object.fromEntries(checkKeys.map((key) => [key, { status: "confirmed", reason: "" }]));
+          async function fakeFetch(url) {
+            const textUrl = String(url);
+            if (textUrl === "/api/v2/templates") return response({ templates: [{ template_id: "V2MULTI", name: "Multi" }] });
+            if (textUrl.endsWith("/draft")) return response({ draft: {
+              metadata: { template_id: "V2MULTI", name: "Multi", shop_name: "" },
+              manifest: { draft_revision: "d0001" },
+              scan: { outputs: [{ key: "Output_main" }, { key: "Output_SideA" }] },
+              config: { outputs: [
+                { key: "Output_main", display_name: "Main", component_key: "main", style: { field: "", options: [] }, design: { field: "", options: [] }, font: { field: "", options: [] } },
+                { key: "Output_SideA", display_name: "Side A", component_key: "side_a", style: { field: "", options: [] }, design: { field: "", options: [] }, font: { field: "", options: [] } }
+              ] }
+            }});
+            if (textUrl.endsWith("/validate")) return response({ validation: { can_save: true, can_publish: true, checks: confirmedChecks(), issues: [] } });
+            return response({});
+          }
+          const app = createApp(fakeFetch);
+          await flush();
+          app.elements.templateList.children[0].dispatch("click");
+          await flush();
+          global.setWorkbenchStage("structure");
+          await flush();
+
+          const checks = confirmedChecks();
+          checks.output = { status: "blocked", reason: "Output list needs review" };
+          global.updateBlockers({
+            can_publish: false,
+            checks,
+            issues: [{ path: "$.outputs", check: "output", status: "blocked", reason: "Output list needs review" }]
+          });
+
+          const keys = document.querySelectorAll("#outputConfigRows .output-row").map((row) => row.querySelector('[data-field="output-key"]'));
+          assert.strictEqual(keys.length, 2);
+          assert(!keys[0].classList.contains("v2-validation-control-error"));
+          assert(!keys[1].classList.contains("v2-validation-control-error"));
+          assert(app.elements.outputConfigRows.classList.contains("v2-validation-row-error"));
+        })().catch((error) => { console.error(error); process.exit(1); });
+        """
+    )
+
+
+def test_v2_workbench_keeps_a_cleared_output_key_after_rerender():
+    run_node(
+        r"""
+        (async () => {
+          const checkKeys = ["output", "fields", "options", "slots", "content", "dimensions", "colors", "preview"];
+          const confirmedChecks = () => Object.fromEntries(checkKeys.map((key) => [key, { status: "confirmed", reason: "" }]));
+          async function fakeFetch(url, options = {}) {
+            const textUrl = String(url);
+            if (textUrl === "/api/v2/templates") return response({ templates: [{ template_id: "V2BLANK", name: "Blank" }] });
+            if (textUrl.endsWith("/draft")) return response({ draft: {
+              metadata: { template_id: "V2BLANK", name: "Blank", shop_name: "" },
+              manifest: { draft_revision: "d0001" },
+              scan: { outputs: [{ key: "Output_main" }] },
+              config: { outputs: [{ key: "Output_main", display_name: "Main", component_key: "main", style: { field: "", options: [] }, design: { field: "", options: [] }, font: { field: "", options: [] } }] }
+            }});
+            if (textUrl.endsWith("/validate")) {
+              const config = JSON.parse(options.body).config;
+              const invalid = config.outputs[0].key === "";
+              const checks = confirmedChecks();
+              if (invalid) checks.output = { status: "blocked", reason: "Output key is required" };
+              return response({ validation: {
+                can_save: !invalid,
+                can_publish: !invalid,
+                checks,
+                issues: invalid ? [{ path: "$.outputs[0].key", check: "output", status: "blocked", reason: "Output key is required" }] : []
+              }});
+            }
+            return response({});
+          }
+          const app = createApp(fakeFetch);
+          await flush();
+          app.elements.templateList.children[0].dispatch("click");
+          await flush();
+          global.setWorkbenchStage("structure");
+          await flush();
+
+          const input = document.querySelectorAll("#outputConfigRows .output-row")[0].querySelector('[data-field="output-key"]');
+          input.value = "";
+          input.dispatch("input");
+          await flush();
+          assert.strictEqual(global.buildControlledConfig().outputs[0].key, "");
+
+          global.setWorkbenchStage("rules");
+          await flush();
+          const rerendered = document.querySelectorAll("#outputConfigRows .output-row")[0].querySelector('[data-field="output-key"]');
+          assert.strictEqual(rerendered.value, "");
+          assert.strictEqual(global.buildControlledConfig().outputs[0].key, "");
+        })().catch((error) => { console.error(error); process.exit(1); });
+        """
+    )
+
+
+def test_v2_workbench_clears_old_validation_feedback_before_next_draft_loads():
+    run_node(
+        r"""
+        (async () => {
+          const checkKeys = ["output", "fields", "options", "slots", "content", "dimensions", "colors", "preview"];
+          const confirmedChecks = () => Object.fromEntries(checkKeys.map((key) => [key, { status: "confirmed", reason: "" }]));
+          let resolveB;
+          async function fakeFetch(url, options = {}) {
+            const textUrl = String(url);
+            if (textUrl === "/api/v2/templates") return response({ templates: [
+              { template_id: "V2A", name: "Template A" },
+              { template_id: "V2B", name: "Template B" }
+            ] });
+            if (textUrl.endsWith("/V2A/draft")) return response({ draft: {
+              metadata: { template_id: "V2A", name: "Template A", shop_name: "" },
+              manifest: { draft_revision: "d0001" },
+              scan: { outputs: [{ key: "Output_main" }] },
+              config: { outputs: [{ key: "Output_main", display_name: "Main", component_key: "main", style: { field: "", options: [] }, design: { field: "", options: [] }, font: { field: "", options: [] } }] }
+            }});
+            if (textUrl.endsWith("/V2B/draft")) return new Promise((resolve) => { resolveB = resolve; });
+            if (textUrl.endsWith("/validate")) {
+              const config = JSON.parse(options.body).config;
+              const invalid = config.template.template_id === "V2A";
+              const checks = confirmedChecks();
+              if (invalid) checks.output = { status: "blocked", reason: "Old blocker" };
+              return response({ validation: {
+                can_save: !invalid,
+                can_publish: !invalid,
+                checks,
+                issues: invalid ? [{ path: "$.outputs[0].key", check: "output", status: "blocked", reason: "Old blocker" }] : []
+              }});
+            }
+            return response({});
+          }
+          const app = createApp(fakeFetch);
+          await flush();
+          app.elements.templateList.children[0].dispatch("click");
+          await flush();
+          global.setWorkbenchStage("structure");
+          await flush();
+          const oldInput = document.querySelectorAll("#outputConfigRows .output-row")[0].querySelector('[data-field="output-key"]');
+          assert(oldInput.classList.contains("v2-validation-control-error"));
+          assert(app.elements.blockerList.textContent.includes("Old blocker"));
+
+          app.elements.templateList.children[1].dispatch("click");
+          assert.strictEqual(global.DrawFlowV2WorkbenchContext.state.selectedTemplateId, "V2B");
+          assert(!oldInput.classList.contains("v2-validation-control-error"));
+          assert.strictEqual(oldInput.getAttribute("aria-invalid"), undefined);
+          assert(!app.elements.blockerList.textContent.includes("Old blocker"));
+          assert(!app.elements.publishBlockerText.textContent.includes("Old blocker"));
+          assert(resolveB);
+
+          resolveB(response({ draft: {
+            metadata: { template_id: "V2B", name: "Template B", shop_name: "" },
+            manifest: { draft_revision: "d0001" },
+            scan: { outputs: [{ key: "Output_SideA" }] },
+            config: { outputs: [{ key: "Output_SideA", display_name: "Side A", component_key: "side_a", style: { field: "", options: [] }, design: { field: "", options: [] }, font: { field: "", options: [] } }] }
+          }}));
+          await flush();
+          assert.strictEqual(app.elements.templateId.value, "V2B");
+        })().catch((error) => { console.error(error); process.exit(1); });
+        """
+    )
+
+
+def test_v2_workbench_ignores_an_out_of_order_draft_response():
+    run_node(
+        r"""
+        (async () => {
+          let resolveA;
+          let resolveB;
+          const draftA = {
+            metadata: { template_id: "V2A", name: "Template A", shop_name: "" },
+            manifest: { draft_revision: "a0001" },
+            scan: { outputs: [{ key: "Output_main" }] },
+            config: { outputs: [{ key: "Output_main", display_name: "Main", component_key: "main", style: { field: "", options: [] }, design: { field: "", options: [] }, font: { field: "", options: [] } }] }
+          };
+          const draftB = {
+            metadata: { template_id: "V2B", name: "Template B", shop_name: "" },
+            manifest: { draft_revision: "b0001" },
+            scan: { outputs: [{ key: "Output_SideA" }] },
+            config: { outputs: [{ key: "Output_SideA", display_name: "Side A", component_key: "side_a", style: { field: "", options: [] }, design: { field: "", options: [] }, font: { field: "", options: [] } }] }
+          };
+          async function fakeFetch(url) {
+            const textUrl = String(url);
+            if (textUrl === "/api/v2/templates") return response({ templates: [
+              { template_id: "V2A", name: "Template A" },
+              { template_id: "V2B", name: "Template B" }
+            ] });
+            if (textUrl.endsWith("/V2A/draft")) return new Promise((resolve) => { resolveA = resolve; });
+            if (textUrl.endsWith("/V2B/draft")) return new Promise((resolve) => { resolveB = resolve; });
+            if (textUrl.endsWith("/validate")) return response({ validation: { checks: {} } });
+            return response({});
+          }
+          const app = createApp(fakeFetch);
+          await flush();
+          app.elements.templateList.children[0].dispatch("click");
+          await flush();
+          app.elements.templateList.children[1].dispatch("click");
+          await flush();
+          assert(resolveA);
+          assert(resolveB);
+
+          resolveB(response({ draft: draftB }));
+          await flush();
+          resolveA(response({ draft: draftA }));
+          await flush();
+
+          const state = global.DrawFlowV2WorkbenchContext.state;
+          assert.strictEqual(state.selectedTemplateId, "V2B");
+          assert.strictEqual(state.draft.metadata.template_id, "V2B");
+          assert.strictEqual(app.elements.templateId.value, "V2B");
+          assert.strictEqual(app.elements.templateName.value, "Template B");
+          assert.strictEqual(state.scan.outputs[0].key, "Output_SideA");
+        })().catch((error) => { console.error(error); process.exit(1); });
+        """
+    )
+
+def test_v2_workbench_uses_business_language_for_internal_validation_identifiers():
+    run_node(
+        r"""
+        (async () => {
+          const app = createApp(async (url) => {
+            if (String(url) === "/api/v2/templates") return response({ templates: [] });
+            return response({});
+          });
+          await flush();
+          const checkKeys = ["output", "fields", "options", "slots", "content", "dimensions", "colors", "preview"];
+          const checks = Object.fromEntries(checkKeys.map((key) => [key, { status: "confirmed", reason: "" }]));
+          checks.slots = { status: "blocked", reason: "anchor_name 与 slot_name 不对应" };
+          global.updateBlockers({
+            can_publish: false,
+            checks,
+            issues: [{
+              path: "$.outputs[0].design.options[0].slots[0].anchor",
+              check: "slots",
+              status: "blocked",
+              code: "anchor_belongs_to_slot",
+              reason: "定位框必须归属同一槽位：Template/Output_main/Design/Design03/slot_name 只能引用 anchor_name。"
+            }]
+          });
+          assert(app.elements.blockerList.textContent.includes("定位框必须与当前槽位对应"));
+          ["Template/", "Output_main", "slot_name", "anchor_name"].forEach((value) => assert(!app.elements.blockerList.textContent.includes(value)));
+        })().catch((error) => { console.error(error); process.exit(1); });
+        """
+    )
 def test_v2_workbench_preflight_modal_sanitizes_issue_details():
     run_node(
         r"""
@@ -2483,6 +2979,33 @@ def test_v2_workbench_sanitizes_sensitive_failures_and_scanning_overlay():
           await flush();
           assert.strictEqual(app.elements.scanRunningOverlay.hidden, true);
           assert(app.elements.scanProgress.textContent.includes("扫描完成"));
+        })().catch((error) => { console.error(error); process.exit(1); });
+        """
+    )
+def test_v2_workbench_hides_technical_validation_details_in_blockers_and_tooltips():
+    run_node(
+        r"""
+        (async () => {
+          const app = createApp(async (url) => {
+            if (String(url) === "/api/v2/templates") return response({ templates: [] });
+            return response({});
+          });
+          await flush();
+          assert.strictEqual(global.hasTechnicalValidationDetail("layer_path=opaque-value"), true);
+          const checkKeys = ["output", "fields", "options", "slots", "content", "dimensions", "colors", "preview"];
+          const checks = Object.fromEntries(checkKeys.map((key) => [key, { status: "confirmed", reason: "" }]));
+          checks.output = { status: "blocked", reason: "Duplicate item" };
+          const unsafeReason = "同一作用域内名称重复：slot_name；冲突图层路径：Template/Output_main/Design/Design03/slot_name ($.outputs[0].design.options[0].slots[1])。";
+          global.updateBlockers({
+            can_publish: false,
+            checks,
+            issues: [{ path: "$.outputs", check: "output", status: "blocked", code: "duplicate_name", reason: unsafeReason }]
+          });
+          assert(app.elements.blockerList.textContent.includes("同一范围内存在重复名称"));
+          assert(!app.elements.blockerList.textContent.includes("Template/"));
+          assert(!app.elements.blockerList.textContent.includes("$.outputs"));
+          assert(!app.elements.outputConfigRows.getAttribute("title").includes("Template/"));
+          assert(!app.elements.outputConfigRows.getAttribute("title").includes("$.outputs"));
         })().catch((error) => { console.error(error); process.exit(1); });
         """
     )

@@ -91,9 +91,20 @@
     step.appendChild(body);
     return step;
   }
+  function preserveLatestConfigForStage() {
+    const config = objectOf(state.lastValidatedConfig);
+    const template = objectOf(config.template);
+    if (!state.draft || !Array.isArray(config.outputs) || cleanText(template.template_id) !== cleanText(state.selectedTemplateId)) return;
+    state.draft = { ...state.draft, config };
+  }
+
+
 
   function setWorkbenchStage(stage) {
+
+
     const allowed = ["upload", "structure", "rules", "preview"];
+    preserveLatestConfigForStage();
     const next = allowed.includes(stage) ? stage : "upload";
     state.stage = next;
     const app = $("v2WorkbenchApp");

@@ -48,7 +48,7 @@ def _validate_output_readiness(output_items: list[Mapping[str, Any]], issues: li
                 "output",
                 V2_STATUS_BLOCKED,
                 "single_output_key_invalid",
-                "单效果图模板必须使用 Output_main；多面模板才使用 Output_SideA/B/C。",
+                "单效果图模板只能设置一个主效果图；多面模板请按顺序配置各面效果图。",
             )
         return
 
@@ -60,7 +60,7 @@ def _validate_output_readiness(output_items: list[Mapping[str, Any]], issues: li
             "output",
             V2_STATUS_BLOCKED,
             "output_side_sequence_invalid",
-            "多 Output 必须使用连续的 Output_SideA/B/C 顺序，不能缺少中间 Side。",
+            "多面模板的效果图顺序不完整，请按顺序补齐各面效果图。",
         )
     for index, output in enumerate(output_items):
         if not str(output.get("display_name") or "").strip():
@@ -70,7 +70,7 @@ def _validate_output_readiness(output_items: list[Mapping[str, Any]], issues: li
                 "output",
                 V2_STATUS_PENDING,
                 "output_display_name_pending",
-                "多 Output 必须确认中文部件名，便于配置、预览和错误定位。",
+                "多面模板需要填写中文部件名称，便于配置、预览和错误定位。",
             )
         if not str(output.get("component_key") or "").strip():
             add_issue(
@@ -79,7 +79,7 @@ def _validate_output_readiness(output_items: list[Mapping[str, Any]], issues: li
                 "output",
                 V2_STATUS_PENDING,
                 "output_component_pending",
-                "多 Output 必须确认用途标识，避免不同部件共用规则。",
+                "多面模板需要填写部件用途，避免不同部件共用规则。",
             )
 
 
@@ -136,13 +136,13 @@ def _validate_slot_markers(
         return
     anchor = str(slot.get("anchor") or "")
     if anchor and anchor != f"anchor_{suffix}":
-        add_issue(issues, slot_path + ".anchor", "slots", V2_STATUS_BLOCKED, "anchor_belongs_to_slot", f"定位框必须归属同一槽位：{layer_prefix}/{slot_key} 只能引用 anchor_{suffix}。")
+        add_issue(issues, slot_path + ".anchor", "slots", V2_STATUS_BLOCKED, "anchor_belongs_to_slot", "定位框必须与当前槽位对应，请重新选择本槽位的定位框。")
     for tail_index, tail in enumerate(list_value(slot.get("tails"))):
         tail_key = str(mapping(tail).get("key") or "")
         layer_path = f"{layer_prefix}/{slot_key}/{tail_key}"
         tail_records.append({"name": tail_key, "scope": f"{layer_prefix}/{slot_key}", "layer_path": layer_path, "json_path": f"{slot_path}.tails[{tail_index}]"})
         if tail_key and not tail_key.startswith(f"tail_{suffix}_"):
-            add_issue(issues, f"{slot_path}.tails[{tail_index}].key", "slots", V2_STATUS_BLOCKED, "tail_belongs_to_slot", f"尾巴样本必须归属同一槽位：{slot_key} 只能使用 tail_{suffix}_*。")
+            add_issue(issues, f"{slot_path}.tails[{tail_index}].key", "slots", V2_STATUS_BLOCKED, "tail_belongs_to_slot", "尾巴样本必须与当前槽位对应，请重新选择本槽位的尾巴样本。")
 
 
 def _validate_asset_slot_links(option: Mapping[str, Any], option_path: str, issues: list[Dict[str, str]]) -> None:
@@ -170,9 +170,9 @@ def _validate_slot_asset_reference(
     slot_key = str(slot.get("key") or "")
     slot_path = f"{option_path}.slots[{slot_index}]"
     if slot_key != expected_slot:
-        add_issue(issues, slot_path + ".asset_key", "slots", V2_STATUS_BLOCKED, "asset_slot_mismatch", f"素材库 {asset_key} 必须与 {expected_slot} 双向对应。")
+        add_issue(issues, slot_path + ".asset_key", "slots", V2_STATUS_BLOCKED, "asset_slot_mismatch", "素材库与当前素材槽位必须相互对应，请重新选择。")
     if asset_key not in assets_by_key:
-        add_issue(issues, slot_path + ".asset_key", "slots", V2_STATUS_BLOCKED, "asset_missing", f"槽位 {slot_key} 引用了不存在的素材库 {asset_key}。")
+        add_issue(issues, slot_path + ".asset_key", "slots", V2_STATUS_BLOCKED, "asset_missing", "当前素材槽位引用的素材库不存在，请重新选择。")
 
 
 def _validate_asset_reference(
@@ -186,11 +186,11 @@ def _validate_asset_reference(
     expected_slot = f"slot_{asset_key}"
     asset_path = f"{option_path}.assets[{asset_index}]"
     if str(asset.get("slot") or "") != expected_slot:
-        add_issue(issues, asset_path + ".slot", "slots", V2_STATUS_BLOCKED, "asset_slot_mismatch", f"Assets/{asset_key} 必须对应 {expected_slot}，不得跨槽位借用。")
+        add_issue(issues, asset_path + ".slot", "slots", V2_STATUS_BLOCKED, "asset_slot_mismatch", "素材库与当前素材槽位必须相互对应，请重新选择。")
     if expected_slot not in slots_by_key:
-        add_issue(issues, asset_path + ".asset_key", "slots", V2_STATUS_BLOCKED, "asset_slot_missing", f"素材库 {asset_key} 缺少对应槽位 {expected_slot}。")
+        add_issue(issues, asset_path + ".asset_key", "slots", V2_STATUS_BLOCKED, "asset_slot_missing", "素材库缺少对应的素材槽位，请重新选择。")
     elif str(slots_by_key[expected_slot].get("asset_key") or "") != asset_key:
-        add_issue(issues, asset_path + ".asset_key", "slots", V2_STATUS_BLOCKED, "asset_slot_mismatch", f"素材库 {asset_key} 与 {expected_slot} 没有形成双向引用。")
+        add_issue(issues, asset_path + ".asset_key", "slots", V2_STATUS_BLOCKED, "asset_slot_mismatch", "素材库与当前素材槽位必须相互对应，请重新选择。")
 
 
 def _validate_fields(contract: Mapping[str, Any], issues: list[Dict[str, str]]) -> None:

@@ -278,3 +278,13 @@ def test_v2_workbench_routes_are_isolated_from_legacy_page():
     assert '"workbench-stage-view.js"' in SERVER
     assert '"workbench-structure-tree.js"' in SERVER
     assert "self._send_html(WORKBENCH_HTML)" in SERVER
+
+
+def test_v2_workbench_marks_and_locates_publish_blockers():
+    assert ".v2-validation-control-error" in CSS
+    assert ".v2-validation-row-error" in CSS
+    assert ".blocker-jump" in CSS
+    assert "validationTargetForIssue" in JS
+    assert "focusValidationIssue" in JS
+    assert "validationRequestId" in JS
+    assert "前往修改" in JS

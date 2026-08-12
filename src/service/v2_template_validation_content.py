@@ -43,9 +43,9 @@ def _validate_content_option(
     if slots and not declared_preset:
         add_issue(issues, option_path + ".content_preset", "content", V2_STATUS_PENDING, "content_preset_missing", "具体选项还没有确认内容处理预设。")
     if active_preset and active_preset not in V2_SELECTABLE_OPTION_CONTENT_PRESETS:
-        add_issue(issues, option_path + ".content_preset", "content", V2_STATUS_BLOCKED, "content_preset_invalid", f"不支持的内容处理预设：{active_preset}。")
+        add_issue(issues, option_path + ".content_preset", "content", V2_STATUS_BLOCKED, "content_preset_invalid", "不支持的内容处理方式，请重新选择。")
     if declared_preset and declared_preset not in V2_SELECTABLE_OPTION_CONTENT_PRESETS:
-        add_issue(issues, option_path + ".content_preset", "content", V2_STATUS_BLOCKED, "option_preset_invalid", "asset_replace 只能作为槽位原语，不能作为选项级内容处理预设。")
+        add_issue(issues, option_path + ".content_preset", "content", V2_STATUS_BLOCKED, "option_preset_invalid", "素材替换仅用于素材槽位，不能作为选项级处理方式。")
     _validate_preset_requirements(active_preset, slots, option_path, has_design, has_font, issues)
     if slots and not option_has_font_evidence(option):
         add_issue(issues, option_path + ".font_dependencies", "content", V2_STATUS_PENDING, "font_dependency_pending", "字体依赖扫描值还没有确认。")
@@ -74,7 +74,7 @@ def _validate_preset_requirements(
     if active_preset == "path_text":
         _require_path_text(slots, option_path, issues)
     if active_preset == "design_font_combo" and not (has_design and has_font):
-        add_issue(issues, option_path + ".content_preset", "content", V2_STATUS_BLOCKED, "combo_requires_design_and_font", "Design + Font 组合必须位于同时包含 Design 和 Font 的同一 Output。")
+        add_issue(issues, option_path + ".content_preset", "content", V2_STATUS_BLOCKED, "combo_requires_design_and_font", "设计与字体组合必须位于同时包含设计和字体的同一效果图。")
 
 
 def _active_preset(option: Mapping[str, Any], slots: list[Mapping[str, Any]]) -> str:
@@ -105,7 +105,7 @@ def _require_multi_initials(slots: list[Mapping[str, Any]], option_path: str, is
         add_issue(issues, option_path + ".content_preset", "content", V2_STATUS_BLOCKED, "multi_initials_incomplete", "多首字母提取必须配置至少两个独立素材槽位。")
         return
     if not all(str(slot.get("preset") or "") == "asset_replace" for slot in asset_slots):
-        add_issue(issues, option_path + ".slots", "content", V2_STATUS_BLOCKED, "multi_initials_asset_preset_missing", "多首字母素材槽位必须使用 asset_replace 槽位原语。")
+        add_issue(issues, option_path + ".slots", "content", V2_STATUS_BLOCKED, "multi_initials_asset_preset_missing", "多首字母素材槽位必须使用素材替换方式。")
     if not all(slot.get("source_field") for slot in asset_slots):
         add_issue(issues, option_path + ".slots", "content", V2_STATUS_BLOCKED, "multi_initials_source_missing", "多首字母提取的每个素材槽位必须绑定订单字母来源。")
 
@@ -113,7 +113,7 @@ def _require_multi_initials(slots: list[Mapping[str, Any]], option_path: str, is
 def _require_tail_text(slots: list[Mapping[str, Any]], option_path: str, issues: list[Dict[str, str]]) -> None:
     tail_slots = [slot for slot in slots if list_value(slot.get("tails"))]
     if not tail_slots:
-        add_issue(issues, option_path + ".content_preset", "content", V2_STATUS_BLOCKED, "tail_sample_missing", "尾巴文字预设必须提供 tail_* 样本。")
+        add_issue(issues, option_path + ".content_preset", "content", V2_STATUS_BLOCKED, "tail_sample_missing", "尾巴文字预设必须提供尾巴样本。")
     if not all(slot.get("source_field") for slot in tail_slots):
         add_issue(issues, option_path + ".slots", "content", V2_STATUS_BLOCKED, "tail_text_source_missing", "尾巴文字槽位必须绑定订单字段。")
 
@@ -127,7 +127,7 @@ def _require_tail_text(slots: list[Mapping[str, Any]], option_path: str, issues:
                     "content",
                     V2_STATUS_BLOCKED,
                     "tail_glyph_coverage_missing",
-                    "尾巴文字样本必须带有已验证的 PUA 连续码位或完整 A-Z 字形映射，无法证明覆盖范围时不得发布。",
+                    "尾巴文字样本必须具备可确认的首字或尾字覆盖证据；无法确认时不能发布。",
                 )
 
 
@@ -141,7 +141,7 @@ def _require_direct_text(slots: list[Mapping[str, Any]], option_path: str, issue
         return
     slot = slots[0]
     if str(slot.get("preset") or "") != "direct_text":
-        add_issue(issues, option_path + ".slots[0].preset", "content", V2_STATUS_BLOCKED, "direct_text_slot_preset_invalid", "直接单槽替换只能使用 direct_text 正文槽位。")
+        add_issue(issues, option_path + ".slots[0].preset", "content", V2_STATUS_BLOCKED, "direct_text_slot_preset_invalid", "直接单槽替换只能使用替换文本槽位。")
     if not slot.get("source_field") or slot.get("asset_key"):
         add_issue(issues, option_path + ".slots[0]", "content", V2_STATUS_BLOCKED, "direct_text_slot_invalid", "直接单槽替换必须绑定一个订单字段，且不得混用素材。")
 
@@ -169,7 +169,7 @@ def _require_mixed_slots(slots: list[Mapping[str, Any]], option_path: str, issue
                     "content",
                     V2_STATUS_BLOCKED,
                     "tail_glyph_coverage_missing",
-                    "尾巴文字样本必须带有已验证的 PUA 连续码位或完整 A-Z 字形映射，无法证明覆盖范围时不得发布。",
+                    "尾巴文字样本必须具备可确认的首字或尾字覆盖证据；无法确认时不能发布。",
                 )
 
 
@@ -178,10 +178,10 @@ def _require_split_by_pipe(slots: list[Mapping[str, Any]], option_path: str, iss
     if len(slots) < 2 or len(sources) != 1 or "" in sources:
         add_issue(issues, option_path + ".content_preset", "content", V2_STATUS_BLOCKED, "split_by_pipe_requires_ordered_slots", "按 | 顺序拆槽必须配置至少两个同一订单字段来源的有序槽位。")
     if any(str(slot.get("preset") or "") != "split_by_pipe" or slot.get("asset_key") for slot in slots):
-        add_issue(issues, option_path + ".slots", "content", V2_STATUS_BLOCKED, "split_by_pipe_slot_preset_invalid", "按 | 顺序拆槽只能使用 split_by_pipe 正文槽位，不得混用素材或路径文字。")
+        add_issue(issues, option_path + ".slots", "content", V2_STATUS_BLOCKED, "split_by_pipe_slot_preset_invalid", "按 | 顺序拆分只能使用替换文本槽位，不得混用素材或路径文字。")
 
 
 def _require_path_text(slots: list[Mapping[str, Any]], option_path: str, issues: list[Dict[str, str]]) -> None:
     path_slots = [slot for slot in slots if str(slot.get("preset") or "") == "path_text"]
     if len(slots) != 1 or len(path_slots) != 1 or not path_slots[0].get("source_field"):
-        add_issue(issues, option_path + ".content_preset", "content", V2_STATUS_BLOCKED, "path_text_requires_scanned_slot", "路径文字保留必须包含一个扫描确认为 path_text 的文字槽位。")
+        add_issue(issues, option_path + ".content_preset", "content", V2_STATUS_BLOCKED, "path_text_requires_scanned_slot", "路径文字保留必须包含一个扫描确认的路径文字槽位。")

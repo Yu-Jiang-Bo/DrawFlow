@@ -45,7 +45,7 @@ def test_tail_text_preset_requires_verified_glyph_coverage_before_publication():
 
     assert result["can_publish"] is False
     assert result["checks"]["content"]["status"] == V2_STATUS_BLOCKED
-    assert _has_issue(result, "tail_glyph_coverage_missing", "PUA 连续码位")
+    assert _has_issue(result, "tail_glyph_coverage_missing", "首字或尾字覆盖证据")
 
 
 def test_tail_text_preset_with_verified_pua_coverage_can_publish():
@@ -79,7 +79,7 @@ def test_mixed_slots_requires_each_slot_source_and_tail_proof_when_selected():
     result = validate_v2_template_configuration(unverified_tail)
 
     assert result["can_publish"] is False
-    assert _has_issue(result, "tail_glyph_coverage_missing", "PUA 连续码位")
+    assert _has_issue(result, "tail_glyph_coverage_missing", "首字或尾字覆盖证据")
 
 
 def test_multi_initials_preset_requires_source_fields_for_each_asset_slot():
@@ -110,7 +110,7 @@ def test_asset_replace_is_slot_primitive_not_option_content_preset():
 
     assert result["can_publish"] is False
     assert result["checks"]["content"]["status"] == V2_STATUS_BLOCKED
-    assert _has_issue(result, "option_preset_invalid", "槽位原语")
+    assert _has_issue(result, "option_preset_invalid", "素材替换仅用于素材槽位")
 
 
 def test_text_presets_reject_incompatible_slot_primitives():
@@ -126,7 +126,7 @@ def test_text_presets_reject_incompatible_slot_primitives():
     ]
 
     for payload, code, reason in (
-        (direct_payload, "direct_text_slot_preset_invalid", "direct_text 正文槽位"),
+        (direct_payload, "direct_text_slot_preset_invalid", "替换文本槽位"),
         (split_payload, "split_by_pipe_slot_preset_invalid", "不得混用素材"),
     ):
         result = validate_v2_template_configuration(payload)
@@ -151,6 +151,16 @@ def test_split_by_pipe_rejects_name1_and_name2_as_separate_order_sources():
     assert _has_issue(result, "split_by_pipe_requires_ordered_slots", "同一订单字段来源")
 
 
+def test_content_blocker_reasons_do_not_expose_internal_processing_names():
+    payload = complete_contract()
+    payload["outputs"][0]["design"]["options"][0]["content_preset"] = "tail_text"
+
+    result = validate_v2_template_configuration(payload)
+
+    issue = next(item for item in result["issues"] if item["code"] == "tail_sample_missing")
+    for internal_name in ("tail_*", "asset_replace", "direct_text", "split_by_pipe", "path_text", "pua_base", "glyph_map"):
+        assert internal_name not in issue["reason"]
+    assert "尾巴样本" in issue["reason"]
 def _has_issue(result, code, reason):
     return any(issue["code"] == code and reason in issue["reason"] for issue in result["issues"])
 

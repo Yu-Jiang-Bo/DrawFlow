@@ -35,8 +35,7 @@
     const rows = Array.from(document.querySelectorAll("#outputConfigRows .output-row")).filter((row) => !row.className.includes("table-head"));
     const model = scanModel(state.scan, state.draft && state.draft.config);
     const result = rows.map((row, index) => {
-      const fallback = index ? `Output_Side${String.fromCharCode(65 + index)}` : "Output_main";
-      const key = safeOutputKey(rowValue(row, "output-key"), fallback, index);
+      const key = cleanText(rowValue(row, "output-key"));
       const singleMain = rows.length === 1 && key === "Output_main";
       const existing = existingOutputConfig(key);
       return {
@@ -48,7 +47,7 @@
         design: { field: outputGroupField(key, "design", existing, model), options: [] },
         font: { field: outputGroupField(key, "font", existing, model), options: [] }
       };
-    }).filter((item) => item.key);
+    });
     return result.length ? result : [emptyOutput()];
   }
 

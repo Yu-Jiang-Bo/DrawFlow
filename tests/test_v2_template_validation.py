@@ -153,12 +153,25 @@ def test_structure_blockers_return_paths_and_chinese_reasons():
 
     assert result["can_publish"] is False
     assert result["checks"]["slots"]["status"] == V2_STATUS_BLOCKED
-    assert _has_issue(result, path="$.outputs[0].design.options[0].slots", code="duplicate_name", reason="Template/Output_main/Design/Design03/slot_name")
+    duplicate = next(issue for issue in result["issues"] if issue["code"] == "duplicate_name")
+    assert duplicate["reason"] == "同一范围内存在重复名称，请修改标红的项目后重试。"
+    assert "Template/" not in duplicate["reason"] and "$." not in duplicate["reason"]
     assert _has_issue(result, path="$.outputs[0].design.options[0].slots[2].anchor", code="anchor_belongs_to_slot", reason="定位框")
     assert _has_issue(result, path="$.outputs[0].design.options[0].slots[2].tails[0].key", code="tail_belongs_to_slot", reason="尾巴")
     assert _all_issues_have_paths_and_chinese_reasons(result)
 
 
+def test_structure_blocker_reasons_do_not_expose_internal_identifiers():
+    payload = complete_contract()
+    option = payload["outputs"][0]["design"]["options"][0]
+    option["slots"][1]["anchor"] = "anchor_initial"
+
+    result = validate_v2_template_configuration(payload)
+
+    issue = next(item for item in result["issues"] if item["code"] == "anchor_belongs_to_slot")
+    for internal_name in ("Template/", "slot_name", "anchor_name", "anchor_initial"):
+        assert internal_name not in issue["reason"]
+    assert "定位框必须与当前槽位对应" in issue["reason"]
 def test_asset_slot_bidirectional_mismatch_blocks_publication():
     payload = complete_contract()
     payload["outputs"][0]["design"]["options"][0]["assets"][0]["slot"] = "slot_name"
@@ -168,7 +181,7 @@ def test_asset_slot_bidirectional_mismatch_blocks_publication():
     assert result["can_save"] is True
     assert result["can_publish"] is False
     assert result["checks"]["slots"]["status"] == V2_STATUS_BLOCKED
-    assert _has_issue(result, path="$.outputs[0].design.options[0].assets[0].slot", code="asset_slot_mismatch", reason="Assets/initial")
+    assert _has_issue(result, path="$.outputs[0].design.options[0].assets[0].slot", code="asset_slot_mismatch", reason="素材库与当前素材槽位")
 
 
 def test_pending_gates_have_chinese_paths_and_reasons():
@@ -265,7 +278,7 @@ def test_contract_errors_cannot_save_and_map_to_output_blocker():
     assert result["can_save"] is False
     assert result["can_publish"] is False
     assert result["checks"]["output"]["status"] == V2_STATUS_BLOCKED
-    assert _has_issue(result, path="$.natural_text", code="contract_invalid", reason="配置契约无效")
+    assert _has_issue(result, path="$.natural_text", code="contract_invalid", reason="存在不支持的填写内容")
 
 
 def test_content_preset_blockers_are_reported_by_path():
@@ -281,7 +294,7 @@ def test_content_preset_blockers_are_reported_by_path():
 
     for payload, code, reason in (
         (tail_payload, "tail_sample_missing", "尾巴文字"),
-        (combo_payload, "combo_requires_design_and_font", "Design + Font"),
+        (combo_payload, "combo_requires_design_and_font", "设计与字体组合"),
         (multi_payload, "multi_initials_incomplete", "多首字母"),
     ):
         result = validate_v2_template_configuration(deepcopy(payload))
@@ -364,8 +377,30 @@ def test_contract_error_reasons_are_natural_chinese_without_english_leakage():
     result = validate_v2_template_configuration(payload)
 
     issue = next(item for item in result["issues"] if item["path"] == "$.natural_text")
-    assert issue["reason"] == "配置契约无效：字段不在 V2 白名单内，请删除该字段。"
+    assert issue["reason"] == "存在不支持的填写内容，请删除后重试。"
     assert "Unknown V2 contract field" not in issue["reason"]
+
+
+def test_contract_errors_follow_their_actual_form_area():
+    source_payload = complete_contract()
+    source_payload["outputs"][0]["design"]["options"][0]["slots"][1]["source_field"] = "name field"
+
+    source_result = validate_v2_template_configuration(source_payload)
+
+    source_issue = next(item for item in source_result["issues"] if item["path"].endswith(".source_field"))
+    assert source_issue["check"] == "slots"
+    assert source_result["checks"]["slots"]["status"] == V2_STATUS_BLOCKED
+    assert source_result["checks"]["output"]["status"] == V2_STATUS_PASSED
+    assert source_issue["reason"] == "内容来源填写有误，请检查标红的内容来源。"
+
+    output_payload = complete_contract()
+    output_payload["outputs"][0]["key"] = "main"
+
+    output_result = validate_v2_template_configuration(output_payload)
+
+    output_issue = next(item for item in output_result["issues"] if item["path"] == "$.outputs[0].key")
+    assert output_issue["check"] == "output"
+    assert output_issue["reason"] == "效果图编号填写有误，请检查标红的效果图编号。"
 
 
 def _has_issue(result, *, path=None, code=None, reason=None):

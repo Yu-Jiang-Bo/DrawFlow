@@ -1,4 +1,4 @@
-﻿(function () {
+(function () {
   "use strict";
   const ctx = globalThis.DrawFlowV2WorkbenchContext;
   const { API_ROOT, state } = ctx;
@@ -17,17 +17,28 @@
 
 
   async function selectTemplate(templateId) {
+    const draftLoadRequestId = ++state.draftLoadRequestId;
+    state.validation = null;
+    state.lastValidatedConfig = null;
+    state.validationRequestId += 1;
+    state.draft = null;
+    state.scan = {};
+    if (typeof clearValidationFeedback === "function") clearValidationFeedback("正在读取模板配置。");
+    state.selectedTemplateId = templateId || "";
+    fillDraftFields(null, templateId);
+    if (typeof updateCheckRail === "function" && typeof defaultChecks === "function") updateCheckRail(defaultChecks());
     if (!templateId) return;
-    state.selectedTemplateId = templateId;
     renderTemplateList();
     setDraftStatus("读取草稿中", "pending");
     try {
       const payload = await getJson(`${API_ROOT}/${encodeURIComponent(templateId)}/draft`, "草稿读取失败，请确认模板是否已创建。");
+      if (draftLoadRequestId !== state.draftLoadRequestId || state.selectedTemplateId !== templateId) return;
       state.draft = payload.draft || null;
       state.scan = normalizeScanFromDraft(state.draft);
       fillDraftFields(state.draft, templateId);
       renderAll();
     } catch (error) {
+      if (draftLoadRequestId !== state.draftLoadRequestId || state.selectedTemplateId !== templateId) return;
       state.draft = null;
       state.scan = {};
       fillDraftFields(null, templateId);
@@ -38,9 +49,15 @@
 
 
   function clearDraftView() {
+    state.validation = null;
+    state.lastValidatedConfig = null;
+    state.validationRequestId += 1;
     state.selectedTemplateId = "";
+    state.draftLoadRequestId += 1;
     state.draft = null;
     state.scan = {};
+    if (typeof clearValidationFeedback === "function") clearValidationFeedback();
+    if (typeof updateCheckRail === "function" && typeof defaultChecks === "function") updateCheckRail(defaultChecks());
     fillDraftFields(null, "");
     renderAll();
   }
@@ -79,7 +96,10 @@
     try {
       await ensureDraftExists();
       const config = buildControlledConfig();
+      const validationRequestId = ++state.validationRequestId;
+      state.lastValidatedConfig = config;
       const validation = await validateConfig(config);
+      if (validationRequestId !== state.validationRequestId) return { saved: false, failure: "stale" };
       state.validation = validation;
       updateCheckRail(validation.checks || config.checks);
       if (validation.can_save === false) {
@@ -140,13 +160,19 @@
 
   async function validateCurrentConfig(showErrors) {
     const config = buildControlledConfig();
+    const validationRequestId = ++state.validationRequestId;
+    state.validation = null;
+    state.lastValidatedConfig = config;
+    if (typeof clearValidationFeedback === "function") clearValidationFeedback("正在检查当前配置。");
     try {
       const validation = await validateConfig(config);
+      if (validationRequestId !== state.validationRequestId) return null;
       state.validation = validation;
       updateCheckRail(validation.checks || config.checks);
       updateBlockers(validation);
       return validation;
     } catch (error) {
+      if (validationRequestId !== state.validationRequestId) return null;
       if (showErrors) showScanFailure(friendlyError(error, "配置校验失败，请检查字段和选项。"));
       updateCheckRail(config.checks);
       updateBlockers(null);

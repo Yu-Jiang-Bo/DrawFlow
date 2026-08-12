@@ -53,7 +53,7 @@ def add_duplicate_issues(
             check,
             V2_STATUS_BLOCKED,
             code,
-            f"同一作用域内名称重复：{value}。",
+            "同一范围内存在重复名称，请修改标红的项目后重试。",
         )
 
 
@@ -76,19 +76,13 @@ def add_duplicate_path_issues(
         if len(items) < 2:
             continue
         name = str(items[0].get("name") or "")
-        scope = str(items[0].get("scope") or "当前作用域")
-        layer_paths = [
-            f"{item.get('layer_path')} ({item.get('json_path')})"
-            for item in items
-            if item.get("layer_path")
-        ]
         add_issue(
             issues,
             path,
             check,
             V2_STATUS_BLOCKED,
             code,
-            f"同一作用域 {scope} 内名称重复：{name}；冲突图层路径：{'; '.join(layer_paths)}。",
+            "同一范围内存在重复名称，请修改标红的项目后重试。",
         )
 
 

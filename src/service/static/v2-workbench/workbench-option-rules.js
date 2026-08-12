@@ -59,6 +59,9 @@
     const button = document.createElement("button");
     button.type = "button";
     button.className = "option-rule-item";
+    button.dataset.output = item.output;
+    button.dataset.option = item.key;
+    button.dataset.group = item.group;
     if (current && item.id === current.id) button.classList.add("active");
     button.appendChild(lineNode(item.label, `${item.output} · ${item.group === "font" ? "F" : "Design"}`));
     button.appendChild(statusBadge(item.status));
