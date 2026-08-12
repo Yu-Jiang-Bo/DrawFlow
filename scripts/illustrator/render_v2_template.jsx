@@ -21,15 +21,24 @@
     var values = execution.values || {};
     var selections = execution.selections || {};
     var layoutWarnings = [];
+    var selectedOutputKey = String(execution.output_key || "");
+    var renderedOutputItems = [];
+    var renderedOutputCount = 0;
 
     try {
         for (var outputIndex = 0; outputIndex < (task.outputs || []).length; outputIndex++) {
-            renderOutput(templateDoc, layer, task.outputs[outputIndex], values, selections);
+            var taskOutput = task.outputs[outputIndex] || {};
+            if (selectedOutputKey && String(taskOutput.key || "") !== selectedOutputKey) continue;
+            renderedOutputItems = renderedOutputItems.concat(renderOutput(templateDoc, layer, taskOutput, values, selections));
+            renderedOutputCount += 1;
         }
+        if (selectedOutputKey && renderedOutputCount !== 1) throw new Error("Selected V2 output was not rendered: " + selectedOutputKey);
+        if (execution.preview_png) fitArtboardToVisibleContent(doc, renderedOutputItems);
         var output = File(String(execution.output_ai));
         ensureFolder(output.parent);
         if (output.exists) output.remove();
         saveAsAI8(doc, output);
+        if (execution.preview_png) exportPreviewPNG(doc, File(String(execution.preview_png)), execution.preview_dpi);
         writeLayoutWarnings(execution.layout_warning_file, layoutWarnings);
         return output.fsName;
     } finally {
@@ -65,6 +74,7 @@
         }
         cleanupAuxiliaryObjects(renderedItems);
         removeSourceOnlyCopies(copied);
+        return renderedItems;
     }
 
     function isSelected(action, selected) {
@@ -87,7 +97,7 @@
         var value = String(valuesByField[String(action.source_field || "")] || "");
         var parts = splitPipeValue(value);
         var preset = String(action.preset || "");
-        var slotValue = preset === "split_by_pipe" ? splitPart(parts, action.source_part_index) : parts[0];
+        var slotValue = preset === "split_by_pipe" ? splitPart(parts, action.source_part_index) : value;
         var requiredValue = preset === "split_by_pipe" ? slotValue : value;
         if (!hasText(requiredValue)) {
             if (action.required !== false) throw new Error("Required V2 slot has no value: " + action.source_field);
@@ -117,7 +127,7 @@
         var tailPaths = action.tail_paths || [];
         for (var index = 0; index < tailPaths.length; index++) {
             var tail = findPageItemByRelativePath(holder.item, relativePath(String(tailPaths[index] || ""), holder.source_path));
-            var tailText = parts[index + 1] || "";
+            var tailText = preset === "split_by_pipe" ? parts[index + 1] || "" : "";
             if (hasText(tailText)) {
                 var tailFrame = writeTextToItem(tail, tailText);
                 fitItemWithinBounds(tailFrame, measuredBounds(tail), action);
@@ -398,6 +408,12 @@
         }
     }
 
+    function fitArtboardToVisibleContent(doc, items) {
+        var bounds = unionBounds(items, true);
+        if (!doc.artboards || !doc.artboards.length) throw new Error("V2 preview artboard is unavailable");
+        doc.artboards[0].artboardRect = [Number(bounds[0]), Number(bounds[1]), Number(bounds[2]), Number(bounds[3])];
+    }
+
     function unionBounds(items, strictVisible) {
         if (!items || !items.length) throw new Error("V2 output has no rendered items");
         var result = null;
@@ -543,6 +559,22 @@
         options.pdfCompatible = false;
         options.compressed = false;
         doc.saveAs(file, options);
+    }
+
+    function exportPreviewPNG(doc, file, dpi) {
+        ensureFolder(file.parent);
+        if (file.exists) file.remove();
+        // Illustrator appends .png for PNG24 exports. Pass an extension-free
+        // target so callers receive the exact preview_png path they requested.
+        var exportTarget = File(String(file.fsName).replace(/\.png$/i, ""));
+        var options = new ExportOptionsPNG24();
+        var scale = Math.max(1, Number(dpi || 144) / 72 * 100);
+        options.antiAliasing = true;
+        options.artBoardClipping = true;
+        options.transparency = true;
+        options.horizontalScale = scale;
+        options.verticalScale = scale;
+        doc.exportFile(exportTarget, ExportType.PNG24, options);
     }
 
     function ensureFolder(folder) {

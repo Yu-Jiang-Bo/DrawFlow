@@ -8,20 +8,16 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from .illustrator_bridge import IllustratorBridge
+from .v2_template_execution_contract import (
+    V2TemplateRendererError,
+    normalize_preview_execution_fields,
+    split_pipe_part,
+)
 from src.service.v2_render_task import V2_RENDER_TASK_SCHEMA, stable_v2_render_task_json
 
 
 V2_RENDER_EXECUTION_SCHEMA = "custom-renderer/v2-render-execution"
 V2_RENDER_EXECUTION_VERSION = 1
-
-
-class V2TemplateRendererError(ValueError):
-    """Raised before Illustrator is invoked for an invalid V2 render runtime."""
-
-    def __init__(self, code: str, message: str, *, path: str = "$") -> None:
-        super().__init__(message)
-        self.code = code
-        self.path = path
 
 
 class V2TemplateRenderer:
@@ -43,6 +39,9 @@ class V2TemplateRenderer:
         output_ai: Path | str,
         values: Mapping[str, Any],
         selections: Mapping[str, Any] | None = None,
+        output_key: str | None = None,
+        preview_png: Path | str | None = None,
+        layout_warning_file: Path | str | None = None,
     ) -> dict[str, Any]:
         return build_v2_execution_task(
             render_task,
@@ -50,6 +49,9 @@ class V2TemplateRenderer:
             output_ai=output_ai,
             values=values,
             selections=selections,
+            output_key=output_key,
+            preview_png=preview_png,
+            layout_warning_file=layout_warning_file,
         )
 
     def render(
@@ -61,6 +63,9 @@ class V2TemplateRenderer:
         values: Mapping[str, Any],
         selections: Mapping[str, Any] | None = None,
         task_file: Path | str | None = None,
+        output_key: str | None = None,
+        preview_png: Path | str | None = None,
+        layout_warning_file: Path | str | None = None,
     ) -> str:
         execution_task = self.build_execution_task(
             render_task,
@@ -68,6 +73,9 @@ class V2TemplateRenderer:
             output_ai=output_ai,
             values=values,
             selections=selections,
+            output_key=output_key,
+            preview_png=preview_png,
+            layout_warning_file=layout_warning_file,
         )
         task_path = Path(task_file) if task_file is not None else _default_task_file(Path(output_ai))
         task_path.parent.mkdir(parents=True, exist_ok=True)
@@ -85,16 +93,25 @@ def build_v2_execution_task(
     output_ai: Path | str,
     values: Mapping[str, Any],
     selections: Mapping[str, Any] | None = None,
+    output_key: str | None = None,
+    preview_png: Path | str | None = None,
+    layout_warning_file: Path | str | None = None,
 ) -> dict[str, Any]:
     task = deepcopy(dict(render_task))
     if task.get("$schema") != V2_RENDER_TASK_SCHEMA:
         raise V2TemplateRendererError("render_task_schema_invalid", "Unsupported V2 render task schema.")
     _validate_runtime_paths(template_ai=template_ai, output_ai=output_ai)
+    selected_output_key, preview_path, warning_path = normalize_preview_execution_fields(
+        task,
+        output_key=output_key,
+        preview_png=preview_png,
+        layout_warning_file=layout_warning_file,
+    )
     normalized_values = {str(key): _string_value(value) for key, value in values.items()}
     normalized_selections = _normalize_selections(task, normalized_values, selections)
-    _preflight_renderable_options(task, normalized_selections)
-    _preflight_required_slots(task, normalized_values, normalized_selections)
-    return {
+    _preflight_renderable_options(task, normalized_selections, selected_output_key)
+    _preflight_required_slots(task, normalized_values, normalized_selections, selected_output_key)
+    execution = {
         "$schema": V2_RENDER_EXECUTION_SCHEMA,
         "execution_protocol_version": V2_RENDER_EXECUTION_VERSION,
         "render_task_sha256": str(task.get("task_sha256") or ""),
@@ -104,6 +121,13 @@ def build_v2_execution_task(
         "values": normalized_values,
         "selections": normalized_selections,
     }
+    if selected_output_key:
+        execution["output_key"] = selected_output_key
+    if preview_path:
+        execution["preview_png"] = str(Path(preview_path))
+    if warning_path:
+        execution["layout_warning_file"] = str(Path(warning_path))
+    return execution
 
 
 def stable_v2_execution_task_json(task: Mapping[str, Any]) -> str:
@@ -151,11 +175,14 @@ def _preflight_required_slots(
     render_task: Mapping[str, Any],
     values: Mapping[str, str],
     selections: Mapping[str, dict[str, str]],
+    output_key_filter: str = "",
 ) -> None:
     for output_index, output in enumerate(render_task.get("outputs", [])):
         if not isinstance(output, Mapping):
             continue
         output_key = str(output.get("key") or "")
+        if output_key_filter and output_key != output_key_filter:
+            continue
         selected = selections.get(output_key, {})
         for action_index, action in enumerate(output.get("actions", [])):
             if not isinstance(action, Mapping) or action.get("type") != "replace_slot_text":
@@ -165,7 +192,10 @@ def _preflight_required_slots(
             if selected.get(group) != option_key:
                 continue
             source_field = str(action.get("source_field") or "")
-            if bool(action.get("required", True)) and not _has_text(values.get(source_field, "")):
+            source_value = values.get(source_field, "")
+            if str(action.get("preset") or "") == "split_by_pipe":
+                source_value = split_pipe_part(source_value, action.get("source_part_index"))
+            if bool(action.get("required", True)) and not _has_text(source_value):
                 raise V2TemplateRendererError(
                     "required_slot_empty",
                     f"Required V2 slot has no value: {source_field}.",
@@ -176,6 +206,7 @@ def _preflight_required_slots(
 def _preflight_renderable_options(
     render_task: Mapping[str, Any],
     selections: Mapping[str, dict[str, str]],
+    output_key_filter: str = "",
 ) -> None:
     outputs = [output for output in render_task.get("outputs", []) if isinstance(output, Mapping)]
     if not outputs:
@@ -184,6 +215,8 @@ def _preflight_renderable_options(
         if not isinstance(output, Mapping):
             continue
         output_key = str(output.get("key") or "")
+        if output_key_filter and output_key != output_key_filter:
+            continue
         options_by_group: dict[str, set[str]] = {}
         for action in output.get("actions", []):
             if not isinstance(action, Mapping) or action.get("type") != "copy_option_group":

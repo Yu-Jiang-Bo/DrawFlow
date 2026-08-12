@@ -85,6 +85,8 @@ def test_builds_execution_task_with_derived_option_selections(tmp_path):
     assert execution["render_task_sha256"] == "f" * 64
     assert execution["selections"] == {"Output_main": {"font": "F10", "design": "Design03"}}
     assert execution["values"]["name"] == "Alice"
+    assert "output_key" not in execution
+    assert "preview_png" not in execution
 
 
 def test_explicit_option_selections_are_accepted_without_mapping_values(tmp_path):

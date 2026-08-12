@@ -61,7 +61,7 @@ def test_v2_renderer_static_contract_uses_paths_and_safe_actions():
     assert "String.fromCharCode" in include
 
 
-def test_v2_renderer_copies_selected_groups_and_replaces_single_and_multi_slots():
+def test_v2_renderer_copies_selected_groups_and_preserves_pipe_in_direct_text():
     task = {
         "$schema": "custom-renderer/v2-render-execution",
         "template_ai": "template.ai",
@@ -129,9 +129,9 @@ const fixed = fontCopy.pageItems.find(item => item.typename === 'PathItem' && it
 if (!fixed) throw new Error('unnamed fixed object was not preserved');
 if (fontSlot.contents !== 'Alice') throw new Error('font slot not replaced: ' + fontSlot.contents);
 if (fontSlot.styleToken !== 'F10-style') throw new Error('font style was not preserved');
-if (child(designCopy, 'slot_name').contents !== 'Amy') throw new Error('primary multi slot mismatch');
-if (child(designCopy, 'tail_name_1').contents !== 'Beth') throw new Error('first tail mismatch');
-if (child(designCopy, 'tail_name_2').contents !== 'Cara') throw new Error('second tail mismatch');
+if (child(designCopy, 'slot_name').contents !== 'Amy|Beth|Cara') throw new Error('direct text was split: ' + child(designCopy, 'slot_name').contents);
+if (designCopy.pageItems.find(item => item.name === 'tail_name_1')) throw new Error('direct text populated a split-only tail');
+if (designCopy.pageItems.find(item => item.name === 'tail_name_2')) throw new Error('direct text populated a split-only tail');
 """)
 
     result = run_node(harness)
@@ -295,6 +295,95 @@ if (child(designCopy, 'slot_year').contents !== 'Tom') throw new Error('second s
     result = run_node(harness)
 
     assert result.returncode == 0, result.stderr
+
+
+def test_v2_renderer_filters_one_output_and_exports_visible_bounds_preview():
+    actions = [
+        {
+            "type": "copy_option_group",
+            "group": "design",
+            "option_key": "Design03",
+            "object_path": "Template/Output_main/Design/Design03",
+        }
+    ]
+    side_b_actions = json.loads(json.dumps(actions))
+    side_b_actions[0]["object_path"] = "Template/Output_SideB/Design/Design03"
+    task = {
+        "$schema": "custom-renderer/v2-render-execution",
+        "template_ai": "template.ai",
+        "output_ai": "out.ai",
+        "output_key": "Output_SideB",
+        "preview_png": "preview.png",
+        "values": {},
+        "selections": {
+            "Output_main": {"design": "Design03"},
+            "Output_SideB": {"design": "Design03"},
+        },
+        "render_task": {
+            "$schema": "custom-renderer/v2-render-task",
+            "outputs": [
+                {"key": "Output_main", "actions": actions},
+                {"key": "Output_SideB", "actions": side_b_actions},
+            ],
+        },
+    }
+    harness = node_mock_harness(task, """
+if (outputLayer.pageItems.length !== 1) throw new Error('preview rendered more than one output');
+if (exportedAs !== 'preview.png') throw new Error('preview PNG was not exported');
+if (!exportOptions || exportOptions.artBoardClipping !== true || exportOptions.transparency !== true) throw new Error('preview PNG options mismatch');
+const visible = outputLayer.pageItems[0].visibleBounds;
+const artboard = outputDoc.artboards[0].artboardRect;
+if (JSON.stringify(artboard) !== JSON.stringify(visible)) throw new Error('preview artboard does not match visible bounds');
+""")
+
+    result = run_node(harness)
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["exportedAs"] == "preview.png"
+    assert payload["copied"] == ["Design03"]
+
+
+def test_v2_renderer_without_preview_filter_keeps_all_outputs_and_skips_png():
+    actions = [
+        {
+            "type": "copy_option_group",
+            "group": "design",
+            "option_key": "Design03",
+            "object_path": "Template/Output_main/Design/Design03",
+        }
+    ]
+    side_b_actions = json.loads(json.dumps(actions))
+    side_b_actions[0]["object_path"] = "Template/Output_SideB/Design/Design03"
+    task = {
+        "$schema": "custom-renderer/v2-render-execution",
+        "template_ai": "template.ai",
+        "output_ai": "out.ai",
+        "values": {},
+        "selections": {
+            "Output_main": {"design": "Design03"},
+            "Output_SideB": {"design": "Design03"},
+        },
+        "render_task": {
+            "$schema": "custom-renderer/v2-render-task",
+            "outputs": [
+                {"key": "Output_main", "actions": actions},
+                {"key": "Output_SideB", "actions": side_b_actions},
+            ],
+        },
+    }
+    harness = node_mock_harness(task, """
+if (outputLayer.pageItems.length !== 2) throw new Error('formal render did not keep all outputs');
+if (exportedAs) throw new Error('formal render exported an internal preview PNG');
+""")
+
+    result = run_node(harness)
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["savedAs"] == "out.ai"
+    assert payload["exportedAs"] == ""
+    assert payload["copied"] == ["Design03", "Design03"]
 
 
 def test_v2_renderer_combines_design_slot_with_selected_font_style_source():
@@ -1240,6 +1329,8 @@ const visibleBoundsFailures = new Set(task.visible_bounds_failures || []);
 const visibleBoundsPaddingAfterResize = task.visible_bounds_padding_after_resize || {{}};
 const folder = {{ exists: true, parent: null, create: () => true }};
 let savedAs = '';
+let exportedAs = '';
+let exportOptions = null;
 const writtenFiles = {{}};
 global.$ = {{ getenv: () => 'task.json' }};
 global.File = function(path) {{
@@ -1260,6 +1351,8 @@ global.ElementPlacement = {{ PLACEATEND: 1 }};
 global.SaveOptions = {{ DONOTSAVECHANGES: 0 }};
 global.Compatibility = {{ ILLUSTRATOR8: 8 }};
 global.IllustratorSaveOptions = function() {{}};
+global.ExportOptionsPNG24 = function() {{}};
+global.ExportType = {{ PNG24: 24 }};
 global.Transformation = {{ CENTER: 0 }};
 function item(typename, name, contents, children, styleToken, bounds, options) {{
   let text = contents || '';
@@ -1434,13 +1527,18 @@ const design03 = item('GroupItem', 'Design03', '', [
 const fontGroup = item('GroupItem', 'Font', '', [f1, f10]);
 const designGroup = item('GroupItem', 'Design', '', [design03]);
 const outputMain = item('GroupItem', 'Output_main', '', [fontGroup, designGroup]);
-const templateLayer = {{ typename: 'Layer', name: 'Template', pageItems: [outputMain] }};
+const outputSideB = item('GroupItem', 'Output_SideB', '', [clone(fontGroup), clone(designGroup)]);
+const templateLayer = {{ typename: 'Layer', name: 'Template', pageItems: [outputMain, outputSideB] }};
 outputMain.parent = templateLayer;
+outputSideB.parent = templateLayer;
 const templateDoc = {{ layers: [templateLayer], close: () => undefined }};
 const outputLayer = {{ typename: 'Layer', name: 'Layer 1', pageItems: [] }};
 const outputDoc = {{
   layers: [outputLayer],
+  artboards: [{{ artboardRect: [0, 1000, 1000, 0] }}],
   saveAs: file => {{ savedAs = file.fsName; }},
+  // Illustrator appends the PNG24 extension automatically.
+  exportFile: (file, type, options) => {{ exportedAs = file.fsName + '.png'; exportOptions = options; }},
   close: () => undefined
 }};
 global.app = {{
@@ -1450,5 +1548,5 @@ global.app = {{
 }};
 new Function(source)();
 {assertions}
-console.log(JSON.stringify({{ savedAs, copied: outputLayer.pageItems.map(item => item.name) }}));
+console.log(JSON.stringify({{ savedAs, exportedAs, copied: outputLayer.pageItems.map(item => item.name) }}));
 """
