@@ -76,6 +76,60 @@ def test_dimension_tolerance_allows_stricter_upper_bound():
     assert not _has_issue(result, check="dimensions", code="dimension_tolerance_invalid")
 
 
+def test_validation_reasons_are_deduped_and_not_reused_as_manual_pending_reason():
+    payload = complete_contract()
+    del payload["field_bindings"]["name"]
+    polluted_reason = (
+        "槽位内容来源 name 还没有绑定到真实表头。；"
+        "槽位内容来源 name1 还没有绑定到真实表头。；"
+        "槽位内容来源 name2 还没有绑定到真实表头。"
+    )
+    payload["checks"]["fields"] = {"status": "pending", "reason": polluted_reason}
+
+    result = validate_v2_template_configuration(payload)
+
+    reasons = result["checks"]["fields"]["reasons"]
+    assert len(reasons) == len(set(reasons))
+    assert polluted_reason not in reasons
+    manual_issues = [
+        issue
+        for issue in result["issues"]
+        if issue["check"] == "fields" and issue["code"] == "manual_check_pending"
+    ]
+    assert len(manual_issues) == 1
+    assert manual_issues[0]["reason"] == "人工核验项还没有确认。"
+
+
+def test_legacy_manual_status_sentence_is_not_nested_again():
+    payload = complete_contract()
+    payload["checks"]["fields"] = {"status": "pending", "reason": "人工核验项还没有确认。"}
+
+    result = validate_v2_template_configuration(payload)
+
+    manual_issues = [
+        issue
+        for issue in result["issues"]
+        if issue["check"] == "fields" and issue["code"] == "manual_check_pending"
+    ]
+    assert len(manual_issues) == 1
+    assert manual_issues[0]["reason"] == "人工核验项还没有确认。"
+
+
+def test_legitimate_manual_reason_with_business_terms_is_preserved():
+    payload = complete_contract()
+    payload["checks"]["fields"] = {"status": "pending", "reason": "订单字段已与店铺确认"}
+
+    result = validate_v2_template_configuration(payload)
+
+    manual_issues = [
+        issue
+        for issue in result["issues"]
+        if issue["check"] == "fields" and issue["code"] == "manual_check_pending"
+    ]
+    assert len(manual_issues) == 1
+    assert manual_issues[0]["reason"] == "人工核验项还没有确认：订单字段已与店铺确认"
+
+
 def _break_output_sequence(payload):
     original = payload["outputs"][0]
     side_a = deepcopy(original)

@@ -174,9 +174,11 @@
 
   function manualCheckReasonForConfig(value) {
     let reason = cleanText(value);
-    const prefixes = ["人工核验项还没有确认：", "人工核验项被标记为阻断："];
+    const emptySentences = ["人工核验项还没有确认", "人工核验项还没有确认。", "人工核验项被标记为阻断", "人工核验项被标记为阻断。"];
+    const prefixes = ["人工核验项还没有确认：", "人工核验项还没有确认:", "人工核验项被标记为阻断：", "人工核验项被标记为阻断:"];
     let changed = true;
     while (changed) {
+      if (emptySentences.includes(reason)) return "";
       changed = false;
       prefixes.forEach((prefix) => {
         if (reason.indexOf(prefix) === 0) {
@@ -185,7 +187,26 @@
         }
       });
     }
-    return reason;
+    if (emptySentences.includes(reason)) return "";
+    return looksLikeValidationReason(reason) ? "" : reason;
+  }
+
+
+  function looksLikeValidationReason(reason) {
+    if (!reason) return false;
+    const markers = ["还没有绑定到真实表头", "还没有映射到订单原值", "发布前预览缺少", "缺少代表性测试数据"];
+    if (markers.some((marker) => reason.includes(marker))) return true;
+    const pairs = [
+      ["槽位内容来源", "真实表头"],
+      ["订单字段", "真实表头"],
+      ["颜色扫描值", "还没有"],
+      ["素材范围", "还没有"],
+      ["最终边界", "还没有"],
+      ["最终边界", "不允许"],
+      ["同一作用域", "重复"],
+      ["同一作用域", "不允许"]
+    ];
+    return pairs.some(([left, right]) => reason.includes(left) && reason.includes(right));
   }
 
 

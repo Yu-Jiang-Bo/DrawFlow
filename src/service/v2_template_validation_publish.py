@@ -152,17 +152,59 @@ def _apply_manual_check_state(contract: Mapping[str, Any], issues: list[Dict[str
 
 def _manual_reason(prefix: str, reason: str) -> str:
     normalized = _strip_manual_reason_prefix(reason)
+    if _looks_like_validation_reason(normalized):
+        normalized = ""
     return f"{prefix}：{normalized}" if normalized else f"{prefix}。"
 
 
 def _strip_manual_reason_prefix(reason: str) -> str:
     text = str(reason or "").strip()
-    prefixes = ("人工核验项还没有确认：", "人工核验项被标记为阻断：")
+    empty_sentences = (
+        "人工核验项还没有确认",
+        "人工核验项还没有确认。",
+        "人工核验项被标记为阻断",
+        "人工核验项被标记为阻断。",
+    )
+    prefixes = (
+        "人工核验项还没有确认：",
+        "人工核验项还没有确认:",
+        "人工核验项被标记为阻断：",
+        "人工核验项被标记为阻断:",
+    )
     changed = True
     while changed:
+        if text in empty_sentences:
+            return ""
         changed = False
         for prefix in prefixes:
             if text.startswith(prefix):
                 text = text[len(prefix):].strip()
                 changed = True
+    if text in empty_sentences:
+        return ""
     return text
+
+
+def _looks_like_validation_reason(reason: str) -> bool:
+    text = str(reason or "").strip()
+    if not text:
+        return False
+    markers = (
+        "还没有绑定到真实表头",
+        "还没有映射到订单原值",
+        "发布前预览缺少",
+        "缺少代表性测试数据",
+    )
+    if any(marker in text for marker in markers):
+        return True
+    pairs = (
+        ("槽位内容来源", "真实表头"),
+        ("订单字段", "真实表头"),
+        ("颜色扫描值", "还没有"),
+        ("素材范围", "还没有"),
+        ("最终边界", "还没有"),
+        ("最终边界", "不允许"),
+        ("同一作用域", "重复"),
+        ("同一作用域", "不允许"),
+    )
+    return any(left in text and right in text for left, right in pairs)

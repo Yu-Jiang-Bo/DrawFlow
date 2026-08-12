@@ -1489,6 +1489,163 @@ def test_v2_workbench_save_next_from_structure_enters_rules_and_strips_manual_re
     )
 
 
+def test_v2_workbench_validation_reasons_do_not_accumulate_as_manual_reasons():
+    run_node(
+        r"""
+        (async () => {
+          const repeated = "\u69fd\u4f4d\u5185\u5bb9\u6765\u6e90 name \u8fd8\u6ca1\u6709\u7ed1\u5b9a\u5230\u771f\u5b9e\u8868\u5934\u3002";
+          const checks = ["output", "fields", "options", "slots", "content", "dimensions", "colors", "preview"].reduce((result, key) => {
+            result[key] = { status: "confirmed", reason: "" };
+            return result;
+          }, {});
+          checks.fields = {
+            status: "pending",
+            reasons: [
+              "\u8ba2\u5355\u5b57\u6bb5 design \u8fd8\u6ca1\u6709\u7ed1\u5b9a\u5230\u771f\u5b9e\u8868\u5934\u3002",
+              repeated,
+              repeated,
+              "\u69fd\u4f4d\u5185\u5bb9\u6765\u6e90 name1 \u8fd8\u6ca1\u6709\u7ed1\u5b9a\u5230\u771f\u5b9e\u8868\u5934\u3002",
+              "\u69fd\u4f4d\u5185\u5bb9\u6765\u6e90 name2 \u8fd8\u6ca1\u6709\u7ed1\u5b9a\u5230\u771f\u5b9e\u8868\u5934\u3002"
+            ]
+          };
+          const validateBodies = [];
+          async function fakeFetch(url, options = {}) {
+            const textUrl = String(url);
+            if (textUrl === "/api/v2/templates") return response({ templates: [{ template_id: "V2DEDUP", name: "Dedup Demo" }] });
+            if (textUrl.endsWith("/draft") && (!options.method || options.method === "GET")) {
+              return response({ draft: {
+                metadata: { template_id: "V2DEDUP", name: "Dedup Demo", shop_name: "" },
+                manifest: { draft_revision: "d0001" },
+                scan: {
+                  "$schema": "custom-renderer/v2-template-scan",
+                  outputs: [{
+                    key: "Output_main",
+                    design: { options: [{ key: "Design01", slots: [{ key: "slot_name", source_field: "name" }] }] },
+                    font: { options: [] },
+                    style: { options: [] },
+                    summary: { designs: 1, fonts: 0, styles: 0, slots: 1, anchors: 0, tails: 0, assets: 0, fixed_objects: 0 }
+                  }]
+                },
+                config: {
+                  checks: {},
+                  field_bindings: { name: "Name", design: "" },
+                  outputs: [{
+                    key: "Output_main",
+                    display_name: "Main",
+                    component_key: "main",
+                    style: { field: "", options: [] },
+                    design: { field: "design", options: [{ key: "Design01", content_preset: "direct_text", slots: [{ key: "slot_name", source_field: "name" }] }] },
+                    font: { field: "", options: [] }
+                  }]
+                }
+              }});
+            }
+            if (textUrl.endsWith("/validate")) {
+              validateBodies.push(JSON.parse(options.body));
+              return response({ validation: { can_save: true, can_publish: false, checks } });
+            }
+            return response({});
+          }
+          const app = createApp(fakeFetch);
+          await flush();
+          app.elements.templateList.children[0].dispatch("click");
+          await flush();
+          global.setWorkbenchStage("structure");
+          await flush();
+          await global.validateCurrentConfig(false);
+          await flush();
+
+          const fieldsCheck = app.elements.v2CheckRail.children.find((item) => item.dataset.checkKey === "fields");
+          assert.strictEqual(fieldsCheck.dataset.reason, "");
+          assert(fieldsCheck.title.includes("\u8ba2\u5355\u5b57\u6bb5 design"));
+          assert(fieldsCheck.title.includes("\u53e6\u6709 1 \u9879"));
+          assert(validateBodies.length >= 2);
+          const lastBody = validateBodies[validateBodies.length - 1];
+          assert.strictEqual(lastBody.config.checks.fields.status, "pending");
+          assert.strictEqual(lastBody.config.checks.fields.reason, "");
+          assert(!app.elements.publishBlockerText.textContent.includes("\u771f\u5b9e\u8868\u5934"));
+          assert(app.elements.publishBlockerText.textContent.length < 80);
+          assert(app.elements.blockerList.children.length <= 8);
+          assert(app.elements.blockerList.textContent.length < 260);
+        })().catch((error) => { console.error(error); process.exit(1); });
+        """
+    )
+
+
+def test_v2_workbench_validation_preserves_legitimate_manual_check_reason():
+    run_node(
+        r"""
+        (async () => {
+          const manualReason = "\u5b57\u6bb5\u6620\u5c04\u5df2\u7531\u674e\u5de5\u590d\u6838";
+          const checks = ["output", "fields", "options", "slots", "content", "dimensions", "colors", "preview"].reduce((result, key) => {
+            result[key] = { status: "confirmed", reason: "" };
+            return result;
+          }, {});
+          checks.fields = {
+            status: "pending",
+            reasons: ["\u8ba2\u5355\u5b57\u6bb5 design \u8fd8\u6ca1\u6709\u7ed1\u5b9a\u5230\u771f\u5b9e\u8868\u5934\u3002"]
+          };
+          const validateBodies = [];
+          async function fakeFetch(url, options = {}) {
+            const textUrl = String(url);
+            if (textUrl === "/api/v2/templates") return response({ templates: [{ template_id: "V2MANUAL", name: "Manual Reason Demo" }] });
+            if (textUrl.endsWith("/draft") && (!options.method || options.method === "GET")) {
+              return response({ draft: {
+                metadata: { template_id: "V2MANUAL", name: "Manual Reason Demo", shop_name: "" },
+                manifest: { draft_revision: "d0001" },
+                scan: {
+                  "$schema": "custom-renderer/v2-template-scan",
+                  outputs: [{
+                    key: "Output_main",
+                    design: { options: [{ key: "Design01", slots: [{ key: "slot_name", source_field: "name" }] }] },
+                    font: { options: [] },
+                    style: { options: [] },
+                    summary: { designs: 1, fonts: 0, styles: 0, slots: 1, anchors: 0, tails: 0, assets: 0, fixed_objects: 0 }
+                  }]
+                },
+                config: {
+                  checks: { fields: { status: "pending", reason: manualReason } },
+                  field_bindings: { name: "Name", design: "" },
+                  outputs: [{
+                    key: "Output_main",
+                    display_name: "Main",
+                    component_key: "main",
+                    style: { field: "", options: [] },
+                    design: { field: "design", options: [{ key: "Design01", content_preset: "direct_text", slots: [{ key: "slot_name", source_field: "name" }] }] },
+                    font: { field: "", options: [] }
+                  }]
+                }
+              }});
+            }
+            if (textUrl.endsWith("/validate")) {
+              validateBodies.push(JSON.parse(options.body));
+              return response({ validation: { can_save: true, can_publish: false, checks } });
+            }
+            return response({});
+          }
+          const app = createApp(fakeFetch);
+          assert.strictEqual(global.manualCheckReasonForConfig("\u4eba\u5de5\u6838\u9a8c\u9879\u8fd8\u6ca1\u6709\u786e\u8ba4\u3002"), "");
+          assert.strictEqual(global.manualCheckReasonForConfig("\u8ba2\u5355\u5b57\u6bb5\u5df2\u4e0e\u5e97\u94fa\u786e\u8ba4"), "\u8ba2\u5355\u5b57\u6bb5\u5df2\u4e0e\u5e97\u94fa\u786e\u8ba4");
+          await flush();
+          app.elements.templateList.children[0].dispatch("click");
+          await flush();
+          global.setWorkbenchStage("structure");
+          await flush();
+          await global.validateCurrentConfig(false);
+          await flush();
+
+          const fieldsCheck = app.elements.v2CheckRail.children.find((item) => item.dataset.checkKey === "fields");
+          assert.strictEqual(fieldsCheck.dataset.reason, manualReason);
+          assert(fieldsCheck.title.includes("\u8ba2\u5355\u5b57\u6bb5 design"));
+          assert(validateBodies.length >= 2);
+          const lastBody = validateBodies[validateBodies.length - 1];
+          assert.strictEqual(lastBody.config.checks.fields.status, "pending");
+          assert.strictEqual(lastBody.config.checks.fields.reason, manualReason);
+        })().catch((error) => { console.error(error); process.exit(1); });
+        """
+    )
+
+
 def test_v2_workbench_normalizes_server_passed_as_confirmed():
     run_node(
         r"""

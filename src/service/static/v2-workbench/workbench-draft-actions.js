@@ -52,9 +52,11 @@
       renderStructureTree();
       renderTables();
       if (state.stage === "rules" && typeof renderOptionRuleStage === "function") renderOptionRuleStage();
+      updateCheckRail(configChecks());
       validateCurrentConfig(false).catch(() => updateCheckRail(configChecks()));
     } else if (state.stage === "preview") {
       renderPreviewStage();
+      updateCheckRail(configChecks());
       validateCurrentConfig(false).catch(() => updateCheckRail(configChecks()));
     } else {
       updateCheckRail(defaultChecks());

@@ -75,9 +75,24 @@ def _checks_from_issues(issues: Iterable[Mapping[str, str]]) -> Dict[str, Dict[s
         result[key] = {
             "status": status,
             "issues": grouped[key],
-            "reasons": [issue["reason"] for issue in grouped[key]],
+            "reasons": _unique_reasons(grouped[key]),
         }
     return result
+
+
+def _unique_reasons(issues: Iterable[Mapping[str, str]]) -> list[str]:
+    reasons: list[str] = []
+    seen: set[str] = set()
+    for issue in issues:
+        reason = str(issue.get("reason") or "").strip()
+        if not reason:
+            continue
+        key = reason.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        reasons.append(reason)
+    return reasons
 
 
 def _contract_error_reason(error: Mapping[str, str]) -> str:

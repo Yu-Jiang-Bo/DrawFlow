@@ -220,8 +220,11 @@
       const item = document.querySelector(`#v2CheckRail .check-item[data-check-key="${key}"]`);
       const check = normalized[key] || { status: "pending", reason: "" };
       if (!item) return;
+      const hasExplicitReason = checkHasExplicitReason(checks, key);
+      const preservedReason = hasExplicitReason ? "" : manualReasonForCheck(item.dataset.reason || "");
+      const reason = check.reason || preservedReason;
       item.dataset.status = check.status;
-      item.dataset.reason = check.reason || "";
+      item.dataset.reason = reason;
       item.classList.remove("passed", "pending", "warn", "blocked", "confirmed", "success");
       item.classList.add(STATUS_CLASS[check.status] || "pending");
       const label = item.querySelector(".check-label, span");
@@ -229,8 +232,14 @@
       if (label) label.textContent = CHECK_LABELS[key] || key;
       if (status) status.textContent = STATUS_LABELS[check.status] || "待校验";
       if (!label && !status) item.textContent = `${CHECK_LABELS[key] || key}：${STATUS_LABELS[check.status] || "待校验"}`;
-      item.title = check.reason || STATUS_LABELS[check.status] || "";
+      item.title = check.displayReason || reason || STATUS_LABELS[check.status] || "";
     });
+  }
+
+
+  function checkHasExplicitReason(checks, key) {
+    const raw = objectOf(checks)[key];
+    return Boolean(raw && typeof raw === "object" && !Array.isArray(raw) && Object.prototype.hasOwnProperty.call(raw, "reason"));
   }
 
 
@@ -239,11 +248,85 @@
     Object.keys(objectOf(checks)).forEach((key) => {
       if (!CHECK_KEYS.includes(key)) return;
       const raw = checks[key];
+      const rawObject = objectOf(raw);
       const status = typeof raw === "string" ? raw : objectOf(raw).status;
-      const reason = typeof raw === "string" ? "" : objectOf(raw).reason || objectOf(raw).reasons;
-      result[key] = { status: safeStatus(status), reason: Array.isArray(reason) ? reason.join("；") : cleanText(reason || "") };
+      const manualReason = typeof raw === "string" ? "" : manualReasonForCheck(rawObject.reason || "");
+      const validationReasons = typeof raw === "string" ? [] : validationReasonsForCheck(rawObject);
+      const displayReasons = unique([manualReason, ...validationReasons].map((item) => cleanText(item))).filter(Boolean);
+      result[key] = {
+        status: safeStatus(status),
+        reason: manualReason,
+        reasons: displayReasons,
+        displayReason: compactReasons(displayReasons)
+      };
     });
     return result;
+  }
+
+
+  function validationReasonsForCheck(check) {
+    const result = [];
+    if (Array.isArray(check.reasons)) result.push(...check.reasons);
+    if (Array.isArray(check.issues)) {
+      check.issues.forEach((issue) => {
+        const reason = objectOf(issue).reason;
+        if (reason) result.push(reason);
+      });
+    }
+    return result;
+  }
+
+
+  function manualReasonForCheck(value) {
+    let reason = cleanText(value);
+    const emptySentences = ["人工核验项还没有确认", "人工核验项还没有确认。", "人工核验项被标记为阻断", "人工核验项被标记为阻断。"];
+    const prefixes = ["人工核验项还没有确认：", "人工核验项还没有确认:", "人工核验项被标记为阻断：", "人工核验项被标记为阻断:"];
+    let changed = true;
+    while (changed) {
+      if (emptySentences.includes(reason)) return "";
+      changed = false;
+      prefixes.forEach((prefix) => {
+        if (reason.indexOf(prefix) === 0) {
+          reason = cleanText(reason.slice(prefix.length));
+          changed = true;
+        }
+      });
+    }
+    if (emptySentences.includes(reason)) return "";
+    return looksLikeValidationReason(reason) ? "" : reason;
+  }
+
+
+  function looksLikeValidationReason(reason) {
+    if (!reason) return false;
+    const markers = ["还没有绑定到真实表头", "还没有映射到订单原值", "发布前预览缺少", "缺少代表性测试数据"];
+    if (markers.some((marker) => reason.includes(marker))) return true;
+    const pairs = [
+      ["槽位内容来源", "真实表头"],
+      ["订单字段", "真实表头"],
+      ["颜色扫描值", "还没有"],
+      ["素材范围", "还没有"],
+      ["最终边界", "还没有"],
+      ["最终边界", "不允许"],
+      ["同一作用域", "重复"],
+      ["同一作用域", "不允许"]
+    ];
+    return pairs.some(([left, right]) => reason.includes(left) && reason.includes(right));
+  }
+
+
+  function compactReasons(reasons) {
+    const items = unique((Array.isArray(reasons) ? reasons : []).map((item) => cleanText(item))).filter(Boolean);
+    if (!items.length) return "";
+    const visible = items.slice(0, 3);
+    const suffix = items.length > visible.length ? `；另有 ${items.length - visible.length} 项` : "";
+    return trimLongReason(visible.join("；") + suffix);
+  }
+
+
+  function trimLongReason(text) {
+    const value = cleanText(text);
+    return value.length > 180 ? `${value.slice(0, 177)}…` : value;
   }
 
 
@@ -252,7 +335,7 @@
     const checks = normalizeChecks(validation && validation.checks ? validation.checks : configChecks());
     const blockers = [];
     CHECK_KEYS.forEach((key) => {
-      if (checks[key].status !== "confirmed") blockers.push(`${CHECK_LABELS[key]}：${checks[key].reason || STATUS_LABELS[checks[key].status]}`);
+      if (checks[key].status !== "confirmed") blockers.push(`${CHECK_LABELS[key]}：${checks[key].displayReason || checks[key].reason || STATUS_LABELS[checks[key].status]}`);
     });
     if (target) {
       target.replaceChildren();
@@ -265,7 +348,17 @@
     const ready = validation && validation.can_publish === true && !blockers.length;
     setDisabled("publishVersionBtn", !ready);
     setDisabled("trialRenderBtn", !state.draft);
-    setText("publishBlockerText", ready ? "核验已完成，发布接口未接入。" : (blockers[0] || "请先完成草稿配置与人工核验。"));
+    setText("publishBlockerText", ready ? "核验已完成，发布接口未接入。" : blockerSummary(blockers));
+  }
+
+
+  function blockerSummary(blockers) {
+    const items = unique(Array.isArray(blockers) ? blockers : []);
+    if (!items.length) return "请先完成草稿配置与人工核验。";
+    const labels = items.map((item) => cleanText(item).split("：")[0]).filter(Boolean);
+    const visible = labels.slice(0, 4).join("、");
+    const suffix = labels.length > 4 ? "等" : "";
+    return `还有 ${labels.length} 项发布核验未完成：${visible}${suffix}。`;
   }
 
 
@@ -291,6 +384,7 @@
     updateToggleButtons,
     updateCheckRail,
     normalizeChecks,
+    compactReasons,
     updateBlockers,
     setDraftStatus,
     showTransientStatus
