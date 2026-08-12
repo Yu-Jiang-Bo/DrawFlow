@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from src.service import v2_template_scanner as scanner_module
 from src.service.v2_template_scanner import (
     V2_SCAN_PROTOCOL_VERSION,
     V2TemplateScanner,
@@ -327,6 +328,31 @@ def test_v2_template_scanner_runs_bridge_and_normalizes_output(tmp_path):
     assert bridge.calls[0]["script_path"].name == "scan_v2_template.jsx"
     assert bridge.calls[0]["task"]["input_ai"] == str(ai)
     assert Path(bridge.calls[0]["task"]["output_json"]).is_file()
+
+
+def test_v2_template_scanner_uses_isolated_illustrator_session_by_default(tmp_path, monkeypatch):
+    ai = tmp_path / "template.ai"
+    ai.write_bytes(b"ai-bytes")
+    bridge_kwargs = []
+
+    class RecordingBridge:
+        def __init__(self, **kwargs):
+            bridge_kwargs.append(kwargs)
+
+        def render(self, _script_path, task_path):
+            task = json.loads(Path(task_path).read_text(encoding="utf-8"))
+            Path(task["output_json"]).write_text(
+                json.dumps(base_raw_scan(*valid_scan_items()), ensure_ascii=False),
+                encoding="utf-8",
+            )
+
+    monkeypatch.setattr(scanner_module, "IllustratorBridge", RecordingBridge)
+    scanner = V2TemplateScanner(work_dir=tmp_path / "tasks")
+
+    result = scanner.scan(ai)
+
+    assert result["blocked"] is False
+    assert bridge_kwargs == [{"visible": False, "fresh_instance": True, "quit_after": True}]
 
 
 def test_v2_template_scanner_reports_missing_json_without_fake_success(tmp_path):

@@ -10,7 +10,7 @@ from typing import Any
 
 COM_RETRY_ATTEMPTS = 3
 COM_RETRY_DELAY_SECONDS = 3.0
-RETRYABLE_COM_HRESULTS = ("-2147417851", "-2147023170")
+RETRYABLE_COM_HRESULTS = ("-2147417851", "-2147023170", "-2146959355", "-2147467259")
 
 
 class IllustratorBridgeError(RuntimeError):
@@ -76,6 +76,8 @@ class IllustratorBridge:
                         and _is_retryable_com_failure(exc)
                     ):
                         # Drop only this bridge's proxy. Never terminate a user's Illustrator process.
+                        if self.quit_after and not self.reuse_instance:
+                            self.close(app)
                         app = None
                         time.sleep(COM_RETRY_DELAY_SECONDS)
                         continue

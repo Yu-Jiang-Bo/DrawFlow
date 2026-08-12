@@ -118,6 +118,46 @@ def test_bridge_retries_remote_server_unavailable_then_explains_recovery(tmp_pat
     assert app.calls == 3
 
 
+@pytest.mark.parametrize("hresult", ["-2146959355", "-2147467259"])
+def test_bridge_closes_failed_fresh_instance_before_retry(tmp_path, monkeypatch, hresult):
+    class App:
+        Visible = False
+
+        def __init__(self, result):
+            self.result = result
+            self.closed = False
+
+        def DoJavaScript(self, _bootstrap):
+            if isinstance(self.result, Exception):
+                raise self.result
+            return self.result
+
+        def Quit(self):
+            self.closed = True
+
+    first_app = App(RuntimeError(f"({hresult}, 'COM failure')"))
+    second_app = App("done.ai")
+    apps = [first_app, second_app]
+    client = types.ModuleType("win32com.client")
+    client.Dispatch = lambda _prog_id: apps[0]
+    client.DispatchEx = lambda _prog_id: apps.pop(0)
+    package = types.ModuleType("win32com")
+    package.client = client
+    pythoncom = types.ModuleType("pythoncom")
+    pythoncom.CoInitialize = lambda: None
+    pythoncom.CoUninitialize = lambda: None
+    monkeypatch.setitem(sys.modules, "win32com", package)
+    monkeypatch.setitem(sys.modules, "win32com.client", client)
+    monkeypatch.setitem(sys.modules, "pythoncom", pythoncom)
+    monkeypatch.setattr(illustrator_bridge.time, "sleep", lambda _seconds: None)
+    script, task = make_inputs(tmp_path)
+
+    assert IllustratorBridge(fresh_instance=True, quit_after=True).render(script, task) == "done.ai"
+    assert apps == []
+    assert first_app.closed is True
+    assert second_app.closed is True
+
+
 def test_bridge_does_not_retry_jsx_business_error(tmp_path, monkeypatch):
     class App:
         Visible = False

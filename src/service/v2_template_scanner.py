@@ -119,7 +119,7 @@ class V2TemplateScanner:
             return self.bridge
         if self.bridge_factory is not None:
             return self.bridge_factory()
-        return IllustratorBridge(visible=False)
+        return IllustratorBridge(visible=False, fresh_instance=True, quit_after=True)
 
     def _task_directory(self) -> Any:
         return _TaskDirectory(self.work_dir)
