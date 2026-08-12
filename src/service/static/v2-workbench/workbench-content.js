@@ -68,8 +68,8 @@
       metaCell("槽位处理（按需覆盖）"),
       metaCell("状态"),
       metaCell("素材键（仅素材）"),
-      metaCell("扫描宽"),
-      metaCell("扫描高"),
+      metaCell("适配宽"),
+      metaCell("适配高"),
       metaCell("首字证据"),
       metaCell("尾字证据"),
       metaCell("字体依赖"),
@@ -87,14 +87,15 @@
     row.dataset.anchor = slot.anchor || "";
     row.__tailConfigs = normalizedTailConfigs(slot.tails);
     const dimensions = objectOf(slot.dimension_rule);
+    row.dataset.dimensionMode = cleanText(dimensions.mode || "") || (slot.anchor ? "anchor" : "slot");
     row.append(
       metaCell(slot.key),
       inputCell("slot-source-field", slot.source_field || ""),
       selectCell("slot-preset", presetOptions(PRESETS), safePreset(slot.preset, "direct_text")),
       selectCell("slot-required", [["required", "必填"], ["optional", "可选"]], slot.required === false ? "optional" : "required"),
       readonlyInputCell("slot-asset-key", slot.asset_key || "", "素材替换槽位才会有素材键；普通文字槽位留空。"),
-      readonlyInputCell("slot-width-mm", dimensions.width_mm || "", "扫描得到的槽位宽度证据，不需要手填。"),
-      readonlyInputCell("slot-height-mm", dimensions.height_mm || "", "扫描得到的槽位高度证据，不需要手填。"),
+      readonlyInputCell("slot-width-mm", dimensions.width_mm || "", "优先显示定位框宽度；没有定位框时显示槽位宽度，不需要手填。"),
+      readonlyInputCell("slot-height-mm", dimensions.height_mm || "", "优先显示定位框高度；没有定位框时显示槽位高度，不需要手填。"),
       readonlyInputCell("slot-tail-first", tailSample(slot.tails, "first"), "扫描到的首字尾巴标注证据；渲染时按订单文字动态取首字。"),
       readonlyInputCell("slot-tail-last", tailSample(slot.tails, "last"), "扫描到的尾字尾巴标注证据；渲染时按订单文字动态取尾字。"),
       inputCell("slot-font-dependencies", stringListValue(slot.font_dependencies)),
@@ -149,15 +150,17 @@
   function slotConfigFromRow(row) {
     const key = slotKeyFor(row.dataset.slotKey || rowValue(row, "slot-key") || "slot_name");
     const fallbackField = safeField(key.replace(/^slot_/, "")) || "name";
+    const anchor = cleanText(row.dataset.anchor || "");
+    const dimensionMode = cleanText(row.dataset.dimensionMode || "") || (anchor ? "anchor" : "slot");
     return {
       key,
       source_field: safeField(rowValue(row, "slot-source-field")) || fallbackField,
       required: rowValue(row, "slot-required") !== "optional",
       preset: safePreset(rowValue(row, "slot-preset"), "direct_text"),
-      anchor: cleanText(row.dataset.anchor || ""),
+      anchor,
       tails: tailConfigsFromRow(row, key),
       asset_key: safeIdentifier(rowValue(row, "slot-asset-key"), ""),
-      dimension_rule: dimensionRuleFromValues(rowValue(row, "slot-width-mm"), rowValue(row, "slot-height-mm"), "slot"),
+      dimension_rule: dimensionRuleFromValues(rowValue(row, "slot-width-mm"), rowValue(row, "slot-height-mm"), dimensionMode),
       font_dependencies: splitStringList(rowValue(row, "slot-font-dependencies")),
       color_binding: safeIdentifier(rowValue(row, "slot-color-binding"), "")
     };
@@ -355,14 +358,21 @@
   }
 
   function slotDimensionRule(item, optionContext, slotKey) {
+    const anchorRule = anchorDimensionRule(item, optionContext, slotKey);
+    if (Object.keys(anchorRule).length) return anchorRule;
     const configured = objectOf(item.dimension_rule);
     if (Object.keys(configured).length) return configured;
     const scanned = normalizedDimensionRule(item.dimensions || item, "slot");
     if (Object.keys(scanned).length) return scanned;
+    return {};
+  }
+
+  function anchorDimensionRule(item, optionContext, slotKey) {
     const anchorKey = inferredAnchorForSlot(item, slotKey, optionContext);
+    if (!anchorKey) return {};
     const anchors = Array.isArray(objectOf(optionContext).anchors) ? objectOf(optionContext).anchors : [];
     const anchor = anchors.find((candidate) => cleanText(candidate.key || candidate.name || "") === anchorKey);
-    return normalizedDimensionRule(objectOf(anchor).dimensions || anchor, "slot");
+    return normalizedDimensionRule(objectOf(anchor).dimensions || anchor, "anchor");
   }
 
   function inferredAnchorForSlot(item, slotKey, optionContext) {

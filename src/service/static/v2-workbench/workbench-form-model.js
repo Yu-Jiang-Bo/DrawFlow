@@ -77,6 +77,29 @@
       const field = safeField(item.source_field || item.field || slotFieldName(item.key || item.name));
       if (field) fields.push(field);
     });
+    configuredSlotSourceFields().forEach((field) => {
+      if (field) fields.push(field);
+    });
+    return unique(fields);
+  }
+
+
+  function configuredSlotSourceFields() {
+    const fields = [];
+    configOutputs().forEach((output) => {
+      ["design", "font"].forEach((group) => {
+        const section = objectOf(output[group]);
+        const options = Array.isArray(section.options) ? section.options : [];
+        options.forEach((option) => {
+          const optionData = objectOf(option);
+          const slots = Array.isArray(optionData.slots) ? optionData.slots : [];
+          slots.forEach((slot) => {
+            const field = safeField(objectOf(slot).source_field);
+            if (field) fields.push(field);
+          });
+        });
+      });
+    });
     return unique(fields);
   }
 
@@ -144,6 +167,7 @@
     configOptionMappings,
     inferredOutputs,
     inferredFields,
+    configuredSlotSourceFields,
     inferredMappings,
     inferredGroupField,
     slotFieldName,

@@ -1069,6 +1069,160 @@ def test_v2_workbench_rules_prefill_anchor_dimensions_and_preserve_tail_proof():
     )
 
 
+def test_v2_workbench_rules_prefer_anchor_dimensions_over_saved_slot_dimensions():
+    run_node(
+        r"""
+        (async () => {
+          async function fakeFetch(url, options = {}) {
+            const textUrl = String(url);
+            if (textUrl === "/api/v2/templates") return response({ templates: [{ template_id: "V2ANCHOROLD", name: "Anchor Old Slot Demo" }] });
+            if (textUrl.endsWith("/draft")) {
+              return response({ draft: {
+                metadata: { template_id: "V2ANCHOROLD", name: "Anchor Old Slot Demo", shop_name: "" },
+                manifest: { draft_revision: "d0001" },
+                scan: {
+                  "$schema": "custom-renderer/v2-template-scan",
+                  outputs: [{
+                    key: "Output_main",
+                    design: { options: [{
+                      key: "Design05",
+                      recommended_preset: "tail_text",
+                      slots: [{
+                        key: "slot_name",
+                        source_field: "name",
+                        anchor: "anchor_name",
+                        dimensions: { width_mm: 163.657, height_mm: 85.03 }
+                      }],
+                      anchors: [{ key: "anchor_name", dimensions: { width_mm: 150.231, height_mm: 47.231 } }],
+                      tails: []
+                    }] },
+                    font: { options: [] },
+                    style: { options: [] },
+                    summary: { designs: 1, fonts: 0, styles: 0, slots: 1, anchors: 1, tails: 0, assets: 0, fixed_objects: 0 }
+                  }]
+                },
+                config: {
+                  outputs: [{
+                    key: "Output_main",
+                    display_name: "Main",
+                    component_key: "main",
+                    style: { field: "", options: [] },
+                    design: {
+                      field: "design",
+                      options: [{
+                        key: "Design05",
+                        content_preset: "tail_text",
+                        slots: [{
+                          key: "slot_name",
+                          source_field: "name",
+                          preset: "tail_text",
+                          anchor: "anchor_name",
+                          dimension_rule: { mode: "slot", width_mm: 163.657, height_mm: 85.03, tolerance_mm: 0.007 }
+                        }]
+                      }]
+                    },
+                    font: { field: "", options: [] }
+                  }]
+                }
+              }});
+            }
+            if (textUrl.endsWith("/validate")) return response({ validation: { checks: {} } });
+            return response({});
+          }
+          const app = createApp(fakeFetch);
+          await flush();
+          app.elements.templateList.children[0].dispatch("click");
+          await flush();
+          global.setWorkbenchStage("rules");
+          await flush();
+
+          const slot = document.querySelectorAll("#contentOptionRows .content-slot-row").find((row) => row.dataset.option === "Design05" && row.dataset.slotKey === "slot_name");
+          assert(slot);
+          assert.strictEqual(slot.dataset.anchor, "anchor_name");
+          assert.strictEqual(String(slot.querySelector('[data-field="slot-width-mm"]').value), "150.231");
+          assert.strictEqual(String(slot.querySelector('[data-field="slot-height-mm"]').value), "47.231");
+
+          const config = buildControlledConfig();
+          const savedSlot = config.outputs[0].design.options.find((item) => item.key === "Design05").slots[0];
+          assert.strictEqual(savedSlot.anchor, "anchor_name");
+          assert.strictEqual(savedSlot.dimension_rule.mode, "anchor");
+          assert.strictEqual(savedSlot.dimension_rule.width_mm, 150.231);
+          assert.strictEqual(savedSlot.dimension_rule.height_mm, 47.231);
+        })().catch((error) => { console.error(error); process.exit(1); });
+        """
+    )
+
+
+def test_v2_workbench_structure_lists_configured_slot_source_fields():
+    run_node(
+        r"""
+        (async () => {
+          async function fakeFetch(url, options = {}) {
+            const textUrl = String(url);
+            if (textUrl === "/api/v2/templates") return response({ templates: [{ template_id: "V2TITLEFIELD", name: "Title Field Demo" }] });
+            if (textUrl.endsWith("/draft")) {
+              return response({ draft: {
+                metadata: { template_id: "V2TITLEFIELD", name: "Title Field Demo", shop_name: "" },
+                manifest: { draft_revision: "d0001" },
+                scan: {
+                  "$schema": "custom-renderer/v2-template-scan",
+                  outputs: [{
+                    key: "Output_main",
+                    design: { options: [{
+                      key: "Design04",
+                      slots: [{ key: "slot_name1", source_field: "name" }, { key: "slot_name2", source_field: "name2" }]
+                    }] },
+                    font: { options: [] },
+                    style: { options: [] },
+                    summary: { designs: 1, fonts: 0, styles: 0, slots: 2, anchors: 0, tails: 0, assets: 0, fixed_objects: 0 }
+                  }]
+                },
+                config: {
+                  field_bindings: { name: "Name", design: "Design", name1: "Name", name2: "Title" },
+                  outputs: [{
+                    key: "Output_main",
+                    display_name: "Main",
+                    component_key: "main",
+                    style: { field: "", options: [] },
+                    design: {
+                      field: "design",
+                      options: [{
+                        key: "Design04",
+                        content_preset: "direct_text",
+                        slots: [
+                          { key: "slot_name1", source_field: "name" },
+                          { key: "slot_name2", source_field: "title" }
+                        ]
+                      }]
+                    },
+                    font: { field: "", options: [] }
+                  }]
+                }
+              }});
+            }
+            if (textUrl.endsWith("/validate")) return response({ validation: { checks: {} } });
+            return response({});
+          }
+          const app = createApp(fakeFetch);
+          await flush();
+          app.elements.templateList.children[0].dispatch("click");
+          await flush();
+          global.setWorkbenchStage("structure");
+          await flush();
+
+          const titleRow = document.querySelectorAll("#fieldBindingRows .field-binding-row").find((row) => row.querySelector('[data-field="binding-field"]').value === "title");
+          assert(titleRow);
+          const titleColumn = titleRow.querySelector('[data-field="binding-column"]');
+          assert.strictEqual(titleColumn.value, "");
+          titleColumn.value = "Title";
+
+          const config = buildControlledConfig();
+          assert.strictEqual(config.field_bindings.title, "Title");
+        })().catch((error) => { console.error(error); process.exit(1); });
+        """
+    )
+
+
 def test_v2_workbench_split_pipe_recommendation_saves_slot_presets():
     run_node(
         r"""
