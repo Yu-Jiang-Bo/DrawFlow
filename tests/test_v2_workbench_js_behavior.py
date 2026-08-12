@@ -576,6 +576,76 @@ def test_v2_workbench_single_output_does_not_invent_style_or_font_fields():
     )
 
 
+def test_v2_workbench_existing_option_mappings_are_completed_from_scan():
+    run_node(
+        r"""
+        (async () => {
+          const scannedDesigns = Array.from({ length: 22 }, (_, index) => ({
+            key: `Design${String(index + 1).padStart(2, "0")}`,
+            slots: [{ key: "slot_name" }]
+          }));
+          async function fakeFetch(url, options = {}) {
+            const textUrl = String(url);
+            if (textUrl === "/api/v2/templates") return response({ templates: [{ template_id: "V2AUTOMAP", name: "Auto Map Demo" }] });
+            if (textUrl.endsWith("/draft")) {
+              return response({ draft: {
+                metadata: { template_id: "V2AUTOMAP", name: "Auto Map Demo", shop_name: "" },
+                manifest: { draft_revision: "d0001" },
+                config: {
+                  field_bindings: { name: "Name", design: "Design" },
+                  option_mappings: [
+                    { field: "design", source_value: "1", target: "Design01", output: "Output_main", group: "design" },
+                    { field: "design", source_value: "01", target: "Design01", output: "Output_main", group: "design" }
+                  ],
+                  outputs: [{
+                    key: "Output_main",
+                    display_name: "Main",
+                    component_key: "main",
+                    style: { field: "", options: [] },
+                    design: { field: "design", options: [] },
+                    font: { field: "", options: [] }
+                  }]
+                },
+                scan: {
+                  "$schema": "custom-renderer/v2-template-scan",
+                  outputs: [{
+                    key: "Output_main",
+                    design: { options: scannedDesigns },
+                    font: { options: [] },
+                    style: { options: [] },
+                    summary: { designs: 22, fonts: 0, styles: 0, slots: 22, anchors: 0, tails: 0, assets: 0, fixed_objects: 0 }
+                  }]
+                }
+              }});
+            }
+            if (textUrl.endsWith("/validate")) return response({ validation: { checks: {} } });
+            return response({});
+          }
+          const app = createApp(fakeFetch);
+          await flush();
+          app.elements.templateList.children[0].dispatch("click");
+          await flush();
+          global.setWorkbenchStage("structure");
+          await flush();
+
+          const rows = document.querySelectorAll("#optionMappingRows .option-mapping-row");
+          assert.strictEqual(rows.length, 23);
+          assert.strictEqual(rows[0].querySelector('[data-field="mapping-source"]').value, "1");
+          assert.strictEqual(rows[1].querySelector('[data-field="mapping-source"]').value, "01");
+          assert.strictEqual(rows[1].querySelector('[data-field="mapping-target"]').value, "Design01");
+          assert.strictEqual(rows[22].querySelector('[data-field="mapping-source"]').value, "22");
+          assert.strictEqual(rows[22].querySelector('[data-field="mapping-target"]').value, "Design22");
+
+          const config = buildControlledConfig();
+          assert.strictEqual(config.option_mappings.length, 23);
+          assert.deepStrictEqual(config.option_mappings.slice(0, 2).map((item) => item.source_value), ["1", "01"]);
+          assert.strictEqual(config.option_mappings[22].source_value, "22");
+          assert.deepStrictEqual(config.outputs[0].design.options.map((item) => item.key), scannedDesigns.map((item) => item.key));
+        })().catch((error) => { console.error(error); process.exit(1); });
+        """
+    )
+
+
 def test_v2_workbench_stale_style_font_config_does_not_pollute_scan_structure():
     run_node(
         r"""
@@ -1164,8 +1234,15 @@ def test_v2_workbench_roundtrips_multi_output_dimensions_assets_tails_fonts_colo
           const designSlot = document.querySelectorAll("#contentOptionRows .content-slot-row").find((row) => row.dataset.output === "Output_SideA" && row.dataset.option === "Design03" && row.dataset.slotKey === "slot_name");
           assert(designSlot);
           assert.strictEqual(designSlot.querySelector('[data-field="slot-tail-first"]').value, "a");
+          assert.strictEqual(designSlot.querySelector('[data-field="slot-tail-first"]').readOnly, true);
+          assert.strictEqual(designSlot.querySelector('[data-field="slot-width-mm"]').readOnly, true);
+          assert.strictEqual(designSlot.querySelector('[data-field="slot-height-mm"]').readOnly, true);
           assert.strictEqual(designSlot.querySelector('[data-field="slot-font-dependencies"]').value, "Cinzel Decorative");
           assert.strictEqual(designSlot.querySelector('[data-field="slot-color-binding"]').value, "color");
+          const assetSlot = document.querySelectorAll("#contentOptionRows .content-slot-row").find((row) => row.dataset.output === "Output_SideA" && row.dataset.option === "Design03" && row.dataset.slotKey === "slot_initial_top");
+          assert(assetSlot);
+          assert.strictEqual(assetSlot.querySelector('[data-field="slot-asset-key"]').value, "initial_top");
+          assert.strictEqual(assetSlot.querySelector('[data-field="slot-asset-key"]').readOnly, true);
 
           app.elements.saveDraftBtn.dispatch("click");
           await flush();
@@ -1474,6 +1551,8 @@ def test_v2_workbench_save_next_from_structure_enters_rules_and_strips_manual_re
           await flush();
           global.setWorkbenchStage("structure");
           await flush();
+          assert.strictEqual(app.elements.confirmStageBtn.hidden, true);
+          assert.strictEqual(app.elements.saveAndNextOptionBtn.textContent, "\u786e\u8ba4\u5e76\u5f00\u59cb\u914d\u7f6e\u9009\u9879");
 
           app.elements.saveAndNextOptionBtn.dispatch("click");
           for (let index = 0; index < 6; index += 1) await flush();
@@ -1483,6 +1562,8 @@ def test_v2_workbench_save_next_from_structure_enters_rules_and_strips_manual_re
           assert(app.elements.selectedOptionTitle.textContent.includes("Design01"));
           assert.strictEqual(draftSaveBody.config.checks.output.status, "confirmed");
           assert.strictEqual(draftSaveBody.config.checks.output.reason, "\u5355 Output_main \u81ea\u52a8\u786e\u8ba4");
+          assert.strictEqual(draftSaveBody.config.checks.fields.status, "confirmed");
+          assert.strictEqual(draftSaveBody.config.checks.options.status, "confirmed");
           assert(!draftSaveBody.config.checks.output.reason.includes(manualPrefix));
         })().catch((error) => { console.error(error); process.exit(1); });
         """
@@ -1733,6 +1814,60 @@ def test_v2_workbench_stage_confirmation_persists_only_current_stage_checks():
           assert.deepStrictEqual(["output", "fields", "options"].map((key) => draftSaveBody.config.checks[key].status), ["confirmed", "confirmed", "confirmed"]);
           assert.deepStrictEqual(["slots", "content", "dimensions", "colors", "preview"].map((key) => draftSaveBody.config.checks[key].status), ["pending", "pending", "pending", "pending", "pending"]);
           assert.strictEqual(draftSaveBody.config.checks.output.reason, "\u5355 Output_main \u81ea\u52a8\u786e\u8ba4");
+        })().catch((error) => { console.error(error); process.exit(1); });
+        """
+    )
+
+
+def test_v2_workbench_preview_stage_keeps_visible_confirmation_action():
+    run_node(
+        r"""
+        (async () => {
+          let draftSaveBody = null;
+          let currentDraft = {
+            metadata: { template_id: "V2PREVIEWCONFIRM", name: "Preview Confirm Demo", shop_name: "" },
+            manifest: { draft_revision: "d0001" },
+            scan: { outputs: [{ key: "Output_main" }], designs: [{ key: "Design01", slots: [{ key: "slot_name", source_field: "name" }] }] },
+            config: {
+              checks: ["output", "fields", "options", "slots", "content", "dimensions", "colors"].reduce((result, key) => {
+                result[key] = { status: "confirmed", reason: "" };
+                return result;
+              }, { preview: { status: "pending", reason: "" } }),
+              outputs: [{ key: "Output_main", display_name: "Main", component_key: "main", style: { field: "", options: [] }, design: { field: "design", options: [{ key: "Design01", content_preset: "direct_text", slots: [{ key: "slot_name", source_field: "name" }] }] }, font: { field: "", options: [] } }]
+            }
+          };
+          async function fakeFetch(url, options = {}) {
+            const textUrl = String(url);
+            if (textUrl === "/api/v2/templates") return response({ templates: [{ template_id: "V2PREVIEWCONFIRM", name: "Preview Confirm Demo" }] });
+            if (textUrl.endsWith("/draft") && (!options.method || options.method === "GET")) return response({ draft: currentDraft });
+            if (textUrl.endsWith("/validate")) {
+              const checks = JSON.parse(options.body).config.checks;
+              return response({ validation: { can_save: true, can_publish: false, checks } });
+            }
+            if (textUrl.endsWith("/draft") && options.method === "POST") {
+              draftSaveBody = JSON.parse(options.body);
+              currentDraft = { ...currentDraft, config: draftSaveBody.config, manifest: { draft_revision: "d0002" } };
+              return response({ draft: currentDraft });
+            }
+            return response({});
+          }
+          const app = createApp(fakeFetch);
+          await flush();
+          app.elements.templateList.children[0].dispatch("click");
+          await flush();
+          global.setWorkbenchStage("preview");
+          await flush();
+
+          assert.strictEqual(app.elements.confirmStageBtn.hidden, false);
+          assert.strictEqual(app.elements.confirmStageBtn.textContent, "\u786e\u8ba4\u6837\u4f8b\u9884\u89c8");
+          assert.strictEqual(app.elements.saveAndNextOptionBtn.hidden, true);
+          app.elements.confirmStageBtn.dispatch("click");
+          for (let index = 0; index < 8; index += 1) await flush();
+
+          assert(draftSaveBody);
+          assert.strictEqual(draftSaveBody.config.checks.preview.status, "confirmed");
+          assert.strictEqual(draftSaveBody.config.checks.output.status, "confirmed");
+          assert.strictEqual(draftSaveBody.config.checks.fields.status, "confirmed");
         })().catch((error) => { console.error(error); process.exit(1); });
         """
     )

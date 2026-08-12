@@ -62,8 +62,18 @@
     const visible = filteredRuleOptions();
     const selectedIndex = state.optionRules.selectedIndex;
     const selectedId = visible[selectedIndex] && visible[selectedIndex].id;
+    const previousChecks = typeof globalThis.collectChecks === "function" ? globalThis.collectChecks() : null;
+    if (typeof globalThis.markCurrentStageConfirmed === "function") {
+      globalThis.markCurrentStageConfirmed();
+      if (typeof globalThis.updateCheckRail === "function" && typeof globalThis.collectChecks === "function") {
+        globalThis.updateCheckRail(globalThis.collectChecks());
+      }
+    }
     const saveResult = typeof globalThis.saveDraft === "function" ? await globalThis.saveDraft() : null;
     const saved = saveResult === true || Boolean(saveResult && saveResult.saved);
+    if (!saved && previousChecks && (!saveResult || saveResult.failure !== "validation") && typeof globalThis.updateCheckRail === "function") {
+      globalThis.updateCheckRail(previousChecks);
+    }
     if (!saved) return;
     if (!wasRuleStage) {
       state.optionRules.selectedIndex = 0;
@@ -83,13 +93,14 @@
 
   function updateStageActionButtons() {
     const stage = state.stage;
-    setHidden("confirmStageBtn", !["structure", "rules", "preview"].includes(stage));
+    setHidden("confirmStageBtn", stage !== "preview");
     setHidden("saveAndNextOptionBtn", !["structure", "rules"].includes(stage));
-    if (stage === "structure") setText("saveAndNextOptionBtn", "保存并开始配置选项");
+    if (stage === "structure") setText("saveAndNextOptionBtn", "确认并开始配置选项");
     if (stage === "rules") {
       const items = filteredRuleOptions();
-      setText("saveAndNextOptionBtn", !items.length || state.optionRules.selectedIndex >= items.length - 1 ? "保存并进入样例预览" : "保存并配置下一个选项");
+      setText("saveAndNextOptionBtn", !items.length || state.optionRules.selectedIndex >= items.length - 1 ? "确认并进入样例预览" : "确认并配置下一个选项");
     }
+    if (stage === "preview") setText("confirmStageBtn", "确认样例预览");
   }
 
   function filteredRuleOptions() {

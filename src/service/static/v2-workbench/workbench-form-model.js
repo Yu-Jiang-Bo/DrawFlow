@@ -90,10 +90,12 @@
       ["design", model.designs],
       ["font", model.fonts]
     ].forEach(([group, items]) => {
-      items.slice(0, 12).forEach((item) => {
+      items.forEach((item) => {
         const target = safeOptionKey(item.key || item.name, group);
         if (!target) return;
-        rows.push({ field: inferredGroupField(group), source_value: displayOptionSource(target, group), target, output: optionOutputKey(item), group });
+        const output = optionOutputKey(item);
+        if (!output) return;
+        rows.push({ field: inferredGroupField(group), source_value: displayOptionSource(target, group), target, output, group });
       });
     });
     return rows;
@@ -121,7 +123,7 @@
     if (raw) return safeOutputKey(raw, "Output_main", 0);
     const outputs = configOutputs().length ? configOutputs() : inferredOutputs();
     if (outputs.length === 1) return safeOutputKey(outputs[0].key || outputs[0].name, "Output_main", 0);
-    return "Output_main";
+    return "";
   }
 
 

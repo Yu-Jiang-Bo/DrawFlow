@@ -377,8 +377,6 @@ def _tail_specs(
     *,
     require_glyphs: bool,
 ) -> list[dict[str, Any]]:
-    if not require_glyphs:
-        return []
     result: list[dict[str, Any]] = []
     seen_positions: set[str] = set()
     slot_suffix = slot_key[5:] if slot_key.casefold().startswith("slot_") else ""
@@ -389,7 +387,7 @@ def _tail_specs(
         if isinstance(tail, Mapping) and str(tail.get("key") or "")
     }
     missing_confirmed = sorted(scan_slot_tail_keys - config_tail_keys, key=str.casefold)
-    if missing_confirmed:
+    if require_glyphs and missing_confirmed:
         raise V2RenderTaskError(
             "tail_sample_unconfirmed",
             "All scanned tail samples for a tail_text slot must be confirmed in config.",
@@ -453,7 +451,10 @@ def _tail_specs(
             "sample": sample,
             "path": _path_by_key(scan_tails, key, f"{path}[{index}].key"),
         }
-        record.update(_tail_glyph_proof(tail, f"{path}[{index}]"))
+        if require_glyphs or tail.get("pua_base") not in (None, "") or tail.get("glyph_map"):
+            record.update(_tail_glyph_proof(tail, f"{path}[{index}]"))
+        else:
+            record["glyph_mode"] = "plain_text"
         result.append(record)
     return sorted(result, key=lambda item: (item["position"], item["key"]))
 

@@ -398,7 +398,8 @@ def test_recommendations_are_pending_and_based_on_scan_facts():
     )
 
     presets = {item["preset"] for item in result["recommendations"]}
-    assert {"initial_with_text", "tail_text", "path_text", "design_font_combo"} <= presets
+    assert {"initial_with_text", "direct_text", "path_text", "design_font_combo"} <= presets
+    assert "tail_text" not in presets
     assert {item["status"] for item in result["recommendations"]} == {"pending"}
 
 

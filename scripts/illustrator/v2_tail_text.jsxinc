@@ -70,6 +70,7 @@ var V2TailText = (function () {
             if (code > 0xF8FF) throw new Error("V2 tail glyph codepoint is outside PUA: pua_base");
             return String.fromCharCode(code);
         }
+        if (String(spec.glyph_mode || "") === "plain_text") return text;
         throw new Error("V2 tail glyph coverage is missing: " + String(spec.key || ""));
     }
 

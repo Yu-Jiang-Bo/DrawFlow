@@ -98,13 +98,15 @@
         if (action.style_source) {
             target = replaceWithFontStyleSource(copied, outputKey, action, selected, slot);
         }
-        if (preset === "tail_text") {
+        var tailSpecs = action.tails || [];
+        if (preset === "tail_text" || tailSpecs.length) {
+            var tailSourceValue = preset === "split_by_pipe" ? slotValue : value;
             V2TailText.replaceTailText(
                 tailTextEnvironment(),
                 holder.item,
                 holder.source_path,
                 target,
-                value,
+                tailSourceValue,
                 fitBounds,
                 action
             );

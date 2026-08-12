@@ -480,8 +480,6 @@ def _recommend_presets(outputs: list[Mapping[str, Any]]) -> list[Dict[str, Any]]
                 reason = "单槽位可直接替换。"
                 if any("path" in str(slot.get("text_kind") or "").lower() for slot in slots):
                     preset, reason = "path_text", "检测到路径文字 slot。"
-                elif any(slot.get("tails") for slot in slots):
-                    preset, reason = "tail_text", "检测到 tail_* 尾巴样本。"
                 elif option.get("assets"):
                     asset_slots = [slot for slot in slots if slot.get("asset_key")]
                     preset = "multi_initials" if len(asset_slots) > 1 else "initial_with_text"

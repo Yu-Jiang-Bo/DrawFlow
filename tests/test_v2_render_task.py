@@ -458,6 +458,41 @@ def test_compiles_tail_text_metadata_from_current_option_scope():
     ]
 
 
+def test_compiles_plain_tail_evidence_for_direct_text_slot():
+    config = render_config()
+    design = config["outputs"][0]["design"]["options"][0]
+    design["content_preset"] = "direct_text"
+    design["assets"] = []
+    design["slots"] = [
+        {
+            "key": "slot_name",
+            "source_field": "name",
+            "preset": "direct_text",
+            "anchor": "anchor_name",
+            "tails": [{"key": "tail_name_last_m", "position": "last", "sample": "m"}],
+        }
+    ]
+    scan = scan_evidence()
+    scan_design = scan["outputs"][0]["designs"][0]
+    scan_design["slots"][0]["tails"] = [{"key": "tail_name_last_m", "path": "Template/Output_main/Design/Design03/tail_name_last_m"}]
+    scan_design["tails"] = [{"key": "tail_name_last_m", "path": "Template/Output_main/Design/Design03/tail_name_last_m"}]
+
+    task = compile_task(config=config, scan=scan)
+
+    action = next(action for action in task["outputs"][0]["actions"] if action.get("slot_key") == "slot_name")
+    assert action["preset"] == "direct_text"
+    assert action["tail_paths"] == ["Template/Output_main/Design/Design03/tail_name_last_m"]
+    assert action["tails"] == [
+        {
+            "key": "tail_name_last_m",
+            "position": "last",
+            "sample": "m",
+            "path": "Template/Output_main/Design/Design03/tail_name_last_m",
+            "glyph_mode": "plain_text",
+        }
+    ]
+
+
 def test_rejects_tail_text_without_confirmed_tail_sample():
     config = render_config()
     config["outputs"][0]["design"]["options"][0]["slots"][0]["preset"] = "tail_text"

@@ -67,11 +67,11 @@
       metaCell("内容来源"),
       metaCell("槽位处理（按需覆盖）"),
       metaCell("状态"),
-      metaCell("素材库键"),
-      metaCell("X 宽"),
-      metaCell("Y 高"),
-      metaCell("首尾样本"),
-      metaCell("末尾样本"),
+      metaCell("素材键（仅素材）"),
+      metaCell("扫描宽"),
+      metaCell("扫描高"),
+      metaCell("首字证据"),
+      metaCell("尾字证据"),
       metaCell("字体依赖"),
       metaCell("颜色绑定")
     );
@@ -92,11 +92,11 @@
       inputCell("slot-source-field", slot.source_field || ""),
       selectCell("slot-preset", presetOptions(PRESETS), safePreset(slot.preset, "direct_text")),
       selectCell("slot-required", [["required", "必填"], ["optional", "可选"]], slot.required === false ? "optional" : "required"),
-      inputCell("slot-asset-key", slot.asset_key || ""),
-      inputCell("slot-width-mm", dimensions.width_mm || ""),
-      inputCell("slot-height-mm", dimensions.height_mm || ""),
-      readonlyInputCell("slot-tail-first", tailSample(slot.tails, "first")),
-      readonlyInputCell("slot-tail-last", tailSample(slot.tails, "last")),
+      readonlyInputCell("slot-asset-key", slot.asset_key || "", "素材替换槽位才会有素材键；普通文字槽位留空。"),
+      readonlyInputCell("slot-width-mm", dimensions.width_mm || "", "扫描得到的槽位宽度证据，不需要手填。"),
+      readonlyInputCell("slot-height-mm", dimensions.height_mm || "", "扫描得到的槽位高度证据，不需要手填。"),
+      readonlyInputCell("slot-tail-first", tailSample(slot.tails, "first"), "扫描到的首字尾巴标注证据；渲染时按订单文字动态取首字。"),
+      readonlyInputCell("slot-tail-last", tailSample(slot.tails, "last"), "扫描到的尾字尾巴标注证据；渲染时按订单文字动态取尾字。"),
       inputCell("slot-font-dependencies", stringListValue(slot.font_dependencies)),
       inputCell("slot-color-binding", slot.color_binding || "")
     );
@@ -395,13 +395,17 @@
     return cell;
   }
 
-  function readonlyInputCell(name, value) {
+  function readonlyInputCell(name, value, title) {
     const wrap = document.createElement("label");
     const input = document.createElement("input");
     input.dataset.field = name;
     input.value = value || "";
     input.readOnly = true;
     input.setAttribute("aria-readonly", "true");
+    if (title) {
+      wrap.title = title;
+      input.title = title;
+    }
     wrap.appendChild(input);
     return wrap;
   }

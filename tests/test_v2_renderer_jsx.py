@@ -871,6 +871,64 @@ if (child(designCopy, 'slot_name').contents.indexOf('S') < 0) throw new Error('m
     assert result.returncode == 0, result.stderr
 
 
+def test_v2_renderer_applies_plain_tail_evidence_for_direct_text():
+    tails = [
+        {
+            "key": "tail_name_last_a",
+            "position": "last",
+            "sample": "a",
+            "glyph_mode": "plain_text",
+            "path": "Template/Output_main/Design/Design03/tail_name_last_a",
+        }
+    ]
+    task = tail_text_task(tails, value="Alice")
+    task["render_task"]["outputs"][0]["actions"][1]["preset"] = "direct_text"
+    harness = node_mock_harness(task, """
+const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
+if (child(designCopy, 'slot_name').contents !== 'Alic') throw new Error('plain direct main mismatch: ' + child(designCopy, 'slot_name').contents);
+if (child(designCopy, 'tail_name_last_a').contents !== 'e') throw new Error('plain direct tail mismatch: ' + child(designCopy, 'tail_name_last_a').contents);
+""")
+
+    result = run_node(harness)
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_v2_renderer_applies_plain_tail_evidence_to_split_part_only():
+    tails = [
+        {
+            "key": "tail_year_tail_last_a",
+            "position": "last",
+            "sample": "a",
+            "glyph_mode": "plain_text",
+            "path": "Template/Output_main/Design/Design03/tail_year_tail_last_a",
+        }
+    ]
+    task = tail_text_task(tails)
+    task["values"] = {"design": "03", "year": "Left|Omega"}
+    action = task["render_task"]["outputs"][0]["actions"][1]
+    action.update(
+        {
+            "slot_key": "slot_year_tail",
+            "object_path": "Template/Output_main/Design/Design03/slot_year_tail",
+            "source_field": "year",
+            "source_part_index": 1,
+            "preset": "split_by_pipe",
+            "tail_paths": [tail["path"] for tail in tails],
+            "tails": tails,
+        }
+    )
+    harness = node_mock_harness(task, """
+const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
+if (child(designCopy, 'slot_year_tail').contents !== 'Omeg') throw new Error('plain split main mismatch: ' + child(designCopy, 'slot_year_tail').contents);
+if (child(designCopy, 'tail_year_tail_last_a').contents !== 'a') throw new Error('plain split tail mismatch: ' + child(designCopy, 'tail_year_tail_last_a').contents);
+""")
+
+    result = run_node(harness)
+
+    assert result.returncode == 0, result.stderr
+
+
 def test_v2_renderer_rejects_tail_text_without_latin_endpoint():
     tails = [
         {

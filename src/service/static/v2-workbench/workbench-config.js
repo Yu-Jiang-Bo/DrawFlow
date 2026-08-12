@@ -118,12 +118,40 @@
         group: ["style", "design", "font", "color"].includes(group) ? group : "design"
       };
     }).filter((item) => item.field && item.source_value && item.target && item.output && item.group);
-    return scanBackedOptionMappings(rows);
+    return mergeOptionMappings(scanBackedOptionMappings(rows), inferredMappings());
   }
 
   function effectiveOptionMappings() {
     const configured = scanBackedOptionMappings(configOptionMappings());
-    return configured.length ? configured : inferredMappings();
+    return mergeOptionMappings(configured, inferredMappings());
+  }
+
+  function mergeOptionMappings(primary, fallback) {
+    const result = [];
+    const seenPrimaryTargets = new Set();
+    const seenFallbackTargets = new Set();
+    const add = (mapping, source) => {
+      const group = ["style", "design", "font", "color"].includes(mapping.group) ? mapping.group : "design";
+      const normalized = {
+        field: safeField(mapping.field),
+        source_value: cleanText(mapping.source_value),
+        target: safeOptionKey(mapping.target, group),
+        output: safeOutputKey(mapping.output, "Output_main", 0),
+        group
+      };
+      if (!normalized.field || !normalized.source_value || !normalized.target || !normalized.output) return;
+      const targetKey = `${normalized.output}::${normalized.group}::${normalized.target}`;
+      if (source === "fallback") {
+        if (seenPrimaryTargets.has(targetKey) || seenFallbackTargets.has(targetKey)) return;
+        seenFallbackTargets.add(targetKey);
+      } else {
+        seenPrimaryTargets.add(targetKey);
+      }
+      result.push(normalized);
+    };
+    (Array.isArray(primary) ? primary : []).forEach((mapping) => add(mapping, "primary"));
+    (Array.isArray(fallback) ? fallback : []).forEach((mapping) => add(mapping, "fallback"));
+    return result;
   }
 
   function scanBackedOptionMappings(mappings) {

@@ -114,20 +114,27 @@
   async function confirmCurrentStage() {
     if (state.isSavingDraft) return;
     const previousChecks = collectChecks();
-    const keys = {
+    markCurrentStageConfirmed();
+    updateCheckRail(collectChecks());
+    const result = await saveDraft();
+    if ((!result || !result.saved) && (!result || result.failure !== "validation")) updateCheckRail(previousChecks);
+  }
+
+  function currentStageCheckKeys() {
+    return {
       structure: ["output", "fields", "options"],
       rules: ["slots", "content", "dimensions", "colors"],
       preview: ["preview"]
     }[state.stage] || [];
-    keys.forEach((key) => {
+  }
+
+  function markCurrentStageConfirmed() {
+    currentStageCheckKeys().forEach((key) => {
       const item = document.querySelector('#v2CheckRail .check-item[data-check-key="' + key + '"]');
       if (!item) return;
       item.dataset.status = "confirmed";
       item.dataset.reason = "本页已人工核验";
     });
-    updateCheckRail(collectChecks());
-    const result = await saveDraft();
-    if ((!result || !result.saved) && (!result || result.failure !== "validation")) updateCheckRail(previousChecks);
   }
 
 
@@ -192,6 +199,7 @@
     renderAll,
     saveDraft,
     confirmCurrentStage,
+    markCurrentStageConfirmed,
     validateCurrentConfig,
     validateConfig,
     ensureDraftExists,

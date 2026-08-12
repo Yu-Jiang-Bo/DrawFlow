@@ -289,6 +289,55 @@ def test_content_preset_blockers_are_reported_by_path():
         assert _has_issue(result, code=code, reason=reason)
 
 
+def test_scan_tail_evidence_does_not_block_direct_or_split_text_presets():
+    direct_payload = complete_contract()
+    direct_option = direct_payload["outputs"][0]["design"]["options"][0]
+    direct_option["content_preset"] = "direct_text"
+    direct_option["assets"] = []
+    direct_option["slots"] = [
+        {
+            "key": "slot_name",
+            "source_field": "name",
+            "preset": "direct_text",
+            "anchor": "anchor_name",
+            "tails": [{"key": "tail_name_last_m", "position": "last", "sample": "m"}],
+            "dimension_rule": {"mode": "anchor", "tolerance_mm": 0.007},
+            "font_dependencies": ["Milkshake"],
+            "color_binding": "color",
+        }
+    ]
+
+    split_payload = complete_contract()
+    split_option = split_payload["outputs"][0]["font"]["options"][0]
+    split_option["content_preset"] = "split_by_pipe"
+    split_option["slots"] = [
+        {
+            "key": "slot_name1",
+            "source_field": "name",
+            "preset": "split_by_pipe",
+            "tails": [{"key": "tail_name1_first_a", "position": "first", "sample": "a"}],
+            "dimension_rule": {"mode": "slot", "tolerance_mm": 0.007},
+            "font_dependencies": ["Milkshake"],
+            "color_binding": "color",
+        },
+        {
+            "key": "slot_name2",
+            "source_field": "name",
+            "preset": "split_by_pipe",
+            "dimension_rule": {"mode": "slot", "tolerance_mm": 0.007},
+            "font_dependencies": ["Milkshake"],
+            "color_binding": "color",
+        },
+    ]
+
+    for payload in (direct_payload, split_payload):
+        result = validate_v2_template_configuration(payload)
+        assert result["can_publish"] is True
+        assert result["checks"]["content"]["status"] == V2_STATUS_PASSED
+        assert not _has_issue(result, code="direct_text_slot_invalid")
+        assert not _has_issue(result, code="split_by_pipe_slot_preset_invalid")
+
+
 def test_direct_split_and_path_presets_require_structural_evidence():
     direct_payload = complete_contract()
     direct_payload["outputs"][0]["design"]["options"][0]["content_preset"] = "direct_text"

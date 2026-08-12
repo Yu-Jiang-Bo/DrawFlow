@@ -143,16 +143,16 @@ def _require_direct_text(slots: list[Mapping[str, Any]], option_path: str, issue
     slot = slots[0]
     if str(slot.get("preset") or "") != "direct_text":
         add_issue(issues, option_path + ".slots[0].preset", "content", V2_STATUS_BLOCKED, "direct_text_slot_preset_invalid", "直接单槽替换只能使用 direct_text 正文槽位。")
-    if not slot.get("source_field") or slot.get("asset_key") or list_value(slot.get("tails")):
-        add_issue(issues, option_path + ".slots[0]", "content", V2_STATUS_BLOCKED, "direct_text_slot_invalid", "直接单槽替换必须绑定一个订单字段，且不得混用素材或尾巴样本。")
+    if not slot.get("source_field") or slot.get("asset_key"):
+        add_issue(issues, option_path + ".slots[0]", "content", V2_STATUS_BLOCKED, "direct_text_slot_invalid", "直接单槽替换必须绑定一个订单字段，且不得混用素材。")
 
 
 def _require_split_by_pipe(slots: list[Mapping[str, Any]], option_path: str, issues: list[Dict[str, str]]) -> None:
     sources = {str(slot.get("source_field") or "") for slot in slots}
     if len(slots) < 2 or len(sources) != 1 or "" in sources:
         add_issue(issues, option_path + ".content_preset", "content", V2_STATUS_BLOCKED, "split_by_pipe_requires_ordered_slots", "按 | 顺序拆槽必须配置至少两个同一订单字段来源的有序槽位。")
-    if any(str(slot.get("preset") or "") != "split_by_pipe" or slot.get("asset_key") or list_value(slot.get("tails")) for slot in slots):
-        add_issue(issues, option_path + ".slots", "content", V2_STATUS_BLOCKED, "split_by_pipe_slot_preset_invalid", "按 | 顺序拆槽只能使用 split_by_pipe 正文槽位，不得混用素材、路径文字或尾巴样本。")
+    if any(str(slot.get("preset") or "") != "split_by_pipe" or slot.get("asset_key") for slot in slots):
+        add_issue(issues, option_path + ".slots", "content", V2_STATUS_BLOCKED, "split_by_pipe_slot_preset_invalid", "按 | 顺序拆槽只能使用 split_by_pipe 正文槽位，不得混用素材或路径文字。")
 
 
 def _require_path_text(slots: list[Mapping[str, Any]], option_path: str, issues: list[Dict[str, str]]) -> None:
