@@ -6,7 +6,7 @@
   function scanModel(scan, config) {
     const cfg = objectOf(config);
     if (hasStructuredV2Outputs(scan)) return structuredV2ScanModel(scan, cfg);
-    const outputs = normalizeItems([...(Array.isArray(cfg.outputs) ? cfg.outputs : []), ...collectDeep(scan, ["outputs", "output"])]);
+    const outputs = normalizeItems(mergeOutputsByKey([...(Array.isArray(cfg.outputs) ? cfg.outputs : []), ...collectDeep(scan, ["outputs", "output"])]));
     return {
       outputs: outputs.length ? outputs : normalizeItems(collectDeep(scan, ["artboards", "pages"])),
       designs: normalizeItems(collectDeep(scan, ["designs", "design_options"])),
@@ -23,7 +23,7 @@
 
   function structuredV2ScanModel(scan, config) {
     const scanOutputs = topLevelArray(scan, "outputs");
-    const outputItems = mergeItemsByIdentity([...scanOutputs, ...topLevelArray(config, "outputs")]);
+    const outputItems = mergeOutputsByKey([...scanOutputs, ...topLevelArray(config, "outputs")]);
     const styleOptions = mergeItemsByIdentity(outputSectionOptions(scanOutputs, "style"));
     const designOptions = mergeItemsByIdentity(outputSectionOptions(scanOutputs, "design"));
     const fontOptions = mergeItemsByIdentity(outputSectionOptions(scanOutputs, "font"));
@@ -119,6 +119,23 @@
       result.push(item);
     });
     return result;
+  }
+
+  function mergeOutputsByKey(items) {
+    const seen = new Set();
+    const result = [];
+    items.forEach((item, index) => {
+      const data = item && typeof item === "object" ? item : { name: String(item || "") };
+      const identity = outputIdentity(data, index);
+      if (seen.has(identity)) return;
+      seen.add(identity);
+      result.push(item);
+    });
+    return result;
+  }
+
+  function outputIdentity(item, index) {
+    return cleanText(item.key || item.name || item.output_key || item.output || item.path || `output-${index}`).toLowerCase();
   }
 
   function itemIdentity(item, index) {
@@ -279,6 +296,7 @@
     nodeTitle,
     nodeSummary,
     scanSummary,
+    mergeOutputsByKey,
     summaryText,
     draftSummaryText,
     summaryCount

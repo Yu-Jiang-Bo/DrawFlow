@@ -335,6 +335,7 @@ def test_v2_workbench_scan_summary_dedupes_matching_scan_and_config_options():
           global.DrawFlowV2WorkbenchContext.state.draft = { config };
           const model = scanModel(scan, config);
           const summary = scanSummary(scan);
+          assert.strictEqual(model.outputs.length, 1);
           assert.deepStrictEqual(model.designs.map((item) => `${item.output}:${item.group}:${item.key}`), ["Output_main:design:Design01"]);
           assert.deepStrictEqual(model.fonts.map((item) => `${item.output}:${item.group}:${item.key}`), ["Output_main:font:F10"]);
           assert.deepStrictEqual(model.slots.map((item) => `${item.output}:${item.group}:${item.option}:${item.key}`), [
@@ -385,15 +386,30 @@ def test_v2_workbench_upload_survives_missing_structure_tree_bundle():
             "$schema": "custom-renderer/v2-template-scan",
             outputs: [{
               key: "Output_main",
+              path: "Template/Output_main",
               design: { options: [{ key: "Design01", slots: [{ key: "slot_name" }] }] },
               font: { options: [{ key: "F1", slots: [{ key: "slot_name" }] }] },
               style: { options: [] },
               summary: { designs: 1, fonts: 1, styles: 0, slots: 2, anchors: 0, tails: 0, assets: 0, fixed_objects: 5 }
             }]
           };
+          global.DrawFlowV2WorkbenchContext.state.draft = {
+            config: {
+              outputs: [{
+                key: "Output_main",
+                display_name: "主效果图",
+                component_key: "main",
+                style: { field: "", options: [] },
+                design: { field: "design", options: [] },
+                font: { field: "", options: [] }
+              }]
+            }
+          };
           assert.strictEqual(typeof global.renderStructureTree, "function");
           assert.strictEqual(app.elements.scanTemplateBtn.disabled, false);
           global.renderStructureTree();
+          const outputRows = document.querySelectorAll("#structureTree .structure-tree-row").filter((row) => row.dataset.nodeKind === "output");
+          assert.strictEqual(outputRows.length, 1);
           assert(app.elements.structureTree.textContent.includes("Template"));
           assert(app.elements.structureTree.textContent.includes("Design01"));
           assert(app.elements.structureTree.textContent.includes("F1"));
