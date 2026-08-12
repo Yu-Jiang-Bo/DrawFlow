@@ -152,6 +152,7 @@ def test_v2_workbench_has_independent_rules_stage_contract():
         "selectedOptionTitle",
         "selectedOptionPendingBadge",
         "optionContentPreset",
+        "optionProcessingHelp",
         "contentOptionRows",
         "assetBindingRows",
         "templateCapabilityPanel",
@@ -220,6 +221,8 @@ def test_v2_workbench_uses_controlled_business_inputs():
     assert "slot-color-binding" in JS
     assert "尾巴样本" in JS
     assert "尾巴文字（已识别）" in JS
+    assert "按槽位分别处理（自动）" in JS
+    assert "两个槽位都填写同一个内容来源" in JS
     assert "displayDimension" in JS
     assert "readonlyRawValue" in JS
     assert "output-component" in JS

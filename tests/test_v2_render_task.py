@@ -493,6 +493,49 @@ def test_compiles_plain_tail_evidence_for_direct_text_slot():
     ]
 
 
+def test_compiles_mixed_slots_without_overwriting_independent_sources_or_tails():
+    config = render_config()
+    config["field_bindings"]["title"] = "Title"
+    design = config["outputs"][0]["design"]["options"][0]
+    design["content_preset"] = "mixed_slots"
+    design["assets"] = []
+    design["slots"] = [
+        {
+            "key": "slot_name1",
+            "source_field": "name",
+            "preset": "direct_text",
+            "tails": [{"key": "tail_name1_last_m", "position": "last", "sample": "m"}],
+        },
+        {
+            "key": "slot_title",
+            "source_field": "title",
+            "preset": "direct_text",
+        },
+    ]
+    scan = scan_evidence()
+    scan_design = scan["outputs"][0]["designs"][0]
+    scan_design["slots"] = [
+        {"key": "slot_name1", "path": "Template/Output_main/Design/Design03/slot_name1"},
+        {"key": "slot_title", "path": "Template/Output_main/Design/Design03/slot_title"},
+    ]
+    scan_design["tails"] = [{"key": "tail_name1_last_m", "path": "Template/Output_main/Design/Design03/tail_name1_last_m"}]
+
+    task = compile_task(config=config, scan=scan)
+
+    copy = next(action for action in task["outputs"][0]["actions"] if action["type"] == "copy_option_group" and action["group"] == "design")
+    actions = [
+        action for action in task["outputs"][0]["actions"]
+        if action["type"] == "replace_slot_text" and action["group"] == "design"
+    ]
+    assert copy["content_preset"] == "mixed_slots"
+    assert [(action["slot_key"], action["source_field"], action["source_part_index"], action["preset"]) for action in actions] == [
+        ("slot_name1", "name", 0, "direct_text"),
+        ("slot_title", "title", 0, "direct_text"),
+    ]
+    assert actions[0]["tail_paths"] == ["Template/Output_main/Design/Design03/tail_name1_last_m"]
+    assert actions[1]["tail_paths"] == []
+
+
 def test_rejects_tail_text_without_confirmed_tail_sample():
     config = render_config()
     config["outputs"][0]["design"]["options"][0]["slots"][0]["preset"] = "tail_text"

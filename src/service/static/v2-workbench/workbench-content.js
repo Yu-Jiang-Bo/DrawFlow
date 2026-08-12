@@ -46,17 +46,22 @@
     section.dataset.option = optionKey;
 
     const requestedOptionPreset = safeOptionPreset(existing.content_preset, recommendedOptionPreset(output, group, optionKey, model));
+    const hasConfiguredSlots = Array.isArray(existing.slots) && existing.slots.length > 0;
     let slots = contentSlotsFor(output, group, optionKey, model, existing, requestedOptionPreset);
-    const tailPresentation = tailPresentationForSlots(slots);
-    const optionPreset = safeTailPreset(requestedOptionPreset, tailPresentation);
-    if (optionPreset !== requestedOptionPreset) slots = contentSlotsFor(output, group, optionKey, model, existing, optionPreset);
+    let tailPresentation = tailPresentationForSlots(slots);
+    let optionPreset = optionPresetForSlots(requestedOptionPreset, slots, hasConfiguredSlots);
+    if (optionPreset !== requestedOptionPreset && optionPreset !== "mixed_slots") {
+      slots = contentSlotsFor(output, group, optionKey, model, existing, optionPreset);
+      tailPresentation = tailPresentationForSlots(slots);
+      optionPreset = optionPresetForSlots(optionPreset, slots, hasConfiguredSlots);
+    }
     const layout = contentSlotLayout(slots, model);
 
     const header = document.createElement("div");
     header.className = "content-option-header";
     header.appendChild(lineNode(
       `${output} · ${groupLabel(group)} ${optionKey}`,
-      tailPresentation.detected ? tailTreatmentDescription(tailPresentation) : (group === "design" ? "具体 Design 独立配置" : "具体 F 独立配置")
+      contentTreatmentDescription(optionPreset, tailPresentation, group)
     ));
     section.dataset.contentPreset = optionPreset;
     section.dataset.tailPresentation = tailPresentation.detected ? (tailPresentation.verified ? "verified" : "detected") : "none";
@@ -154,8 +159,8 @@
           const requestedPreset = safeOptionPreset(option.content_preset, "direct_text");
           const optionContext = scannedOptionForContent(outputKey, group, key, model);
           let slots = Array.isArray(option.slots) ? controlledSlots(option.slots, optionContext, requestedPreset) : [];
-          const preset = safeTailPreset(requestedPreset, tailPresentationForSlots(slots));
-          if (preset !== requestedPreset && Array.isArray(option.slots)) {
+          const preset = optionPresetForSlots(requestedPreset, slots, Array.isArray(option.slots) && option.slots.length > 0);
+          if (preset !== requestedPreset && preset !== "mixed_slots" && Array.isArray(option.slots)) {
             slots = controlledSlots(option.slots, optionContext, preset);
           }
           result[contentOptionMapKey(outputKey, group, key)] = {
@@ -215,10 +220,12 @@
 
   function contentOptionPreset(content, output, group, option, model) {
     const existing = content[contentOptionMapKey(output, group, option)];
-    if (existing) return existing.content_preset;
+    if (existing) return optionPresetForSlots(existing.content_preset, existing.slots, true);
     const found = findConfigOption(output, group, option);
-    if (OPTION_PRESETS.includes(found.content_preset)) return found.content_preset;
-    return recommendedOptionPreset(output, group, option, model || scanModel(state.scan, state.draft && state.draft.config));
+    const currentModel = model || scanModel(state.scan, state.draft && state.draft.config);
+    const requestedPreset = safeOptionPreset(found.content_preset, recommendedOptionPreset(output, group, option, currentModel));
+    const slots = contentSlotsFor(output, group, option, currentModel, found, requestedPreset);
+    return optionPresetForSlots(requestedPreset, slots, Array.isArray(found.slots) && found.slots.length > 0);
   }
 
   function contentOptionSlots(content, output, group, option, fallbackSlots, model) {
@@ -297,6 +304,7 @@
     const preset = safeOptionPreset(optionPreset, "");
     const hasAsset = Boolean(safeIdentifier(data.asset_key || inferredAssetKey(slotKeyFor(data.key || data.name || data.label || ""), data), ""));
     const hasTail = normalizedTailConfigs(data.tails).length > 0;
+    if (preset === "mixed_slots") return hasAsset ? safePreset(data.preset, "asset_replace") : safePreset(data.preset, "direct_text");
     if (preset === "split_by_pipe") return "split_by_pipe";
     if (preset === "path_text") return "path_text";
     if (preset === "tail_text" && hasTail) return "tail_text";
@@ -316,7 +324,8 @@
   }
 
   function safeTailPreset(value, tailPresentation) {
-    const preset = safePreset(value, "direct_text");
+    const raw = cleanText(value);
+    const preset = PRESETS.includes(raw) || OPTION_PRESETS.includes(raw) ? raw : "direct_text";
     const presentation = objectOf(tailPresentation);
     return preset === "tail_text" && presentation.detected && !presentation.verified ? "direct_text" : preset;
   }
@@ -452,6 +461,13 @@
     return `已识别尾巴样式，订单文字的${endpoint}会自动放入尾巴位置，无需手动填写样本。`;
   }
 
+  function contentTreatmentDescription(preset, presentation, group) {
+    if (preset === "mixed_slots") return "此设计有多种槽位处理，请在下方分别确认。";
+    if (preset === "split_by_pipe") return "内容按 | 顺序拆分：每个槽位都填写同一个内容来源，系统按槽位顺序分配。";
+    if (objectOf(presentation).detected) return tailTreatmentDescription(presentation);
+    return group === "design" ? "具体 Design 独立配置" : "具体 F 独立配置";
+  }
+
   function tailEvidenceCell(tails) {
     const cell = metaCell(tailSampleSummary(tails));
     cell.classList.add("tail-sample-cell");
@@ -505,16 +521,49 @@
     const existing = findConfigOption(output, group, optionKey);
     const optionPreset = safeOptionPreset(existing.content_preset, recommendedOptionPreset(output, group, optionKey, currentModel));
     const slots = contentSlotsFor(output, group, optionKey, currentModel, existing, optionPreset);
-    return presetOptions(OPTION_PRESETS, tailPresentationForSlots(slots));
+    const hasConfiguredSlots = Array.isArray(existing.slots) && existing.slots.length > 0;
+    const resolvedPreset = optionPresetForSlots(optionPreset, slots, hasConfiguredSlots);
+    if (resolvedPreset === "mixed_slots") return [["mixed_slots", (ctx.PRESET_LABELS || {}).mixed_slots || "按槽位分别处理（自动）"]];
+    return presetOptions(OPTION_PRESETS, tailPresentationForSlots(slots)).filter(([value]) => (
+      value !== "mixed_slots" && (value !== "split_by_pipe" || splitOptionAvailable(slots, hasConfiguredSlots))
+    ));
   }
 
   function recommendedPresetForOption(option) {
     const data = objectOf(option);
     const recommended = safeOptionPreset(data.content_preset || data.recommended_preset || data.preset, "direct_text");
     const tails = tailPresentationForSlots(scannedOptionSlotsFromOption(data));
+    if (recommended === "mixed_slots") return recommended;
     if (recommended === "tail_text" && !tails.verified) return "direct_text";
     if (recommended !== "direct_text") return recommended;
     return tails.verified ? "tail_text" : "direct_text";
+  }
+
+  function optionPresetForSlots(requestedPreset, slots, hasConfiguredSlots) {
+    const preset = safeTailPreset(requestedPreset, tailPresentationForSlots(slots));
+    return shouldUseMixedSlotPresentation(slots, preset, hasConfiguredSlots) ? "mixed_slots" : preset;
+  }
+
+  function shouldUseMixedSlotPresentation(slots, preset, hasConfiguredSlots) {
+    const items = Array.isArray(slots) ? slots : [];
+    if (preset === "mixed_slots") return items.length > 1;
+    if (items.length < 2) return false;
+    if (preset === "split_by_pipe") return !splitOptionAvailable(items, hasConfiguredSlots);
+    if (items.some((slot) => Boolean(safeIdentifier(objectOf(slot).asset_key || "", "")))) return false;
+    if (items.some((slot) => normalizedTailConfigs(objectOf(slot).tails).length > 0)) return true;
+    const slotPresets = unique(items.map((slot) => safePreset(objectOf(slot).preset, "direct_text")));
+    if (slotPresets.length > 1 || slotPresets.includes("path_text")) return true;
+    if (!hasConfiguredSlots) return false;
+    const sources = unique(items.map((slot) => cleanText(objectOf(slot).source_field)).filter(Boolean));
+    return sources.length > 1 || slotPresets.length > 1;
+  }
+
+  function splitOptionAvailable(slots, hasConfiguredSlots) {
+    const items = Array.isArray(slots) ? slots : [];
+    if (items.length < 2 || items.some((slot) => normalizedTailConfigs(objectOf(slot).tails).length > 0)) return false;
+    if (!hasConfiguredSlots) return true;
+    const sources = unique(items.map((slot) => cleanText(objectOf(slot).source_field)).filter(Boolean));
+    return sources.length === 1;
   }
 
   function slotDimensionRule(item, optionContext, slotKey) {
@@ -618,6 +667,9 @@
     slotPresetForOption,
     presetOptions,
     recommendedPresetForOption,
+    optionPresetForSlots,
+    shouldUseMixedSlotPresentation,
+    splitOptionAvailable,
     tailPresentationForSlots,
     tailTreatmentDescription,
     hasActiveColorRules,

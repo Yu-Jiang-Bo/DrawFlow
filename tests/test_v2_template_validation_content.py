@@ -55,6 +55,33 @@ def test_tail_text_preset_with_verified_pua_coverage_can_publish():
     assert result["issues"] == []
 
 
+def test_mixed_slots_allows_independent_name_tail_and_title_text():
+    payload = _mixed_slots_payload()
+
+    result = validate_v2_template_configuration(payload)
+
+    assert result["can_publish"] is True
+    assert result["issues"] == []
+
+
+def test_mixed_slots_requires_each_slot_source_and_tail_proof_when_selected():
+    missing_source = _mixed_slots_payload()
+    missing_source["outputs"][0]["design"]["options"][0]["slots"][1].pop("source_field")
+
+    result = validate_v2_template_configuration(missing_source)
+
+    assert result["can_publish"] is False
+    assert _has_issue(result, "mixed_slots_source_missing", "每个槽位")
+
+    unverified_tail = _mixed_slots_payload()
+    unverified_tail["outputs"][0]["design"]["options"][0]["slots"][0]["preset"] = "tail_text"
+
+    result = validate_v2_template_configuration(unverified_tail)
+
+    assert result["can_publish"] is False
+    assert _has_issue(result, "tail_glyph_coverage_missing", "PUA 连续码位")
+
+
 def test_multi_initials_preset_requires_source_fields_for_each_asset_slot():
     payload = complete_contract()
     option = payload["outputs"][0]["design"]["options"][0]
@@ -108,6 +135,22 @@ def test_text_presets_reject_incompatible_slot_primitives():
         assert _has_issue(result, code, reason)
 
 
+def test_split_by_pipe_rejects_name1_and_name2_as_separate_order_sources():
+    payload = complete_contract()
+    option = payload["outputs"][0]["font"]["options"][0]
+    option["content_preset"] = "split_by_pipe"
+    option["slots"] = [
+        {"key": "slot_name1", "source_field": "name1", "preset": "split_by_pipe"},
+        {"key": "slot_name2", "source_field": "name2", "preset": "split_by_pipe"},
+    ]
+    payload["field_bindings"].update({"name1": "Name1", "name2": "Name2"})
+
+    result = validate_v2_template_configuration(payload)
+
+    assert result["can_publish"] is False
+    assert _has_issue(result, "split_by_pipe_requires_ordered_slots", "同一订单字段来源")
+
+
 def _has_issue(result, code, reason):
     return any(issue["code"] == code and reason in issue["reason"] for issue in result["issues"])
 
@@ -127,6 +170,35 @@ def _tail_text_payload():
                 "dimension_rule": {"mode": "slot", "tolerance_mm": 0.007},
                 "font_dependencies": ["Milkshake"],
             }
+        ],
+        "assets": [],
+    }
+    return payload
+
+
+def _mixed_slots_payload():
+    payload = complete_contract()
+    payload["field_bindings"]["title"] = "Title"
+    payload["outputs"][0]["design"]["options"][0] = {
+        "key": "Design03",
+        "content_preset": "mixed_slots",
+        "font_dependencies": ["Milkshake"],
+        "slots": [
+            {
+                "key": "slot_name1",
+                "source_field": "name",
+                "preset": "direct_text",
+                "tails": [{"key": "tail_name1_last_m", "position": "last", "sample": "m"}],
+                "dimension_rule": {"mode": "slot", "tolerance_mm": 0.007},
+                "font_dependencies": ["Milkshake"],
+            },
+            {
+                "key": "slot_title",
+                "source_field": "title",
+                "preset": "direct_text",
+                "dimension_rule": {"mode": "slot", "tolerance_mm": 0.007},
+                "font_dependencies": ["Milkshake"],
+            },
         ],
         "assets": [],
     }

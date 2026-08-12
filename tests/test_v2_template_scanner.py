@@ -403,6 +403,25 @@ def test_recommendations_are_pending_and_based_on_scan_facts():
     assert {item["status"] for item in result["recommendations"]} == {"pending"}
 
 
+def test_recommends_slotwise_handling_for_multiple_slots_with_tail_sample():
+    result = normalize_v2_template_scan(
+        base_raw_scan(
+            group("Template", "Template"),
+            group("Template/Output_main", "Output_main"),
+            group("Template/Output_main/Design", "Design"),
+            group("Template/Output_main/Design/Design02", "Design02"),
+            text("Template/Output_main/Design/Design02/slot_name1", "slot_name1"),
+            text("Template/Output_main/Design/Design02/slot_title", "slot_title"),
+            text("Template/Output_main/Design/Design02/tail_name1_last_m", "tail_name1_last_m"),
+        )
+    )
+
+    recommendation = next(item for item in result["recommendations"] if item["path"].endswith("/Design02"))
+
+    assert recommendation["preset"] == "mixed_slots"
+    assert "分别确认" in recommendation["reason"]
+
+
 def test_font_and_color_dependencies_are_recorded_and_invalid_fills_block():
     result = normalize_v2_template_scan(
         base_raw_scan(

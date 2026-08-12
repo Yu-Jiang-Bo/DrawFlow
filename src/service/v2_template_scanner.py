@@ -485,7 +485,10 @@ def _recommend_presets(outputs: list[Mapping[str, Any]]) -> list[Dict[str, Any]]
                     preset = "multi_initials" if len(asset_slots) > 1 else "initial_with_text"
                     reason = "检测到 Design 本地 Assets 与素材槽位。"
                 elif len(slots) > 1:
-                    preset, reason = "split_by_pipe", "检测到多个 slot，建议按 | 顺序拆槽。"
+                    if any(slot.get("tails") for slot in slots):
+                        preset, reason = "mixed_slots", "检测到多个 slot 且包含尾巴样本，请分别确认每个槽位的处理方式。"
+                    else:
+                        preset, reason = "split_by_pipe", "检测到多个 slot，建议按 | 顺序拆槽。"
                 recs.append(_pending(preset, option["path"], reason))
     return sorted(recs, key=lambda item: (item["path"].casefold(), item["preset"]))
 

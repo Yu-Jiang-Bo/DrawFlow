@@ -244,7 +244,7 @@ def test_v2_renderer_replaces_split_by_pipe_slots_by_source_part_index():
         "$schema": "custom-renderer/v2-render-execution",
         "template_ai": "template.ai",
         "output_ai": "out.ai",
-        "values": {"design": "03", "name": "Alice|Beth"},
+        "values": {"design": "03", "name": " Jay | | Tom "},
         "selections": {"Output_main": {"design": "Design03"}},
         "render_task": {
             "$schema": "custom-renderer/v2-render-task",
@@ -288,8 +288,8 @@ def test_v2_renderer_replaces_split_by_pipe_slots_by_source_part_index():
     harness = node_mock_harness(task, """
 const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
 if (!designCopy) throw new Error('Design03 was not copied');
-if (child(designCopy, 'slot_name').contents !== 'Alice') throw new Error('first split slot mismatch: ' + child(designCopy, 'slot_name').contents);
-if (child(designCopy, 'slot_year').contents !== 'Beth') throw new Error('second split slot mismatch: ' + child(designCopy, 'slot_year').contents);
+if (child(designCopy, 'slot_name').contents !== 'Jay') throw new Error('first split slot mismatch: ' + child(designCopy, 'slot_name').contents);
+if (child(designCopy, 'slot_year').contents !== 'Tom') throw new Error('second split slot mismatch: ' + child(designCopy, 'slot_year').contents);
 """)
 
     result = run_node(harness)

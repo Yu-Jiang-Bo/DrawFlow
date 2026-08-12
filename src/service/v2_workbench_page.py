@@ -289,8 +289,9 @@ INDEX_HTML = """<!doctype html>
             <div class="option-rule-controls">
               <label><span>内容处理预设</span><select id="optionContentPreset"></select></label>
             </div>
+            <p class="v2-help" id="optionProcessingHelp">系统会按当前处理方式推荐槽位处理。</p>
             <h4>槽位要求</h4>
-            <p class="v2-help">系统会按选项预设推荐槽位处理；只有混合文字、路径、尾巴或素材槽位时才需要逐项调整。</p>
+            <p class="v2-help">每个槽位的内容来源、处理方式和必填状态都可以分别确认。</p>
             <div class="content-option-list" id="contentOptionRows" aria-live="polite"></div>
             <h4>素材库绑定</h4>
             <div class="asset-binding-list" id="assetBindingRows" aria-live="polite"></div>

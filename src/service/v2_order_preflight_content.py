@@ -29,7 +29,7 @@ def check_split_by_pipe_values(
         value = _cell(row, header)
         if not value:
             continue
-        parts = [part for part in value.split("|") if part != ""]
+        parts = [part.strip() for part in value.split("|") if part.strip()]
         path = f"{output_path}.{group_name}.options.{option.get('key')}.content_preset"
         expected = f"期望格式：使用 | 分隔 {required_count} 到 {total_count} 段内容。"
         if len(parts) < required_count:

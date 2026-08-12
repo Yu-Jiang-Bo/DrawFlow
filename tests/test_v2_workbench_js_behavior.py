@@ -16,7 +16,7 @@ const ids = [
   "styleDimensionRows", "contentOptionRows", "blockerList", "draftSummary", "saveDraftBtn", "trialRenderBtn", "publishVersionBtn",
   "publishBlockerText", "draftSaveStatusText", "scanRunningOverlay", "scanRunningMessage", "scanFailedOverlay", "scanFailedMessage", "retryScanBtn", "closeScanFailedBtn",
   "optionRuleSearch", "optionRuleList", "optionRuleStats", "optionRuleCount", "pendingOnlyBtn", "selectedOptionTitle",
-  "selectedOptionPendingBadge", "optionContentPreset", "assetBindingRows", "templateCapabilityPanel",
+  "selectedOptionPendingBadge", "optionContentPreset", "optionProcessingHelp", "assetBindingRows", "templateCapabilityPanel",
   "capabilityEvidenceRows", "colorRuleTitle", "colorRuleRows", "dimensionRuleRows", "fontDependencyRows", "confirmStageBtn", "saveAndNextOptionBtn", "rerunTrialRenderBtn", "preflightFailedOverlay", "preflightFailedMessage",
   "preflightIssueList", "closePreflightFailedBtn", "returnToSampleDataBtn", "previewSampleRows", "previewValidationRows"
 ];
@@ -1070,7 +1070,7 @@ def test_v2_workbench_rules_prefill_anchor_dimensions_and_preserve_tail_proof():
           const option = config.outputs[0].design.options.find((item) => item.key === "Design02");
           const saved1 = option.slots.find((slot) => slot.key === "slot_name1");
           const saved2 = option.slots.find((slot) => slot.key === "slot_name2");
-          assert.strictEqual(option.content_preset, "tail_text");
+              assert.strictEqual(option.content_preset, "mixed_slots");
           assert.strictEqual(saved1.preset, "tail_text");
           assert.strictEqual(saved1.anchor, "anchor_name1");
           assert.strictEqual(saved2.anchor, "anchor_name2");
@@ -1413,6 +1413,95 @@ def test_v2_workbench_split_pipe_recommendation_saves_slot_presets():
           await flush();
           const rows = document.querySelectorAll("#contentOptionRows .content-slot-row");
           assert(rows.every((row) => row.querySelector('[data-field="slot-preset"]').value === "split_by_pipe"));
+        })().catch((error) => { console.error(error); process.exit(1); });
+        """
+    )
+
+
+def test_v2_workbench_locks_mixed_slots_and_preserves_name_and_title_rows():
+    run_node(
+        r"""
+        (async () => {
+          async function fakeFetch(url, options = {}) {
+            const textUrl = String(url);
+            if (textUrl === "/api/v2/templates") return response({ templates: [{ template_id: "V2MIXED", name: "Mixed Demo" }] });
+            if (textUrl.endsWith("/draft")) {
+              return response({ draft: {
+                metadata: { template_id: "V2MIXED", name: "Mixed Demo", shop_name: "" },
+                manifest: { draft_revision: "d0001" },
+                scan: {
+                  "$schema": "custom-renderer/v2-template-scan",
+                  outputs: [{
+                    key: "Output_main",
+                    design: { options: [{
+                      key: "Design02",
+                      slots: [
+                        { key: "slot_name1", tails: [{ key: "tail_name1_last_m", position: "last", sample: "m" }] },
+                        { key: "slot_title" }
+                      ],
+                      anchors: [],
+                      tails: [{ key: "tail_name1_last_m", position: "last", sample: "m" }],
+                      assets: []
+                    }] },
+                    font: { options: [] },
+                    style: { options: [] },
+                    summary: { designs: 1, fonts: 0, styles: 0, slots: 2, anchors: 0, tails: 1, assets: 0, fixed_objects: 0 }
+                  }]
+                },
+                config: {
+                  field_bindings: { name: "Name", title: "Title", design: "Design" },
+                  outputs: [{
+                    key: "Output_main",
+                    display_name: "Main",
+                    component_key: "main",
+                    style: { field: "", options: [] },
+                    design: { field: "design", options: [{
+                      key: "Design02",
+                      content_preset: "direct_text",
+                      slots: [
+                        { key: "slot_name1", source_field: "name", preset: "direct_text", tails: [{ key: "tail_name1_last_m", position: "last", sample: "m" }] },
+                        { key: "slot_title", source_field: "title", preset: "direct_text" }
+                      ],
+                      assets: []
+                    }] },
+                    font: { field: "", options: [] }
+                  }]
+                }
+              }});
+            }
+            if (textUrl.endsWith("/validate")) return response({ validation: { checks: {} } });
+            return response({});
+          }
+          const app = createApp(fakeFetch);
+          await flush();
+          app.elements.templateList.children[0].dispatch("click");
+          await flush();
+          global.setWorkbenchStage("rules");
+          await flush();
+
+          const select = app.elements.optionContentPreset;
+          const group = document.querySelectorAll("#contentOptionRows .content-option-group")[0];
+          assert.strictEqual(select.value, "mixed_slots");
+          assert.strictEqual(select.disabled, true);
+          assert.strictEqual(select.children.length, 1);
+          assert.strictEqual(group.dataset.contentPreset, "mixed_slots");
+          assert(app.elements.optionProcessingHelp.textContent.includes("分别确认"));
+          assert(app.elements.optionProcessingHelp.textContent.includes("不拆分"));
+
+          select.value = "split_by_pipe";
+          select.dispatch("change");
+          await flush();
+          const rows = document.querySelectorAll("#contentOptionRows .content-slot-row");
+          assert.strictEqual(group.dataset.contentPreset, "mixed_slots");
+          assert.deepStrictEqual(rows.map((row) => [
+            row.querySelector('[data-field="slot-source-field"]').value,
+            row.querySelector('[data-field="slot-preset"]').value
+          ]), [["name", "direct_text"], ["title", "direct_text"]]);
+
+          const config = buildControlledConfig();
+          const option = config.outputs[0].design.options.find((item) => item.key === "Design02");
+          assert.strictEqual(option.content_preset, "mixed_slots");
+          assert.deepStrictEqual(option.slots.map((slot) => [slot.source_field, slot.preset]), [["name", "direct_text"], ["title", "direct_text"]]);
         })().catch((error) => { console.error(error); process.exit(1); });
         """
     )

@@ -25,6 +25,8 @@ V2_PROCESSING_PRESETS = {
     "design_font_combo",
     "asset_replace",
 }
+V2_OPTION_CONTENT_PRESETS = V2_PROCESSING_PRESETS | {"mixed_slots"}
+V2_SELECTABLE_OPTION_CONTENT_PRESETS = V2_OPTION_CONTENT_PRESETS - {"asset_replace"}
 V2_VERIFICATION_KEYS = (
     "output",
     "fields",
@@ -273,7 +275,7 @@ def _normalize_option(value: Any, kind: str, path: str, issues: list[Dict[str, s
         normalized["dimensions"] = _normalize_dimension_rule(data.get("dimensions", {}), f"{path}.dimensions", issues)
         return normalized
     preset = _optional_string(data, "content_preset", f"{path}.content_preset", issues)
-    if preset and preset not in V2_PROCESSING_PRESETS:
+    if preset and preset not in V2_OPTION_CONTENT_PRESETS:
         _issue(issues, f"{path}.content_preset", f"Unsupported V2 processing preset: {preset}")
     normalized.update(
         {

@@ -105,7 +105,15 @@
       row.dataset.output === item.output && row.dataset.group === item.group && row.dataset.option === item.key
     ));
     if (!group) return;
+    if (group.dataset.contentPreset === "mixed_slots") {
+      validateCurrentConfig(false).catch(() => updateCheckRail(collectChecks()));
+      return;
+    }
     group.dataset.contentPreset = safeOptionPreset(preset, "direct_text");
+    if (group.dataset.contentPreset === "mixed_slots") {
+      validateCurrentConfig(false).catch(() => updateCheckRail(collectChecks()));
+      return;
+    }
     Array.from(document.querySelectorAll("#contentOptionRows .content-slot-row"))
       .filter((row) => row.dataset.output === item.output && row.dataset.group === item.group && row.dataset.option === item.key)
       .forEach((row) => {

@@ -92,12 +92,38 @@ def test_v2_order_preflight_accepts_optional_split_by_pipe_content():
         }
     )
     rows = [dict(valid_rows()[0])]
-    rows[0]["Name"] = "Amy|Beth"
+    rows[0]["Name"] = " Amy | | Beth "
 
     result = preflight_v2_order_rows(config, rows)
 
     assert result["ok"] is True
     assert result["issues"] == []
+
+
+def test_v2_order_preflight_mixed_slots_do_not_require_pipe_and_still_require_title():
+    config = complete_contract()
+    config["field_bindings"]["title"] = "Title"
+    config["outputs"][0]["design"]["options"][0] = {
+        "key": "Design03",
+        "content_preset": "mixed_slots",
+        "slots": [
+            {"key": "slot_name1", "source_field": "name", "preset": "direct_text"},
+            {"key": "slot_title", "source_field": "title", "preset": "direct_text"},
+        ],
+        "assets": [],
+    }
+    rows = [dict(valid_rows()[0], Name="Jay", Title="Chief")]
+
+    result = preflight_v2_order_rows(config, rows)
+
+    assert result["ok"] is True
+    assert result["issues"] == []
+
+    rows[0]["Title"] = ""
+    result = preflight_v2_order_rows(config, rows)
+
+    assert result["ok"] is False
+    assert _has_issue(result, row=1, code="required_slot_missing", reason="Title")
 
 
 def test_v2_order_preflight_reports_missing_pipe_content_for_selected_option():

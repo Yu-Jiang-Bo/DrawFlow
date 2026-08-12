@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Mapping
 
-from .v2_template_contract import V2_PROCESSING_PRESETS
+from .v2_template_contract import V2_SELECTABLE_OPTION_CONTENT_PRESETS
 from .v2_template_validation_common import (
     V2_STATUS_BLOCKED,
     V2_STATUS_PENDING,
@@ -14,9 +14,6 @@ from .v2_template_validation_common import (
     option_has_font_evidence,
     outputs,
 )
-
-
-V2_OPTION_CONTENT_PRESETS = V2_PROCESSING_PRESETS - {"asset_replace"}
 
 
 def collect_content_validation_issues(contract: Mapping[str, Any]) -> list[Dict[str, str]]:
@@ -45,9 +42,9 @@ def _validate_content_option(
     active_preset = _active_preset(option, slots)
     if slots and not declared_preset:
         add_issue(issues, option_path + ".content_preset", "content", V2_STATUS_PENDING, "content_preset_missing", "具体选项还没有确认内容处理预设。")
-    if active_preset and active_preset not in V2_PROCESSING_PRESETS:
+    if active_preset and active_preset not in V2_SELECTABLE_OPTION_CONTENT_PRESETS:
         add_issue(issues, option_path + ".content_preset", "content", V2_STATUS_BLOCKED, "content_preset_invalid", f"不支持的内容处理预设：{active_preset}。")
-    if declared_preset and declared_preset not in V2_OPTION_CONTENT_PRESETS:
+    if declared_preset and declared_preset not in V2_SELECTABLE_OPTION_CONTENT_PRESETS:
         add_issue(issues, option_path + ".content_preset", "content", V2_STATUS_BLOCKED, "option_preset_invalid", "asset_replace 只能作为槽位原语，不能作为选项级内容处理预设。")
     _validate_preset_requirements(active_preset, slots, option_path, has_design, has_font, issues)
     if slots and not option_has_font_evidence(option):
@@ -72,6 +69,8 @@ def _validate_preset_requirements(
         _require_multi_initials(slots, option_path, issues)
     if active_preset == "tail_text":
         _require_tail_text(slots, option_path, issues)
+    if active_preset == "mixed_slots":
+        _require_mixed_slots(slots, option_path, issues)
     if active_preset == "path_text":
         _require_path_text(slots, option_path, issues)
     if active_preset == "design_font_combo" and not (has_design and has_font):
@@ -145,6 +144,33 @@ def _require_direct_text(slots: list[Mapping[str, Any]], option_path: str, issue
         add_issue(issues, option_path + ".slots[0].preset", "content", V2_STATUS_BLOCKED, "direct_text_slot_preset_invalid", "直接单槽替换只能使用 direct_text 正文槽位。")
     if not slot.get("source_field") or slot.get("asset_key"):
         add_issue(issues, option_path + ".slots[0]", "content", V2_STATUS_BLOCKED, "direct_text_slot_invalid", "直接单槽替换必须绑定一个订单字段，且不得混用素材。")
+
+
+def _require_mixed_slots(slots: list[Mapping[str, Any]], option_path: str, issues: list[Dict[str, str]]) -> None:
+    if len(slots) < 2:
+        add_issue(issues, option_path + ".content_preset", "content", V2_STATUS_BLOCKED, "mixed_slots_requires_multiple_slots", "按槽位分别处理至少需要两个文字槽位。")
+        return
+    if any(not slot.get("source_field") for slot in slots):
+        add_issue(issues, option_path + ".slots", "content", V2_STATUS_BLOCKED, "mixed_slots_source_missing", "按槽位分别处理的每个槽位都必须绑定订单字段。")
+    allowed = {"direct_text", "tail_text", "path_text"}
+    if any(str(slot.get("preset") or "") not in allowed or slot.get("asset_key") for slot in slots):
+        add_issue(issues, option_path + ".slots", "content", V2_STATUS_BLOCKED, "mixed_slots_preset_invalid", "按槽位分别处理只能组合替换文本、尾巴文字或路径文字，不得混用素材或按 | 拆分。")
+    for slot_index, slot in enumerate(slots):
+        if str(slot.get("preset") or "") != "tail_text":
+            continue
+        tails = [mapping(tail) for tail in list_value(slot.get("tails"))]
+        if not tails:
+            add_issue(issues, f"{option_path}.slots[{slot_index}].tails", "content", V2_STATUS_BLOCKED, "tail_sample_missing", "尾巴文字槽位必须提供首字或尾字样本。")
+        for tail_index, tail in enumerate(tails):
+            if not _tail_has_glyph_proof(tail):
+                add_issue(
+                    issues,
+                    f"{option_path}.slots[{slot_index}].tails[{tail_index}]",
+                    "content",
+                    V2_STATUS_BLOCKED,
+                    "tail_glyph_coverage_missing",
+                    "尾巴文字样本必须带有已验证的 PUA 连续码位或完整 A-Z 字形映射，无法证明覆盖范围时不得发布。",
+                )
 
 
 def _require_split_by_pipe(slots: list[Mapping[str, Any]], option_path: str, issues: list[Dict[str, str]]) -> None:

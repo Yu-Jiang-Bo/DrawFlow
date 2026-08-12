@@ -3,6 +3,7 @@ import pytest
 from src.service.v2_template_contract import (
     V2_CONTRACT_SCHEMA,
     V2_CONTRACT_VERSION,
+    V2_OPTION_CONTENT_PRESETS,
     V2_PROCESSING_PRESETS,
     check_v2_template_contract,
     normalize_v2_template_contract,
@@ -151,6 +152,29 @@ def test_normalizes_pure_font_contract_and_preserves_f10_as_font():
     assert contract["outputs"][0]["font"]["options"][1]["slots"][0]["preset"] == "split_by_pipe"
     assert contract["checks"]["preview"] == {"status": "pending", "reason": ""}
     assert set(V2_PROCESSING_PRESETS) >= {"direct_text", "split_by_pipe", "tail_text", "asset_replace"}
+
+
+def test_normalizes_mixed_slots_as_option_only_preset():
+    payload = base_contract()
+    option = payload["outputs"][0]["font"]["options"][0]
+    option["content_preset"] = "mixed_slots"
+    option["slots"] = [
+        {"key": "slot_name", "source_field": "name", "preset": "direct_text"},
+        {"key": "slot_title", "source_field": "title", "preset": "direct_text"},
+    ]
+    payload["field_bindings"]["title"] = "Title"
+
+    contract = normalize_v2_template_contract(payload)
+
+    assert "mixed_slots" in V2_OPTION_CONTENT_PRESETS
+    assert "mixed_slots" not in V2_PROCESSING_PRESETS
+    assert contract["outputs"][0]["font"]["options"][0]["content_preset"] == "mixed_slots"
+
+    payload["outputs"][0]["font"]["options"][0]["slots"][0]["preset"] = "mixed_slots"
+    result = check_v2_template_contract(payload)
+
+    assert result["ok"] is False
+    assert any(error["path"].endswith(".slots[0].preset") for error in result["errors"])
 
 
 def test_normalizes_pure_design_contract_with_dual_assets_and_tail_samples():

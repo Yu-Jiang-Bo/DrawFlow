@@ -35,7 +35,24 @@
     const options = item && typeof contentOptionPresetOptions === "function"
       ? contentOptionPresetOptions(item.output, item.group, item.key)
       : presetOptions(ctx.OPTION_PRESETS);
-    fillSelect("optionContentPreset", options, item ? item.preset : "direct_text");
+    const selected = fillSelect("optionContentPreset", options, item ? item.preset : "direct_text");
+    const select = $("optionContentPreset");
+    const automatic = options.length === 1 && options[0][0] === "mixed_slots";
+    if (select) {
+      select.disabled = automatic;
+      select.setAttribute("aria-readonly", automatic ? "true" : "false");
+    }
+    setText("optionProcessingHelp", optionProcessingHelpText(selected));
+  }
+
+  function optionProcessingHelpText(preset) {
+    if (preset === "mixed_slots") {
+      return "此设计有多种槽位处理，请在下方分别确认。内容不拆分，顶部不会改写下方设置。";
+    }
+    if (preset === "split_by_pipe") {
+      return "两个槽位都填写同一个内容来源（例如 name）。系统按第 1 段、第 2 段分配；name1、name2 是独立内容来源。";
+    }
+    return "系统会按当前处理方式推荐槽位处理；需要时可在下方逐项调整。";
   }
 
   function optionRuleNode(item, index, current) {
@@ -172,6 +189,7 @@
     });
     const selected = options.some(([optionValue]) => optionValue === value) ? value : ((options[0] && options[0][0]) || "");
     select.value = selected;
+    return selected;
   }
 
   function syncPendingOnlyButton() {

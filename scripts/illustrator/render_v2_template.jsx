@@ -501,7 +501,10 @@
     function splitPipeValue(value) {
         var raw = String(value || "").split("|");
         var parts = [];
-        for (var index = 0; index < raw.length; index++) parts.push(raw[index]);
+        for (var index = 0; index < raw.length; index++) {
+            var part = String(raw[index] || "").replace(/^\s+|\s+$/g, "");
+            if (part) parts.push(part);
+        }
         return parts;
     }
 
