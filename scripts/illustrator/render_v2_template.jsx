@@ -550,7 +550,173 @@
 
     function parseJson(text) {
         if (typeof JSON !== "undefined" && JSON.parse) return JSON.parse(text);
-        throw new Error("JSON parser is not available in this Illustrator runtime");
+        return parseJsonFallback(String(text || ""));
+    }
+
+    function parseJsonFallback(text) {
+        var index = 0;
+
+        function fail(message) {
+            throw new Error("Invalid JSON task file: " + message);
+        }
+
+        function skipWhitespace() {
+            while (index < text.length && /[\s]/.test(text.charAt(index))) index++;
+        }
+
+        function parseValue() {
+            skipWhitespace();
+            var ch = text.charAt(index);
+            if (ch === '"') return parseString();
+            if (ch === "{") return parseObject();
+            if (ch === "[") return parseArray();
+            if (ch === "t") return parseLiteral("true", true);
+            if (ch === "f") return parseLiteral("false", false);
+            if (ch === "n") return parseLiteral("null", null);
+            if (ch === "-" || (ch >= "0" && ch <= "9")) return parseNumber();
+            fail("unexpected token at " + index);
+        }
+
+        function parseLiteral(token, value) {
+            if (text.substr(index, token.length) !== token) fail("invalid literal at " + index);
+            index += token.length;
+            return value;
+        }
+
+        function parseNumber() {
+            var match = text.substring(index).match(/^-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+\-]?[0-9]+)?/);
+            if (!match) fail("invalid number at " + index);
+            index += match[0].length;
+            return Number(match[0]);
+        }
+
+        function parseString() {
+            var result = "";
+            index++;
+            while (index < text.length) {
+                var ch = text.charAt(index++);
+                if (ch === '"') return result;
+                if (ch !== "\\") {
+                    result += ch;
+                    continue;
+                }
+                if (index >= text.length) fail("unterminated escape");
+                var esc = text.charAt(index++);
+                if (esc === '"' || esc === "\\" || esc === "/") result += esc;
+                else if (esc === "b") result += "\b";
+                else if (esc === "f") result += "\f";
+                else if (esc === "n") result += "\n";
+                else if (esc === "r") result += "\r";
+                else if (esc === "t") result += "\t";
+                else if (esc === "u") {
+                    var hex = text.substr(index, 4);
+                    if (!/^[0-9a-fA-F]{4}$/.test(hex)) fail("invalid unicode escape at " + index);
+                    result += String.fromCharCode(parseInt(hex, 16));
+                    index += 4;
+                } else {
+                    fail("invalid escape at " + index);
+                }
+            }
+            fail("unterminated string");
+        }
+
+        function parseArray() {
+            var result = [];
+            index++;
+            skipWhitespace();
+            if (text.charAt(index) === "]") {
+                index++;
+                return result;
+            }
+            while (index < text.length) {
+                result.push(parseValue());
+                skipWhitespace();
+                var ch = text.charAt(index++);
+                if (ch === "]") return result;
+                if (ch !== ",") fail("expected comma in array");
+            }
+            fail("unterminated array");
+        }
+
+        function parseObject() {
+            var result = {};
+            index++;
+            skipWhitespace();
+            if (text.charAt(index) === "}") {
+                index++;
+                return result;
+            }
+            while (index < text.length) {
+                skipWhitespace();
+                if (text.charAt(index) !== '"') fail("expected object key");
+                var key = parseString();
+                skipWhitespace();
+                if (text.charAt(index++) !== ":") fail("expected colon after object key");
+                result[key] = parseValue();
+                skipWhitespace();
+                var ch = text.charAt(index++);
+                if (ch === "}") return result;
+                if (ch !== ",") fail("expected comma in object");
+            }
+            fail("unterminated object");
+        }
+
+        var parsed = parseValue();
+        skipWhitespace();
+        if (index !== text.length) fail("trailing content at " + index);
+        return parsed;
+    }
+
+    function stringifyJson(value) {
+        if (typeof JSON !== "undefined" && JSON.stringify) return JSON.stringify(value);
+        return stringifyJsonFallback(value);
+    }
+
+    function stringifyJsonFallback(value) {
+        if (value === null || value === undefined) return "null";
+        var type = typeof value;
+        if (type === "string") return quoteJsonString(value);
+        if (type === "number") return isFinite(value) ? String(value) : "null";
+        if (type === "boolean") return value ? "true" : "false";
+        if (isArray(value)) {
+            var parts = [];
+            for (var index = 0; index < value.length; index++) parts.push(stringifyJsonFallback(value[index]));
+            return "[" + parts.join(",") + "]";
+        }
+        var fields = [];
+        for (var key in value) {
+            if (Object.prototype.hasOwnProperty.call(value, key)) {
+                fields.push(quoteJsonString(key) + ":" + stringifyJsonFallback(value[key]));
+            }
+        }
+        return "{" + fields.join(",") + "}";
+    }
+
+    function quoteJsonString(value) {
+        var text = String(value);
+        var result = '"';
+        for (var index = 0; index < text.length; index++) {
+            var ch = text.charAt(index);
+            var code = text.charCodeAt(index);
+            if (ch === '"' || ch === "\\") result += "\\" + ch;
+            else if (ch === "\b") result += "\\b";
+            else if (ch === "\f") result += "\\f";
+            else if (ch === "\n") result += "\\n";
+            else if (ch === "\r") result += "\\r";
+            else if (ch === "\t") result += "\\t";
+            else if (code < 32) {
+                var hex = code.toString(16);
+                while (hex.length < 4) hex = "0" + hex;
+                result += "\\u" + hex;
+            } else {
+                result += ch;
+            }
+        }
+        return result + '"';
+    }
+
+    function isArray(value) {
+        return Object.prototype.toString.call(value) === "[object Array]";
     }
 
     function saveAsAI8(doc, file) {
@@ -589,7 +755,7 @@
         ensureFolder(file.parent);
         file.encoding = "UTF-8";
         if (!file.open("w")) throw new Error("Cannot write V2 layout warnings: " + file.fsName);
-        file.write(JSON.stringify({warnings: warnings || []}));
+        file.write(stringifyJson({warnings: warnings || []}));
         file.close();
     }
 }());

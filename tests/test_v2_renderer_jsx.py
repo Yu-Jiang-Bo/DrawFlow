@@ -61,6 +61,29 @@ def test_v2_renderer_static_contract_uses_paths_and_safe_actions():
     assert "String.fromCharCode" in include
 
 
+def test_v2_renderer_jsx_runs_without_native_json_parser():
+    task = {
+        "$schema": "custom-renderer/v2-render-execution",
+        "template_ai": "template.ai",
+        "output_ai": "out.ai",
+        "layout_warning_file": "warnings.json",
+        "values": {},
+        "selections": {},
+        "render_task": {
+            "$schema": "custom-renderer/v2-render-task",
+            "outputs": [],
+        },
+    }
+    harness = node_mock_harness(task, """
+if (savedAs !== 'out.ai') throw new Error('output was not saved');
+if (writtenFiles['warnings.json'] !== '{"warnings":[]}') throw new Error('warnings were not written without JSON');
+""", disable_native_json=True)
+
+    result = run_node(harness)
+
+    assert result.returncode == 0, result.stderr
+
+
 def test_v2_renderer_copies_selected_groups_and_preserves_pipe_in_direct_text():
     task = {
         "$schema": "custom-renderer/v2-render-execution",
@@ -1320,11 +1343,13 @@ def test_v2_renderer_rejects_final_output_that_exceeds_target():
     assert "V2 output exceeds target bounds" in result.stderr
 
 
-def node_mock_harness(task, assertions):
+def node_mock_harness(task, assertions, disable_native_json=False):
     return f"""
 const fs = require('fs');
 const source = {jsx_source_expression()};
+const NativeJSON = JSON;
 const task = {json.dumps(task)};
+const taskText = NativeJSON.stringify(task);
 const visibleBoundsFailures = new Set(task.visible_bounds_failures || []);
 const visibleBoundsPaddingAfterResize = task.visible_bounds_padding_after_resize || {{}};
 const folder = {{ exists: true, parent: null, create: () => true }};
@@ -1339,7 +1364,7 @@ global.File = function(path) {{
     exists: path === 'task.json',
     parent: folder,
     open: () => true,
-    read: () => JSON.stringify(task),
+    read: () => taskText,
     write: text => {{ writtenFiles[path] = (writtenFiles[path] || '') + String(text); }},
     close: () => undefined,
     remove: () => undefined
@@ -1546,7 +1571,9 @@ global.app = {{
   open: () => templateDoc,
   documents: {{ add: () => outputDoc }}
 }};
+if ({str(disable_native_json).lower()}) global.JSON = undefined;
 new Function(source)();
+global.JSON = NativeJSON;
 {assertions}
 console.log(JSON.stringify({{ savedAs, exportedAs, copied: outputLayer.pageItems.map(item => item.name) }}));
 """
