@@ -284,6 +284,144 @@ def test_v2_workbench_renders_scan_structure_groups_from_draft():
     )
 
 
+def test_v2_workbench_style_dimensions_are_displayed_as_integers():
+    run_node(
+        r"""
+        (async () => {
+          let draftSaveBody = null;
+          let currentDraft = null;
+          async function fakeFetch(url, options = {}) {
+            if (url === "/api/v2/templates") return response({ templates: [{ template_id: "V2STYLEINT", name: "Style integer" }] });
+            if (String(url).endsWith("/draft") && options.method === "POST") {
+              draftSaveBody = JSON.parse(options.body);
+              currentDraft = { ...currentDraft, config: draftSaveBody.config, manifest: { draft_revision: "d0002" } };
+              return response({ draft: currentDraft });
+            }
+            if (String(url).endsWith("/draft")) {
+              currentDraft = {
+                metadata: { template_id: "V2STYLEINT", name: "Style integer", shop_name: "" },
+                manifest: { draft_revision: "d0001" },
+                config: {},
+                scan: {
+                  outputs: [{ key: "Output_main" }],
+                  styles: [
+                    { key: "style1", output: "Output_main", dimensions: { width_mm: 50.28, height_mm: 30.28 } },
+                    { key: "style2", output: "Output_main", dimensions: { width_mm: 200.398, height_mm: 50.398 } }
+                  ]
+                }
+              };
+              return response({ draft: currentDraft });
+            }
+            if (String(url).endsWith("/validate")) return response({ validation: { can_save: true, checks: {} } });
+            return response({});
+          }
+          const app = createApp(fakeFetch);
+          await flush();
+          app.elements.templateList.children[0].dispatch("click");
+          await flush();
+          global.setWorkbenchStage("structure");
+          await flush();
+
+          const rows = document.querySelectorAll("#styleDimensionRows .style-dimension-row");
+          assert.strictEqual(rows.length, 2);
+          assert.strictEqual(rows[0].querySelector('[data-field="style-width-mm"]').value, "50");
+          assert.strictEqual(rows[0].querySelector('[data-field="style-height-mm"]').value, "30");
+          assert.strictEqual(rows[1].querySelector('[data-field="style-width-mm"]').value, "200");
+          assert.strictEqual(rows[1].querySelector('[data-field="style-height-mm"]').value, "50");
+
+          app.elements.saveDraftBtn.dispatch("click");
+          for (let index = 0; index < 16; index += 1) await flush();
+          assert(draftSaveBody);
+          const savedStyle = draftSaveBody.config.outputs[0].style.options.find((option) => option.key === "style1");
+          assert.strictEqual(savedStyle.dimensions.width_mm, 50.28);
+          assert.strictEqual(savedStyle.dimensions.height_mm, 30.28);
+        })().catch((error) => { console.error(error); process.exit(1); });
+        """
+    )
+
+
+def test_v2_workbench_confirm_structure_stage_saves_and_opens_rules():
+    run_node(
+        r"""
+        (async () => {
+          const confirmedChecks = Object.fromEntries(["output", "fields", "options", "slots", "content", "dimensions", "colors", "preview"]
+            .map((key) => [key, { status: "confirmed", reason: "" }]));
+          let draftSaveBody = null;
+          let currentDraft = {
+            metadata: { template_id: "V2NEXT", name: "Next stage", shop_name: "" },
+            manifest: { draft_revision: "d0001" },
+            scan: { outputs: [{ key: "Output_main" }], fields: [] },
+            config: { outputs: [], field_bindings: { name: "Name" }, option_mappings: [], checks: {} }
+          };
+          async function fakeFetch(url, options = {}) {
+            if (url === "/api/v2/templates") return response({ templates: [{ template_id: "V2NEXT", name: "Next stage" }] });
+            if (String(url).endsWith("/draft") && (!options.method || options.method === "GET")) return response({ draft: currentDraft });
+            if (String(url).endsWith("/validate")) return response({ validation: { can_save: true, checks: confirmedChecks } });
+            if (String(url).endsWith("/draft") && options.method === "POST") {
+              draftSaveBody = JSON.parse(options.body);
+              currentDraft = { ...currentDraft, config: draftSaveBody.config, manifest: { draft_revision: "d0002" } };
+              return response({ draft: currentDraft });
+            }
+            return response({});
+          }
+          const app = createApp(fakeFetch);
+          await flush();
+          app.elements.templateList.children[0].dispatch("click");
+          await flush();
+          global.setWorkbenchStage("structure");
+          await flush();
+          app.elements.confirmStageBtn.dispatch("click");
+          for (let index = 0; index < 16; index += 1) await flush();
+
+          assert(draftSaveBody, "confirm must save the current draft");
+          assert.strictEqual(global.DrawFlowV2WorkbenchContext.state.stage, "rules");
+        })().catch((error) => { console.error(error); process.exit(1); });
+        """
+    )
+
+
+def test_v2_workbench_field_bindings_accept_chinese_order_headers():
+    run_node(
+        r"""
+        (async () => {
+          let draftSaveBody = null;
+          async function fakeFetch(url, options = {}) {
+            if (url === "/api/v2/templates") return response({ templates: [{ template_id: "V2CNFIELD", name: "Chinese field" }] });
+            if (String(url).endsWith("/draft") && (!options.method || options.method === "GET")) {
+              return response({ draft: {
+                metadata: { template_id: "V2CNFIELD", name: "Chinese field", shop_name: "" },
+                manifest: { draft_revision: "d0001" },
+                scan: { outputs: [{ key: "Output_main" }] },
+                config: { outputs: [], field_bindings: { name: "定制信息" }, option_mappings: [], checks: {} }
+              }});
+            }
+            if (String(url).endsWith("/validate")) return response({ validation: { can_save: true, checks: {} } });
+            if (String(url).endsWith("/draft") && options.method === "POST") {
+              draftSaveBody = JSON.parse(options.body);
+              return response({ draft: { metadata: { template_id: "V2CNFIELD", name: "Chinese field", shop_name: "" }, manifest: { draft_revision: "d0002" }, config: draftSaveBody.config, scan: { outputs: [{ key: "Output_main" }] } } });
+            }
+            return response({});
+          }
+          const app = createApp(fakeFetch);
+          await flush();
+          app.elements.templateList.children[0].dispatch("click");
+          await flush();
+          global.setWorkbenchStage("structure");
+          await flush();
+          const nameRow = document.querySelectorAll("#fieldBindingRows .field-binding-row")
+            .find((row) => row.querySelector('[data-field="binding-field"]').value === "name");
+          assert(nameRow);
+          assert.strictEqual(nameRow.querySelector('[data-field="binding-column"]').value, "定制信息");
+          app.elements.saveDraftBtn.dispatch("click");
+          await flush();
+
+          assert(draftSaveBody);
+          assert.strictEqual(draftSaveBody.config.field_bindings.name, "定制信息");
+        })().catch((error) => { console.error(error); process.exit(1); });
+        """
+    )
+
+
 def test_v2_workbench_scan_summary_does_not_double_count_v2_aliases():
     run_node(
         r"""

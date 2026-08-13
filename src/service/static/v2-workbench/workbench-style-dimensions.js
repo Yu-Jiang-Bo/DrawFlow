@@ -25,8 +25,8 @@
         row.append(
           inputCell("style-output", outputKey),
           inputCell("style-key", key),
-          inputCell("style-width-mm", dimensions.width_mm || ""),
-          inputCell("style-height-mm", dimensions.height_mm || ""),
+          styleDimensionInputCell("style-width-mm", dimensions.width_mm),
+          styleDimensionInputCell("style-height-mm", dimensions.height_mm),
           staticMetaCell("误差上限 0.007mm，禁止超出")
         );
         target.appendChild(row);
@@ -49,6 +49,23 @@
     return objectOf(configured.dimensions || scanned.dimensions || scanned);
   }
 
+  function styleDimensionDisplay(value) {
+    if (typeof displayDimension === "function") return displayDimension(value);
+    const number = Number(value);
+    return Number.isFinite(number) && number > 0 ? String(Math.trunc(number)) : "";
+  }
+
+  function styleDimensionInputCell(name, rawValue) {
+    const wrap = inputCell(name, styleDimensionDisplay(rawValue));
+    const input = wrap.querySelector(`[data-field="${name}"]`);
+    if (input && rawValue !== undefined && rawValue !== null && rawValue !== "") {
+      input.dataset.rawValue = String(rawValue);
+      input.title = "按模板尺寸框取整显示；未手动修改时仍按精确扫描值保存。";
+      wrap.title = input.title;
+    }
+    return wrap;
+  }
+
   function staticMetaCell(text) {
     const cell = document.createElement("div");
     cell.className = "content-meta-cell";
@@ -58,6 +75,8 @@
 
   Object.assign(globalThis, {
     renderStyleDimensionRows,
-    styleDimensionKeys
+    styleDimensionKeys,
+    styleDimensionDisplay,
+    styleDimensionInputCell
   });
 })();

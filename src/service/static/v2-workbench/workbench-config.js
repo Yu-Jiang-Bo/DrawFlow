@@ -370,11 +370,22 @@
       const output = safeOutputKey(rowValue(row, "style-output") || row.dataset.output, "Output_main", 0);
       const key = safeOptionKey(rowValue(row, "style-key") || row.dataset.styleKey, "style");
       if (!output || !key) return;
-      const dimensions = dimensionRuleFromValues(rowValue(row, "style-width-mm"), rowValue(row, "style-height-mm"), "fixed");
+      const dimensions = dimensionRuleFromValues(styleDimensionValue(row, "style-width-mm"), styleDimensionValue(row, "style-height-mm"), "fixed");
       if (!result[output]) result[output] = {};
       result[output][key] = dimensions;
     });
     return result;
+  }
+
+  function styleDimensionValue(row, field) {
+    const input = row.querySelector(`[data-field="${field}"]`);
+    if (!input) return "";
+    if (Object.prototype.hasOwnProperty.call(input.dataset, "rawValue")) {
+      const rawValue = input.dataset.rawValue;
+      const displayValue = typeof globalThis.styleDimensionDisplay === "function" ? globalThis.styleDimensionDisplay(rawValue) : String(rawValue || "");
+      if (String(input.value || "") === displayValue) return rawValue;
+    }
+    return input.value;
   }
 
   function styleDimensionsFor(output, key, collected, styles) {

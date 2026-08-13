@@ -357,6 +357,17 @@ def test_rejects_execution_text_inside_whitelisted_string_fields():
     assert "$.option_mappings[0].target" in paths
 
 
+def test_accepts_chinese_field_binding_values_as_order_headers():
+    payload = base_contract()
+    payload["field_bindings"]["name"] = "定制信息"
+
+    normalized = normalize_v2_template_contract(payload)
+    result = check_v2_template_contract(normalized)
+
+    assert normalized["field_bindings"]["name"] == "定制信息"
+    assert "$.field_bindings.name" not in {error["path"] for error in result["errors"]}
+
+
 def test_rejects_camel_case_execution_field_aliases():
     payload = base_contract()
     payload["preview"]["sample_rows"] = [

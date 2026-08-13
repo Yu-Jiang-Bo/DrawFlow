@@ -143,10 +143,15 @@
 
   async function confirmCurrentStage() {
     if (state.isSavingDraft) return;
+    const stageBeforeSave = state.stage;
     const previousChecks = collectChecks();
     markCurrentStageConfirmed();
     updateCheckRail(collectChecks());
     const result = await saveDraft();
+    if (result && result.saved && stageBeforeSave === "structure" && typeof globalThis.setWorkbenchStage === "function") {
+      globalThis.setWorkbenchStage("rules");
+      return;
+    }
     if ((!result || !result.saved) && (!result || result.failure !== "validation")) updateCheckRail(previousChecks);
   }
 
