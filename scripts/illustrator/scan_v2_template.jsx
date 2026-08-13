@@ -328,7 +328,18 @@
         record.font = record.text ? record.text.font : null;
         if (kind === "anchor") record.related_slot = relatedSlot(record.key, "anchor_");
         if (kind === "slot") record.asset_key = assetKeyFromSlot(record.key);
+        if (kind === "slot") record.preserve_composition = hasKeepRatioMarker(item);
         return record;
+    }
+
+    function hasKeepRatioMarker(item) {
+        var name = normalizeName(safeString(item, "name", ""));
+        if (name === "keep_ratio" || lowerStartsWith(name, "keep_ratio_")) return true;
+        var children = directItems(item);
+        for (var i = 0; i < children.length; i++) {
+            if (hasKeepRatioMarker(children[i])) return true;
+        }
+        return false;
     }
 
     function tailRecord(item, rootPath) {

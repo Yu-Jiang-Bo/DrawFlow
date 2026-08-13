@@ -611,7 +611,7 @@ if (Math.abs(centerX - 50) > 0.1 || Math.abs(centerY - 15) > 0.1) throw new Erro
     assert result.returncode == 0, result.stderr
 
 
-def test_v2_renderer_short_text_centers_without_resizing():
+def test_v2_renderer_short_text_fills_slot_bounds_and_centers():
     task = {
         "$schema": "custom-renderer/v2-render-execution",
         "template_ai": "template.ai",
@@ -647,7 +647,10 @@ def test_v2_renderer_short_text_centers_without_resizing():
     harness = node_mock_harness(task, """
 const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
 const slot = child(designCopy, 'slot_name');
-if (slot.resizeCalls !== 0) throw new Error('short text should not resize');
+if (slot.resizeCalls < 1) throw new Error('short text should resize to fill slot bounds');
+const width = slot.visibleBounds[2] - slot.visibleBounds[0];
+const height = slot.visibleBounds[1] - slot.visibleBounds[3];
+if (Math.abs(width - 100) > 0.1 || Math.abs(height - 30) > 0.1) throw new Error('short text did not fill slot bounds: ' + width + 'x' + height);
 const centerX = (slot.visibleBounds[0] + slot.visibleBounds[2]) / 2;
 const centerY = (slot.visibleBounds[1] + slot.visibleBounds[3]) / 2;
 if (Math.abs(centerX - 50) > 0.1 || Math.abs(centerY - 15) > 0.1) throw new Error('short text not centered');
@@ -658,7 +661,7 @@ if (Math.abs(centerX - 50) > 0.1 || Math.abs(centerY - 15) > 0.1) throw new Erro
     assert result.returncode == 0, result.stderr
 
 
-def test_v2_renderer_normal_text_stays_proportional_without_resizing():
+def test_v2_renderer_normal_text_fills_slot_bounds():
     task = {
         "$schema": "custom-renderer/v2-render-execution",
         "template_ai": "template.ai",
@@ -694,9 +697,10 @@ def test_v2_renderer_normal_text_stays_proportional_without_resizing():
     harness = node_mock_harness(task, """
 const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
 const slot = child(designCopy, 'slot_name');
-if (slot.resizeCalls !== 0) throw new Error('normal text should keep template scale');
+if (slot.resizeCalls < 1) throw new Error('normal text should resize to fill slot bounds');
 const width = slot.visibleBounds[2] - slot.visibleBounds[0];
-if (width > 100.01) throw new Error('normal text escaped slot width');
+const height = slot.visibleBounds[1] - slot.visibleBounds[3];
+if (Math.abs(width - 100) > 0.1 || Math.abs(height - 30) > 0.1) throw new Error('normal text did not fill slot bounds: ' + width + 'x' + height);
 """)
 
     result = run_node(harness)
@@ -849,6 +853,62 @@ const deco = child(slotGroup, 'slot_group_decoration');
 if (text.resizeCalls < 1) throw new Error('group slot text was not fitted');
 if (deco.translateCalls !== 0 || deco.resizeCalls !== 0) throw new Error('slot decoration moved or resized');
 if (!slotGroup.pageItems.includes(deco)) throw new Error('slot decoration was removed');
+""")
+
+    result = run_node(harness)
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_v2_renderer_preserves_short_group_slot_text_with_keep_ratio_marker():
+    task = {
+        "$schema": "custom-renderer/v2-render-execution",
+        "template_ai": "template.ai",
+        "output_ai": "out.ai",
+        "values": {"design": "03", "group_name": "A"},
+        "selections": {"Output_main": {"design": "Design03"}},
+        "render_task": {
+            "$schema": "custom-renderer/v2-render-task",
+            "outputs": [
+                {
+                    "key": "Output_main",
+                    "actions": [
+                        {
+                            "type": "copy_option_group",
+                            "group": "design",
+                            "option_key": "Design03",
+                            "object_path": "Template/Output_main/Design/Design03",
+                        },
+                        {
+                            "type": "replace_slot_text",
+                            "group": "design",
+                            "option_key": "Design03",
+                            "object_path": "Template/Output_main/Design/Design03/slot_ratio_group",
+                            "source_field": "group_name",
+                            "required": True,
+                            "tail_paths": [],
+                        },
+                    ],
+                }
+            ],
+        },
+    }
+    harness = node_mock_harness(task, """
+const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
+const slotGroup = child(designCopy, 'slot_ratio_group');
+const text = child(slotGroup, 'slot_ratio_text');
+const deco = child(slotGroup, 'keep_ratio_heart');
+const marker = slotGroup.pageItems.find(item => item.name === 'keep_ratio');
+const bounds = text.visibleBounds;
+const width = bounds[2] - bounds[0];
+const height = bounds[1] - bounds[3];
+if (text.resizeCalls !== 0) throw new Error('decorated short slot text should keep template scale');
+if (deco.translateCalls !== 0 || deco.resizeCalls !== 0) throw new Error('slot decoration moved or resized');
+if (marker) throw new Error('pure keep_ratio marker should be removed from output');
+if (width > 150.01 || height > 40.01) throw new Error('decorated text escaped group slot bounds: ' + width + 'x' + height);
+const centerX = (bounds[0] + bounds[2]) / 2;
+const centerY = (bounds[1] + bounds[3]) / 2;
+if (Math.abs(centerX - 75) > 0.1 || Math.abs(centerY - 20) > 0.1) throw new Error('expanded text not centered in slot');
 """)
 
     result = run_node(harness)
@@ -1024,6 +1084,31 @@ const expectedFirst = {json.dumps(expected_first)};
 const expectedLast = {json.dumps(expected_last)};
 {assert_tail_presence}
 if (child(designCopy, 'slot_name').contents.indexOf('S') < 0) throw new Error('middle word was incorrectly treated as endpoint');
+""")
+
+    result = run_node(harness)
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_v2_renderer_tail_text_preserves_composition_when_flagged():
+    tails = [
+        {
+            "key": "tail_name_first_a",
+            "position": "first",
+            "sample": "a",
+            "pua_base": TAIL_PUA_BASE,
+            "path": "Template/Output_main/Design/Design03/tail_name_first_a",
+        }
+    ]
+    task = tail_text_task(tails, value="Alice Smith")
+    task["render_task"]["outputs"][0]["actions"][1]["preserve_composition"] = True
+    harness = node_mock_harness(task, """
+const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
+const slot = child(designCopy, 'slot_name');
+const width = slot.visibleBounds[2] - slot.visibleBounds[0];
+if (slot.resizeCalls !== 0) throw new Error('preserved tail text should not stretch short main text');
+if (width >= 99.9) throw new Error('preserved tail text unexpectedly filled full slot width: ' + width);
 """)
 
     result = run_node(harness)
@@ -1588,6 +1673,11 @@ const design03 = item('GroupItem', 'Design03', '', [
   item('GroupItem', 'slot_group', '', [
     item('TextFrame', 'slot_group_text', 'Group sample', [], 'Group-style'),
     item('PathItem', 'slot_group_decoration', '', [])
+  ]),
+  item('GroupItem', 'slot_ratio_group', '', [
+    item('TextFrame', 'slot_ratio_text', 'Ratio sample', [], 'Ratio-style'),
+    item('PathItem', 'keep_ratio', '', []),
+    item('PathItem', 'keep_ratio_heart', '', [])
   ]),
   item('TextFrame', 'tail_name_first_a', 'a', [], 'First-tail-style'),
   item('TextFrame', 'tail_name_last_a', 'a', [], 'Last-tail-style'),

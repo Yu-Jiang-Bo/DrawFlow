@@ -154,6 +154,15 @@ def test_normalizes_pure_font_contract_and_preserves_f10_as_font():
     assert set(V2_PROCESSING_PRESETS) >= {"direct_text", "split_by_pipe", "tail_text", "asset_replace"}
 
 
+def test_normalizes_slot_preserve_composition_flag():
+    payload = base_contract()
+    payload["outputs"][0]["font"]["options"][0]["slots"][0]["preserve_composition"] = True
+
+    contract = normalize_v2_template_contract(payload)
+
+    assert contract["outputs"][0]["font"]["options"][0]["slots"][0]["preserve_composition"] is True
+
+
 def test_normalizes_mixed_slots_as_option_only_preset():
     payload = base_contract()
     option = payload["outputs"][0]["font"]["options"][0]

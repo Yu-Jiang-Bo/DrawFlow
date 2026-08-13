@@ -129,14 +129,14 @@
             return;
         }
         var textFrame = writeTextToItem(target, slotValue);
-        fitItemWithinBounds(textFrame, fitBounds, action);
+        fitItemWithinBounds(textFrame, fitBounds, action, shouldPreserveSlotComposition(target, action));
         var tailPaths = action.tail_paths || [];
         for (var index = 0; index < tailPaths.length; index++) {
             var tail = findPageItemByRelativePath(holder.item, relativePath(String(tailPaths[index] || ""), holder.source_path));
             var tailText = preset === "split_by_pipe" ? parts[index + 1] || "" : "";
             if (hasText(tailText)) {
                 var tailFrame = writeTextToItem(tail, tailText);
-                fitItemWithinBounds(tailFrame, measuredBounds(tail), action);
+                fitItemWithinBounds(tailFrame, measuredBounds(tail), action, shouldPreserveSlotComposition(tail, action));
             } else {
                 removePageItem(tail);
             }
@@ -281,8 +281,9 @@
         } catch (alignError) {}
     }
 
-    function fitItemWithinBounds(item, bounds, action) {
+    function fitItemWithinBounds(item, bounds, action, preserveComposition) {
         if (!bounds) return;
+        preserveComposition = preserveComposition === true || (action && action.preserve_composition === true);
         var targetWidth = Math.abs(Number(bounds[2]) - Number(bounds[0]));
         var targetHeight = Math.abs(Number(bounds[1]) - Number(bounds[3]));
         if (targetWidth <= 0 || targetHeight <= 0) return;
@@ -290,20 +291,28 @@
             fitPathTextWithinBounds(item, bounds, action, targetWidth, targetHeight);
             return;
         }
-        var shrinkCount = 0;
+        var resizeCount = 0;
         var smallestScale = 1;
         for (var index = 0; index < 20; index++) {
             var current = measuredBounds(item);
             var width = Math.abs(Number(current[2]) - Number(current[0]));
             var height = Math.abs(Number(current[1]) - Number(current[3]));
-            if (width <= targetWidth && height <= targetHeight) break;
-            var scale = Math.min(targetWidth / width, targetHeight / height) * 0.98;
-            if (!isFinite(scale) || scale <= 0 || scale >= 1) break;
-            shrinkCount += 1;
-            smallestScale = Math.min(smallestScale, scale);
-            try { item.resize(scale * 100, scale * 100, true, true, true, true, 100, Transformation.CENTER); }
+            if (width <= 0 || height <= 0) break;
+            var scaleX = targetWidth / width;
+            var scaleY = targetHeight / height;
+            if (preserveComposition) {
+                if (width <= targetWidth && height <= targetHeight) break;
+                var proportionalScale = Math.min(scaleX, scaleY);
+                scaleX = proportionalScale;
+                scaleY = proportionalScale;
+            }
+            if (!isFinite(scaleX) || !isFinite(scaleY) || scaleX <= 0 || scaleY <= 0) break;
+            if (Math.abs(scaleX - 1) <= 0.001 && Math.abs(scaleY - 1) <= 0.001) break;
+            resizeCount += 1;
+            smallestScale = Math.min(smallestScale, Math.min(scaleX, scaleY));
+            try { item.resize(scaleX * 100, scaleY * 100, true, true, true, true, 100, Transformation.CENTER); }
             catch (resizeError1) {
-                try { item.resize(scale * 100, scale * 100); } catch (resizeError2) { break; }
+                try { item.resize(scaleX * 100, scaleY * 100); } catch (resizeError2) { break; }
             }
         }
         centerItemInBounds(item, bounds);
@@ -321,13 +330,13 @@
                 target_width: targetWidth,
                 target_height: targetHeight
             });
-        } else if (shrinkCount > 0 && smallestScale < 0.35) {
+        } else if (resizeCount > 0 && smallestScale < 0.35) {
             layoutWarnings.push({
                 code: "text_fit_extreme",
                 severity: "warning",
                 slot_key: String(action && action.slot_key || ""),
                 object_path: String(action && action.object_path || ""),
-                shrink_count: shrinkCount,
+                shrink_count: resizeCount,
                 min_scale: smallestScale,
                 target_width: targetWidth,
                 target_height: targetHeight
@@ -335,19 +344,48 @@
         }
     }
 
+    function shouldPreserveSlotComposition(slot, action) {
+        if (action && action.preserve_composition === true) return true;
+        return slotHasKeepRatioMarker(slot);
+    }
+
+    function slotHasKeepRatioMarker(slot) {
+        if (!slot || !slot.pageItems || !slot.pageItems.length) return false;
+        var children = slot.pageItems || [];
+        for (var index = 0; index < children.length; index++) {
+            if (hasKeepRatioMarker(children[index])) return true;
+        }
+        return false;
+    }
+
+    function hasKeepRatioMarker(item) {
+        if (!item) return false;
+        var name = normalizedName(item.name);
+        if (name === "keep_ratio" || name.indexOf("keep_ratio_") === 0) return true;
+        var children = item.pageItems || [];
+        for (var index = 0; index < children.length; index++) {
+            if (hasKeepRatioMarker(children[index])) return true;
+        }
+        return false;
+    }
+
+    function normalizedName(value) {
+        return String(value || "").replace(/^\s+|\s+$/g, "").toLowerCase();
+    }
+
     function fitPathTextWithinBounds(item, bounds, action, targetWidth, targetHeight) {
-        var shrinkCount = 0;
+        var resizeCount = 0;
         var smallestScale = 1;
         for (var index = 0; index < 20; index++) {
             var current = measuredBounds(item);
             var width = Math.abs(Number(current[2]) - Number(current[0]));
             var height = Math.abs(Number(current[1]) - Number(current[3]));
-            if (width <= targetWidth && height <= targetHeight) break;
-            var scale = Math.min(targetWidth / width, targetHeight / height) * 0.98;
-            if (!isFinite(scale) || scale <= 0 || scale >= 1) break;
+            if (width <= 0 || height <= 0) break;
+            var scale = Math.min(targetWidth / width, targetHeight / height);
+            if (!isFinite(scale) || scale <= 0 || Math.abs(scale - 1) <= 0.001) break;
             if (!scaleTextSize(item, scale)) break;
-            shrinkCount += 1;
-            smallestScale = Math.min(smallestScale, scale);
+            resizeCount += 1;
+            if (scale < 1) smallestScale = Math.min(smallestScale, scale);
         }
         var finalBounds = measuredBounds(item);
         var finalWidth = Math.abs(Number(finalBounds[2]) - Number(finalBounds[0]));
@@ -355,13 +393,13 @@
         if (finalWidth > targetWidth || finalHeight > targetHeight) {
             throw new Error("V2 path text exceeds anchor bounds: " + String(action && action.slot_key || ""));
         }
-        if (shrinkCount > 0 && smallestScale < 0.35) {
+        if (resizeCount > 0 && smallestScale < 0.35) {
             layoutWarnings.push({
                 code: "path_text_fit_extreme",
                 severity: "warning",
                 slot_key: String(action && action.slot_key || ""),
                 object_path: String(action && action.object_path || ""),
-                shrink_count: shrinkCount,
+                shrink_count: resizeCount,
                 min_scale: smallestScale,
                 target_width: targetWidth,
                 target_height: targetHeight
@@ -513,7 +551,8 @@
 
     function isAuxiliaryObject(item) {
         var name = String(item && item.name || "");
-        return name === "Assets" || name.indexOf("anchor_") === 0 || name.indexOf("size_") === 0 || name.indexOf("dimension_") === 0;
+        var normalized = normalizedName(name);
+        return normalized === "keep_ratio" || name === "Assets" || name.indexOf("anchor_") === 0 || name.indexOf("size_") === 0 || name.indexOf("dimension_") === 0;
     }
 
     function mmToPt(mm) {

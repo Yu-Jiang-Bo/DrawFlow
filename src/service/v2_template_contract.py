@@ -76,6 +76,7 @@ _SLOT_FIELDS = {
     "dimension_rule",
     "font_dependencies",
     "color_binding",
+    "preserve_composition",
 }
 _ASSET_FIELDS = {"asset_key", "slot", "supported_values", "component_key", "scope"}
 _TAIL_FIELDS = {"key", "position", "sample", "pua_base", "glyph_map"}
@@ -335,6 +336,7 @@ def _normalize_slot(value: Any, path: str, issues: list[Dict[str, str]]) -> Dict
         "dimension_rule": _normalize_dimension_rule(data.get("dimension_rule", {}), f"{path}.dimension_rule", issues),
         "font_dependencies": _string_list(data.get("font_dependencies", []), f"{path}.font_dependencies", issues),
         "color_binding": _optional_string(data, "color_binding", f"{path}.color_binding", issues),
+        "preserve_composition": bool(data.get("preserve_composition") is True),
     }
 
 

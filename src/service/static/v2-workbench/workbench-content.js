@@ -103,6 +103,7 @@
     row.dataset.option = optionKey;
     row.dataset.slotKey = slot.key;
     row.dataset.anchor = slot.anchor || "";
+    row.dataset.preserveComposition = slot.preserve_composition === true ? "true" : "false";
     row.__tailConfigs = normalizedTailConfigs(slot.tails);
     row.__colorBinding = safeIdentifier(slot.color_binding || "", "");
     const dimensions = objectOf(slot.dimension_rule);
@@ -194,7 +195,8 @@
       asset_key: safeIdentifier(rowValue(row, "slot-asset-key"), ""),
       dimension_rule: dimensionRuleFromValues(readonlyRawValue(row, "slot-width-mm"), readonlyRawValue(row, "slot-height-mm"), dimensionMode),
       font_dependencies: splitStringList(rowValue(row, "slot-font-dependencies")),
-      color_binding: colorBindingFromRow(row)
+      color_binding: colorBindingFromRow(row),
+      preserve_composition: row.dataset.preserveComposition === "true"
     };
   }
 
@@ -218,7 +220,8 @@
         asset_key: safeIdentifier(item.asset_key || inferredAssetKey(key, item), ""),
         dimension_rule: slotDimensionRule(item, optionContext, key),
         font_dependencies: Array.isArray(item.font_dependencies) ? item.font_dependencies.map(cleanText).filter(Boolean) : [],
-        color_binding: safeIdentifier(item.color_binding || "", "")
+        color_binding: safeIdentifier(item.color_binding || "", ""),
+        preserve_composition: item.preserve_composition === true
       };
     });
   }

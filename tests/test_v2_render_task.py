@@ -818,6 +818,21 @@ def test_keeps_design_and_font_same_slot_keys_on_distinct_paths():
     assert font_copy["source_only"] is True
 
 
+def test_carries_preserve_composition_from_scanned_keep_ratio_slot():
+    scan = scan_evidence()
+    scan["outputs"][0]["designs"][0]["slots"][0]["preserve_composition"] = True
+
+    task = compile_task(scan=scan)
+
+    design_slot = next(
+        action
+        for action in task["outputs"][0]["actions"]
+        if action["type"] == "replace_slot_text" and action["group"] == "design" and action["slot_key"] == "slot_name"
+    )
+
+    assert design_slot["preserve_composition"] is True
+
+
 def test_rejects_duplicate_scan_object_keys_in_same_scope():
     scan = scan_evidence()
     scan["outputs"][0]["fonts"][0]["slots"].append({"key": "slot_name", "path": "Template/other"})

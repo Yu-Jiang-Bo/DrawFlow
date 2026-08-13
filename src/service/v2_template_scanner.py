@@ -749,6 +749,7 @@ def _slot_record(item: Mapping[str, Any]) -> Dict[str, Any]:
         "text_kind": str(item.get("text_kind") or item.get("textKind") or ""),
         "font_dependencies": [font] if font else [],
         "preset": "path_text" if "path" in str(item.get("text_kind") or item.get("textKind") or "").lower() else "direct_text",
+        "preserve_composition": bool(item.get("preserve_composition") or item.get("preserveComposition")),
         **_geometry_facts(item),
     }
 

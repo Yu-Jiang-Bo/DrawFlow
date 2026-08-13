@@ -114,6 +114,19 @@ def test_normalizes_scan_with_stable_sorting_and_digest():
     assert a["evidence"]["scan_protocol_version"] == V2_SCAN_PROTOCOL_VERSION
 
 
+def test_normalizes_slot_keep_ratio_marker_for_composition_preservation():
+    items = valid_scan_items()
+    for item in items:
+        if item["path"] == "Template/Output_main/Design/Design03/slot_name":
+            item["preserve_composition"] = True
+            break
+
+    result = normalize_v2_template_scan(base_raw_scan(*items))
+
+    slot = result["outputs"][0]["design"]["options"][0]["slots"][0]
+    assert slot["preserve_composition"] is True
+
+
 def test_reports_missing_and_multiple_template_roots():
     missing = normalize_v2_template_scan(base_raw_scan(group("Template Copy", "Template Copy")))
     multiple = normalize_v2_template_scan(
@@ -731,7 +744,7 @@ function link(parent) {{
 }}
 const fixed = {{ typename: 'PathItem', name: '', filled: true, closed: true, pathPoints: [1], visibleBounds: [0, 10, 10, 0], opacity: 100 }};
 const design = group('Design03', [
-  text('slot_logo', TextType.PATHTEXT),
+  group('slot_logo', [text('slot_logo_text', TextType.PATHTEXT), pathItem('keep_ratio_heart', {{ typename: 'RGBColor', red: 0, green: 0, blue: 0 }})]),
   text(' slot_LOGO ', TextType.POINTTEXT),
   group('Assets', [group('logo', [group('A', [])])]),
   fixed
@@ -769,6 +782,7 @@ if (scan.status !== 'blocked') throw new Error('duplicate slot should block');
 if (option.fixed_object_count !== 1) throw new Error('fixed object count lost');
 if (scan.items.some(item => item.name === '' || item.layer_path.indexOf('/PathItem') >= 0)) throw new Error('fixed object leaked into items');
 if (!option.slots.some(slot => slot.text && slot.text.text_kind === 'path_text')) throw new Error('path text not detected');
+if (!option.slots.some(slot => slot.preserve_composition === true)) throw new Error('keep ratio marker not detected');
 if (scan.colors[0].fill_color.space !== 'RGB') throw new Error('RGB color not scanned');
 if (!scan.issues.some(issue => issue.code === 'slot_duplicate')) throw new Error('duplicate slot issue missing');
 console.log(NativeJSON.stringify({{ status: scan.status, fixed: option.fixed_object_count, colors: scan.colors.length }}));
