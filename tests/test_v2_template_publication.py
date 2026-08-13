@@ -2,6 +2,7 @@ import hashlib
 import json
 from http import HTTPStatus
 
+from src.service.http_server import _content_disposition, _safe_download_name
 from src.service.v2_template_api import handle_v2_template_api
 from tests.test_v2_template_api import FakeHandler
 from tests.v2_publication_support import (
@@ -117,3 +118,13 @@ def test_draft_template_asset_download_is_manifest_bound(tmp_path):
     )
     assert bad_handler.sent[-1][1] == HTTPStatus.NOT_FOUND
     assert not bad_handler.sent_files
+
+
+def test_v2_asset_download_header_supports_non_ascii_file_names():
+    header = _content_disposition("attachment", "5-3纯设计模板.ai")
+
+    assert _safe_download_name("5-3纯设计模板.ai").endswith(".ai")
+    assert all(ord(char) < 128 for char in _safe_download_name("5-3纯设计模板.ai"))
+    assert 'filename="' in header
+    assert "filename*=UTF-8''5-3%E7%BA%AF%E8%AE%BE%E8%AE%A1%E6%A8%A1%E6%9D%BF.ai" in header
+    header.encode("latin-1")

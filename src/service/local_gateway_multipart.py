@@ -127,7 +127,7 @@ def is_v2_asset_upload(path: str) -> bool:
 
 def safe_download_name(value: str) -> str:
     chars = [
-        char if char.isalnum() or char in {"-", "_", "."} else "_"
+        char if char.isascii() and (char.isalnum() or char in {"-", "_", "."}) else "_"
         for char in Path(value).name
     ]
     return "".join(chars).strip("._") or "file"

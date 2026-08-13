@@ -9,6 +9,7 @@ import pytest
 from src.service import local_gateway
 from src.service.job_store import JobStore
 from src.service.local_client import LocalClientError
+from src.service.local_gateway_multipart import safe_download_name
 
 
 def run_server(handler):
@@ -70,6 +71,13 @@ def test_gateway_runs_trial_and_serves_registered_preview(tmp_path):
     )
     assert image == b"png-bytes"
     assert disposition.startswith("inline;")
+
+
+def test_gateway_safe_download_name_is_ascii_for_non_ascii_names():
+    name = safe_download_name("5-3纯设计模板.ai")
+
+    assert name.endswith(".ai")
+    assert all(ord(char) < 128 for char in name)
 
 
 def test_gateway_hides_disk_path_for_missing_preview(tmp_path):

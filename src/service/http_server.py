@@ -14,7 +14,7 @@ from email.parser import BytesParser
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import unquote, urlparse
+from urllib.parse import quote, unquote, urlparse
 
 from .job_store import JobStore
 from .llm_rule_parser import LlmRuleParser
@@ -1415,7 +1415,7 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
         download_name = _safe_download_name(f"{template.template_id}.ai")
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", "application/octet-stream")
-        self.send_header("Content-Disposition", f'attachment; filename="{download_name}"')
+        self.send_header("Content-Disposition", _content_disposition("attachment", download_name))
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
         self.wfile.write(data)
@@ -1435,7 +1435,7 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
         download_name = _safe_download_name(str(asset.get("file_name") or asset_path.name))
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", "application/octet-stream")
-        self.send_header("Content-Disposition", f'attachment; filename="{download_name}"')
+        self.send_header("Content-Disposition", _content_disposition("attachment", download_name))
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
         self.wfile.write(data)
@@ -1459,7 +1459,7 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
     ) -> None:
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", content_type)
-        self.send_header("Content-Disposition", f'attachment; filename="{_safe_download_name(download_name)}"')
+        self.send_header("Content-Disposition", _content_disposition("attachment", download_name))
         for key, value in (extra_headers or {}).items():
             self.send_header(key, str(value))
         self.send_header("Content-Length", str(path.stat().st_size))
@@ -1498,7 +1498,7 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
         content_type = "application/zip" if output_path.suffix.lower() == ".zip" else "application/octet-stream"
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", content_type)
-        self.send_header("Content-Disposition", f'attachment; filename="{_safe_download_name(output_path.name)}"')
+        self.send_header("Content-Disposition", _content_disposition("attachment", output_path.name))
         self.send_header("Content-Length", str(output_path.stat().st_size))
         self.end_headers()
         with output_path.open("rb") as source:
@@ -1578,12 +1578,18 @@ def parse_args() -> argparse.Namespace:
 def _safe_download_name(value: str) -> str:
     chars = []
     for char in Path(value).name:
-        if char.isalnum() or char in {"-", "_", "."}:
+        if char.isascii() and (char.isalnum() or char in {"-", "_", "."}):
             chars.append(char)
         else:
             chars.append("_")
     name = "".join(chars).strip("._")
     return name or "file"
+
+
+def _content_disposition(disposition: str, download_name: str) -> str:
+    fallback = _safe_download_name(download_name)
+    utf8_name = quote(Path(download_name or fallback).name or fallback, safe="")
+    return f'{disposition}; filename="{fallback}"; filename*=UTF-8\'\'{utf8_name}'
 
 
 def _safe_static_name(value: str) -> str:
