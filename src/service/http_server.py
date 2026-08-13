@@ -1575,6 +1575,11 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def _should_prepare_legacy_runtime_templates() -> bool:
+    value = os.environ.get("DRAWFLOW_PREPARE_LEGACY_TEMPLATES", "")
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _safe_download_name(value: str) -> str:
     chars = []
     for char in Path(value).name:
@@ -1673,13 +1678,15 @@ def _design_asset_count(assets: object) -> int:
 def main() -> int:
     args = parse_args()
     handler = CentralRequestHandler if args.role == "central" else RenderRequestHandler
-    if args.role == "central":
+    if args.role == "central" and _should_prepare_legacy_runtime_templates():
         prepared = handler.runtime_templates.ensure_active_registry_versions()
         summary = ", ".join(
             f"{item['template_id']}={item['version']}({item['action']})"
             for item in prepared
         )
         print(f"DrawFlow runtime templates ready: {summary or 'none'}")
+    elif args.role == "central":
+        print("DrawFlow legacy runtime template startup check skipped")
     server = ExclusiveThreadingHTTPServer((args.host, args.port), handler)
     print(f"DrawFlow listening on http://{args.host}:{args.port}")
     server.serve_forever()
