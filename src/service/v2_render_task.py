@@ -68,8 +68,9 @@ def compile_v2_render_task(
 
     normalized_font_check = _normalize_font_check(font_check)
     scan_index = _build_scan_index(scan)
+    field_bindings = dict(contract.get("field_bindings") or {})
     outputs = [
-        _compile_output(output, scan_index, index)
+        _compile_output(output, scan_index, index, field_bindings)
         for index, output in enumerate(contract["outputs"], start=1)
     ]
     task = {
@@ -114,7 +115,12 @@ def _normalize_contract(config: Mapping[str, Any]) -> dict[str, Any]:
         raise V2RenderTaskError("config_contract_invalid", message or "V2 配置契约无效。") from exc
 
 
-def _compile_output(output: Mapping[str, Any], scan_index: Mapping[tuple[str, ...], Mapping[str, Any]], order: int) -> dict[str, Any]:
+def _compile_output(
+    output: Mapping[str, Any],
+    scan_index: Mapping[tuple[str, ...], Mapping[str, Any]],
+    order: int,
+    field_bindings: Mapping[str, Any],
+) -> dict[str, Any]:
     output_key = str(output.get("key") or "")
     output_scan = _scan_ref(scan_index, ("output", output_key), f"$.outputs.{output_key}")
     font_style_sources = _font_style_sources(output_key, output, scan_index)
@@ -153,7 +159,7 @@ def _compile_output(output: Mapping[str, Any], scan_index: Mapping[tuple[str, ..
                     **copy_action,
                 )
             )
-            actions.extend(_slot_actions(output_key, group, dict(option), option_scan, scan_index, font_style_sources))
+            actions.extend(_slot_actions(output_key, group, dict(option), option_scan, scan_index, font_style_sources, field_bindings))
             actions.extend(_asset_actions(output_key, group, dict(option), scan_index))
     return {
         "key": output_key,
@@ -170,6 +176,7 @@ def _slot_actions(
     option_scan: Mapping[str, Any],
     scan_index: Mapping[tuple[str, ...], Mapping[str, Any]],
     font_style_sources: Mapping[str, Mapping[str, str]],
+    field_bindings: Mapping[str, Any],
 ) -> list[dict[str, Any]]:
     actions = []
     option_key = str(option.get("key") or "")
@@ -187,8 +194,9 @@ def _slot_actions(
         source_field = str(slot_data.get("source_field") or "")
         source_part_index = 0
         if preset == "split_by_pipe":
-            source_part_index = split_source_counts.get(source_field, 0)
-            split_source_counts[source_field] = source_part_index + 1
+            split_key = _split_source_key(source_field, field_bindings)
+            source_part_index = split_source_counts.get(split_key, 0)
+            split_source_counts[split_key] = source_part_index + 1
         anchor_path = _path_by_key(
             option_scan.get("anchors", []),
             anchor_key,
@@ -243,6 +251,11 @@ def _slot_actions(
             }
         actions.append(_action("replace_slot_text", **action))
     return actions
+
+
+def _split_source_key(source_field: str, field_bindings: Mapping[str, Any]) -> str:
+    bound_header = str(field_bindings.get(source_field) or "").strip()
+    return (bound_header or source_field).casefold()
 
 
 def _asset_actions(

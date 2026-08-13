@@ -616,7 +616,7 @@
     };
     const presetPredicates = {
       multi_initials_asset_preset_missing: (slot) => cleanText(slot.asset_key) && cleanText(slot.preset) !== "asset_replace",
-      mixed_slots_preset_invalid: (slot) => !["direct_text", "tail_text", "path_text"].includes(cleanText(slot.preset)),
+      mixed_slots_preset_invalid: (slot) => !["direct_text", "tail_text", "path_text", "split_by_pipe"].includes(cleanText(slot.preset)),
       split_by_pipe_slot_preset_invalid: (slot) => cleanText(slot.preset) !== "split_by_pipe"
     };
     const field = Object.prototype.hasOwnProperty.call(sourcePredicates, code) ? "slot-source-field"

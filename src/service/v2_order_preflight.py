@@ -200,13 +200,28 @@ def _check_required_slot_values(
                         expected_format=f"请填写 {header}。",
                     )
                 )
-        if str(option.get("content_preset") or "") == "split_by_pipe":
+        option_preset = str(option.get("content_preset") or "")
+        split_slots = [slot for slot in slots if str(slot.get("preset") or "") == "split_by_pipe"]
+        if option_preset == "split_by_pipe":
             check_split_by_pipe_values(
                 contract,
                 output,
                 option,
                 group_name,
                 slots,
+                row,
+                row_index,
+                order_id,
+                output_path,
+                issues,
+            )
+        elif option_preset == "mixed_slots" and split_slots:
+            check_split_by_pipe_values(
+                contract,
+                output,
+                option,
+                group_name,
+                split_slots,
                 row,
                 row_index,
                 order_id,

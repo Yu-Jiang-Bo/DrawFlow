@@ -1750,7 +1750,8 @@ def test_v2_workbench_locks_mixed_summary_and_preserves_name1_name2_contract():
           assert.strictEqual(lowerSource.focused, true);
 
           latest.outputs[0].design.options[0].slots[0].source_field = "name1";
-          latest.outputs[0].design.options[0].slots[0].preset = "split_by_pipe";
+          latest.outputs[0].design.options[0].slots[0].preset = "asset_replace";
+          latest.outputs[0].design.options[0].slots[0].asset_key = "initial";
           global.DrawFlowV2WorkbenchContext.state.lastValidatedConfig = latest;
           global.updateBlockers({
             can_publish: false,

@@ -23,11 +23,12 @@ def collect_content_validation_issues(contract: Mapping[str, Any]) -> list[Dict[
         has_font = bool(list_value(mapping(output.get("font")).get("options")))
         for group_name in ("design", "font"):
             for option_index, option in enumerate(list_value(mapping(output.get(group_name)).get("options"))):
-                _validate_content_option(output_index, group_name, option_index, mapping(option), has_design, has_font, issues)
+                _validate_content_option(contract, output_index, group_name, option_index, mapping(option), has_design, has_font, issues)
     return issues
 
 
 def _validate_content_option(
+    contract: Mapping[str, Any],
     output_index: int,
     group_name: str,
     option_index: int,
@@ -46,12 +47,13 @@ def _validate_content_option(
         add_issue(issues, option_path + ".content_preset", "content", V2_STATUS_BLOCKED, "content_preset_invalid", "不支持的内容处理方式，请重新选择。")
     if declared_preset and declared_preset not in V2_SELECTABLE_OPTION_CONTENT_PRESETS:
         add_issue(issues, option_path + ".content_preset", "content", V2_STATUS_BLOCKED, "option_preset_invalid", "素材替换仅用于素材槽位，不能作为选项级处理方式。")
-    _validate_preset_requirements(active_preset, slots, option_path, has_design, has_font, issues)
+    _validate_preset_requirements(contract, active_preset, slots, option_path, has_design, has_font, issues)
     if slots and not option_has_font_evidence(option):
         add_issue(issues, option_path + ".font_dependencies", "content", V2_STATUS_PENDING, "font_dependency_pending", "字体依赖扫描值还没有确认。")
 
 
 def _validate_preset_requirements(
+    contract: Mapping[str, Any],
     active_preset: str,
     slots: list[Mapping[str, Any]],
     option_path: str,
@@ -62,7 +64,7 @@ def _validate_preset_requirements(
     if active_preset == "direct_text":
         _require_direct_text(slots, option_path, issues)
     if active_preset == "split_by_pipe":
-        _require_split_by_pipe(slots, option_path, issues)
+        _require_split_by_pipe(contract, slots, option_path, issues)
     if active_preset == "initial_with_text":
         _require_initial_with_text(slots, option_path, issues)
     if active_preset == "multi_initials":
@@ -152,9 +154,9 @@ def _require_mixed_slots(slots: list[Mapping[str, Any]], option_path: str, issue
         return
     if any(not slot.get("source_field") for slot in slots):
         add_issue(issues, option_path + ".slots", "content", V2_STATUS_BLOCKED, "mixed_slots_source_missing", "按槽位分别处理的每个槽位都必须绑定订单字段。")
-    allowed = {"direct_text", "tail_text", "path_text"}
+    allowed = {"direct_text", "tail_text", "path_text", "split_by_pipe"}
     if any(str(slot.get("preset") or "") not in allowed or slot.get("asset_key") for slot in slots):
-        add_issue(issues, option_path + ".slots", "content", V2_STATUS_BLOCKED, "mixed_slots_preset_invalid", "按槽位分别处理只能组合替换文本、尾巴文字或路径文字，不得混用素材或按 | 拆分。")
+        add_issue(issues, option_path + ".slots", "content", V2_STATUS_BLOCKED, "mixed_slots_preset_invalid", "按槽位分别处理只能组合替换文本、尾巴文字、路径文字或按 | 顺序拆分，不得混用素材。")
     for slot_index, slot in enumerate(slots):
         if str(slot.get("preset") or "") != "tail_text":
             continue
@@ -173,12 +175,20 @@ def _require_mixed_slots(slots: list[Mapping[str, Any]], option_path: str, issue
                 )
 
 
-def _require_split_by_pipe(slots: list[Mapping[str, Any]], option_path: str, issues: list[Dict[str, str]]) -> None:
-    sources = {str(slot.get("source_field") or "") for slot in slots}
+def _require_split_by_pipe(contract: Mapping[str, Any], slots: list[Mapping[str, Any]], option_path: str, issues: list[Dict[str, str]]) -> None:
+    sources = {_bound_source_key(contract, str(slot.get("source_field") or "")) for slot in slots}
     if len(slots) < 2 or len(sources) != 1 or "" in sources:
         add_issue(issues, option_path + ".content_preset", "content", V2_STATUS_BLOCKED, "split_by_pipe_requires_ordered_slots", "按 | 顺序拆槽必须配置至少两个同一订单字段来源的有序槽位。")
     if any(str(slot.get("preset") or "") != "split_by_pipe" or slot.get("asset_key") for slot in slots):
         add_issue(issues, option_path + ".slots", "content", V2_STATUS_BLOCKED, "split_by_pipe_slot_preset_invalid", "按 | 顺序拆分只能使用替换文本槽位，不得混用素材或路径文字。")
+
+
+def _bound_source_key(contract: Mapping[str, Any], source_field: str) -> str:
+    field = source_field.strip()
+    if not field:
+        return ""
+    bound_header = str(mapping(contract.get("field_bindings")).get(field) or "").strip()
+    return (bound_header or field).casefold()
 
 
 def _require_path_text(slots: list[Mapping[str, Any]], option_path: str, issues: list[Dict[str, str]]) -> None:

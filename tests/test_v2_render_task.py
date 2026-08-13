@@ -377,6 +377,35 @@ def test_compiles_split_by_pipe_slots_with_ordered_source_part_indices():
     ]
 
 
+def test_compiles_split_by_pipe_alias_slots_by_bound_order_header():
+    config = render_config()
+    config["field_bindings"].update({"name1": "Name", "name2": "Name"})
+    design = config["outputs"][0]["design"]["options"][0]
+    design["content_preset"] = "mixed_slots"
+    design["assets"] = []
+    design["slots"] = [
+        {"key": "slot_name1", "source_field": "name1", "preset": "split_by_pipe"},
+        {"key": "slot_name2", "source_field": "name2", "preset": "split_by_pipe"},
+    ]
+    scan = scan_evidence()
+    scan["outputs"][0]["designs"][0]["slots"] = [
+        {"key": "slot_name1", "path": "Template/Output_main/Design/Design03/slot_name1"},
+        {"key": "slot_name2", "path": "Template/Output_main/Design/Design03/slot_name2"},
+    ]
+
+    task = compile_task(config=config, scan=scan)
+
+    actions = [
+        action
+        for action in task["outputs"][0]["actions"]
+        if action["type"] == "replace_slot_text" and action["group"] == "design"
+    ]
+    assert [(action["slot_key"], action["source_field"], action["source_part_index"]) for action in actions] == [
+        ("slot_name1", "name1", 0),
+        ("slot_name2", "name2", 1),
+    ]
+
+
 def test_compiles_split_by_pipe_task_from_workbench_controlled_config():
     config = _workbench_split_config()
     config["audit"]["template_sha256"] = TEMPLATE_SHA

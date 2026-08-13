@@ -20,12 +20,12 @@ def check_split_by_pipe_values(
     issues: list[Dict[str, Any]],
 ) -> None:
     bindings = dict(contract.get("field_bindings") or {})
-    fields = sorted({str(slot.get("source_field") or "").strip() for slot in slots} - {""})
+    fields = sorted({_bound_source_key(bindings, str(slot.get("source_field") or "")) for slot in slots} - {""})
     for field in fields:
-        field_slots = [slot for slot in slots if str(slot.get("source_field") or "").strip() == field]
+        field_slots = [slot for slot in slots if _bound_source_key(bindings, str(slot.get("source_field") or "")) == field]
         required_count = sum(1 for slot in field_slots if slot.get("required", True))
         total_count = len(field_slots)
-        header = str(bindings.get(field) or field).strip()
+        header = _bound_header(bindings, field_slots[0])
         value = _cell(row, header)
         if not value:
             continue
@@ -67,6 +67,18 @@ def check_split_by_pipe_values(
 def _cell(row: Mapping[str, Any], key: str) -> str:
     value = row.get(key, "")
     return str(value).strip() if value is not None else ""
+
+
+def _bound_header(bindings: Mapping[str, Any], slot: Mapping[str, Any]) -> str:
+    field = str(slot.get("source_field") or "").strip()
+    return str(bindings.get(field) or field).strip()
+
+
+def _bound_source_key(bindings: Mapping[str, Any], source_field: str) -> str:
+    field = source_field.strip()
+    if not field:
+        return ""
+    return str(bindings.get(field) or field).strip().casefold()
 
 
 __all__ = ["check_split_by_pipe_values"]

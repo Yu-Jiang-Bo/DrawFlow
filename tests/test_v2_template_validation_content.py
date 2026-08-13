@@ -64,6 +64,20 @@ def test_mixed_slots_allows_independent_name_tail_and_title_text():
     assert result["issues"] == []
 
 
+def test_mixed_slots_allows_split_by_pipe_slot_primitives():
+    payload = _mixed_slots_payload()
+    payload["field_bindings"].update({"name1": "Name", "name2": "Name"})
+    payload["outputs"][0]["design"]["options"][0]["slots"] = [
+        {"key": "slot_name1", "source_field": "name1", "preset": "split_by_pipe", "dimension_rule": {"mode": "slot", "tolerance_mm": 0.007}, "font_dependencies": ["Milkshake"]},
+        {"key": "slot_name2", "source_field": "name2", "preset": "split_by_pipe", "dimension_rule": {"mode": "slot", "tolerance_mm": 0.007}, "font_dependencies": ["Milkshake"]},
+    ]
+
+    result = validate_v2_template_configuration(payload)
+
+    assert result["can_publish"] is True
+    assert result["issues"] == []
+
+
 def test_mixed_slots_requires_each_slot_source_and_tail_proof_when_selected():
     missing_source = _mixed_slots_payload()
     missing_source["outputs"][0]["design"]["options"][0]["slots"][1].pop("source_field")
@@ -149,6 +163,22 @@ def test_split_by_pipe_rejects_name1_and_name2_as_separate_order_sources():
 
     assert result["can_publish"] is False
     assert _has_issue(result, "split_by_pipe_requires_ordered_slots", "同一订单字段来源")
+
+
+def test_split_by_pipe_accepts_alias_fields_bound_to_same_order_source():
+    payload = complete_contract()
+    option = payload["outputs"][0]["font"]["options"][0]
+    option["content_preset"] = "split_by_pipe"
+    option["slots"] = [
+        {"key": "slot_name1", "source_field": "name1", "preset": "split_by_pipe", "dimension_rule": {"mode": "slot", "tolerance_mm": 0.007}, "font_dependencies": ["Milkshake"]},
+        {"key": "slot_name2", "source_field": "name2", "preset": "split_by_pipe", "dimension_rule": {"mode": "slot", "tolerance_mm": 0.007}, "font_dependencies": ["Milkshake"]},
+    ]
+    payload["field_bindings"].update({"name1": "Name", "name2": "Name"})
+
+    result = validate_v2_template_configuration(payload)
+
+    assert result["can_publish"] is True
+    assert result["issues"] == []
 
 
 def test_content_blocker_reasons_do_not_expose_internal_processing_names():
