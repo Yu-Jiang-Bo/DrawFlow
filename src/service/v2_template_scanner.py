@@ -642,7 +642,7 @@ def _valid_option_name(kind: str, name: str, issues: list[Dict[str, Any]], scope
 
 
 def _template_roots(items: Iterable[Dict[str, Any]]) -> list[Dict[str, Any]]:
-    return _sort_items([item for item in items if _norm(item["name"]) == "template" and _is_group(item)])
+    return _sort_items([item for item in items if _norm(item["name"]) == "template" and _is_real_group(item)])
 
 
 def _controlled_items(items: list[Dict[str, Any]], root_path: str) -> list[Dict[str, Any]]:
@@ -683,6 +683,10 @@ def _norm(value: str) -> str:
 
 def _is_group(item: Mapping[str, Any]) -> bool:
     return str(item.get("type") or "").strip().lower() in _GROUP_TYPES
+
+
+def _is_real_group(item: Mapping[str, Any]) -> bool:
+    return str(item.get("type") or "").strip().lower() in {"group", "groupitem"}
 
 
 def _is_output_name(value: str) -> bool:

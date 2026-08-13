@@ -20,6 +20,10 @@ def group(path, name=None, **extra):
     return {"type": "GroupItem", "name": name or Path(path).name, "path": path, **extra}
 
 
+def layer(path, name=None, **extra):
+    return {"type": "Layer", "name": name or Path(path).name, "path": path, **extra}
+
+
 def text(path, name=None, **extra):
     return {
         "type": "TextFrame",
@@ -112,6 +116,25 @@ def test_normalizes_scan_with_stable_sorting_and_digest():
     assert a["outputs"][0]["design"]["options"][0]["slots"][0]["key"] == "slot_name"
     assert a["evidence"]["object_path_digest"] == b["evidence"]["object_path_digest"]
     assert a["evidence"]["scan_protocol_version"] == V2_SCAN_PROTOCOL_VERSION
+
+
+def test_template_named_layer_does_not_count_as_duplicate_root():
+    items = [
+        layer("Template", "Template"),
+        group("Template/Template", "Template"),
+        group("Template/Template/Output_main", "Output_main"),
+        group("Template/Template/Output_main/Font", "Font"),
+        group("Template/Template/Output_main/Font/F1", "F1"),
+        text("Template/Template/Output_main/Font/F1/slot_name", "slot_name"),
+    ]
+
+    result = normalize_v2_template_scan(base_raw_scan(*items))
+
+    assert "template_root_multiple" not in issue_codes(result)
+    assert result["blocked"] is False
+    assert result["outputs"][0]["key"] == "Output_main"
+    assert result["outputs"][0]["fonts"][0]["key"] == "F1"
+    assert result["outputs"][0]["fonts"][0]["slots"][0]["key"] == "slot_name"
 
 
 def test_normalizes_slot_keep_ratio_marker_for_composition_preservation():
