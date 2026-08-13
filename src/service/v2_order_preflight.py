@@ -225,15 +225,33 @@ def _mapped_target(
     value = source_value.strip()
     if not value:
         return ""
+    field_aliases = _field_aliases(contract, field)
     for item in contract.get("option_mappings") or []:
         if (
             item.get("output") == output
             and item.get("group") == group
-            and item.get("field") == field
+            and _matches_field_alias(item.get("field"), field_aliases)
             and item.get("source_value") == value
         ):
             return str(item.get("target") or "")
     return value
+
+
+def _field_aliases(contract: Mapping[str, Any], field: str) -> set[str]:
+    normalized = str(field or "").strip()
+    aliases = {normalized} if normalized else set()
+    bound_header = str(dict(contract.get("field_bindings") or {}).get(normalized) or "").strip()
+    if bound_header:
+        aliases.add(bound_header)
+    return aliases
+
+
+def _matches_field_alias(raw_field: Any, aliases: set[str]) -> bool:
+    candidate = str(raw_field or "").strip()
+    if candidate in aliases:
+        return True
+    folded_aliases = {item.casefold() for item in aliases if item}
+    return bool(candidate and candidate.casefold() in folded_aliases)
 
 
 def _known_color(contract: Mapping[str, Any], output: str, source_value: str) -> bool:

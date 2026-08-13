@@ -33,6 +33,23 @@ def test_v2_order_preflight_accepts_bound_headers_and_mapped_options():
     ]
 
 
+def test_v2_order_preflight_accepts_option_mapping_saved_with_order_header_name():
+    config = complete_contract()
+    config["outputs"][0]["design"]["options"][0]["key"] = "Design01"
+    config["option_mappings"] = [
+        {"field": "style", "source_value": "small", "target": "style1", "output": "Output_main", "group": "style"},
+        {"field": "Design", "source_value": "D1", "target": "Design01", "output": "Output_main", "group": "design"},
+        {"field": "font", "source_value": "F1", "target": "F1", "output": "Output_main", "group": "font"},
+    ]
+    rows = [dict(valid_rows()[0], Design="D1")]
+
+    result = preflight_v2_order_rows(config, rows)
+
+    assert result["ok"] is True
+    assert result["issues"] == []
+    assert result["preflight_rows"][0]["outputs"][0]["design"] == "Design01"
+
+
 def test_v2_order_preflight_reports_missing_real_order_headers():
     rows = [dict(valid_rows()[0])]
     rows[0].pop("Name")
