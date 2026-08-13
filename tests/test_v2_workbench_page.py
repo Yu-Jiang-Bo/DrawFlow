@@ -1,5 +1,9 @@
+import threading
+import urllib.request
+from http.server import ThreadingHTTPServer
 from pathlib import Path
 
+from src.service import http_server
 from src.service.v2_workbench_page import INDEX_HTML
 
 
@@ -21,6 +25,15 @@ JS = "\n".join(
         "workbench-option-rules.js",
         "workbench-rule-evidence.js",
         "workbench-stage-view.js",
+        "workbench-preview-state.js",
+        "workbench-preview-versions.js",
+        "workbench-preview.js",
+        "workbench-preview-actions.js",
+        "workbench-view-tables.js",
+        "workbench-validation-checks.js",
+        "workbench-validation-targets.js",
+        "workbench-validation-navigation.js",
+        "workbench-validation-blockers.js",
         "workbench-view.js",
         "workbench-structure-tree.js",
         "workbench-draft-actions.js",
@@ -106,6 +119,12 @@ def test_v2_workbench_page_exposes_independent_entry_contract():
     assert 'src="/static/v2-workbench/workbench-option-rules.js"' in INDEX_HTML
     assert 'src="/static/v2-workbench/workbench-rule-evidence.js"' in INDEX_HTML
     assert 'src="/static/v2-workbench/workbench-stage-view.js"' in INDEX_HTML
+    assert 'src="/static/v2-workbench/workbench-preview-state.js"' in INDEX_HTML
+    assert 'src="/static/v2-workbench/workbench-preview-versions.js"' in INDEX_HTML
+    assert 'src="/static/v2-workbench/workbench-preview.js"' in INDEX_HTML
+    assert 'src="/static/v2-workbench/workbench-preview-actions.js"' in INDEX_HTML
+    assert 'src="/static/v2-workbench/workbench-view-tables.js"' in INDEX_HTML
+    assert 'src="/static/v2-workbench/workbench-validation-blockers.js"' in INDEX_HTML
     assert 'src="/static/v2-workbench/workbench-view.js"' in INDEX_HTML
     assert 'src="/static/v2-workbench/workbench-structure-tree.js"' in INDEX_HTML
     assert 'class="v2-shell" id="v2WorkbenchApp" data-workbench-stage="upload"' in INDEX_HTML
@@ -178,9 +197,17 @@ def test_v2_workbench_has_preview_publish_and_preflight_contract():
         "previewSampleRows",
         "previewSideTabs",
         "previewArtworkPane",
+        "previewRuntimeBadge",
+        "previewTrialStatus",
+        "previewWarningList",
         "rerunTrialRenderBtn",
         "previewValidationRows",
+        "previewValidationStatus",
         "versionPublishPanel",
+        "versionPublishStatus",
+        "draftVersionSummary",
+        "currentVersionSummary",
+        "rollbackVersionSummary",
         "publishNotes",
         "preflightFailedOverlay",
         "preflightFailedTitle",
@@ -195,12 +222,38 @@ def test_v2_workbench_has_preview_publish_and_preflight_contract():
     assert "closePreflightFailure" in JS
     assert '#v2WorkbenchApp[data-workbench-stage="preview"] .workspace-grid' in STAGE_CSS
     assert ".preflight-dialog" in CSS
+    assert "`/local/v2/templates/${" in JS
+    assert "/publication-check`" in JS
+    assert "/versions`" in JS
+    assert "/publish`" in JS
+    assert "expected_draft_revision" in JS
+    assert "sample_row" in JS
+
+
+def test_v2_workbench_preview_contains_no_fake_sample_or_publication_success():
+    combined = INDEX_HTML + "\n" + JS
+    for fake in [
+        "AHERN YERR",
+        "Ahern|Yerr",
+        "BEST DAD",
+        "满足发布条件 8/8",
+        "v4 · 待发布",
+        "v3 · 2026-08-01",
+        "外部设计</button><button",
+        "内部文字</button>",
+        "发布接口未接入",
+        "试渲染接口未就绪",
+    ]:
+        assert fake not in combined
+    assert "previewFieldDescriptors" in JS
+    assert "trial.outputs" in JS
+    assert "input.dataset.sampleHeader" in JS
 
 
 def test_v2_workbench_uses_controlled_business_inputs():
     assert 'type="file" accept=".ai"' in INDEX_HTML
     assert "Output_main" in INDEX_HTML
-    assert "Design03" in INDEX_HTML
+    assert 'placeholder="Design08 或 F2"' in INDEX_HTML
     assert "fontOptionsFor" in JS
     assert "字段绑定" in INDEX_HTML
     assert "订单原值映射" in INDEX_HTML
@@ -266,7 +319,9 @@ def test_v2_workbench_static_styles_cover_desktop_layout_and_states():
 
 
 def test_v2_workbench_routes_are_isolated_from_legacy_page():
-    assert "from .v2_workbench_page import INDEX_HTML as V2_WORKBENCH_HTML" in SERVER
+    assert "self._send_html(_v2_workbench_html())" in SERVER
+    assert "def _v2_workbench_html()" in SERVER
+    assert '"v2_workbench_page_head.py"' in SERVER
     assert 'path == "/v2/templates/workbench"' in SERVER
     assert 'path.startswith("/static/v2-workbench/")' in SERVER
     assert '"workbench-scan-actions.js"' in SERVER
@@ -276,8 +331,41 @@ def test_v2_workbench_routes_are_isolated_from_legacy_page():
     assert '"workbench-rule-evidence.js"' in SERVER
     assert '"workbench-stages.css"' in SERVER
     assert '"workbench-stage-view.js"' in SERVER
+    assert '"workbench-preview-state.js"' in SERVER
+    assert '"workbench-preview-versions.js"' in SERVER
+    assert '"workbench-preview.js"' in SERVER
+    assert '"workbench-preview-actions.js"' in SERVER
+    assert '"workbench-view-tables.js"' in SERVER
+    assert '"workbench-validation-blockers.js"' in SERVER
     assert '"workbench-structure-tree.js"' in SERVER
     assert "self._send_html(WORKBENCH_HTML)" in SERVER
+
+
+def test_v2_workbench_http_manifest_refreshes_without_module_cache(monkeypatch):
+    version = {"value": "first"}
+
+    def read_fragment(filename):
+        return f"<script src=\"/static/v2-workbench/{version['value']}-{filename}\" defer></script>"
+
+    monkeypatch.setattr(http_server, "_read_v2_workbench_page_fragment", read_fragment)
+    server = ThreadingHTTPServer(("127.0.0.1", 0), http_server.RenderRequestHandler)
+    worker = threading.Thread(target=server.serve_forever, daemon=True)
+    worker.start()
+    try:
+        base_url = f"http://127.0.0.1:{server.server_address[1]}"
+        with urllib.request.urlopen(f"{base_url}/v2/templates/workbench") as response:
+            first = response.read().decode("utf-8")
+        version["value"] = "second"
+        with urllib.request.urlopen(f"{base_url}/v2/templates/workbench") as response:
+            second = response.read().decode("utf-8")
+    finally:
+        server.shutdown()
+        server.server_close()
+        worker.join(timeout=2)
+
+    assert "first-v2_workbench_page_head.py" in first
+    assert "second-v2_workbench_page_head.py" not in first
+    assert "second-v2_workbench_page_head.py" in second
 
 
 def test_v2_workbench_marks_and_locates_publish_blockers():

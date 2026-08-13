@@ -339,27 +339,24 @@ th { color: var(--v2-muted); background: #f7f9fc; font-size: 12px; font-weight: 
 }
 .version-publish-panel { grid-column: 1 / -1; }
 .preview-sample-grid {
-  display: grid; grid-template-columns: repeat(6, minmax(86px, 1fr)); gap: 8px; min-width: 0;
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; min-width: 0;
   padding: 10px 12px; border: 1px solid var(--v2-border); border-radius: 5px; background: #f7f9fc;
 }
 .preview-sample-cell span { display: block; color: var(--v2-muted); font-size: 11px; }
-.preview-sample-cell strong { display: block; margin-top: 2px; }
+.preview-sample-cell input { width: 100%; margin-top: 5px; }
 .preview-side-tabs { display: flex; gap: 8px; margin: 14px 0; }
 .preview-artwork-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(210px, 238px); gap: 20px; }
 .preview-artwork-pane {
   display: grid; place-items: center; position: relative; min-height: 296px; border: 1px solid #b9c5d2;
-  border-radius: 5px; background: #ffffff;
+  padding: 18px; border-radius: 5px; background: #ffffff;
 }
-.preview-artwork-pane::before {
-  content: ""; position: absolute; inset: 10px; border: 1px dashed var(--v2-primary); border-radius: 3px;
+.preview-artwork-pane img {
+  display: block; max-width: 100%; max-height: 560px; object-fit: contain;
 }
-.preview-artwork-pane span { font-family: Georgia, "Times New Roman", serif; font-size: 38px; letter-spacing: 0; }
-.preview-artwork-pane small { position: absolute; top: 16px; left: 16px; }
+.preview-output-caption { position: absolute; top: 10px; left: 12px; z-index: 1; padding: 4px 7px; border-radius: 4px; background: rgba(255,255,255,.92); }
 .preview-side-summary { display: grid; gap: 12px; align-content: start; }
-.preview-thumbnail {
-  display: grid; place-items: center; min-height: 142px; border: 1px solid var(--v2-border);
-  border-radius: 5px; background: #f7f9fc; font-family: Georgia, "Times New Roman", serif; font-size: 18px;
-}
+.preview-trial-status { padding: 12px; border: 1px solid var(--v2-border); border-radius: 5px; background: #f7f9fc; }
+.preview-warning-list { display: grid; gap: 8px; }
 .preview-validation-callout {
   margin-bottom: 12px; padding: 12px; border: 1px solid #bfd0f5; border-radius: 5px;
   color: var(--v2-primary); background: #e9f0ff; font-weight: 700;

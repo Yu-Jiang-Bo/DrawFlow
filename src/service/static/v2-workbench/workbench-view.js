@@ -1,6 +1,12 @@
 (function () {
   "use strict";
+
+  // 兼容旧版页面：早期 HTML 未引入拆分后的 workbench-view-tables.js。
+  // 新页面已先导出 renderTemplateList 时，保留拆分模块的实现，不重复覆盖。
+  if (typeof globalThis.renderTemplateList === "function") return;
+
   const ctx = globalThis.DrawFlowV2WorkbenchContext;
+  if (!ctx) return;
   const { state, CHECK_KEYS, CHECK_LABELS, STATUS_LABELS, STATUS_CLASS } = ctx;
 
   function renderTemplateList() {
@@ -980,9 +986,12 @@
       });
     }
     const ready = validation && validation.can_publish === true && !entries.length;
-    setDisabled("publishVersionBtn", !ready);
-    setDisabled("trialRenderBtn", !state.draft);
-    setText("publishBlockerText", ready ? "核验已完成，发布接口未接入。" : blockerSummary(blockers));
+    const busy = Boolean(state.isTrialRendering || state.isPublicationChecking || state.isPublishing);
+    const hasRealTrial = typeof trialSucceeded === "function" && trialSucceeded();
+    const versionsReady = state.versionsStatus !== "loading" && state.versionsStatus !== "error";
+    setDisabled("publishVersionBtn", !ready || !hasRealTrial || !versionsReady || busy);
+    setDisabled("trialRenderBtn", !state.draft || busy);
+    setText("publishBlockerText", ready ? "发布核验已完成，可以发布新版本。" : blockerSummary(blockers));
   }
 
 
@@ -1005,7 +1014,7 @@
   function showTransientStatus(text) {
     setText("publishBlockerText", text);
   }
-  Object.assign(globalThis, {
+  const compatibilityExports = {
     renderTemplateList,
     fillDraftFields,
     templateContextText,
@@ -1031,5 +1040,8 @@
     validationTargetKey,
     validationLocationLabel,
     showTransientStatus
+  };
+  Object.keys(compatibilityExports).forEach((key) => {
+    if (typeof globalThis[key] !== "function") globalThis[key] = compatibilityExports[key];
   });
 })();

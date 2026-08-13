@@ -29,7 +29,6 @@ from .template_inspector import TemplateInspector
 from .template_publication import TemplatePublicationService
 from .template_rule_compiler import compile_rule_ast
 from .v2_template_api import V2TemplateApi, handle_v2_template_api
-from .v2_workbench_page import INDEX_HTML as V2_WORKBENCH_HTML
 from .web_page import INDEX_HTML as WORKBENCH_HTML
 
 V2_WORKBENCH_STATIC_DIR = Path(__file__).resolve().parent / "static" / "v2-workbench"
@@ -790,7 +789,7 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
         if handle_v2_template_api(self, "GET", path, parts):
             return
         if path == "/v2/templates/workbench":
-            self._send_html(V2_WORKBENCH_HTML)
+            self._send_html(_v2_workbench_html())
             return
         if path.startswith("/static/v2-workbench/"):
             self._send_v2_workbench_static(path)
@@ -1605,12 +1604,51 @@ def _safe_static_name(value: str) -> str:
         "workbench-option-rules.js",
         "workbench-rule-evidence.js",
         "workbench-stage-view.js",
+        "workbench-preview-state.js",
+        "workbench-preview-versions.js",
+        "workbench-preview.js",
+        "workbench-preview-actions.js",
+        "workbench-view-tables.js",
+        "workbench-validation-checks.js",
+        "workbench-validation-targets.js",
+        "workbench-validation-navigation.js",
+        "workbench-validation-blockers.js",
         "workbench-view.js",
         "workbench-structure-tree.js",
         "workbench-draft-actions.js",
         "workbench-scan-actions.js",
     }
     return name if name in allowed else ""
+
+
+def _v2_workbench_html() -> str:
+    """Read the V2 page fragments for the current request as one bundle.
+
+    Static V2 assets are already read for each request.  Building the HTML
+    from the same source fragments avoids retaining an older script manifest
+    in ``sys.modules`` when the service process remains alive during a safe
+    static-bundle update.
+    """
+    fragments = (
+        "v2_workbench_page_head.py",
+        "v2_workbench_page_main.py",
+        "v2_workbench_page_finish.py",
+    )
+    return "".join(_read_v2_workbench_page_fragment(filename) for filename in fragments)
+
+
+def _read_v2_workbench_page_fragment(filename: str) -> str:
+    """Return the literal HTML body from one V2 page-fragment source file."""
+    source = (Path(__file__).resolve().parent / filename).read_text(encoding="utf-8")
+    marker = ' = """'
+    start = source.find(marker)
+    if start < 0:
+        raise RuntimeError("V2 workbench page fragment is invalid")
+    start += len(marker)
+    end = source.rfind('"""')
+    if end < start:
+        raise RuntimeError("V2 workbench page fragment is invalid")
+    return source[start:end]
 
 
 def _design_asset_count(assets: object) -> int:

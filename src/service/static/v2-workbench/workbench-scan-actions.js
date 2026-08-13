@@ -19,6 +19,7 @@
       return;
     }
     state.lastUploadFile = file;
+    if (typeof globalThis.invalidateTrialResult === "function") globalThis.invalidateTrialResult("模板已重新扫描，请重新试渲染。");
     state.isScanning = true;
     setScanningUi(true, rescan ? "正在重新扫描 .ai 模板" : "正在扫描 .ai 模板");
     try {

@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from src.service import local_gateway
+from src.service import local_gateway_http
 from src.service.job_store import JobStore
 from src.service.local_client import LocalClientError
 
@@ -318,6 +319,12 @@ def test_local_gateway_serves_v2_workbench_fallback_when_central_is_unavailable(
             stage_css = response.read().decode("utf-8")
         with urllib.request.urlopen(f"{base_url}/static/v2-workbench/workbench-stage-view.js") as response:
             stage_view_js = response.read().decode("utf-8")
+        with urllib.request.urlopen(f"{base_url}/static/v2-workbench/workbench-preview-versions.js") as response:
+            preview_versions_js = response.read().decode("utf-8")
+        with urllib.request.urlopen(f"{base_url}/static/v2-workbench/workbench-preview.js") as response:
+            preview_js = response.read().decode("utf-8")
+        with urllib.request.urlopen(f"{base_url}/static/v2-workbench/workbench-preview-actions.js") as response:
+            preview_actions_js = response.read().decode("utf-8")
         with urllib.request.urlopen(f"{base_url}/static/v2-workbench/workbench-scan-actions.js") as response:
             scan_actions_js = response.read().decode("utf-8")
         with urllib.request.urlopen(f"{base_url}/static/v2-workbench/workbench-scan-model.js") as response:
@@ -339,11 +346,155 @@ def test_local_gateway_serves_v2_workbench_fallback_when_central_is_unavailable(
     assert 'data-workbench-stage="upload"' in html
     assert '[data-stage-panel]:not([data-stage-panel="upload"])' in stage_css
     assert "function setWorkbenchStage" in stage_view_js
+    assert "function renderVersionSummary" in preview_versions_js
+    assert "function renderPreviewStage" in preview_js
+    assert "/trial-render" in preview_actions_js
     assert "/local/templates/scan" in scan_actions_js
     assert "function scanModel" in scan_model_js
     assert "function renderContentOptionRows" in content_js
     assert "function renderOptionRuleStage" in option_rules_js
     assert "function renderStructureTree" in structure_tree_js
+
+
+def test_local_gateway_falls_back_to_local_v2_static_when_central_returns_not_found(tmp_path):
+    class StaleCentral:
+        def proxy(self, *args, **kwargs):
+            return 404, {"Content-Type": "application/json"}, b'{"error":"not found"}'
+
+    class FakeClient:
+        def __init__(self):
+            self.jobs = JobStore(tmp_path / "jobs")
+            self.data_dir = tmp_path
+            self.central = StaleCentral()
+
+    handler = type(
+        "TestStaleV2StaticGatewayRequestHandler",
+        (local_gateway.LocalGatewayRequestHandler,),
+        {"client": FakeClient()},
+    )
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    worker = threading.Thread(target=server.serve_forever, daemon=True)
+    worker.start()
+    try:
+        with urllib.request.urlopen(
+            f"http://127.0.0.1:{server.server_address[1]}/static/v2-workbench/workbench-view-tables.js"
+        ) as response:
+            script = response.read().decode("utf-8")
+    finally:
+        server.shutdown()
+        server.server_close()
+        worker.join(timeout=2)
+
+    assert "function renderTemplateList" in script
+
+
+def test_local_gateway_uses_its_v2_page_when_central_page_is_stale(tmp_path):
+    class StaleCentral:
+        def proxy(self, *args, **kwargs):
+            return 200, {"Content-Type": "text/html"}, b"<html>central-old</html>"
+
+    class FakeClient:
+        def __init__(self):
+            self.jobs = JobStore(tmp_path / "jobs")
+            self.data_dir = tmp_path
+            self.central = StaleCentral()
+
+    handler = type(
+        "TestStaleV2PageGatewayRequestHandler",
+        (local_gateway.LocalGatewayRequestHandler,),
+        {"client": FakeClient()},
+    )
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    worker = threading.Thread(target=server.serve_forever, daemon=True)
+    worker.start()
+    try:
+        with urllib.request.urlopen(
+            f"http://127.0.0.1:{server.server_address[1]}/v2/templates/workbench"
+        ) as response:
+            html = response.read().decode("utf-8")
+    finally:
+        server.shutdown()
+        server.server_close()
+        worker.join(timeout=2)
+
+    assert 'id="v2WorkbenchApp"' in html
+    assert "central-old" not in html
+
+
+def test_local_gateway_v2_page_refreshes_its_manifest_per_request(monkeypatch, tmp_path):
+    version = {"value": "first"}
+
+    class OfflineCentral:
+        def proxy(self, *args, **kwargs):
+            raise LocalClientError("central offline", code="central_unreachable")
+
+    class FakeClient:
+        def __init__(self):
+            self.jobs = JobStore(tmp_path / "jobs")
+            self.data_dir = tmp_path
+            self.central = OfflineCentral()
+
+    monkeypatch.setattr(
+        local_gateway_http,
+        "_v2_workbench_html",
+        lambda: f'<script src="/static/v2-workbench/{version["value"]}.js" defer></script>',
+    )
+    handler = type(
+        "TestV2PageRefreshGatewayRequestHandler",
+        (local_gateway.LocalGatewayRequestHandler,),
+        {"client": FakeClient()},
+    )
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    worker = threading.Thread(target=server.serve_forever, daemon=True)
+    worker.start()
+    try:
+        base_url = f"http://127.0.0.1:{server.server_address[1]}"
+        with urllib.request.urlopen(f"{base_url}/v2/templates/workbench") as response:
+            first = response.read().decode("utf-8")
+        version["value"] = "second"
+        with urllib.request.urlopen(f"{base_url}/v2/templates/workbench") as response:
+            second = response.read().decode("utf-8")
+    finally:
+        server.shutdown()
+        server.server_close()
+        worker.join(timeout=2)
+
+    assert "first.js" in first
+    assert "second.js" not in first
+    assert "second.js" in second
+
+
+def test_local_gateway_uses_its_v2_static_bundle_when_central_returns_old_script(tmp_path):
+    class StaleCentral:
+        def proxy(self, *args, **kwargs):
+            return 200, {"Content-Type": "text/javascript"}, b"window.centralOld = true;"
+
+    class FakeClient:
+        def __init__(self):
+            self.jobs = JobStore(tmp_path / "jobs")
+            self.data_dir = tmp_path
+            self.central = StaleCentral()
+
+    handler = type(
+        "TestStaleV2StaticGatewayRequestHandler",
+        (local_gateway.LocalGatewayRequestHandler,),
+        {"client": FakeClient()},
+    )
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    worker = threading.Thread(target=server.serve_forever, daemon=True)
+    worker.start()
+    try:
+        with urllib.request.urlopen(
+            f"http://127.0.0.1:{server.server_address[1]}/static/v2-workbench/workbench.js"
+        ) as response:
+            script = response.read().decode("utf-8")
+    finally:
+        server.shutdown()
+        server.server_close()
+        worker.join(timeout=2)
+
+    assert "window.centralOld" not in script
+    assert 'const API_ROOT = "/api/v2/templates";' in script
 
 
 def test_configure_local_logging_writes_gateway_errors_to_the_client_log(tmp_path):

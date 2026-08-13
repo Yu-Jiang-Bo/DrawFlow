@@ -43,6 +43,22 @@
     lastUploadFile: null,
     isScanning: false,
     isSavingDraft: false,
+    isTrialRendering: false,
+    isPublicationChecking: false,
+    isPublishing: false,
+    trialGeneration: 0,
+    trialRequestId: 0,
+    activeTrialRequestId: 0,
+    versionRequestId: 0,
+    versionsStatus: "idle",
+    versionsError: "",
+    versionsTemplateId: "",
+    trial: null,
+    publication: null,
+    versions: [],
+    previewOutputIndex: 0,
+    previewSampleValues: {},
+    previewMessage: "",
     stage: "upload",
     optionRules: { pendingOnly: false, selectedIndex: 0 }
   };
@@ -74,15 +90,15 @@
 
   function bindEvents() {
     on("templateSearch", "input", renderTemplateList);
-    on("templateId", "input", updateDraftButtons);
-    on("templateName", "input", updateDraftButtons);
-    on("shopName", "input", updateDraftButtons);
+    on("templateId", "input", handleDraftFieldInput);
+    on("templateName", "input", handleDraftFieldInput);
+    on("shopName", "input", handleDraftFieldInput);
     on("structureSearch", "input", renderStructureTree);
     on("toggleDesignsBtn", "click", () => toggleSection("designs"));
     on("toggleFontsBtn", "click", () => toggleSection("fonts"));
     on("saveDraftBtn", "click", saveDraft);
-    on("trialRenderBtn", "click", () => showTransientStatus("试渲染接口未就绪，当前先完成草稿配置。"));
-    on("publishVersionBtn", "click", () => showTransientStatus("发布接口未接入，当前不会伪造发布结果。"));
+    on("trialRenderBtn", "click", () => globalThis.trialRenderCurrentDraft());
+    on("publishVersionBtn", "click", () => globalThis.publishCurrentDraft());
     on("scanTemplateBtn", "click", () => uploadSelectedAiFile(false));
     on("rescanTemplateBtn", "click", () => uploadSelectedAiFile(true));
     on("aiFile", "change", handleFileInput);
@@ -92,10 +108,13 @@
     on("backToUploadBtn", "click", () => globalThis.setWorkbenchStage("upload"));
     on("pendingOnlyBtn", "click", togglePendingOnlyOptions);
     on("optionRuleSearch", "input", renderOptionRuleStage);
-    on("optionContentPreset", "change", applySelectedOptionControls);
+    on("optionContentPreset", "change", () => {
+      invalidatePreviewIfAvailable("配置已修改，请重新试渲染。");
+      applySelectedOptionControls();
+    });
     on("confirmStageBtn", "click", confirmCurrentStage);
     on("saveAndNextOptionBtn", "click", saveDraftAndSelectNextOption);
-    on("rerunTrialRenderBtn", "click", showPreflightFailure);
+    on("rerunTrialRenderBtn", "click", () => globalThis.trialRenderCurrentDraft());
     on("closePreflightFailedBtn", "click", closePreflightFailure);
     on("returnToSampleDataBtn", "click", closePreflightFailure);
     on("newTemplateBtn", "click", () => {
@@ -116,6 +135,15 @@
   function on(id, type, handler) {
     const el = $(id);
     if (el) el.addEventListener(type, handler);
+  }
+
+  function handleDraftFieldInput() {
+    invalidatePreviewIfAvailable("模板信息已修改，请重新试渲染。");
+    updateDraftButtons();
+  }
+
+  function invalidatePreviewIfAvailable(message) {
+    if (typeof globalThis.invalidateTrialResult === "function") globalThis.invalidateTrialResult(message);
   }
 
   function renderInitialState() {

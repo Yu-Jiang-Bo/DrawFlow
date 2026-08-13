@@ -12,24 +12,24 @@
     return row;
   }
 
-
   function tableRow(className) {
     const row = document.createElement("div");
     row.className = `structured-row ${className}`;
     return row;
   }
 
-
   function inputCell(name, value) {
     const wrap = document.createElement("label");
     const input = document.createElement("input");
     input.dataset.field = name;
     input.value = value || "";
-    input.addEventListener("input", () => globalThis.validateCurrentConfig(false));
+    input.addEventListener("input", () => {
+      if (typeof globalThis.invalidateTrialResult === "function") globalThis.invalidateTrialResult("配置已修改，请重新试渲染。");
+      globalThis.validateCurrentConfig(false);
+    });
     wrap.appendChild(input);
     return wrap;
   }
-
 
   function selectCell(name, options, value) {
     const wrap = document.createElement("label");
@@ -43,27 +43,30 @@
     });
     const selected = options.some(([optionValue]) => optionValue === value) ? value : options[0][0];
     select.value = selected;
-    select.addEventListener("change", () => globalThis.validateCurrentConfig(false));
+    select.addEventListener("change", () => {
+      if (typeof globalThis.invalidateTrialResult === "function") globalThis.invalidateTrialResult("配置已修改，请重新试渲染。");
+      globalThis.validateCurrentConfig(false);
+    });
     wrap.appendChild(select);
     return wrap;
   }
-
 
   function addRowButton(text, handler) {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "btn-subtle row-add-button";
     button.textContent = text;
-    button.addEventListener("click", handler);
+    button.addEventListener("click", (event) => {
+      if (typeof globalThis.invalidateTrialResult === "function") globalThis.invalidateTrialResult("配置已修改，请重新试渲染。");
+      handler(event);
+    });
     return button;
   }
-
 
   function rowValue(row, name) {
     const el = row.querySelector(`[data-field="${name}"]`);
     return el ? el.value : "";
   }
-
 
   function lineNode(title, subtitle) {
     const wrap = document.createElement("span");
@@ -74,14 +77,12 @@
     return wrap;
   }
 
-
   function metaNode(text) {
     const el = document.createElement("span");
     el.className = "muted";
     el.textContent = text || "";
     return el;
   }
-
 
   function emptyNode(text) {
     const el = document.createElement("div");

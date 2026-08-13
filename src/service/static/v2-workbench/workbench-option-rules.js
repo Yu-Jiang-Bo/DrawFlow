@@ -116,14 +116,13 @@
 
   function updateStageActionButtons() {
     const stage = state.stage;
-    setHidden("confirmStageBtn", stage !== "preview");
+    setHidden("confirmStageBtn", true);
     setHidden("saveAndNextOptionBtn", !["structure", "rules"].includes(stage));
     if (stage === "structure") setText("saveAndNextOptionBtn", "确认并开始配置选项");
     if (stage === "rules") {
       const items = filteredRuleOptions();
       setText("saveAndNextOptionBtn", !items.length || state.optionRules.selectedIndex >= items.length - 1 ? "确认并进入样例预览" : "确认并配置下一个选项");
     }
-    if (stage === "preview") setText("confirmStageBtn", "确认样例预览");
   }
 
   function filteredRuleOptions() {

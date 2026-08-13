@@ -19,6 +19,8 @@ const ids = [
   "selectedOptionPendingBadge", "optionContentPreset", "optionProcessingHelp", "assetBindingRows", "templateCapabilityPanel",
   "capabilityEvidenceRows", "colorRuleTitle", "colorRuleRows", "dimensionRuleRows", "fontDependencyRows", "confirmStageBtn", "saveAndNextOptionBtn", "rerunTrialRenderBtn", "preflightFailedOverlay", "preflightFailedMessage",
   "preflightIssueList", "closePreflightFailedBtn", "returnToSampleDataBtn", "previewSampleRows", "previewValidationRows"
+  , "previewSideTabs", "previewArtworkPane", "previewRuntimeBadge", "previewTrialStatus", "previewWarningList", "previewValidationStatus",
+  "versionPublishStatus", "draftVersionSummary", "draftTrialSummary", "currentVersionSummary", "currentVersionMeta", "rollbackVersionSummary", "rollbackVersionMeta", "publishNotes"
 ];
 
 function makeClassList(element) {
@@ -130,7 +132,7 @@ function makeDocument() {
   const elements = {};
   ids.forEach((id) => { elements[id] = new Element("div", id); });
   ["aiFile"].forEach((id) => { elements[id].tagName = "INPUT"; });
-  ["templateSearch", "templateId", "templateName", "shopName", "structureSearch", "optionRuleSearch"].forEach((id) => { elements[id].tagName = "INPUT"; });
+  ["templateSearch", "templateId", "templateName", "shopName", "structureSearch", "optionRuleSearch", "publishNotes"].forEach((id) => { elements[id].tagName = "INPUT"; });
   ["optionContentPreset"].forEach((id) => { elements[id].tagName = "SELECT"; });
   ["scanTemplateBtn", "rescanTemplateBtn", "saveDraftBtn", "trialRenderBtn", "publishVersionBtn", "retryScanBtn", "closeScanFailedBtn", "toggleDesignsBtn", "toggleFontsBtn", "pendingOnlyBtn", "confirmStageBtn", "saveAndNextOptionBtn", "rerunTrialRenderBtn", "closePreflightFailedBtn", "returnToSampleDataBtn"].forEach((id) => { elements[id].tagName = "BUTTON"; });
   const checkKeys = ["output", "fields", "options", "slots", "content", "dimensions", "colors", "preview"];
@@ -206,6 +208,15 @@ function createApp(fetchImpl, fileNames) {
     "workbench-option-rules.js",
     "workbench-rule-evidence.js",
     "workbench-stage-view.js",
+    "workbench-preview-state.js",
+    "workbench-preview-versions.js",
+    "workbench-preview.js",
+    "workbench-preview-actions.js",
+    "workbench-view-tables.js",
+    "workbench-validation-checks.js",
+    "workbench-validation-targets.js",
+    "workbench-validation-navigation.js",
+    "workbench-validation-blockers.js",
     "workbench-view.js",
     "workbench-structure-tree.js",
     "workbench-draft-actions.js",
@@ -368,6 +379,51 @@ def test_v2_workbench_scan_summary_dedupes_matching_scan_and_config_options():
     )
 
 
+def test_v2_workbench_legacy_page_scripts_keep_upload_available_without_view_tables():
+    run_node(
+        r"""
+        (async () => {
+          const files = [
+            "workbench.js",
+            "workbench-dom.js",
+            "workbench-api.js",
+            "workbench-scan-model.js",
+            "workbench-form-model.js",
+            "workbench-config.js",
+            "workbench-content.js",
+            "workbench-style-dimensions.js",
+            "workbench-option-rules.js",
+            "workbench-rule-evidence.js",
+            "workbench-stage-view.js",
+            "workbench-view.js",
+            "workbench-draft-actions.js",
+            "workbench-scan-actions.js"
+          ];
+          async function fakeFetch(url, options = {}) {
+            if (String(url) === "/api/v2/templates") return response({ templates: [] });
+            return response({});
+          }
+          const app = createApp(fakeFetch, files);
+          await flush();
+          assert.strictEqual(typeof global.renderTemplateList, "function");
+          assert.strictEqual(typeof global.renderTables, "function");
+          let filePickerOpened = false;
+          app.elements.aiFile.click = () => { filePickerOpened = true; };
+          app.elements.aiDropzone.dispatch("click");
+          assert.strictEqual(filePickerOpened, true, "点击上传区必须打开文件选择器");
+          assert.doesNotThrow(() => app.elements.templateSearch.dispatch("input"));
+          app.elements.templateId.value = "LEGACYVIEW";
+          app.elements.templateName.value = "Legacy View Demo";
+          app.elements.templateId.dispatch("input");
+          app.elements.templateName.dispatch("input");
+          app.elements.aiFile.dispatch("change", { target: { files: [{ name: "legacy.ai" }] } });
+          await flush();
+          assert.strictEqual(app.elements.scanTemplateBtn.disabled, false);
+        })().catch((error) => { console.error(error); process.exit(1); });
+        """
+    )
+
+
 def test_v2_workbench_upload_survives_missing_structure_tree_bundle():
     run_node(
         r"""
@@ -384,6 +440,15 @@ def test_v2_workbench_upload_survives_missing_structure_tree_bundle():
             "workbench-option-rules.js",
             "workbench-rule-evidence.js",
             "workbench-stage-view.js",
+            "workbench-preview-state.js",
+            "workbench-preview-versions.js",
+            "workbench-preview.js",
+            "workbench-preview-actions.js",
+            "workbench-view-tables.js",
+            "workbench-validation-checks.js",
+            "workbench-validation-targets.js",
+            "workbench-validation-navigation.js",
+            "workbench-validation-blockers.js",
             "workbench-view.js",
             "workbench-draft-actions.js",
             "workbench-scan-actions.js"
@@ -840,8 +905,8 @@ def test_v2_workbench_save_draft_does_not_submit_scan_payload():
           assert.strictEqual(draftSaveBody.config.audit.scan_version, "");
           assert.strictEqual(draftSaveBody.config.audit.template_sha256, "");
           assert.deepStrictEqual(Object.keys(draftSaveBody.config.checks), ["output", "fields", "options", "slots", "content", "dimensions", "colors", "preview"]);
-          assert.strictEqual(app.elements.publishVersionBtn.disabled, false);
-          assert(app.elements.publishBlockerText.textContent.includes("发布接口未接入"));
+          assert.strictEqual(app.elements.publishVersionBtn.disabled, true, "真实试渲染完成前禁止发布");
+          assert(app.elements.publishBlockerText.textContent.includes("发布核验已完成"));
         })().catch((error) => { console.error(error); process.exit(1); });
         """
     )
@@ -2747,7 +2812,7 @@ def test_v2_workbench_stage_confirmation_persists_only_current_stage_checks():
     )
 
 
-def test_v2_workbench_preview_stage_keeps_visible_confirmation_action():
+def test_v2_workbench_preview_cannot_be_manually_confirmed_without_real_trial():
     run_node(
         r"""
         (async () => {
@@ -2786,16 +2851,11 @@ def test_v2_workbench_preview_stage_keeps_visible_confirmation_action():
           global.setWorkbenchStage("preview");
           await flush();
 
-          assert.strictEqual(app.elements.confirmStageBtn.hidden, false);
-          assert.strictEqual(app.elements.confirmStageBtn.textContent, "\u786e\u8ba4\u6837\u4f8b\u9884\u89c8");
+          assert.strictEqual(app.elements.confirmStageBtn.hidden, true);
           assert.strictEqual(app.elements.saveAndNextOptionBtn.hidden, true);
-          app.elements.confirmStageBtn.dispatch("click");
-          for (let index = 0; index < 8; index += 1) await flush();
-
-          assert(draftSaveBody);
-          assert.strictEqual(draftSaveBody.config.checks.preview.status, "confirmed");
-          assert.strictEqual(draftSaveBody.config.checks.output.status, "confirmed");
-          assert.strictEqual(draftSaveBody.config.checks.fields.status, "confirmed");
+          global.markCurrentStageConfirmed();
+          assert.strictEqual(global.collectChecks().preview.status, "pending");
+          assert.strictEqual(draftSaveBody, null);
         })().catch((error) => { console.error(error); process.exit(1); });
         """
     )
@@ -3188,7 +3248,7 @@ def test_v2_workbench_clears_old_feedback_before_a_delayed_validation_returns():
           resolveUpdatedValidation(response({ validation: { can_save: true, can_publish: true, checks: confirmedChecks(), issues: [] } }));
           await flush();
           assert(!input.classList.contains("v2-validation-control-error"));
-          assert.strictEqual(app.elements.publishVersionBtn.disabled, false);
+          assert.strictEqual(app.elements.publishVersionBtn.disabled, true, "只有真实试渲染才能解锁发布");
         })().catch((error) => { console.error(error); process.exit(1); });
         """
     )
@@ -3247,7 +3307,7 @@ def test_v2_workbench_ignores_an_older_validation_response_after_a_newer_result(
 
           assert(!input.classList.contains("v2-validation-control-error"));
           assert(!app.elements.blockerList.textContent.includes("旧结果"));
-          assert.strictEqual(app.elements.publishVersionBtn.disabled, false);
+          assert.strictEqual(app.elements.publishVersionBtn.disabled, true, "只有真实试渲染才能解锁发布");
         })().catch((error) => { console.error(error); process.exit(1); });
         """
     )
@@ -3644,6 +3704,279 @@ def test_v2_workbench_hides_technical_validation_details_in_blockers_and_tooltip
           assert(!app.elements.blockerList.textContent.includes("$.outputs"));
           assert(!app.elements.outputConfigRows.getAttribute("title").includes("Template/"));
           assert(!app.elements.outputConfigRows.getAttribute("title").includes("$.outputs"));
+        })().catch((error) => { console.error(error); process.exit(1); });
+        """
+    )
+
+
+def test_v2_workbench_real_trial_render_uses_bound_headers_saved_revision_and_single_output():
+    run_node(
+        r"""
+        (async () => {
+          let currentDraft = {
+            metadata: { template_id: "V2REALPREVIEW", name: "Real Preview", shop_name: "" },
+            manifest: { draft_revision: "d0001" },
+            scan: { outputs: [{ key: "Output_main" }] },
+            config: {
+              outputs: [{
+                key: "Output_main", display_name: "主效果图", component_key: "main",
+                style: { field: "style", options: [{ key: "style1" }] },
+                design: { field: "design", options: [{ key: "Design02", content_preset: "mixed_slots", slots: [
+                  { key: "slot_name1", source_field: "name1", preset: "tail_text" },
+                  { key: "slot_name2", source_field: "name2", preset: "direct_text" }
+                ] }] },
+                font: { field: "", options: [] }
+              }],
+              field_bindings: { style: "Size", design: "Design", name1: "Name", name2: "Title" },
+              option_mappings: [
+                { field: "style", source_value: "Small", group: "style", target: "style1", output: "Output_main" },
+                { field: "design", source_value: "2", group: "design", target: "Design02", output: "Output_main" }
+              ],
+              checks: {}, preview: { sample_rows: [] }
+            }
+          };
+          let draftPostBody = null;
+          let trialBody = null;
+          let publicationBody = null;
+          const urls = [];
+          const confirmedChecks = Object.fromEntries(["output", "fields", "options", "slots", "content", "dimensions", "colors", "preview"]
+            .map((key) => [key, { status: "confirmed", reason: "" }]));
+          async function fakeFetch(url, options = {}) {
+            const textUrl = String(url);
+            urls.push(textUrl);
+            if (textUrl === "/api/v2/templates") return response({ templates: [{ template_id: "V2REALPREVIEW", name: "Real Preview" }] });
+            if (textUrl.endsWith("/draft") && (!options.method || options.method === "GET")) return response({ draft: currentDraft });
+            if (textUrl.endsWith("/validate")) return response({ validation: { can_save: true, can_publish: false, checks: { ...confirmedChecks, preview: { status: "pending", reason: "请试渲染" } } } });
+            if (textUrl.endsWith("/draft") && options.method === "POST") {
+              draftPostBody = JSON.parse(options.body);
+              currentDraft = { ...currentDraft, config: draftPostBody.config, manifest: { draft_revision: "d0002" } };
+              return response({ draft: currentDraft });
+            }
+            if (textUrl.endsWith("/trial-render")) {
+              trialBody = JSON.parse(options.body);
+              const proofDraft = { ...currentDraft, manifest: { draft_revision: "d0003" } };
+              return response({
+                trial: { id: "t1", status: "succeeded", rendered_at: "2026-08-13T10:00:00Z", outputs: [{ key: "Output_main", display_name: "主效果图", preview_url: "/local/previews/t1/main.png", warnings: [] }] },
+                draft: proofDraft,
+                validation: { can_save: true, can_publish: true, checks: confirmedChecks },
+                publication: { current_version: "v3", previous_version: "v2" },
+                versions: [{ version: "v3", published_at: "2026-08-12T10:00:00Z" }, { version: "v2", published_at: "2026-08-10T10:00:00Z" }]
+              });
+            }
+            if (textUrl.endsWith("/publication-check")) {
+              publicationBody = JSON.parse(options.body);
+              return response({ validation: { can_save: true, can_publish: true, checks: confirmedChecks }, publication: { current_version: "v3", previous_version: "v2" }, versions: [] });
+            }
+            if (textUrl.endsWith("/versions")) return response({ versions: [{ version: "v3" }, { version: "v2" }] });
+            return response({});
+          }
+          const app = createApp(fakeFetch);
+          await flush();
+          app.elements.templateList.children[0].dispatch("click");
+          await flush();
+          global.setWorkbenchStage("preview");
+          await flush();
+
+          const sampleInputs = allDescendants(app.elements.previewSampleRows).filter((node) => node.dataset.sampleHeader);
+          assert.deepStrictEqual(sampleInputs.map((input) => input.dataset.sampleHeader), ["Size", "Design", "Name", "Title"]);
+          assert.deepStrictEqual(sampleInputs.map((input) => input.value), ["Small", "2", "", ""]);
+          sampleInputs.find((input) => input.dataset.sampleHeader === "Name").value = "Ava";
+          sampleInputs.find((input) => input.dataset.sampleHeader === "Title").value = "My title";
+          app.elements.trialRenderBtn.dispatch("click");
+          for (let index = 0; index < 16; index += 1) await flush();
+
+          assert(draftPostBody, "trial render must save draft first");
+          assert(trialBody, "trial render endpoint must be called");
+          assert.deepStrictEqual(draftPostBody.config.field_bindings, { style: "Size", design: "Design", name1: "Name", name2: "Title" });
+          assert.deepStrictEqual(draftPostBody.config.option_mappings, currentDraft.config.option_mappings);
+          assert.deepStrictEqual(draftPostBody.config.outputs[0].design.options[0].slots.map((slot) => slot.source_field), ["name1", "name2"]);
+          assert.strictEqual(trialBody.expected_draft_revision, "d0002");
+          assert.deepStrictEqual(trialBody.sample_row, { Size: "Small", Design: "2", Name: "Ava", Title: "My title" });
+          assert.deepStrictEqual(publicationBody, { expected_draft_revision: "d0003" });
+          assert.strictEqual(global.currentDraftRevision(global.DrawFlowV2WorkbenchContext.state.draft), "d0003");
+          assert(urls.indexOf("/api/v2/templates/V2REALPREVIEW/draft") < urls.indexOf("/local/v2/templates/V2REALPREVIEW/trial-render"));
+          const proofIndex = urls.indexOf("/local/v2/templates/V2REALPREVIEW/trial-render");
+          const publicationIndex = urls.indexOf("/api/v2/templates/V2REALPREVIEW/publication-check");
+          const versionsIndex = urls.findIndex((url, index) => index > publicationIndex && url === "/api/v2/templates/V2REALPREVIEW/versions");
+          assert(proofIndex < publicationIndex && publicationIndex < versionsIndex);
+          assert.strictEqual(app.elements.previewSideTabs.hidden, true);
+          const images = allDescendants(app.elements.previewArtworkPane).filter((node) => node.tagName === "IMG");
+          assert.strictEqual(images.length, 1);
+          assert.strictEqual(images[0].src, "/local/previews/t1/main.png");
+          assert.strictEqual(images[0].alt, "试渲染效果图");
+          assert.strictEqual(app.elements.currentVersionSummary.textContent, "v3");
+          assert.strictEqual(app.elements.rollbackVersionSummary.textContent, "v2");
+          assert.strictEqual(app.elements.publishVersionBtn.disabled, false);
+        })().catch((error) => { console.error(error); process.exit(1); });
+        """
+    )
+
+
+def test_v2_workbench_multi_output_labels_and_publish_use_real_responses():
+    run_node(
+        r"""
+        (async () => {
+          const checks = Object.fromEntries(["output", "fields", "options", "slots", "content", "dimensions", "colors", "preview"]
+            .map((key) => [key, { status: "confirmed", reason: "" }]));
+          let publishBody = null;
+          let versionsCalls = 0;
+          const urls = [];
+          const app = createApp(async (url, options = {}) => {
+            const textUrl = String(url);
+            urls.push(textUrl);
+            if (textUrl === "/api/v2/templates") return response({ templates: [] });
+            if (textUrl.endsWith("/publication-check")) return response({ validation: { can_publish: true, checks }, publication: { current_version: "v7", previous_version: "v6" }, versions: [], draft_revision: "d0100" });
+            if (textUrl.endsWith("/publish")) {
+              publishBody = JSON.parse(options.body);
+              return response({ publication: { current_version: "v8", previous_version: "v7" }, versions: [{ version: "v8" }, { version: "v7" }] });
+            }
+            if (textUrl.endsWith("/versions")) {
+              versionsCalls += 1;
+              if (versionsCalls === 1) return response({ error: { reason: "版本信息暂时读取失败" } }, false);
+              return response({ versions: [{ version: "v8" }, { version: "v7" }] });
+            }
+            return response({});
+          });
+          await flush();
+          const state = global.DrawFlowV2WorkbenchContext.state;
+          state.selectedTemplateId = "V2MULTI";
+          state.draft = { metadata: { template_id: "V2MULTI" }, manifest: { draft_revision: "d0099" }, config: { field_bindings: {}, outputs: [] } };
+          state.validation = { can_publish: true, checks };
+          state.trial = { status: "succeeded", outputs: [
+            { key: "Output_SideA", display_name: "正面", preview_url: "/a.png" },
+            { key: "Output_SideB", display_name: "背面", preview_url: "/b.png" }
+          ] };
+          state.publication = { current_version: "v7", previous_version: "v6" };
+          app.elements.publishNotes.value = "更新文字规则";
+          global.renderPreviewStage();
+          global.updateBlockers(state.validation);
+          assert.strictEqual(app.elements.previewSideTabs.hidden, false);
+          assert.deepStrictEqual(app.elements.previewSideTabs.children.map((node) => node.textContent), ["正面", "背面"]);
+          app.elements.previewSideTabs.children[1].dispatch("click");
+          const image = allDescendants(app.elements.previewArtworkPane).find((node) => node.tagName === "IMG");
+          assert.strictEqual(image.src, "/b.png");
+          await global.publishCurrentDraft();
+          assert.strictEqual(publishBody, null, "版本读取失败必须阻断 publish");
+          assert.strictEqual(state.versionsStatus, "error");
+          assert.strictEqual(app.elements.publishVersionBtn.disabled, true);
+          assert(app.elements.currentVersionSummary.textContent.includes("读取失败"));
+          const failedUrls = urls.filter((url) => /\/(publication-check|versions|publish)$/.test(url));
+          assert.deepStrictEqual(failedUrls, [
+            "/api/v2/templates/V2MULTI/publication-check",
+            "/api/v2/templates/V2MULTI/versions"
+          ]);
+          const retryStart = urls.length;
+          await global.publishCurrentDraft();
+          assert.deepStrictEqual(publishBody, { expected_draft_revision: "d0100", note: "更新文字规则" });
+          const publicationUrls = urls.slice(retryStart).filter((url) => /\/(publication-check|versions|publish)$/.test(url));
+          assert.deepStrictEqual(publicationUrls.slice(0, 3), [
+            "/api/v2/templates/V2MULTI/publication-check",
+            "/api/v2/templates/V2MULTI/versions",
+            "/api/v2/templates/V2MULTI/publish"
+          ]);
+          assert.strictEqual(state.publication.current_version, "v8");
+        })().catch((error) => { console.error(error); process.exit(1); });
+        """
+    )
+
+
+def test_v2_workbench_late_trial_response_cannot_override_edited_sample_or_new_request():
+    run_node(
+        r"""
+        (async () => {
+          const confirmedChecks = Object.fromEntries(["output", "fields", "options", "slots", "content", "dimensions", "colors", "preview"]
+            .map((key) => [key, { status: "confirmed", reason: "" }]));
+          let currentDraft = {
+            metadata: { template_id: "V2RACE", name: "Race Demo", shop_name: "" },
+            manifest: { draft_revision: "d0001" },
+            scan: { outputs: [{ key: "Output_main" }], designs: [{ key: "Design01", slots: [{ key: "slot_name" }] }] },
+            config: {
+              outputs: [{
+                key: "Output_main", display_name: "主效果图", component_key: "main",
+                style: { field: "", options: [] },
+                design: { field: "design", options: [{ key: "Design01", content_preset: "direct_text", slots: [{ key: "slot_name", source_field: "name", preset: "direct_text" }] }] },
+                font: { field: "", options: [] }
+              }],
+              field_bindings: { design: "Design", name: "Name" },
+              option_mappings: [{ field: "design", source_value: "1", target: "Design01", output: "Output_main", group: "design" }],
+              checks: confirmedChecks
+            }
+          };
+          let revisionNumber = 1;
+          let resolveA = null;
+          let resolveB = null;
+          const trialBodies = [];
+          const app = createApp(async (url, options = {}) => {
+            const textUrl = String(url);
+            if (textUrl === "/api/v2/templates") return response({ templates: [{ template_id: "V2RACE", name: "Race Demo" }] });
+            if (textUrl.endsWith("/draft") && (!options.method || options.method === "GET")) return response({ draft: currentDraft });
+            if (textUrl.endsWith("/validate")) return response({ validation: {
+              can_save: true,
+              can_publish: false,
+              checks: { ...confirmedChecks, preview: { status: "pending", reason: "请重新试渲染" } }
+            } });
+            if (textUrl.endsWith("/draft") && options.method === "POST") {
+              revisionNumber += 1;
+              currentDraft = { ...currentDraft, config: JSON.parse(options.body).config, manifest: { draft_revision: `d${String(revisionNumber).padStart(4, "0")}` } };
+              return response({ draft: currentDraft });
+            }
+            if (textUrl.endsWith("/trial-render")) {
+              const body = JSON.parse(options.body);
+              trialBodies.push(body);
+              return new Promise((resolve) => {
+                if (body.sample_row.Name === "A") resolveA = resolve;
+                else resolveB = resolve;
+              });
+            }
+            if (textUrl.endsWith("/versions")) return response({ versions: [] });
+            return response({});
+          });
+          await flush();
+          app.elements.templateList.children[0].dispatch("click");
+          await flush();
+          global.setWorkbenchStage("preview");
+          await flush();
+          const state = global.DrawFlowV2WorkbenchContext.state;
+          let nameInput = allDescendants(app.elements.previewSampleRows).find((node) => node.dataset.sampleHeader === "Name");
+          nameInput.value = "A";
+          nameInput.dispatch("input");
+          app.elements.trialRenderBtn.dispatch("click");
+          for (let index = 0; index < 20 && !resolveA; index += 1) await flush();
+          assert(resolveA, "A request must be in flight");
+          assert.strictEqual(trialBodies[0].expected_draft_revision, "d0002");
+
+          nameInput = allDescendants(app.elements.previewSampleRows).find((node) => node.dataset.sampleHeader === "Name");
+          nameInput.value = "B";
+          nameInput.dispatch("input");
+          assert.strictEqual(state.trial, null);
+          assert.strictEqual(app.elements.publishVersionBtn.disabled, true);
+          app.elements.trialRenderBtn.dispatch("click");
+          for (let index = 0; index < 20 && !resolveB; index += 1) await flush();
+          assert(resolveB, "B request must replace A");
+          const activeBRequestId = state.activeTrialRequestId;
+          assert.strictEqual(state.isTrialRendering, true);
+          assert.strictEqual(trialBodies[1].expected_draft_revision, "d0003");
+
+          resolveA(response({
+            draft: { ...currentDraft, manifest: { draft_revision: "d0999" } },
+            trial: { status: "succeeded", outputs: [{ preview_url: "/late-a.png" }] },
+            validation: { can_publish: true, checks: confirmedChecks }
+          }));
+          await flush();
+          assert.strictEqual(state.trial, null, "迟到的 A proof 必须丢弃");
+          assert.strictEqual(global.currentDraftRevision(state.draft), "d0003");
+          assert.strictEqual(state.activeTrialRequestId, activeBRequestId);
+          assert.strictEqual(state.isTrialRendering, true, "A 的 finally 不得清除 B 的 busy 状态");
+          assert.strictEqual(app.elements.publishVersionBtn.disabled, true);
+
+          resolveB(response({
+            draft: { ...currentDraft, manifest: { draft_revision: "d0004" } },
+            trial: { status: "failed", outputs: [] },
+            validation: { can_publish: false, checks: { ...confirmedChecks, preview: { status: "blocked", reason: "试渲染失败" } } }
+          }));
+          await flush();
+          assert.strictEqual(state.isTrialRendering, false);
+          assert.strictEqual(global.trialSucceeded(), false);
         })().catch((error) => { console.error(error); process.exit(1); });
         """
     )

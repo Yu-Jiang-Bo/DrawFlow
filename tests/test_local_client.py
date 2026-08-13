@@ -111,6 +111,43 @@ def sha256_bytes(payload):
     return hashlib.sha256(payload).hexdigest()
 
 
+def test_http_central_preview_challenge_and_proof_include_trusted_worker_fields(monkeypatch):
+    client = HttpCentralClient("http://central.example")
+    calls = []
+
+    def fake_post(path, payload):
+        calls.append((path, payload))
+        if path.endswith("preview-challenge"):
+            return {"challenge": {"challenge_id": "c1", "nonce": "n1", "worker_id": "worker-1"}}
+        return {"ok": True}
+
+    monkeypatch.setattr(client, "_post_json", fake_post)
+
+    challenge = client.request_v2_preview_challenge(
+        "T1", expected_draft_revision="d0004", worker_id="worker-1"
+    )
+    result = client.submit_v2_preview_proof(
+        "T1",
+        expected_draft_revision="d0004",
+        sample_rows=[{"Name": "Alice"}],
+        evidence={"preview_sha256": "a" * 64},
+        worker_proof={
+            "challenge_id": "c1",
+            "nonce": "n1",
+            "worker_id": "worker-1",
+            "signature": "b" * 64,
+        },
+    )
+
+    assert challenge == {"challenge_id": "c1", "nonce": "n1", "worker_id": "worker-1"}
+    assert result == {"ok": True}
+    assert calls[0] == (
+        "/api/v2/templates/T1/preview-challenge",
+        {"expected_draft_revision": "d0004", "worker_id": "worker-1"},
+    )
+    assert calls[1][1]["worker_proof"]["signature"] == "b" * 64
+
+
 def write_order(path: Path):
     workbook = Workbook()
     sheet = workbook.active

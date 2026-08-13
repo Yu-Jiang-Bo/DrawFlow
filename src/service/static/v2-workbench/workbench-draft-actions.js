@@ -4,15 +4,20 @@
   const { API_ROOT, state } = ctx;
 
   async function loadTemplates(preferredId) {
-    const payload = await getJson(API_ROOT, "模板列表加载失败，请稍后重试。");
-    state.templates = Array.isArray(payload.templates) ? payload.templates : [];
-    renderTemplateList();
+    await refreshTemplateList();
     const id = preferredId || state.selectedTemplateId;
     if (id && state.templates.some((item) => templateIdOf(item) === id)) {
       await selectTemplate(id);
     } else if (!state.templates.length) {
       clearDraftView();
     }
+  }
+
+
+  async function refreshTemplateList() {
+    const payload = await getJson(API_ROOT, "模板列表加载失败，请稍后重试。");
+    state.templates = Array.isArray(payload.templates) ? payload.templates : [];
+    renderTemplateList();
   }
 
 
@@ -23,6 +28,7 @@
     state.validationRequestId += 1;
     state.draft = null;
     state.scan = {};
+    if (typeof resetPreviewState === "function") resetPreviewState();
     if (typeof clearValidationFeedback === "function") clearValidationFeedback("正在读取模板配置。");
     state.selectedTemplateId = templateId || "";
     fillDraftFields(null, templateId);
@@ -56,6 +62,7 @@
     state.draftLoadRequestId += 1;
     state.draft = null;
     state.scan = {};
+    if (typeof resetPreviewState === "function") resetPreviewState();
     if (typeof clearValidationFeedback === "function") clearValidationFeedback();
     if (typeof updateCheckRail === "function" && typeof defaultChecks === "function") updateCheckRail(defaultChecks());
     fillDraftFields(null, "");
@@ -72,6 +79,7 @@
       updateCheckRail(configChecks());
       validateCurrentConfig(false).catch(() => updateCheckRail(configChecks()));
     } else if (state.stage === "preview") {
+      renderTables();
       renderPreviewStage();
       updateCheckRail(configChecks());
       validateCurrentConfig(false).catch(() => updateCheckRail(configChecks()));
@@ -82,7 +90,7 @@
   }
 
 
-  async function saveDraft() {
+  async function saveDraft(options) {
     const basics = formBasics();
     if (!basics.template_id || !basics.name) {
       showScanFailure("请先填写模板 ID 和模板名称。");
@@ -95,7 +103,8 @@
     setDraftStatus("正在保存", "pending");
     try {
       await ensureDraftExists();
-      const config = buildControlledConfig();
+      const configOverride = objectOf(options).configOverride;
+      const config = Array.isArray(objectOf(configOverride).outputs) ? configOverride : buildControlledConfig();
       const validationRequestId = ++state.validationRequestId;
       state.lastValidatedConfig = config;
       const validation = await validateConfig(config);
@@ -114,12 +123,13 @@
         config
       }, "草稿保存失败，请检查当前配置。");
       state.draft = payload.draft || state.draft;
+      const savedDraft = state.draft;
       state.scan = normalizeScanFromDraft(state.draft);
-      await loadTemplates(basics.template_id);
+      await refreshTemplateList();
       setDraftStatus("草稿已保存", "confirmed");
       setText("draftSaveStatusText", "草稿已保存；发布核验状态见下方。");
       renderAll();
-      return { saved: true, failure: "" };
+      return { saved: true, failure: "", draft: savedDraft };
     } catch (error) {
       setDraftStatus("保存失败", "blocked");
       setText("draftSaveStatusText", "草稿保存失败，请按错误提示修正后重试。");
@@ -144,7 +154,7 @@
     return {
       structure: ["output", "fields", "options"],
       rules: ["slots", "content", "dimensions", "colors"],
-      preview: ["preview"]
+      preview: []
     }[state.stage] || [];
   }
 
@@ -219,9 +229,9 @@
   }
 
 
-
   Object.assign(globalThis, {
     loadTemplates,
+    refreshTemplateList,
     selectTemplate,
     clearDraftView,
     renderAll,

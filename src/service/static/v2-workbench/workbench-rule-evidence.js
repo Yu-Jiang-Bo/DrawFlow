@@ -232,6 +232,7 @@
     if (!item) return;
     item.dataset.status = status;
     item.dataset.reason = reason || "";
+    if (typeof globalThis.invalidateTrialResult === "function") globalThis.invalidateTrialResult("配置已修改，请重新试渲染。");
     updateCheckRail(collectChecks());
     if (state.draft) validateCurrentConfig(false).catch(() => updateCheckRail(collectChecks()));
   }

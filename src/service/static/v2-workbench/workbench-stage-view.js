@@ -118,9 +118,15 @@
       updateCheckRail(configChecks());
       validateCurrentConfig(false).catch(() => updateCheckRail(configChecks()));
     } else if (next === "preview") {
-      renderPreviewStage();
+      renderTables();
+      globalThis.renderPreviewStage();
       updateCheckRail(configChecks());
       validateCurrentConfig(false).catch(() => updateCheckRail(configChecks()));
+      if (state.selectedTemplateId && typeof loadTemplateVersions === "function") {
+        loadTemplateVersions(state.selectedTemplateId).catch((error) => {
+          showTransientStatus(friendlyError(error, "版本信息读取失败，请重试。"));
+        });
+      }
     } else {
       renderScanSummary();
       updateCheckRail(defaultChecks());
@@ -136,52 +142,6 @@
     return "V2 模板配置工作台";
   }
 
-  function renderPreviewStage() {
-    renderPreviewSampleRows();
-    renderPreviewValidationRows();
-  }
-
-  function renderPreviewSampleRows() {
-    const target = $("previewSampleRows");
-    if (!target) return;
-    const rows = [
-      ["design", "Design08"],
-      ["font", "F2"],
-      ["name", "Ahern|Yerr"],
-      ["title", "BEST DAD"],
-      ["color", "Black"],
-      ["size", "style1"]
-    ];
-    target.replaceChildren(...rows.map(([label, value]) => {
-      const node = document.createElement("div");
-      node.className = "preview-sample-cell";
-      const span = document.createElement("span");
-      const strong = document.createElement("strong");
-      span.textContent = label;
-      strong.textContent = value;
-      node.append(span, strong);
-      return node;
-    }));
-  }
-
-  function renderPreviewValidationRows() {
-    const target = $("previewValidationRows");
-    if (!target) return;
-    const rows = [
-      ["外部设计", "57.998 x 44.999 mm", "通过"],
-      ["内部文字", "57.997 x 44.999 mm", "通过"],
-      ["槽位", "7/7 已填充或删除可选槽", "通过"],
-      ["字体", "2 个依赖均已安装", "通过"],
-      ["颜色", "Black -> 黑色", "通过"]
-    ];
-    target.replaceChildren(...rows.map(([label, value, status]) => {
-      const row = document.createElement("div");
-      row.className = "preview-validation-row";
-      row.append(lineNode(label, value), statusPill(status, "success"));
-      return row;
-    }));
-  }
-
   function statusPill(text, status) {
     const node = document.createElement("span");
     node.className = `stage-status-pill ${status || ""}`.trim();
@@ -195,6 +155,6 @@
     renderScanProgress,
     setWorkbenchStage,
     scanWarningText,
-    renderPreviewStage
+    statusPill
   });
 })();
