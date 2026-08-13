@@ -3881,6 +3881,32 @@ def test_v2_workbench_multi_output_labels_and_publish_use_real_responses():
     )
 
 
+def test_v2_workbench_preview_confirmed_checks_hide_stale_failure_reason():
+    run_node(
+        r"""
+        (async () => {
+          const app = createApp(async (url) => {
+            if (String(url) === "/api/v2/templates") return response({ templates: [] });
+            return response({});
+          });
+          await flush();
+          const state = global.DrawFlowV2WorkbenchContext.state;
+          const staleReason = "操作失败，技术详情已隐藏，请稍后重试。";
+          state.trial = { status: "succeeded", outputs: [] };
+          state.validation = {
+            can_publish: true,
+            checks: Object.fromEntries(["output", "fields", "options", "slots", "content", "dimensions", "colors", "preview"]
+              .map((key) => [key, { status: "confirmed", reason: staleReason }]))
+          };
+          global.renderPreviewStage();
+          const text = app.elements.previewValidationRows.textContent;
+          assert(!text.includes(staleReason), "confirmed rows must not show stale failure reason");
+          assert(text.includes("已通过"), "confirmed rows should show a successful plain-language detail");
+        })().catch((error) => { console.error(error); process.exit(1); });
+        """
+    )
+
+
 def test_v2_workbench_late_trial_response_cannot_override_edited_sample_or_new_request():
     run_node(
         r"""

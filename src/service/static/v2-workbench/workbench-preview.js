@@ -231,10 +231,11 @@
   function validationRow(key, value) {
     const check = objectOf(value);
     const status = safeStatus(check.status);
+    const detail = status === "confirmed" ? "已通过" : sanitizeMessage(check.reason || "", "");
     const row = document.createElement("div");
     row.className = "preview-validation-row";
     row.append(
-      lineNode(ctx.CHECK_LABELS[key] || "核验项", sanitizeMessage(check.reason || "", "")),
+      lineNode(ctx.CHECK_LABELS[key] || "核验项", detail),
       statusPill(ctx.STATUS_LABELS[status] || "待校验", ctx.STATUS_CLASS[status] || "warn")
     );
     return row;
