@@ -317,6 +317,12 @@ def test_compiles_v2_render_task_with_stable_json_and_whitelisted_actions():
     assert fit_action["group"] == "style"
     assert fit_action["style_key"] == "style1"
     assert fit_action["dimensions"] == {"mode": "style", "width_mm": 80, "height_mm": 50}
+    assert not any(action["type"] == "replace_slot_text" and action.get("slot_key") == "slot_initial" for action in actions)
+    asset_action = next(action for action in actions if action["type"] == "bind_asset_library")
+    assert asset_action["slot_key"] == "slot_initial"
+    assert asset_action["slot_path"] == "Template/Output_main/Design/Design03/slot_initial"
+    assert asset_action["source_field"] == "initial"
+    assert asset_action["supported_values"] == ["A", "B"]
 
 
 def test_compiles_path_text_preset_with_scanned_path_text_kind():

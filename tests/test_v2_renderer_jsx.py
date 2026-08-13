@@ -84,6 +84,54 @@ if (writtenFiles['warnings.json'] !== '{"warnings":[]}') throw new Error('warnin
     assert result.returncode == 0, result.stderr
 
 
+def test_v2_renderer_binds_asset_library_from_source_field_initial():
+    task = {
+        "$schema": "custom-renderer/v2-render-execution",
+        "template_ai": "template.ai",
+        "output_ai": "out.ai",
+        "values": {"initial": "Tom"},
+        "selections": {"Output_main": {"design": "Design03"}},
+        "render_task": {
+            "$schema": "custom-renderer/v2-render-task",
+            "outputs": [
+                {
+                    "key": "Output_main",
+                    "actions": [
+                        {
+                            "type": "copy_option_group",
+                            "group": "design",
+                            "option_key": "Design03",
+                            "object_path": "Template/Output_main/Design/Design03",
+                        },
+                        {
+                            "type": "bind_asset_library",
+                            "group": "design",
+                            "option_key": "Design03",
+                            "asset_key": "initial_top",
+                            "slot_key": "slot_initial",
+                            "slot_path": "Template/Output_main/Design/Design03/slot_initial",
+                            "object_path": "Template/Output_main/Design/Design03/Assets/initial_top",
+                            "source_field": "initial",
+                            "supported_values": ["A", "T"],
+                        },
+                    ],
+                }
+            ],
+        },
+    }
+    harness = node_mock_harness(task, """
+const design = outputLayer.pageItems[0];
+const names = design.pageItems.map(item => item.name);
+if (!names.includes('T')) throw new Error('initial asset T was not inserted: ' + names.join(','));
+if (names.includes('slot_initial')) throw new Error('placeholder slot was not removed');
+if (names.includes('Assets')) throw new Error('asset library was not cleaned up');
+""")
+
+    result = run_node(harness)
+
+    assert result.returncode == 0, result.stderr
+
+
 def test_v2_renderer_copies_selected_groups_and_preserves_pipe_in_direct_text():
     task = {
         "$schema": "custom-renderer/v2-render-execution",
@@ -1533,6 +1581,7 @@ const f10 = item('GroupItem', 'F10', '', [
   item('PathItem', '', '', [])
 ]);
 const design03 = item('GroupItem', 'Design03', '', [
+  item('GroupItem', 'slot_initial', '', [item('PathItem', 'placeholder_initial', '', [])]),
   item('TextFrame', 'slot_name', 'Design sample', [], 'Design-style'),
   item('TextFrame', 'slot_year_tail', 'Year sample', [], 'Year-style'),
   item('PathItem', 'anchor_name', '', []),
@@ -1547,6 +1596,12 @@ const design03 = item('GroupItem', 'Design03', '', [
   item('TextFrame', 'tail_name_2', 'Tail 2', [], 'Tail-style'),
   item('TextFrame', 'slot_year', '2026', [], 'Year-style'),
   item('PathItem', 'fixed_heart', '', []),
+  item('GroupItem', 'Assets', '', [
+    item('GroupItem', 'initial_top', '', [
+      item('PathItem', 'A', '', []),
+      item('PathItem', 'T', '', [])
+    ])
+  ]),
   item('PathItem', '', '', [])
 ]);
 const fontGroup = item('GroupItem', 'Font', '', [f1, f10]);

@@ -181,6 +181,8 @@ def _slot_actions(
         anchor_key = str(slot_data.get("anchor") or "")
         tail_keys = [str(tail.get("key") or "") for tail in slot_data.get("tails", []) if isinstance(tail, Mapping)]
         preset = str(slot_data.get("preset") or slot_scan.get("preset") or "direct_text")
+        if preset == "asset_replace":
+            continue
         text_kind = str(slot_scan.get("text_kind") or slot_scan.get("textKind") or "")
         source_field = str(slot_data.get("source_field") or "")
         source_part_index = 0
@@ -256,15 +258,28 @@ def _asset_actions(
     for asset in option.get("assets", []):
         asset_data = dict(asset)
         asset_key = str(asset_data.get("asset_key") or "")
+        slot_key = str(asset_data.get("slot") or "")
         asset_scan = _scan_ref(scan_index, ("asset", output_key, option_key, asset_key), f"$.{output_key}.design.{option_key}.assets.{asset_key}")
+        slot_scan = _scan_ref(scan_index, ("slot", output_key, group, option_key, slot_key), f"$.{output_key}.design.{option_key}.assets.{asset_key}.slot")
+        slot_config = next(
+            (
+                dict(slot)
+                for slot in option.get("slots", [])
+                if isinstance(slot, Mapping) and str(slot.get("key") or "") == slot_key
+            ),
+            {},
+        )
         actions.append(
             _action(
                 "bind_asset_library",
                 group=group,
                 option_key=option_key,
                 asset_key=asset_key,
-                slot_key=str(asset_data.get("slot") or ""),
+                slot_key=slot_key,
+                slot_path=slot_scan["path"],
                 object_path=asset_scan["path"],
+                source_field=str(slot_config.get("source_field") or ""),
+                required=bool(slot_config.get("required", True)),
                 supported_values=list(asset_data.get("supported_values") or []),
             )
         )

@@ -59,6 +59,12 @@
                 if (action.source_only !== true) renderedItems.push(copied[copyKey(outputKey, action)].item);
             }
         }
+        for (var assetIndex = 0; assetIndex < actions.length; assetIndex++) {
+            var assetAction = actions[assetIndex] || {};
+            if (assetAction.type === "bind_asset_library" && isSelected(assetAction, selected)) {
+                bindAssetLibrary(copied, outputKey, assetAction, valuesByField);
+            }
+        }
         for (var replaceIndex = 0; replaceIndex < actions.length; replaceIndex++) {
             var replaceAction = actions[replaceIndex] || {};
             if (replaceAction.type === "replace_slot_text" && isSelected(replaceAction, selected)) {
@@ -135,6 +141,56 @@
                 removePageItem(tail);
             }
         }
+    }
+
+    function bindAssetLibrary(copied, outputKey, action, valuesByField) {
+        var holder = copied[copyKey(outputKey, action)];
+        if (!holder || !holder.item) throw new Error("Selected option was not copied: " + copyKey(outputKey, action));
+        var sourceField = String(action.source_field || "");
+        var rawValue = String(valuesByField[sourceField] || "");
+        var targetKey = assetTargetKey(rawValue, action.supported_values || []);
+        if (!targetKey) {
+            if (action.required !== false) throw new Error("Required V2 asset slot has no value: " + sourceField);
+            return;
+        }
+        var library = findPageItemByRelativePath(holder.item, relativePath(String(action.object_path || ""), holder.source_path));
+        var slot = findPageItemByRelativePath(holder.item, relativePath(String(action.slot_path || ""), holder.source_path));
+        var sourceAsset = findDirectChildByName(library, targetKey);
+        if (!sourceAsset) throw new Error("V2 asset library has no item: " + targetKey);
+        var parent = slot.parent || holder.item;
+        var replacement = sourceAsset.duplicate(parent, ElementPlacement.PLACEATEND);
+        fitItemWithinBounds(replacement, measuredBounds(slot), action);
+        alignItemToItem(replacement, slot);
+        removePageItem(slot);
+        removePageItem(library);
+    }
+
+    function assetTargetKey(rawValue, supportedValues) {
+        var value = String(rawValue || "").replace(/^\s+|\s+$/g, "");
+        if (!value) return "";
+        var exact = supportedAssetValue(value, supportedValues);
+        if (exact) return exact;
+        return supportedAssetValue(value.charAt(0).toUpperCase(), supportedValues);
+    }
+
+    function supportedAssetValue(value, supportedValues) {
+        var target = String(value || "");
+        if (!target) return "";
+        for (var index = 0; index < supportedValues.length; index++) {
+            var candidate = String(supportedValues[index] || "");
+            if (candidate === target || candidate.toUpperCase() === target.toUpperCase()) return candidate;
+        }
+        return target.length === 1 ? target : "";
+    }
+
+    function findDirectChildByName(item, name) {
+        var expected = String(name || "").toUpperCase();
+        var children = item.pageItems || [];
+        for (var index = 0; index < children.length; index++) {
+            var childName = String(children[index].name || "");
+            if (childName === name || childName.toUpperCase() === expected) return children[index];
+        }
+        return null;
     }
 
     function tailTextEnvironment() {
@@ -457,7 +513,7 @@
 
     function isAuxiliaryObject(item) {
         var name = String(item && item.name || "");
-        return name.indexOf("anchor_") === 0 || name.indexOf("size_") === 0 || name.indexOf("dimension_") === 0;
+        return name === "Assets" || name.indexOf("anchor_") === 0 || name.indexOf("size_") === 0 || name.indexOf("dimension_") === 0;
     }
 
     function mmToPt(mm) {
