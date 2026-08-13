@@ -55,6 +55,8 @@ def scan_evidence(template_sha256):
     }
 
 
+
+
 def api_for(tmp_path):
     return V2TemplateApi(V2TemplateStore(tmp_path / "v2"))
 
@@ -172,9 +174,10 @@ def test_v2_api_validation_advertises_current_workbench_capabilities(tmp_path):
         {"config": saveable_config()},
     ).payload
 
-    assert result["service_contract"]["version"] == 2
+    assert result["service_contract"]["version"] == 4
     assert "mixed_slot_processing" in result["service_contract"]["capabilities"]
     assert "editable_validation_targets" in result["service_contract"]["capabilities"]
+    assert "trusted_preview_worker" in result["service_contract"]["capabilities"]
 
 
 def test_v2_api_rejects_scan_missing_trusted_contract_fields(tmp_path):

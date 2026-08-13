@@ -84,6 +84,8 @@ DRAWFLOW_LOG_DIR=/opt/drawflow-central-r10/output/logs
 
 只有需要中央 DeepSeek 编译规则时，才在服务器自己的 `drawflow.env` 中填写 LLM 地址、模型和 Key。不要把 `drawflow.env` 放回 zip 或发送给客户端。
 
+启用 V2 真实样例预览时，还必须为中央服务和可信 Windows 预览工作端配置相同的 `DRAWFLOW_PREVIEW_WORKER_SECRET`。该值至少包含 32 字节随机内容，只能通过受控环境配置分发；不要放入浏览器页面、客户端示例 JSON、日志、截图或发布 ZIP。中央端未配置时会拒绝签发试渲染凭证，不接受浏览器自行构造的预览证据。
+
 ### 3.3 安装和启动
 
 逐行执行：

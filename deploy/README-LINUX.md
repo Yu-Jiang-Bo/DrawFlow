@@ -33,7 +33,7 @@ cp deploy/linux/drawflow.env.example drawflow.env
 chmod 600 drawflow.env
 ```
 
-编辑 `drawflow.env`，只在中央服务上填写 `DRAWFLOW_LLM_API_KEY`、`DRAWFLOW_LLM_BASE_URL` 和模型。客户端不需要这些变量。
+编辑 `drawflow.env`，只在中央服务上填写 `DRAWFLOW_LLM_API_KEY`、`DRAWFLOW_LLM_BASE_URL` 和模型。启用 V2 真实样例预览前，还必须生成至少 32 字节的随机值并填写 `DRAWFLOW_PREVIEW_WORKER_SECRET`；同一值通过受控客户端配置交给可信 Windows 预览工作端，普通浏览器不得获取。真实密钥不得写入仓库、日志或发布包。
 
 安装 Python 依赖。项目要求 Python 3.10 或更高版本；脚本会在创建虚拟环境前检查版本：
 

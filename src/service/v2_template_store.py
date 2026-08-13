@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from copy import deepcopy
-import shutil
 from pathlib import Path
 from typing import Any, Mapping
 from uuid import uuid4
@@ -12,6 +11,7 @@ import zipfile
 from .paths import V2_TEMPLATE_DATA_DIR
 from .template_locks import TEMPLATE_STATE_LOCK
 from .v2_template_store_assets import bundle_is_valid, bundle_members, write_v2_assets
+from .v2_template_store_publication import publish_draft_locked
 from .v2_template_store_utils import (
     optional_json,
     read_json,
@@ -26,6 +26,11 @@ V2_TEMPLATE_STORE_VERSION = 1
 
 class V2TemplateStoreError(RuntimeError):
     """Raised when a V2 template draft or version cannot be stored."""
+
+
+class V2TemplatePublishConflict(V2TemplateStoreError):
+    """Raised when a draft revision cannot be published again."""
+
 
 class V2TemplateStore:
     _write_json_atomic = staticmethod(write_json_atomic)
@@ -101,35 +106,29 @@ class V2TemplateStore:
             source_version=source_version,
         )
 
-    def publish_draft(self, template_id: str, *, note: str = "") -> dict[str, Any]:
+    def publish_draft(
+        self,
+        template_id: str,
+        *,
+        note: str = "",
+        expected_revision: str | None = None,
+    ) -> dict[str, Any]:
         with TEMPLATE_STATE_LOCK:
             state = self.get_state(template_id)
             draft = state.get("draft")
             if not isinstance(draft, Mapping):
                 raise V2TemplateStoreError("没有可发布的草稿。")
-            draft_dir = self._draft_dir(template_id, str(draft["revision"]))
-            version = self._next_child_name(self._versions_dir(template_id), "v")
-            version_dir = self._version_dir(template_id, version)
-            staging = self._staging_dir(template_id, "version")
-            try:
-                shutil.copytree(draft_dir, staging, dirs_exist_ok=True)
-                manifest = read_json(staging / "manifest.json")
-                manifest.update({
-                    "version": version,
-                    "immutable": True,
-                    "published_at": utc_now(),
-                    "publication_note": str(note or ""),
-                })
-                self._write_json_atomic(staging / "manifest.json", manifest)
-                version_dir.parent.mkdir(parents=True, exist_ok=True)
-                staging.rename(version_dir)
-                next_state = self._state_after_publish(state, version, manifest)
-                self._write_state(template_id, next_state)
-            except Exception:
-                remove_tree(staging)
-                if version_dir.exists():
-                    remove_tree(version_dir)
-                raise
+            current_revision = str(draft.get("revision") or "")
+            if expected_revision is not None and str(expected_revision) != current_revision:
+                raise V2TemplatePublishConflict("草稿修订已变化，不能继续发布。")
+            publish_draft_locked(
+                self,
+                template_id,
+                state,
+                source_revision=current_revision,
+                note=note,
+                conflict_error=V2TemplatePublishConflict,
+            )
         return self.get_state(template_id)
 
     def version_bundle_path(self, template_id: str, version: str) -> Path:
@@ -209,15 +208,6 @@ class V2TemplateStore:
             "scan_sha256": sha256_file(directory / "scan.json"),
             "assets": asset_records,
         }
-
-    def _state_after_publish(self, state: Mapping[str, Any], version: str, manifest: Mapping[str, Any]) -> dict[str, Any]:
-        next_state = deepcopy(dict(state))
-        previous = str(dict(state.get("publication", {})).get("current_version") or "")
-        next_state["publication"] = {"status": "active", "current_version": version, "rollback_version": previous}
-        versions = [dict(item) for item in state.get("versions", []) if isinstance(item, Mapping)]
-        versions.append({"version": version, "created_at": manifest["published_at"], "manifest_sha256": sha256_file(self._version_dir(str(state["template_id"]), version) / "manifest.json")})
-        next_state["versions"] = versions
-        return next_state
 
     def _draft_record(self, revision: str, source_version: str, manifest: Mapping[str, Any]) -> dict[str, Any]:
         template_id = str(dict(manifest.get("template", {})).get("template_id") or "")

@@ -33,6 +33,9 @@ from .v2_template_errors import V2ApiError, sanitize_v2_config
 from .v2_template_limits import StreamingWriteGuard, V2TemplateLimitConfig, V2UploadConcurrencyGate
 from .v2_template_maintenance import build_maintenance_snapshot, drawing_group_safe_view
 from .v2_template_maintenance import require_central_upload_allowed
+from .v2_preview_proof import preview_config_payload
+from .v2_preview_worker_auth import V2PreviewWorkerChallengeRegistry
+from .v2_template_publication import V2TemplatePublicationService
 from .v2_template_store import V2TemplateStore, V2TemplateStoreError
 from .v2_template_store_utils import read_json, remove_tree, safe_segment
 from .v2_template_transfer import DEFAULT_CHUNK_SIZE, receive_ai_stream
@@ -41,8 +44,16 @@ from .v2_template_validation import validate_v2_template_configuration
 
 SCAN_TIMESTAMP_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
 V2_WORKBENCH_SERVICE_CONTRACT = {
-    "version": 2,
-    "capabilities": ["mixed_slot_processing", "editable_validation_targets"],
+    "version": 4,
+    "capabilities": [
+        "mixed_slot_processing",
+        "editable_validation_targets",
+        "real_preview_proof",
+        "draft_asset_download",
+        "publication_check",
+        "draft_publication",
+        "trusted_preview_worker",
+    ],
 }
 
 
@@ -60,11 +71,20 @@ class V2TemplateApi:
         limits: V2TemplateLimitConfig | None = None,
         upload_gate: V2UploadConcurrencyGate | None = None,
         audit_recorder: V2AuditRecorder | None = None,
+        preview_worker_secret: str | bytes | None = None,
+        preview_worker_clock: Any | None = None,
+        preview_challenge_ttl_seconds: int = 120,
     ) -> None:
         self.store = store or V2TemplateStore(V2_TEMPLATE_DATA_DIR)
         self.limits = limits or V2TemplateLimitConfig(temp_dir=self.store.root / "_tmp")
         self.upload_gate = upload_gate or V2UploadConcurrencyGate(self.limits)
         self.audit_recorder = audit_recorder or V2AuditRecorder(self.store.root / "audit.jsonl")
+        self.preview_worker_auth = V2PreviewWorkerChallengeRegistry(
+            preview_worker_secret,
+            clock=preview_worker_clock,
+            ttl_seconds=preview_challenge_ttl_seconds,
+        )
+        self.publication = V2TemplatePublicationService(self)
 
     def handle(self, method: str, parts: list[str], payload: Mapping[str, Any] | None = None) -> V2ApiResult:
         if len(parts) == 3 and parts == ["api", "v2", "templates"]:
@@ -90,6 +110,14 @@ class V2TemplateApi:
                 return V2ApiResult(self.validate_config(payload or {}))
             if method == "GET" and action == "versions":
                 return V2ApiResult(self.read_versions(template_id))
+            if method == "POST" and action == "preview-proof":
+                return V2ApiResult(self.publication.register_preview_proof(template_id, payload or {}))
+            if method == "POST" and action == "preview-challenge":
+                return V2ApiResult(self.publication.preview_challenge(template_id, payload or {}), HTTPStatus.CREATED)
+            if method == "POST" and action == "publication-check":
+                return V2ApiResult(self.publication.publication_check(template_id, payload or {}))
+            if method == "POST" and action == "publish":
+                return V2ApiResult(self.publication.publish(template_id, payload or {}))
         raise V2TemplateApiError(
             "v2_route_not_found",
             "请求的 V2 模板接口不存在。",
@@ -122,6 +150,8 @@ class V2TemplateApi:
         scan = dict(current_draft.get("scan", {})) if current_draft else {}
         assets = current_asset_sources(self.store, template_id, current_draft, replace_file_name="")
         self._apply_trusted_scan_audit(config, scan)
+        if config:
+            config = preview_config_payload(config)
         config, validation = self._prepare_saveable_config(config)
         self._ensure_config_template_matches(template_id, validation)
         state = self.store.save_draft(template_id, metadata=metadata, config=config, scan=scan, assets=assets)
@@ -146,6 +176,8 @@ class V2TemplateApi:
         metadata = metadata_from_state(template_id, state)
         draft = optional_draft(self.store, template_id)
         config = dict(draft.get("config", {})) if draft else {}
+        if config:
+            config = preview_config_payload(config)
         headers_by_name = header_map(headers or {})
         asset_role = header(headers_by_name, "x-drawflow-asset-role") or "template"
         require_central_upload_allowed(asset_role)
@@ -195,6 +227,9 @@ class V2TemplateApi:
 
     def version_bundle_path(self, template_id: str, version: str) -> Path:
         return self.store.version_bundle_path(template_id, version)
+
+    def draft_asset_path(self, template_id: str, file_name: str) -> tuple[Path, dict[str, Any]]:
+        return self.publication.draft_asset_path(template_id, file_name)
 
     def read_draft(self, template_id: str) -> dict[str, Any]:
         try:
@@ -257,6 +292,9 @@ class V2TemplateApi:
             )
         metadata = metadata_from_state(template_id, self.store.get_state(template_id))
         config = dict(draft.get("config", {}))
+        if config:
+            config = preview_config_payload(config)
+            self._apply_trusted_scan_audit(config, evidence)
         assets = current_asset_sources(self.store, template_id, draft, replace_file_name="")
         state = self.store.save_draft(template_id, metadata=metadata, config=config, scan=evidence, assets=assets)
         next_draft = self.store.read_draft(template_id)
@@ -268,15 +306,13 @@ class V2TemplateApi:
         if not isinstance(config, Mapping):
             raise V2TemplateApiError("v2_config_invalid", "校验内容必须是 JSON 对象。")
         validation = validate_v2_template_configuration(dict(config))
+        validation = self.publication.verify_submitted_if_current(dict(config), validation)
         if validation.get("ok"):
             state = {"template_id": str(dict(validation.get("contract", {}).get("template", {})).get("template_id") or "")}
             self._record_audit("draft_validated", state, details={"can_save": validation.get("can_save", False)})
         return {
             "validation": validation,
-            "service_contract": {
-                "version": V2_WORKBENCH_SERVICE_CONTRACT["version"],
-                "capabilities": list(V2_WORKBENCH_SERVICE_CONTRACT["capabilities"]),
-            },
+            "service_contract": self._service_contract(),
         }
 
     def read_versions(self, template_id: str) -> dict[str, Any]:
@@ -287,11 +323,29 @@ class V2TemplateApi:
             "versions": state["versions"],
         }
 
+    def register_preview_proof(self, template_id: str, payload: Mapping[str, Any]) -> dict[str, Any]:
+        return self.publication.register_preview_proof(template_id, payload)
+
+    def preview_challenge(self, template_id: str, payload: Mapping[str, Any]) -> dict[str, Any]:
+        return self.publication.preview_challenge(template_id, payload)
+
+    def publication_check(self, template_id: str, payload: Mapping[str, Any]) -> dict[str, Any]:
+        return self.publication.publication_check(template_id, payload)
+
+    def publish(self, template_id: str, payload: Mapping[str, Any]) -> dict[str, Any]:
+        return self.publication.publish(template_id, payload)
+
     def maintenance_snapshot(self) -> dict[str, Any]:
         return build_maintenance_snapshot(self.store.root, limits=self.limits)
 
     def drawing_group_safe_maintenance(self) -> dict[str, Any]:
         return drawing_group_safe_view(self.maintenance_snapshot())
+
+    def _service_contract(self) -> dict[str, Any]:
+        return {
+            "version": V2_WORKBENCH_SERVICE_CONTRACT["version"],
+            "capabilities": list(V2_WORKBENCH_SERVICE_CONTRACT["capabilities"]),
+        }
 
     def _prepare_saveable_config(self, config: Mapping[str, Any]) -> tuple[dict[str, Any], dict[str, Any] | None]:
         if not config:

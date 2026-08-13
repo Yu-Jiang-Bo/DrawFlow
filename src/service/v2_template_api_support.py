@@ -11,7 +11,7 @@ from .v2_template_errors import V2ApiError, status_for_code
 from .v2_template_limits import V2TemplateLimitError
 from .v2_template_maintenance import V2TemplateMaintenanceError
 from .v2_template_store import V2TemplateStore, V2TemplateStoreError
-from .v2_template_store_utils import sha256_file
+from .v2_template_api_streams import handle_v2_template_stream
 from .v2_template_transfer import TransferError
 
 
@@ -56,22 +56,7 @@ def handle_v2_template_api(handler: Any, method: str, path: str, parts: list[str
             )
             handler._send_json(result, HTTPStatus.CREATED)
             return True
-        if (
-            method == "GET"
-            and len(parts) == 7
-            and parts[:3] == ["api", "v2", "templates"]
-            and parts[4] == "versions"
-            and parts[6] == "bundle"
-        ):
-            template_id = unquote(parts[3])
-            version = unquote(parts[5])
-            bundle_path = handler.v2_template_api.version_bundle_path(template_id, version)
-            handler._send_file_stream(
-                bundle_path,
-                content_type="application/zip",
-                download_name=f"{template_id}-{version}-template-bundle.zip",
-                extra_headers={"X-DrawFlow-SHA256": sha256_file(bundle_path)},
-            )
+        if handle_v2_template_stream(handler, method, parts):
             return True
         payload = handler._read_json() if method == "POST" else None
         result = handler.v2_template_api.handle(method, parts, payload)

@@ -85,14 +85,22 @@ _OPTION_MAPPING_FIELDS = {"field", "source_value", "target", "output", "group"}
 _CHECK_FIELDS = {"status", "reason"}
 _PREVIEW_FIELDS = {"sample_rows", "evidence"}
 _PREVIEW_EVIDENCE_FIELDS = {
+    "draft_revision",
+    "template_sha256",
+    "scan_sha256",
+    "config_sha256",
+    "sample_sha256",
     "render_task_sha256",
     "preview_sha256",
     "renderer_version",
     "font_check",
     "warnings",
+    "rendered_at",
+    "outputs",
     "approved_by",
     "approved_at",
 }
+_PREVIEW_OUTPUT_FIELDS = {"key", "ai_sha256", "png_sha256"}
 _AUDIT_FIELDS = {"scan_version", "template_sha256", "config_version"}
 _EXECUTION_FIELD_NAMES = {
     "expression",
@@ -557,7 +565,19 @@ def _normalize_preview_evidence(evidence: Mapping[str, Any], issues: list[Dict[s
     normalized: Dict[str, Any] = {}
     for key, value in evidence.items():
         path = f"$.preview.evidence.{key}"
-        if key in {"render_task_sha256", "preview_sha256", "renderer_version", "approved_by", "approved_at"}:
+        if key in {
+            "draft_revision",
+            "template_sha256",
+            "scan_sha256",
+            "config_sha256",
+            "sample_sha256",
+            "render_task_sha256",
+            "preview_sha256",
+            "renderer_version",
+            "rendered_at",
+            "approved_by",
+            "approved_at",
+        }:
             if not isinstance(value, str):
                 _issue(issues, path, "Preview evidence value must be a string.")
                 continue
@@ -566,7 +586,23 @@ def _normalize_preview_evidence(evidence: Mapping[str, Any], issues: list[Dict[s
             normalized[str(key)] = _string_list(value, path, issues)
         elif key == "font_check":
             normalized[str(key)] = _safe_metadata_value(value, path, issues)
+        elif key == "outputs":
+            output_values = _list(value, path, issues)
+            normalized[str(key)] = [
+                _normalize_preview_output(output, f"{path}[{index}]", issues)
+                for index, output in enumerate(output_values)
+            ]
     return normalized
+
+
+def _normalize_preview_output(value: Any, path: str, issues: list[Dict[str, str]]) -> Dict[str, str]:
+    data = _mapping(value, path, issues)
+    _reject_unknown(data, _PREVIEW_OUTPUT_FIELDS, path, issues)
+    return {
+        "key": _required_string(data, "key", f"{path}.key", issues),
+        "ai_sha256": _required_string(data, "ai_sha256", f"{path}.ai_sha256", issues),
+        "png_sha256": _required_string(data, "png_sha256", f"{path}.png_sha256", issues),
+    }
 
 
 def _normalize_string_map(value: Any, path: str, issues: list[Dict[str, str]]) -> Dict[str, str]:
