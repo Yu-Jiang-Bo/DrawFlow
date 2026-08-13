@@ -9,7 +9,9 @@
   }
 
   function canonicalPreviewConfig() {
-    const config = objectOf(state.draft && state.draft.config);
+    const config = typeof buildControlledConfig === "function"
+      ? buildControlledConfig()
+      : objectOf(state.draft && state.draft.config);
     const basics = formBasics();
     return {
       ...config,

@@ -92,13 +92,23 @@ def _validate_colors(contract: Mapping[str, Any], issues: list[Dict[str, str]]) 
     colors = [mapping(color) for color in list_value(contract.get("colors"))]
     add_duplicate_issues([str(color.get("key") or "") for color in colors], "$.colors", "colors", "duplicate_color", issues)
     color_keys = {str(color.get("key") or "") for color in colors}
-    needs_color = "color" in mapping(contract.get("field_bindings"))
+    needs_color = bool(colors) or _has_color_option_mappings(contract)
     for output_index, output in enumerate(outputs(contract)):
         for group_name in ("design", "font"):
             for option_index, option in enumerate(list_value(mapping(output.get(group_name)).get("options"))):
+                if _has_slot_color_binding(mapping(option)):
+                    needs_color = True
                 _validate_slot_colors(output_index, group_name, option_index, mapping(option), color_keys, contract, issues)
     if needs_color and not colors and not _manual_check_confirmed(contract, "colors"):
         add_issue(issues, "$.colors", "colors", V2_STATUS_PENDING, "color_samples_pending", "颜色扫描值还没有确认。")
+
+
+def _has_color_option_mappings(contract: Mapping[str, Any]) -> bool:
+    return any(str(mapping(item).get("group") or "") == "color" for item in list_value(contract.get("option_mappings")))
+
+
+def _has_slot_color_binding(option: Mapping[str, Any]) -> bool:
+    return any(str(mapping(slot).get("color_binding") or "").strip() for slot in list_value(option.get("slots")))
 
 
 def _manual_check_confirmed(contract: Mapping[str, Any], key: str) -> bool:

@@ -1135,6 +1135,171 @@ def test_v2_workbench_keeps_same_slot_independent_per_design_and_font_option():
     )
 
 
+def test_v2_workbench_saves_all_single_slot_font_options_from_scan_defaults():
+    run_node(
+        r"""
+        (async () => {
+          let draftSaveBody = null;
+          async function fakeFetch(url, options = {}) {
+            const textUrl = String(url);
+            if (textUrl === "/api/v2/templates") return response({ templates: [{ template_id: "V2FONT12", name: "Font Demo" }] });
+            if (textUrl.endsWith("/draft") && options.method === "POST") {
+              draftSaveBody = JSON.parse(options.body);
+              return response({ draft: {
+                metadata: draftSaveBody.metadata,
+                manifest: { draft_revision: "d0002" },
+                config: draftSaveBody.config,
+                scan: global.DrawFlowV2WorkbenchContext.state.scan
+              }});
+            }
+            if (textUrl.endsWith("/draft")) {
+              return response({ draft: {
+                metadata: { template_id: "V2FONT12", name: "Font Demo", shop_name: "" },
+                manifest: { draft_revision: "d0001" },
+                scan: {
+                  outputs: [{
+                    key: "Output_main",
+                    font: { options: Array.from({ length: 12 }, (_, index) => ({
+                      key: `F${index + 1}`,
+                      slots: [{ key: "slot_name", source_field: "name" }]
+                    })) },
+                    design: { options: [] },
+                    style: { options: [] },
+                    summary: { designs: 0, fonts: 12, styles: 0, slots: 12, anchors: 0, tails: 0, assets: 0, fixed_objects: 0 }
+                  }]
+                },
+                config: {
+                  outputs: [{
+                    key: "Output_main",
+                    display_name: "主效果图",
+                    component_key: "main",
+                    style: { field: "", options: [] },
+                    design: { field: "", options: [] },
+                    font: { field: "font", options: [] }
+                  }],
+                  field_bindings: { name: "定制信息", font: "Font" },
+                  option_mappings: Array.from({ length: 12 }, (_, index) => ({
+                    field: "font",
+                    source_value: `F${index + 1}`,
+                    target: `F${index + 1}`,
+                    output: "Output_main",
+                    group: "font"
+                  }))
+                }
+              }});
+            }
+            if (textUrl.endsWith("/validate")) return response({ validation: { can_save: true, can_publish: true, checks: {} } });
+            return response({});
+          }
+          const app = createApp(fakeFetch);
+          await flush();
+          app.elements.templateList.children[0].dispatch("click");
+          await flush();
+          global.setWorkbenchStage("rules");
+          await flush();
+
+          assert.strictEqual(document.querySelectorAll("#contentOptionRows .content-option-group").length, 1);
+          const currentSlot = document.querySelectorAll("#contentOptionRows .content-slot-row")[0];
+          assert.strictEqual(currentSlot.dataset.group, "font");
+          assert.strictEqual(currentSlot.dataset.option, "F1");
+          currentSlot.querySelector('[data-field="slot-source-field"]').value = "name";
+          currentSlot.querySelector('[data-field="slot-preset"]').value = "direct_text";
+          currentSlot.querySelector('[data-field="slot-required"]').value = "required";
+
+          await global.saveDraft();
+          await flush();
+
+          const fonts = draftSaveBody.config.outputs[0].font.options;
+          assert.strictEqual(fonts.length, 12);
+          fonts.forEach((font, index) => {
+            assert.strictEqual(font.key, `F${index + 1}`);
+            assert.strictEqual(font.content_preset, "direct_text");
+            assert.strictEqual(font.slots.length, 1);
+            assert.strictEqual(font.slots[0].key, "slot_name");
+            assert.strictEqual(font.slots[0].source_field, "name");
+            assert.strictEqual(font.slots[0].preset, "direct_text");
+            assert.strictEqual(font.slots[0].required, true);
+          });
+        })().catch((error) => { console.error(error); process.exit(1); });
+        """
+    )
+
+
+def test_v2_workbench_keeps_label_only_color_field_out_of_slot_rules():
+    run_node(
+        r"""
+        (async () => {
+          let draftSaveBody = null;
+          async function fakeFetch(url, options = {}) {
+            const textUrl = String(url);
+            if (textUrl === "/api/v2/templates") return response({ templates: [{ template_id: "V2COLORNOTE", name: "Color Note Demo" }] });
+            if (textUrl.endsWith("/draft") && options.method === "POST") {
+              draftSaveBody = JSON.parse(options.body);
+              return response({ draft: {
+                metadata: { template_id: "V2COLORNOTE", name: "Color Note Demo", shop_name: "" },
+                manifest: { draft_revision: "d0002" },
+                config: draftSaveBody.config,
+                scan: global.DrawFlowV2WorkbenchContext.state.scan
+              }});
+            }
+            if (textUrl.endsWith("/draft")) {
+              return response({ draft: {
+                metadata: { template_id: "V2COLORNOTE", name: "Color Note Demo", shop_name: "" },
+                manifest: { draft_revision: "d0001" },
+                scan: {
+                  outputs: [{
+                    key: "Output_main",
+                    design: { options: [{ key: "Design01", slots: [{ key: "slot_name", source_field: "name" }] }] },
+                    font: { options: [] },
+                    style: { options: [] },
+                    summary: { designs: 1, fonts: 0, styles: 0, slots: 1, anchors: 0, tails: 0, assets: 0, fixed_objects: 0 }
+                  }],
+                  colors: []
+                },
+                config: {
+                  field_bindings: { name: "Name", design: "Design", color: "Color" },
+                  outputs: [{
+                    key: "Output_main",
+                    display_name: "主效果图",
+                    component_key: "main",
+                    style: { field: "", options: [] },
+                    design: { field: "design", options: [{ key: "Design01", content_preset: "direct_text", slots: [{ key: "slot_name", source_field: "name", preset: "direct_text" }] }] },
+                    font: { field: "", options: [] }
+                  }],
+                  option_mappings: [{ field: "design", source_value: "01", target: "Design01", output: "Output_main", group: "design" }]
+                }
+              }});
+            }
+            if (textUrl.endsWith("/validate")) return response({ validation: { can_save: true, can_publish: true, checks: {} } });
+            return response({});
+          }
+          const app = createApp(fakeFetch);
+          await flush();
+          app.elements.templateList.children[0].dispatch("click");
+          await flush();
+          global.setWorkbenchStage("rules");
+          await flush();
+
+          const colorBindingRow = document.querySelectorAll("#fieldBindingRows .field-binding-row")
+            .find((row) => row.querySelector('[data-field="binding-field"]').value === "color");
+          assert(colorBindingRow, "label-only color field must stay editable");
+          assert.strictEqual(colorBindingRow.querySelector('[data-field="binding-column"]').value, "Color");
+          assert.strictEqual(app.elements.colorRuleRows.hidden, true);
+          assert.strictEqual(app.elements.colorRuleTitle.hidden, true);
+          assert.strictEqual(document.querySelector('[data-field="slot-color-binding"]'), null);
+
+          await global.saveDraft();
+          await flush();
+
+          assert.strictEqual(draftSaveBody.config.field_bindings.color, "Color");
+          assert.deepStrictEqual(draftSaveBody.config.colors, []);
+          const savedSlot = draftSaveBody.config.outputs[0].design.options[0].slots[0];
+          assert.strictEqual(savedSlot.color_binding, "");
+        })().catch((error) => { console.error(error); process.exit(1); });
+        """
+    )
+
+
 def test_v2_workbench_rules_stage_shows_only_selected_option_content():
     run_node(
         r"""
@@ -2205,7 +2370,7 @@ def test_v2_workbench_routes_pending_scan_color_and_manual_checks_to_real_action
               scan: { outputs: [{ key: "Output_main", design: { options: [{ key: "Design02", slots: [{ key: "slot_name" }] }] }, font: { options: [] }, style: { options: [] } }] },
               config: {
                 field_bindings: { design: "Design", name: "Name", color: "Color" },
-                outputs: [{ key: "Output_main", display_name: "Main", component_key: "main", style: { field: "", options: [] }, design: { field: "design", options: [{ key: "Design02", content_preset: "direct_text", slots: [{ key: "slot_name", source_field: "name", preset: "direct_text" }] }] }, font: { field: "", options: [] } }]
+                outputs: [{ key: "Output_main", display_name: "Main", component_key: "main", style: { field: "", options: [] }, design: { field: "design", options: [{ key: "Design02", content_preset: "direct_text", slots: [{ key: "slot_name", source_field: "name", preset: "direct_text", color_binding: "color" }] }] }, font: { field: "", options: [] } }]
               }
             }});
             if (textUrl.endsWith("/validate")) return response({ validation: { checks: {} } });
@@ -3855,14 +4020,20 @@ def test_v2_workbench_real_trial_render_uses_bound_headers_saved_revision_and_si
           let currentDraft = {
             metadata: { template_id: "V2REALPREVIEW", name: "Real Preview", shop_name: "" },
             manifest: { draft_revision: "d0001" },
-            scan: { outputs: [{ key: "Output_main" }] },
+            scan: { outputs: [{
+              key: "Output_main",
+              style: { options: [{ key: "style1" }] },
+              design: { options: [{ key: "Design02", slots: [{ key: "slot_name1" }, { key: "slot_name2" }] }] },
+              font: { options: [] },
+              summary: { designs: 1, fonts: 0, styles: 1, slots: 2, anchors: 0, tails: 0, assets: 0, fixed_objects: 0 }
+            }] },
             config: {
               outputs: [{
                 key: "Output_main", display_name: "主效果图", component_key: "main",
                 style: { field: "style", options: [{ key: "style1" }] },
                 design: { field: "design", options: [{ key: "Design02", content_preset: "mixed_slots", slots: [
                   { key: "slot_name1", source_field: "name1", preset: "tail_text" },
-                  { key: "slot_name2", source_field: "name2", preset: "direct_text" }
+                  { key: "slot_name2", source_field: "name2", preset: "direct_text", path: "Template/Output_main/Design/Design02/slot_name2" }
                 ] }] },
                 font: { field: "", options: [] }
               }],
@@ -3929,6 +4100,7 @@ def test_v2_workbench_real_trial_render_uses_bound_headers_saved_revision_and_si
           assert.deepStrictEqual(draftPostBody.config.field_bindings, { style: "Size", design: "Design", name1: "Name", name2: "Title" });
           assert.deepStrictEqual(draftPostBody.config.option_mappings, currentDraft.config.option_mappings);
           assert.deepStrictEqual(draftPostBody.config.outputs[0].design.options[0].slots.map((slot) => slot.source_field), ["name1", "name2"]);
+          assert.strictEqual(Object.prototype.hasOwnProperty.call(draftPostBody.config.outputs[0].design.options[0].slots[1], "path"), false);
           assert.strictEqual(trialBody.expected_draft_revision, "d0002");
           assert.deepStrictEqual(trialBody.sample_row, { Size: "Small", Design: "2", Name: "Ava", Title: "My title" });
           assert.deepStrictEqual(publicationBody, { expected_draft_revision: "d0003" });

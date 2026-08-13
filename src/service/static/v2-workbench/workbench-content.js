@@ -527,7 +527,6 @@
   function hasActiveColorRules(slots, model) {
     const currentModel = model || scanModel(state.scan, state.draft && state.draft.config);
     if (Array.isArray(currentModel.colors) && currentModel.colors.length) return true;
-    if (colorFieldIsBound()) return true;
     if (configuredColorBindingsExist()) return true;
     return (Array.isArray(slots) ? slots : []).some((slot) => Boolean(safeIdentifier(objectOf(slot).color_binding || "", "")));
   }

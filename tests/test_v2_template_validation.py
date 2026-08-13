@@ -221,6 +221,24 @@ def test_confirmed_color_check_allows_label_only_templates_without_color_samples
     assert result["checks"]["colors"]["status"] == V2_STATUS_PASSED
 
 
+def test_color_field_binding_without_render_rules_does_not_require_color_samples():
+    payload = complete_contract()
+    payload["colors"] = []
+    for output in payload["outputs"]:
+        for group_name in ("design", "font"):
+            for option in output[group_name]["options"]:
+                for slot in option["slots"]:
+                    slot.pop("color_binding", None)
+    payload["checks"]["colors"] = "pending"
+
+    result = validate_v2_template_configuration(payload)
+
+    assert result["can_publish"] is False
+    assert result["checks"]["colors"]["status"] == V2_STATUS_PENDING
+    assert not _has_issue(result, path="$.colors", code="color_samples_pending")
+    assert _has_issue(result, path="$.checks.colors", code="manual_check_pending")
+
+
 def test_blocked_color_check_overrides_label_only_color_confirmation():
     payload = complete_contract()
     payload["colors"] = []

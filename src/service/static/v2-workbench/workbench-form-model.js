@@ -72,7 +72,7 @@
     if (model.designs.length) fields.push("design");
     if (model.fonts.length) fields.push("font");
     if (model.styles.length) fields.push("style");
-    if (model.colors.length) fields.push("color");
+    fields.push("color");
     const configuredSources = configuredSlotSourceFields();
     model.slots.forEach((item) => {
       const field = inferredScannedSlotField(item);

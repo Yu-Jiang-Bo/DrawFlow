@@ -85,6 +85,56 @@ def test_v2_order_preflight_reports_unknown_design_font_style_and_color_values()
     assert result["issues"][0]["expected_format"]
 
 
+def test_v2_order_preflight_allows_label_only_color_column_without_render_rules():
+    config = deepcopy(complete_contract())
+    config["colors"] = []
+    for output in config["outputs"]:
+        for group_name in ("design", "font"):
+            for option in output[group_name]["options"]:
+                for slot in option["slots"]:
+                    slot.pop("color_binding", None)
+    rows = [dict(valid_rows()[0], Color="Blue")]
+
+    result = preflight_v2_order_rows(config, rows)
+
+    assert result["ok"] is True
+    assert result["can_render"] is True
+    assert result["issues"] == []
+
+
+def test_v2_order_preflight_requires_color_header_when_slot_uses_order_color():
+    config = deepcopy(complete_contract())
+    config["colors"] = []
+    rows = [dict(valid_rows()[0])]
+    rows[0].pop("Color")
+
+    result = preflight_v2_order_rows(config, rows)
+
+    assert result["ok"] is False
+    assert result["can_render"] is False
+    assert _has_issue(result, row=0, code="header_missing", reason="Color")
+
+
+def test_v2_order_preflight_checks_nondefault_color_binding_values():
+    config = deepcopy(complete_contract())
+    config["field_bindings"].pop("color")
+    config["field_bindings"]["front_color"] = "Front Color"
+    for output in config["outputs"]:
+        for group_name in ("design", "font"):
+            for option in output[group_name]["options"]:
+                for slot in option["slots"]:
+                    if slot.get("color_binding"):
+                        slot["color_binding"] = "front_color"
+    rows = [dict(valid_rows()[0], **{"Front Color": "Blue"})]
+    rows[0].pop("Color")
+
+    result = preflight_v2_order_rows(config, rows)
+
+    assert result["ok"] is False
+    assert result["can_render"] is False
+    assert _has_issue(result, row=1, code="unknown_color", reason="Blue")
+
+
 def test_v2_order_preflight_reports_required_slot_missing_by_row_and_order_id():
     rows = [dict(valid_rows()[0])]
     rows[0]["Name"] = ""
