@@ -1140,6 +1140,7 @@ def test_v2_workbench_saves_all_single_slot_font_options_from_scan_defaults():
         r"""
         (async () => {
           let draftSaveBody = null;
+          let validateBody = null;
           async function fakeFetch(url, options = {}) {
             const textUrl = String(url);
             if (textUrl === "/api/v2/templates") return response({ templates: [{ template_id: "V2FONT12", name: "Font Demo" }] });
@@ -1161,7 +1162,18 @@ def test_v2_workbench_saves_all_single_slot_font_options_from_scan_defaults():
                     key: "Output_main",
                     font: { options: Array.from({ length: 12 }, (_, index) => ({
                       key: `F${index + 1}`,
-                      slots: [{ key: "slot_name", source_field: "name" }]
+                      path: `Template/Output_main/Font/F${index + 1}`,
+                      fixed_object_count: 0,
+                      fixed_objects: [],
+                      slots: [{
+                        key: "slot_name",
+                        path: `Template/Output_main/Font/F${index + 1}/slot_name`,
+                        type: "TextFrame",
+                        text_kind: "point_text",
+                        source_field: "name",
+                        visible_bounds: [1, 2, 3, 4],
+                        dimensions: { width_mm: 15.619, height_mm: 8.49 }
+                      }]
                     })) },
                     design: { options: [] },
                     style: { options: [] },
@@ -1188,7 +1200,10 @@ def test_v2_workbench_saves_all_single_slot_font_options_from_scan_defaults():
                 }
               }});
             }
-            if (textUrl.endsWith("/validate")) return response({ validation: { can_save: true, can_publish: true, checks: {} } });
+            if (textUrl.endsWith("/validate")) {
+              validateBody = JSON.parse(options.body);
+              return response({ validation: { can_save: true, can_publish: true, checks: {} } });
+            }
             return response({});
           }
           const app = createApp(fakeFetch);
@@ -1210,6 +1225,7 @@ def test_v2_workbench_saves_all_single_slot_font_options_from_scan_defaults():
           await flush();
 
           const fonts = draftSaveBody.config.outputs[0].font.options;
+          const validatedFonts = validateBody.config.outputs[0].font.options;
           assert.strictEqual(fonts.length, 12);
           fonts.forEach((font, index) => {
             assert.strictEqual(font.key, `F${index + 1}`);
@@ -1219,6 +1235,10 @@ def test_v2_workbench_saves_all_single_slot_font_options_from_scan_defaults():
             assert.strictEqual(font.slots[0].source_field, "name");
             assert.strictEqual(font.slots[0].preset, "direct_text");
             assert.strictEqual(font.slots[0].required, true);
+            ["path", "type", "text_kind", "visible_bounds", "dimensions"].forEach((key) => {
+              assert.strictEqual(Object.prototype.hasOwnProperty.call(font.slots[0], key), false);
+              assert.strictEqual(Object.prototype.hasOwnProperty.call(validatedFonts[index].slots[0], key), false);
+            });
           });
         })().catch((error) => { console.error(error); process.exit(1); });
         """
@@ -2798,6 +2818,21 @@ def test_v2_workbench_save_next_from_structure_enters_rules_and_strips_manual_re
             result[key] = { status: key === "output" ? "pending" : "confirmed", reason: key === "output" ? nestedReason : "" };
             return result;
           }, {});
+          const fontScanOptions = Array.from({ length: 12 }, (_, index) => ({
+            key: `F${index + 1}`,
+            path: `Template/Output_main/Font/F${index + 1}`,
+            fixed_object_count: 0,
+            fixed_objects: [],
+            slots: [{
+              key: "slot_name",
+              path: `Template/Output_main/Font/F${index + 1}/slot_name`,
+              type: "TextFrame",
+              text_kind: "point_text",
+              source_field: "name",
+              visible_bounds: [1, 2, 3, 4],
+              dimensions: { width_mm: 15.619, height_mm: 8.49 }
+            }]
+          }));
           async function fakeFetch(url, options = {}) {
             const textUrl = String(url);
             if (textUrl === "/api/v2/templates") return response({ templates: [{ template_id: "V2NEXT", name: "Next Demo" }] });
@@ -2810,21 +2845,21 @@ def test_v2_workbench_save_next_from_structure_enters_rules_and_strips_manual_re
                   outputs: [{
                     key: "Output_main",
                     design: { options: [{ key: "Design01", slots: [{ key: "slot_name", source_field: "name" }] }] },
-                    font: { options: [] },
+                    font: { options: fontScanOptions },
                     style: { options: [] },
-                    summary: { designs: 1, fonts: 0, styles: 0, slots: 1, anchors: 0, tails: 0, assets: 0, fixed_objects: 0 }
+                    summary: { designs: 1, fonts: 12, styles: 0, slots: 13, anchors: 0, tails: 0, assets: 0, fixed_objects: 0 }
                   }]
                 },
                 config: {
                   checks,
-                  field_bindings: { name: "Name", design: "Design" },
+                  field_bindings: { name: "Name", design: "Design", font: "Font" },
                   outputs: [{
                     key: "Output_main",
                     display_name: "Main",
                     component_key: "main",
                     style: { field: "", options: [] },
                     design: { field: "design", options: [] },
-                    font: { field: "", options: [] }
+                    font: { field: "font", options: [] }
                   }]
                 }
               }});
@@ -2862,6 +2897,16 @@ def test_v2_workbench_save_next_from_structure_enters_rules_and_strips_manual_re
           assert.strictEqual(draftSaveBody.config.checks.fields.status, "confirmed");
           assert.strictEqual(draftSaveBody.config.checks.options.status, "confirmed");
           assert(!draftSaveBody.config.checks.output.reason.includes(manualPrefix));
+          const fonts = draftSaveBody.config.outputs[0].font.options;
+          assert.strictEqual(fonts.length, 12);
+          fonts.forEach((font, index) => {
+            assert.strictEqual(font.key, `F${index + 1}`);
+            assert.strictEqual(font.slots[0].key, "slot_name");
+            assert.strictEqual(font.slots[0].source_field, "name");
+            ["path", "type", "text_kind", "visible_bounds", "dimensions"].forEach((key) => {
+              assert.strictEqual(Object.prototype.hasOwnProperty.call(font.slots[0], key), false);
+            });
+          });
         })().catch((error) => { console.error(error); process.exit(1); });
         """
     )

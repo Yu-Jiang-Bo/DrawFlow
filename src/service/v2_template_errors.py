@@ -6,7 +6,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from http import HTTPStatus
 import re
-from typing import Any, Iterable, Mapping
+from typing import Any, Iterable, Mapping, MutableMapping
 
 from .v2_template_contract import V2ContractError, normalize_v2_template_contract
 
@@ -39,6 +39,26 @@ V2_CONFIG_TOP_LEVEL_FIELDS = frozenset(
         "audit",
     }
 )
+_V2_LEGACY_OUTPUT_SCAN_FIELDS = frozenset({"path", "order", "styles", "designs", "fonts", "summary"})
+_V2_LEGACY_GROUP_SCAN_FIELDS = frozenset({"path"})
+_V2_LEGACY_STYLE_OPTION_SCAN_FIELDS = frozenset({"path", "closed_dimension_box", "visible_bounds", "summary"})
+_V2_LEGACY_CONTENT_OPTION_SCAN_FIELDS = frozenset(
+    {
+        "path",
+        "anchors",
+        "tails",
+        "dimensions",
+        "visible_bounds",
+        "type",
+        "text_kind",
+        "fixed_object_count",
+        "fixed_object_type_counts",
+        "fixed_objects",
+        "summary",
+    }
+)
+_V2_LEGACY_SLOT_SCAN_FIELDS = frozenset({"path", "type", "text_kind", "visible_bounds", "dimensions", "closed_dimension_box"})
+_V2_LEGACY_ASSET_SCAN_FIELDS = frozenset({"path", "type", "file_name", "filename", "stored_path", "extension", "sha256"})
 
 _DEFAULT_TITLE = "V2 模板请求无法处理"
 _DEFAULT_REASON = "请求内容不符合 V2 模板接口要求。"
@@ -183,6 +203,7 @@ def sanitize_v2_config(payload: Mapping[str, Any]) -> dict[str, Any]:
     if unknown:
         raise _config_rejected()
     _scan_for_executable_fields(source)
+    source = _clean_legacy_v2_scan_fields(source)
     try:
         return normalize_v2_template_contract(deepcopy(source))
     except V2ContractError as exc:
@@ -230,6 +251,63 @@ def _config_rejected(cause: BaseException | None = None) -> V2ApiError:
         suggestion=_CONFIG_SUGGESTION,
         cause=cause,
     )
+
+
+def _clean_legacy_v2_scan_fields(payload: Mapping[str, Any]) -> dict[str, Any]:
+    source = deepcopy(dict(payload))
+    outputs = source.get("outputs")
+    if not isinstance(outputs, list):
+        return source
+    for output in outputs:
+        if not isinstance(output, Mapping):
+            continue
+        _drop_known_fields(output, _V2_LEGACY_OUTPUT_SCAN_FIELDS)
+        for group in ("style", "design", "font"):
+            group_data = output.get(group)
+            if not isinstance(group_data, Mapping):
+                continue
+            _drop_known_fields(group_data, _V2_LEGACY_GROUP_SCAN_FIELDS)
+            options = group_data.get("options")
+            if not isinstance(options, list):
+                continue
+            for option in options:
+                if not isinstance(option, Mapping):
+                    continue
+                if group == "style":
+                    _drop_known_fields(option, _V2_LEGACY_STYLE_OPTION_SCAN_FIELDS)
+                    continue
+                _drop_known_fields(option, _V2_LEGACY_CONTENT_OPTION_SCAN_FIELDS)
+                slots = option.get("slots")
+                if isinstance(slots, list):
+                    for slot in slots:
+                        if isinstance(slot, Mapping):
+                            _promote_legacy_slot_dimensions(slot)
+                            _drop_known_fields(slot, _V2_LEGACY_SLOT_SCAN_FIELDS)
+                assets = option.get("assets")
+                if isinstance(assets, list):
+                    for asset in assets:
+                        if isinstance(asset, Mapping):
+                            _drop_known_fields(asset, _V2_LEGACY_ASSET_SCAN_FIELDS)
+    return source
+
+
+def _promote_legacy_slot_dimensions(slot: MutableMapping[str, Any]) -> None:
+    if "dimension_rule" in slot or not isinstance(slot.get("dimensions"), Mapping):
+        return
+    dimensions = dict(slot.get("dimensions") or {})
+    promoted = {key: dimensions[key] for key in ("width_mm", "height_mm", "tolerance_mm") if key in dimensions}
+    if "mode" in dimensions:
+        promoted["mode"] = dimensions["mode"]
+    elif promoted:
+        promoted["mode"] = "slot"
+    if promoted:
+        slot["dimension_rule"] = promoted
+
+
+def _drop_known_fields(data: MutableMapping[str, Any], fields: Iterable[str]) -> None:
+    for field in fields:
+        if field in data:
+            del data[field]
 
 
 def _scan_for_executable_fields(value: Any) -> None:

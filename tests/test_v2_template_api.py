@@ -180,6 +180,63 @@ def test_v2_api_validation_advertises_current_workbench_capabilities(tmp_path):
     assert "trusted_preview_worker" in result["service_contract"]["capabilities"]
 
 
+def test_v2_api_validates_and_saves_legacy_font_slots_as_clean_config(tmp_path):
+    api = api_for(tmp_path)
+    config = saveable_config()
+    output = config["outputs"][0]
+    output["path"] = "Template/Output_main"
+    output["font"]["path"] = "Template/Output_main/Font"
+    output["font"]["options"] = [
+        {
+            "key": f"F{index}",
+            "content_preset": "direct_text",
+            "path": f"Template/Output_main/Font/F{index}",
+            "fixed_object_count": 0,
+            "fixed_objects": [],
+            "slots": [
+                {
+                    "key": "slot_name",
+                    "source_field": "name",
+                    "preset": "direct_text",
+                    "path": f"Template/Output_main/Font/F{index}/slot_name",
+                    "type": "TextFrame",
+                    "text_kind": "point_text",
+                    "visible_bounds": [1, 2, 3, 4],
+                    "dimensions": {"width_mm": 15.619, "height_mm": 8.49},
+                }
+            ],
+        }
+        for index in range(1, 13)
+    ]
+    config["option_mappings"] = [
+        {"field": "font", "source_value": f"F{index}", "target": f"F{index}", "output": "Output_main", "group": "font"}
+        for index in range(1, 13)
+    ]
+
+    validation = api.handle(
+        "POST",
+        ["api", "v2", "templates", "V2API001", "validate"],
+        {"config": config},
+    ).payload["validation"]
+
+    assert validation["can_save"] is True
+    assert not any(issue["code"] == "contract_invalid" for issue in validation["issues"])
+
+    api.create_template({"template_id": "V2API001", "name": "API Demo"})
+    saved = api.save_draft("V2API001", {"config": config})
+
+    fonts = saved["draft"]["config"]["outputs"][0]["font"]["options"]
+    assert saved["validation"]["can_save"] is True
+    assert len(fonts) == 12
+    for font in fonts:
+        assert len(font["slots"]) == 1
+        slot = font["slots"][0]
+        assert slot["key"] == "slot_name"
+        assert slot["source_field"] == "name"
+        assert slot["dimension_rule"] == {"mode": "slot", "width_mm": 15.619, "height_mm": 8.49}
+        assert not {"path", "type", "text_kind", "visible_bounds", "dimensions"} & set(slot)
+
+
 def test_v2_api_rejects_scan_missing_trusted_contract_fields(tmp_path):
     api = api_for(tmp_path)
     api.create_template({"template_id": "V2API001", "name": "API Demo"})

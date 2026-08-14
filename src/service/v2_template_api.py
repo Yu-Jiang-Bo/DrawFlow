@@ -305,8 +305,9 @@ class V2TemplateApi:
         config = payload.get("config", payload)
         if not isinstance(config, Mapping):
             raise V2TemplateApiError("v2_config_invalid", "校验内容必须是 JSON 对象。")
-        validation = validate_v2_template_configuration(dict(config))
-        validation = self.publication.verify_submitted_if_current(dict(config), validation)
+        controlled_config = self._validation_config(config)
+        validation = validate_v2_template_configuration(controlled_config)
+        validation = self.publication.verify_submitted_if_current(controlled_config, validation)
         if validation.get("ok"):
             state = {"template_id": str(dict(validation.get("contract", {}).get("template", {})).get("template_id") or "")}
             self._record_audit("draft_validated", state, details={"can_save": validation.get("can_save", False)})
@@ -351,7 +352,7 @@ class V2TemplateApi:
         if not config:
             return {}, None
         try:
-            sanitize_v2_config(config)
+            controlled_config = sanitize_v2_config(config)
         except V2ApiError as exc:
             raise V2TemplateApiError(
                 "v2_config_rejected",
@@ -359,7 +360,6 @@ class V2TemplateApi:
                 suggestion="请删除脚本、自然语言规则、未知字段或错误类型后再保存。",
                 cause=exc,
             ) from exc
-        controlled_config = dict(config)
         validation = validate_v2_template_configuration(controlled_config)
         if not validation["can_save"]:
             raise V2TemplateApiError(
@@ -368,6 +368,12 @@ class V2TemplateApi:
                 suggestion="请删除脚本、自然语言规则、未知字段或错误类型后再保存。",
             )
         return controlled_config, validation
+
+    def _validation_config(self, config: Mapping[str, Any]) -> dict[str, Any]:
+        try:
+            return sanitize_v2_config(config)
+        except V2ApiError:
+            return dict(config)
 
     def _ensure_config_template_matches(self, template_id: str, validation: Mapping[str, Any] | None) -> None:
         if not validation:

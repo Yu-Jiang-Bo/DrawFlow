@@ -51,10 +51,10 @@ _TOP_LEVEL_FIELDS = {
     "preview",
     "audit",
 }
-_TEMPLATE_FIELDS = {"template_id", "name", "shop_name", "component_key", "scope"}
-_OUTPUT_FIELDS = {"key", "display_name", "component_key", "scope", "style", "design", "font"}
+_TEMPLATE_FIELDS = {"template_id", "name", "shop_name", "component_key", "scope", "component_scope_executable"}
+_OUTPUT_FIELDS = {"key", "display_name", "component_key", "scope", "style", "design", "font", "order", "component_scope_executable"}
 _GROUP_FIELDS = {"field", "options"}
-_STYLE_OPTION_FIELDS = {"key", "label", "dimensions", "component_key", "scope"}
+_STYLE_OPTION_FIELDS = {"key", "label", "dimensions", "component_key", "scope", "component_scope_executable"}
 _DESIGN_FONT_OPTION_FIELDS = {
     "key",
     "label",
@@ -64,6 +64,7 @@ _DESIGN_FONT_OPTION_FIELDS = {
     "content_preset",
     "component_key",
     "scope",
+    "component_scope_executable",
 }
 _SLOT_FIELDS = {
     "key",
@@ -78,7 +79,7 @@ _SLOT_FIELDS = {
     "color_binding",
     "preserve_composition",
 }
-_ASSET_FIELDS = {"asset_key", "slot", "supported_values", "component_key", "scope"}
+_ASSET_FIELDS = {"asset_key", "slot", "supported_values", "component_key", "scope", "component_scope_executable"}
 _TAIL_FIELDS = {"key", "position", "sample", "pua_base", "glyph_map"}
 _DIMENSION_FIELDS = {"mode", "width_mm", "height_mm", "tolerance_mm"}
 _COLOR_FIELDS = {"key", "zh_name", "space", "value", "allow_recolor"}
@@ -199,6 +200,7 @@ def normalize_v2_template_contract(payload: Any) -> Dict[str, Any]:
 def _normalize_template(value: Any, issues: list[Dict[str, str]]) -> Dict[str, Any]:
     data = _mapping(value, "$.template", issues)
     _reject_unknown(data, _TEMPLATE_FIELDS, "$.template", issues)
+    _internal_false(data, "component_scope_executable", "$.template.component_scope_executable", issues)
     template_id = _required_string(data, "template_id", "$.template.template_id", issues)
     if template_id and not _SAFE_ID_RE.match(template_id):
         _issue(issues, "$.template.template_id", "Template ID may only contain letters, numbers, '-' and '_'.")
@@ -231,6 +233,8 @@ def _normalize_outputs(value: Any, issues: list[Dict[str, str]]) -> list[Dict[st
 def _normalize_output(value: Any, path: str, issues: list[Dict[str, str]]) -> Dict[str, Any]:
     data = _mapping(value, path, issues)
     _reject_unknown(data, _OUTPUT_FIELDS, path, issues)
+    _internal_false(data, "component_scope_executable", f"{path}.component_scope_executable", issues)
+    _internal_order(data, f"{path}.order", issues)
     key = _required_string(data, "key", f"{path}.key", issues)
     if key and not (_OUTPUT_MAIN_RE.match(key) or _OUTPUT_SIDE_RE.match(key)):
         _issue(issues, f"{path}.key", "Output key must be Output_main or Output_SideA/B/C...")
@@ -266,6 +270,7 @@ def _normalize_option(value: Any, kind: str, path: str, issues: list[Dict[str, s
     data = _mapping(value, path, issues)
     allowed = _STYLE_OPTION_FIELDS if kind == "style" else _DESIGN_FONT_OPTION_FIELDS
     _reject_unknown(data, allowed, path, issues)
+    _internal_false(data, "component_scope_executable", f"{path}.component_scope_executable", issues)
     key = _required_string(data, "key", f"{path}.key", issues)
     if key and kind == "style" and not _STYLE_RE.match(key):
         _issue(issues, f"{path}.key", "Style options must use style1/style2/... names.")
@@ -343,6 +348,7 @@ def _normalize_slot(value: Any, path: str, issues: list[Dict[str, str]]) -> Dict
 def _normalize_asset(value: Any, path: str, issues: list[Dict[str, str]]) -> Dict[str, Any]:
     data = _mapping(value, path, issues)
     _reject_unknown(data, _ASSET_FIELDS, path, issues)
+    _internal_false(data, "component_scope_executable", f"{path}.component_scope_executable", issues)
     slot = _required_string(data, "slot", f"{path}.slot", issues)
     if slot and not _SLOT_RE.match(slot):
         _issue(issues, f"{path}.slot", "Asset slot references must use slot_*.")
@@ -676,6 +682,21 @@ def _scope(value: Any, path: str, issues: list[Dict[str, str]]) -> str:
         _issue(issues, path, "Scope must be local or shared.")
         return "local"
     return scope
+
+
+def _internal_false(data: Mapping[str, Any], key: str, path: str, issues: list[Dict[str, str]]) -> None:
+    if key not in data or data.get(key) in (None, ""):
+        return
+    if data.get(key) is not False:
+        _issue(issues, path, "Internal execution marker must be false.")
+
+
+def _internal_order(data: Mapping[str, Any], path: str, issues: list[Dict[str, str]]) -> None:
+    if "order" not in data:
+        return
+    value = data.get("order")
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        _issue(issues, path, "Internal order must be a non-negative integer.")
 
 
 def _number(value: Any, path: str, issues: list[Dict[str, str]]) -> float:

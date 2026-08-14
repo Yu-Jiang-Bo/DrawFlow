@@ -102,6 +102,40 @@ def test_sanitize_v2_config_returns_normalized_whitelist_dict_without_mutating_s
     assert "component_scope_executable" not in source["template"]
 
 
+def test_sanitize_v2_config_drops_legacy_scan_fields_without_mutating_source():
+    source = saveable_config()
+    output = source["outputs"][0]
+    output["path"] = "Template/Output_main"
+    output["font"]["path"] = "Template/Output_main/Font"
+    option = output["font"]["options"][0]
+    option.update(
+        {
+            "path": "Template/Output_main/Font/F1",
+            "anchors": [],
+            "tails": [],
+            "fixed_object_count": 0,
+            "fixed_objects": [],
+        }
+    )
+    option["slots"][0].update(
+        {
+            "path": "Template/Output_main/Font/F1/slot_name",
+            "type": "TextFrame",
+            "text_kind": "point_text",
+            "visible_bounds": [1, 2, 3, 4],
+            "dimensions": {"width_mm": 15.619, "height_mm": 8.49},
+        }
+    )
+
+    sanitized = sanitize_v2_config(source)
+
+    slot = sanitized["outputs"][0]["font"]["options"][0]["slots"][0]
+    assert slot["dimension_rule"] == {"mode": "slot", "width_mm": 15.619, "height_mm": 8.49}
+    assert not {"path", "type", "text_kind", "visible_bounds", "dimensions"} & set(slot)
+    assert "path" not in sanitized["outputs"][0]["font"]
+    assert "path" in source["outputs"][0]["font"]["options"][0]["slots"][0]
+
+
 @pytest.mark.parametrize(
     "mutator",
     [
