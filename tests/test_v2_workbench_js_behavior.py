@@ -1230,11 +1230,13 @@ def test_v2_workbench_saves_all_single_slot_font_options_from_scan_defaults():
           fonts.forEach((font, index) => {
             assert.strictEqual(font.key, `F${index + 1}`);
             assert.strictEqual(font.content_preset, "direct_text");
+            assert.deepStrictEqual(font.font_dependencies, []);
             assert.strictEqual(font.slots.length, 1);
             assert.strictEqual(font.slots[0].key, "slot_name");
             assert.strictEqual(font.slots[0].source_field, "name");
             assert.strictEqual(font.slots[0].preset, "direct_text");
             assert.strictEqual(font.slots[0].required, true);
+            assert.deepStrictEqual(font.slots[0].font_dependencies, []);
             ["path", "type", "text_kind", "visible_bounds", "dimensions"].forEach((key) => {
               assert.strictEqual(Object.prototype.hasOwnProperty.call(font.slots[0], key), false);
               assert.strictEqual(Object.prototype.hasOwnProperty.call(validatedFonts[index].slots[0], key), false);
@@ -2579,6 +2581,8 @@ def test_v2_workbench_roundtrips_multi_output_dimensions_assets_tails_fonts_colo
           assert.strictEqual(sideB.style.options.length, 0);
           assert.strictEqual(sideB.design.options.length, 0);
           assert.strictEqual(sideB.font.options[0].key, "F10");
+          assert.deepStrictEqual(sideB.font.options[0].font_dependencies, []);
+          assert.deepStrictEqual(sideB.font.options[0].slots[0].font_dependencies, []);
           assert(draftSaveBody.config.option_mappings.some((item) => item.output === "Output_SideB" && item.group === "font" && item.target === "F10"));
 
           const reloadedSlot = document.querySelectorAll("#contentOptionRows .content-slot-row").find((row) => row.dataset.output === "Output_SideA" && row.dataset.option === "Design03" && row.dataset.slotKey === "slot_name");
@@ -2901,8 +2905,10 @@ def test_v2_workbench_save_next_from_structure_enters_rules_and_strips_manual_re
           assert.strictEqual(fonts.length, 12);
           fonts.forEach((font, index) => {
             assert.strictEqual(font.key, `F${index + 1}`);
+            assert.deepStrictEqual(font.font_dependencies, []);
             assert.strictEqual(font.slots[0].key, "slot_name");
             assert.strictEqual(font.slots[0].source_field, "name");
+            assert.deepStrictEqual(font.slots[0].font_dependencies, []);
             ["path", "type", "text_kind", "visible_bounds", "dimensions"].forEach((key) => {
               assert.strictEqual(Object.prototype.hasOwnProperty.call(font.slots[0], key), false);
             });

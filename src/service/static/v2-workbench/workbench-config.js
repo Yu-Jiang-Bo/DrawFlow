@@ -302,16 +302,30 @@
   function fontOptionsFor(output, mappings, fonts, slots) {
     const content = collectContentOptionConfigs();
     const model = scanModel(state.scan, state.draft && state.draft.config);
-    return optionKeysFor(output, "font", mappings, fonts).map((key) => ({
-      key: safeOptionKey(key, "font"),
-      label: key,
-      content_preset: contentOptionPreset(content, output, "font", key, model),
-      component_key: "",
-      scope: "local",
-      font_dependencies: optionFontDependencies(output, "font", key, contentOptionSlots(content, output, "font", key, slots, model), [key]),
-      slots: contentOptionSlots(content, output, "font", key, slots, model),
-      assets: []
-    })).filter((item) => item.key);
+    return optionKeysFor(output, "font", mappings, fonts).map((key) => {
+      const optionKey = safeOptionKey(key, "font");
+      const optionSlots = contentOptionSlots(content, output, "font", key, slots, model)
+        .map((slot) => cleanFontOptionSlotDependencies(optionKey, slot));
+      return {
+        key: optionKey,
+        label: key,
+        content_preset: contentOptionPreset(content, output, "font", key, model),
+        component_key: "",
+        scope: "local",
+        font_dependencies: optionFontDependencies(output, "font", key, optionSlots, []),
+        slots: optionSlots,
+        assets: []
+      };
+    }).filter((item) => item.key);
+  }
+
+  function cleanFontOptionSlotDependencies(optionKey, slot) {
+    return {
+      ...slot,
+      font_dependencies: Array.isArray(slot.font_dependencies)
+        ? slot.font_dependencies.filter((font) => !isFontOptionSelfDependency("font", optionKey, font))
+        : []
+    };
   }
 
 
@@ -416,11 +430,18 @@
 
   function optionFontDependencies(output, group, key, slots, defaults) {
     const existing = findConfigOption(output, group, key);
+    const optionKey = safeOptionKey(key, group);
     return unique([
       ...(Array.isArray(defaults) ? defaults : []),
       ...(Array.isArray(existing.font_dependencies) ? existing.font_dependencies : []),
       ...slots.flatMap((slot) => Array.isArray(slot.font_dependencies) ? slot.font_dependencies : [])
-    ].map(cleanText));
+    ].map(cleanText)).filter((font) => !isFontOptionSelfDependency(group, optionKey, font));
+  }
+
+  function isFontOptionSelfDependency(group, optionKey, value) {
+    return group === "font"
+      && /^F[1-9]\d*$/i.test(String(optionKey || ""))
+      && safeOptionKey(value, "font") === optionKey;
   }
 
   function supportedValuesFor(existing, scanned) {

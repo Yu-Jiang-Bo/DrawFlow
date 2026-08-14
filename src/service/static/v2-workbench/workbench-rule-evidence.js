@@ -168,8 +168,15 @@
     const slotFonts = slots.flatMap((slot) => Array.isArray(slot.font_dependencies) ? slot.font_dependencies : []);
     const scannedOption = item ? selectedScanOptionForEvidence(item, model) : {};
     const scannedOptionFonts = [scannedOption.font_name, scannedOption.font].map(cleanText).filter(Boolean);
-    const scanned = item && item.group === "font" ? [item.key] : scannedOptionFonts;
-    return unique([...optionFonts, ...slotFonts, ...scanned]);
+    return unique([...optionFonts, ...slotFonts, ...scannedOptionFonts])
+      .filter((font) => !isFontOptionSelfDependency(item, font));
+  }
+
+  function isFontOptionSelfDependency(item, value) {
+    if (!item || item.group !== "font") return false;
+    const optionKey = safeOptionKey(item.key, "font");
+    return /^F[1-9]\d*$/i.test(String(optionKey || ""))
+      && safeOptionKey(value, "font") === optionKey;
   }
 
   function displayDimensionValue(value) {

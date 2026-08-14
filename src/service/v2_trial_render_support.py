@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import shutil
 from pathlib import Path
 from typing import Any, Mapping
@@ -18,6 +19,9 @@ class V2TrialRenderError(RuntimeError):
         super().__init__(message)
         self.code = code
         self.technical_message = technical_message
+
+
+_FONT_OPTION_MARKER_RE = re.compile(r"^F[1-9]\d*$", re.IGNORECASE)
 
 
 def sample_row(value: Mapping[str, Any]) -> dict[str, str]:
@@ -64,11 +68,11 @@ def required_fonts(config: Mapping[str, Any], scan: Mapping[str, Any]) -> list[s
             for option in options if isinstance(options, list) else []:
                 if not isinstance(option, Mapping):
                     continue
-                _add_strings(fonts, option.get("font_dependencies"))
+                _add_strings(fonts, option.get("font_dependencies"), group_name=group_name, option=option)
                 slots = option.get("slots")
                 for slot in slots if isinstance(slots, list) else []:
                     if isinstance(slot, Mapping):
-                        _add_strings(fonts, slot.get("font_dependencies"))
+                        _add_strings(fonts, slot.get("font_dependencies"), group_name=group_name, option=option)
     return sorted(fonts, key=str.casefold)
 
 
@@ -233,10 +237,35 @@ def read_warnings(path: Path) -> list[str]:
     return messages
 
 
-def _add_strings(target: set[str], value: Any) -> None:
+def _add_strings(
+    target: set[str],
+    value: Any,
+    *,
+    group_name: str = "",
+    option: Mapping[str, Any] | None = None,
+) -> None:
     for item in value if isinstance(value, list) else []:
-        if str(item or "").strip():
-            target.add(str(item).strip())
+        text = str(item or "").strip()
+        if text and not _is_font_option_self_dependency(group_name, option, text):
+            target.add(text)
+
+
+def _is_font_option_self_dependency(
+    group_name: str,
+    option: Mapping[str, Any] | None,
+    value: str,
+) -> bool:
+    if group_name != "font" or not isinstance(option, Mapping):
+        return False
+    dependency = str(value or "").strip().casefold()
+    for key in ("key", "label"):
+        option_value = str(option.get(key) or "").strip()
+        if (
+            _FONT_OPTION_MARKER_RE.fullmatch(option_value)
+            and dependency == option_value.casefold()
+        ):
+            return True
+    return False
 
 
 __all__ = [
