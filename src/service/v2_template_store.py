@@ -182,6 +182,15 @@ class V2TemplateStore:
             raise V2TemplateStoreError("草稿不存在。")
         return self._read_payload(self._draft_dir(template_id, str(draft["revision"])))
 
+    def read_version(self, template_id: str, version: str) -> dict[str, Any]:
+        version_name = safe_segment(version)
+        if not version_name or version_name != str(version).strip():
+            raise V2TemplateStoreError("正式模板版本不存在，无法读取。")
+        version_dir = self._version_dir(template_id, version_name)
+        if not (version_dir / "manifest.json").exists():
+            raise V2TemplateStoreError("正式模板版本不存在，无法读取。")
+        return self._read_payload(version_dir)
+
     def get_state(self, template_id: str) -> dict[str, Any]:
         path = self._state_path(template_id)
         return read_json(path) if path.exists() else self._default_state(template_id)

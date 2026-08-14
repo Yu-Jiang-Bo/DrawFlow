@@ -102,7 +102,7 @@ def _check_required_headers(contract: Mapping[str, Any], headers: set[str], issu
                     order_id="",
                     path=f"$.field_bindings.{field}",
                     code="header_missing",
-                    reason=f"订单表缺少字段“{header or field}”，请先补齐真实英文表头。",
+                    reason=f"订单表缺少字段“{header or field}”，请先补齐订单表头。",
                     expected_format=f"请在订单表中提供列：{header or field}。",
                 )
             )

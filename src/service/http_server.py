@@ -28,7 +28,10 @@ from .template_onboarding import TemplateOnboardingStore
 from .template_inspector import TemplateInspector
 from .template_publication import TemplatePublicationService
 from .template_rule_compiler import compile_rule_ast
+from .v2_template_boundary import V2_RENDER_PIPELINE, V2_TEMPLATE_TYPE
 from .v2_template_api import V2TemplateApi, handle_v2_template_api
+from .v2_template_validation import validate_v2_template_configuration
+from .v2_trial_render_support import current_template_asset
 from .web_page import INDEX_HTML as WORKBENCH_HTML
 
 V2_WORKBENCH_STATIC_DIR = Path(__file__).resolve().parent / "static" / "v2-workbench"
@@ -810,7 +813,7 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
             self._send_error(HTTPStatus.NOT_FOUND, "not found")
             return
         if path == "/api/templates":
-            self._send_json({"templates": [self._template_payload(item) for item in self.registry.list_templates()]})
+            self._send_json({"templates": self._template_list_payloads()})
             return
         if len(parts) == 5 and parts[:3] == ["api", "runtime", "templates"] and parts[4] == "manifest":
             try:
@@ -1160,6 +1163,74 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
         payload = template.to_json_dict()
         payload["rule_check"] = check_template_definition(template)
         return payload
+
+    def _template_list_payloads(self) -> list[dict[str, object]]:
+        payloads = [self._template_payload(item) for item in self.registry.list_templates()]
+        seen = {str(item.get("template_id") or "") for item in payloads}
+        for item in self._v2_published_template_payloads():
+            template_id = str(item.get("template_id") or "")
+            if template_id and template_id not in seen:
+                payloads.append(item)
+                seen.add(template_id)
+        return payloads
+
+    def _v2_published_template_payloads(self) -> list[dict[str, object]]:
+        try:
+            states = self.v2_template_api.list_templates()
+        except Exception:
+            return []
+        payloads: list[dict[str, object]] = []
+        for state in states:
+            if not isinstance(state, dict):
+                continue
+            publication = dict(state.get("publication") or {})
+            version = str(publication.get("current_version") or "").strip()
+            if str(publication.get("status") or "").strip() != "active" or not version:
+                continue
+            template = dict(state.get("template") or {})
+            template_id = str(template.get("template_id") or state.get("template_id") or "").strip()
+            name = str(template.get("name") or template_id).strip()
+            rule_check = self._v2_rule_check(template_id, version)
+            payloads.append(
+                {
+                    "template_id": template_id,
+                    "name": name,
+                    "shop_name": str(template.get("shop_name") or "").strip(),
+                    "template_type": V2_TEMPLATE_TYPE,
+                    "pipeline": V2_RENDER_PIPELINE,
+                    "status": "active" if rule_check.get("renderable") is True else "draft",
+                    "default_columns": 1,
+                    "default_hide_boxes": True,
+                    "template_ai": "",
+                    "template_ai_role": "",
+                    "template_config": "",
+                    "template_rules_config": "",
+                    "assets": [],
+                    "v2_workbench": True,
+                    "current_version": version,
+                    "rule_check": rule_check,
+                }
+            )
+        return payloads
+
+    def _v2_rule_check(self, template_id: str, version: str) -> dict[str, object]:
+        try:
+            payload = self.v2_template_api.read_version(template_id, version)
+            validation = validate_v2_template_configuration(payload.get("config") or {})
+            manifest = payload.get("manifest") or {}
+            renderable = validation.get("can_save") is True and bool(current_template_asset(manifest))
+        except Exception:
+            renderable = False
+        return {
+            "template_id": template_id,
+            "mode": "v2_workbench",
+            "status": "active" if renderable else "draft",
+            "complete": renderable,
+            "renderable": renderable,
+            "missing": [] if renderable else [{"code": "v2_template", "message": "请回到 V2 工作台重新发布模板。"}],
+            "warnings": [],
+            "capabilities": ["v2_workbench"],
+        }
 
     def _build_template_rule_draft(self, payload: dict[str, object]) -> dict[str, object]:
         template_id = str(payload.get("template_id", "")).strip()

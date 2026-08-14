@@ -228,6 +228,12 @@ class V2TemplateApi:
     def version_bundle_path(self, template_id: str, version: str) -> Path:
         return self.store.version_bundle_path(template_id, version)
 
+    def read_version(self, template_id: str, version: str) -> dict[str, Any]:
+        try:
+            return self.store.read_version(template_id, version)
+        except V2TemplateStoreError as exc:
+            raise not_found(str(exc)) from exc
+
     def draft_asset_path(self, template_id: str, file_name: str) -> tuple[Path, dict[str, Any]]:
         return self.publication.draft_asset_path(template_id, file_name)
 

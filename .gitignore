@@ -6,6 +6,7 @@ __pycache__/
 .runtime-*/
 .tmp/
 output/
+drawflow-data/
 release/
 render-tasks/
 *.log

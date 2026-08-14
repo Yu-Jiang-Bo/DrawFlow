@@ -38,6 +38,7 @@ from .paths import LOCAL_DRAWFLOW_DIR
 from .render_service import RenderService, RenderServiceError
 from .template_inspector import TemplateInspector
 from .v2_template_scanner import V2TemplateScanner
+from .v2_order_render import V2OrderRenderError, V2OrderRenderService
 from .v2_trial_render import V2TrialRenderError, V2TrialRenderService
 from .v2_trial_render_support import missing_required_fonts
 
@@ -96,7 +97,10 @@ class LocalDrawFlowClient:
         template_id = str(payload.get("template_id") or "").strip()
         if not template_id:
             raise LocalClientError("缺少 template_id", code="missing_template_id")
-        cached = self.cache.ensure_template(template_id)
+        try:
+            cached = self.cache.ensure_template(template_id)
+        except LocalClientError as legacy_error:
+            return self._render_v2_if_published(template_id, payload, legacy_error)
         missing_fonts = missing_required_fonts(
             cached.manifest.get("required_fonts", []),
             self.font_dirs,
@@ -127,6 +131,38 @@ class LocalDrawFlowClient:
             "version": cached.version,
             "cache_hit": cached.cache_hit,
             "sha256": template_sha256(cached.manifest),
+        }
+        return record
+
+    def _render_v2_if_published(
+        self,
+        template_id: str,
+        payload: Mapping[str, Any],
+        legacy_error: LocalClientError,
+    ) -> dict[str, Any]:
+        try:
+            record = self._v2_order_service().render({**payload, "template_id": template_id})
+        except V2OrderRenderError as exc:
+            if exc.code in {
+                "v2_template_not_found",
+                "v2_template_not_published",
+                "v2_order_not_supported",
+            }:
+                raise legacy_error from exc
+            raise LocalClientError(
+                str(exc),
+                code=exc.code,
+                technical_message=exc.technical_message,
+            ) from exc
+        if record.get("status") == "failed":
+            raise LocalClientError(
+                str(record.get("error") or "V2 模板出图失败"),
+                code=str(record.get("error_code") or "v2_order_render_failed"),
+            )
+        request = dict(record.get("request") or {})
+        record["template_cache"] = {
+            "version": str(request.get("template_version") or ""),
+            "cache_hit": False,
         }
         return record
 
@@ -162,6 +198,15 @@ class LocalDrawFlowClient:
             self.font_dirs,
             self.preview_worker_secret,
             self.preview_worker_id,
+        )
+
+    def _v2_order_service(self) -> V2OrderRenderService:
+        return V2OrderRenderService(
+            self.central,
+            self.data_dir,
+            self.v2_renderer,
+            self.font_dirs,
+            self.jobs,
         )
 
     def scan_and_import(

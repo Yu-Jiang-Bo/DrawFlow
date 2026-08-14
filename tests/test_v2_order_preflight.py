@@ -59,6 +59,8 @@ def test_v2_order_preflight_reports_missing_real_order_headers():
     assert result["ok"] is False
     assert result["can_render"] is False
     assert _has_issue(result, row=0, code="header_missing", reason="Name")
+    assert "英文表头" not in result["issues"][0]["reason"]
+    assert "订单表头" in result["issues"][0]["reason"]
 
 
 def test_v2_order_preflight_reports_unknown_design_font_style_and_color_values():

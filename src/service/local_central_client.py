@@ -62,6 +62,49 @@ class HttpCentralClient:
                 code="central_unreachable",
             ) from exc
 
+    def get_v2_templates(self) -> list[dict[str, Any]]:
+        response = self._get_json("/api/v2/templates")
+        templates = response.get("templates", [])
+        return [dict(item) for item in templates if isinstance(item, Mapping)]
+
+    def get_v2_versions(self, template_id: str) -> dict[str, Any]:
+        return self._get_json(
+            f"/api/v2/templates/{_quote_segment(template_id)}/versions"
+        )
+
+    def download_v2_version_bundle_to_file(
+        self,
+        template_id: str,
+        version: str,
+        target_path: Path | str,
+    ) -> dict[str, Any]:
+        request = urllib.request.Request(
+            self.base_url
+            + f"/api/v2/templates/{_quote_segment(template_id)}/versions/{_quote_segment(version)}/bundle",
+            method="GET",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=60) as response:
+                expected = str(response.headers.get("X-DrawFlow-SHA256") or "").strip()
+                return download_stream_to_file(
+                    response,
+                    target_path,
+                    expected_sha256=expected,
+                )
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace")
+            raise LocalClientError(
+                f"中央服务读取正式模板版本失败（HTTP {exc.code}）：{central_error_detail(detail)}",
+                code=f"central_http_{exc.code}",
+            ) from exc
+        except TransferError as exc:
+            raise LocalClientError(str(exc), code=exc.code) from exc
+        except OSError as exc:
+            raise LocalClientError(
+                "无法连接中央服务，请确认服务已启动后重试。",
+                code="central_unreachable",
+            ) from exc
+
     def import_scan(self, payload: Mapping[str, Any]) -> dict[str, Any]:
         return self._post_json("/api/templates/import-scan", payload)
 
