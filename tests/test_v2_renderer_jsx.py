@@ -812,6 +812,55 @@ if (!warning.warnings || warning.warnings[0].code !== 'text_fit_extreme') throw 
     assert result.returncode == 0, result.stderr
 
 
+def test_v2_renderer_ignores_sub_tolerance_text_fit_rounding_warning():
+    task = {
+        "$schema": "custom-renderer/v2-render-execution",
+        "template_ai": "template.ai",
+        "output_ai": "out.ai",
+        "layout_warning_file": "warnings.json",
+        "values": {"design": "03", "name": "ModeratelyLong"},
+        "selections": {"Output_main": {"design": "Design03"}},
+        "visible_bounds_padding_after_resize": {"slot_name": 0.004},
+        "render_task": {
+            "$schema": "custom-renderer/v2-render-task",
+            "outputs": [
+                {
+                    "key": "Output_main",
+                    "actions": [
+                        {
+                            "type": "copy_option_group",
+                            "group": "design",
+                            "option_key": "Design03",
+                            "object_path": "Template/Output_main/Design/Design03",
+                        },
+                        {
+                            "type": "replace_slot_text",
+                            "group": "design",
+                            "option_key": "Design03",
+                            "object_path": "Template/Output_main/Design/Design03/slot_name",
+                            "source_field": "name",
+                            "required": True,
+                            "tail_paths": [],
+                        },
+                    ],
+                }
+            ],
+        },
+    }
+    harness = node_mock_harness(task, """
+const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
+const slot = child(designCopy, 'slot_name');
+const width = slot.visibleBounds[2] - slot.visibleBounds[0];
+if (width <= 100 || width >= 100.02) throw new Error('test did not create sub-tolerance rounding: ' + width);
+const warning = JSON.parse(writtenFiles['warnings.json']);
+if (warning.warnings.length) throw new Error('sub-tolerance text fit warning should be ignored');
+""")
+
+    result = run_node(harness)
+
+    assert result.returncode == 0, result.stderr
+
+
 def test_v2_renderer_group_slot_fits_text_without_moving_slot_decoration():
     task = {
         "$schema": "custom-renderer/v2-render-execution",
@@ -1466,6 +1515,76 @@ if (height < 29.96) throw new Error('font and style were not scaled as one outpu
     assert result.returncode == 0, result.stderr
 
 
+def test_v2_renderer_places_standalone_font_text_inside_selected_style_bounds():
+    task = {
+        "$schema": "custom-renderer/v2-render-execution",
+        "template_ai": "template.ai",
+        "output_ai": "out.ai",
+        "values": {"style": "small", "font": "F1", "name": "Amy"},
+        "selections": {"Output_main": {"style": "style1", "font": "F1"}},
+        "mock_style1_bounds": [200, 100, 300, 0],
+        "mock_f1_slot_bounds": [0, 30, 30, 0],
+        "render_task": {
+            "$schema": "custom-renderer/v2-render-task",
+            "outputs": [
+                {
+                    "key": "Output_main",
+                    "actions": [
+                        {
+                            "type": "select_style",
+                            "group": "style",
+                            "option_key": "style1",
+                            "object_path": "Template/Output_main/Style/style1",
+                        },
+                        {
+                            "type": "copy_option_group",
+                            "group": "font",
+                            "option_key": "F1",
+                            "object_path": "Template/Output_main/Font/F1",
+                        },
+                        {
+                            "type": "replace_slot_text",
+                            "group": "font",
+                            "option_key": "F1",
+                            "slot_key": "slot_name",
+                            "object_path": "Template/Output_main/Font/F1/slot_name",
+                            "source_field": "name",
+                            "required": True,
+                            "tail_paths": [],
+                        },
+                        {
+                            "type": "fit_output_bounds",
+                            "group": "style",
+                            "style_key": "style1",
+                            "dimensions": {"width_mm": 35.2777777778, "height_mm": 10.5833333333},
+                        },
+                    ],
+                }
+            ],
+        },
+    }
+    harness = node_mock_harness(task, """
+const styleCopy = outputLayer.pageItems.find(item => item.name === 'style1');
+const fontCopy = outputLayer.pageItems.find(item => item.name === 'F1');
+const slot = child(fontCopy, 'slot_name');
+const styleBounds = styleCopy.visibleBounds;
+const textBounds = slot.visibleBounds;
+const styleWidth = styleBounds[2] - styleBounds[0];
+const styleHeight = styleBounds[1] - styleBounds[3];
+const textWidth = textBounds[2] - textBounds[0];
+const textHeight = textBounds[1] - textBounds[3];
+if (textBounds[0] < styleBounds[0] - 0.05 || textBounds[2] > styleBounds[2] + 0.05) throw new Error('font text escaped selected style width');
+if (textBounds[1] > styleBounds[1] + 0.05 || textBounds[3] < styleBounds[3] - 0.05) throw new Error('font text escaped selected style height');
+if (textWidth < styleWidth - 0.08) throw new Error('font text did not fill selected style width: ' + textWidth + ' vs ' + styleWidth);
+if (textHeight < styleHeight - 0.08) throw new Error('font text did not fill selected style height: ' + textHeight + ' vs ' + styleHeight);
+if (slot.contents !== 'Amy') throw new Error('font slot not replaced: ' + slot.contents);
+""")
+
+    result = run_node(harness)
+
+    assert result.returncode == 0, result.stderr
+
+
 def test_v2_renderer_blocks_unmeasurable_final_output():
     task = {
         "$schema": "custom-renderer/v2-render-execution",
@@ -1801,7 +1920,9 @@ function child(parent, name) {{
   if (!found) throw new Error('missing child: ' + name);
   return found;
 }}
-const f1 = item('GroupItem', 'F1', '', [item('TextFrame', 'slot_name', 'F1 sample', [], 'F1-style')]);
+const f1SlotBounds = task.mock_f1_slot_bounds || undefined;
+const style1Bounds = task.mock_style1_bounds || [0, 100, 100, 0];
+const f1 = item('GroupItem', 'F1', '', [item('TextFrame', 'slot_name', 'F1 sample', [], 'F1-style', f1SlotBounds)]);
 const f10 = item('GroupItem', 'F10', '', [
   item('TextFrame', 'slot_name', 'F10 sample', [], 'F10-style'),
   item('TextFrame', 'slot_title', 'Arc sample', [], 'Arc-style', [0, 40, 100, 20], {{ kind: 'PATHTEXT', pathToken: 'arc-main', textSize: 18 }}),
@@ -1836,7 +1957,7 @@ const design03 = item('GroupItem', 'Design03', '', [
   ]),
   item('PathItem', '', '', [])
 ]);
-const style1 = item('GroupItem', 'style1', '', [item('PathItem', 'style1_shape', '', [], '', [0, 100, 100, 0])]);
+const style1 = item('GroupItem', 'style1', '', [item('PathItem', 'style1_shape', '', [], '', style1Bounds)]);
 const style2 = item('GroupItem', 'style2', '', [item('PathItem', 'style2_shape', '', [], '', [0, 200, 200, 0])]);
 const styleGroup = item('GroupItem', 'Style', '', [style1, style2]);
 const fontGroup = item('GroupItem', 'Font', '', [f1, f10]);
