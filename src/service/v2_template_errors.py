@@ -34,6 +34,9 @@ V2_CONFIG_TOP_LEVEL_FIELDS = frozenset(
         "colors",
         "field_bindings",
         "option_mappings",
+        "multi_name_customization",
+        "render_layout",
+        "output",
         "checks",
         "preview",
         "audit",
@@ -67,7 +70,7 @@ _TECHNICAL_TITLE = "V2 模板服务异常"
 _TECHNICAL_REASON = "服务处理请求时失败，技术详情已保留在服务日志。"
 _TECHNICAL_SUGGESTION = "请稍后重试；如果持续失败，请联系维护人员查看服务日志。"
 _CONFIG_TITLE = "V2 配置未通过白名单校验"
-_CONFIG_REASON = "配置包含脚本、JSX、自由表达式或非白名单字段，已拒绝保存。"
+_CONFIG_REASON = "配置包含脚本内容、自由表达式或未开放字段，已拒绝保存。"
 _CONFIG_SUGGESTION = "请删除自然语言规则、脚本字段和未受控字段后再保存。"
 
 _SAFE_CODE_RE = re.compile(r"^[a-z][a-z0-9_]*$")
@@ -212,7 +215,7 @@ def sanitize_v2_config(payload: Mapping[str, Any]) -> dict[str, Any]:
 
 def sanitize_v2_business_payload(payload: Mapping[str, Any], allowed_fields: Iterable[str]) -> dict[str, Any]:
     if not isinstance(payload, Mapping):
-        raise V2ApiError("v2_payload_rejected", "请求内容必须是 JSON 对象。")
+        raise V2ApiError("v2_payload_rejected", "请求内容格式不正确，请刷新页面后重试。")
     allowed = set(allowed_fields)
     source = dict(payload)
     if sorted(set(source) - allowed):

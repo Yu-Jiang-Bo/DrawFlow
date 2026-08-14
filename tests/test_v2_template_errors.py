@@ -95,11 +95,34 @@ def test_sanitize_v2_config_returns_normalized_whitelist_dict_without_mutating_s
         "colors",
         "field_bindings",
         "option_mappings",
+        "multi_name_customization",
+        "render_layout",
+        "output",
         "checks",
         "preview",
         "audit",
     }
     assert "component_scope_executable" not in source["template"]
+
+
+def test_sanitize_v2_config_accepts_preview_rows_with_chinese_headers_and_planning_metadata():
+    source = saveable_config()
+    source["field_bindings"] = {"name": "定制信息", "font": "字体", "style": "尺寸", "color": "字体颜色"}
+    source["multi_name_customization"] = {"enabled": False}
+    source["render_layout"] = {"type": "single_output"}
+    source["output"] = {"color_mode": "CMYK"}
+    source["preview"] = {
+        "sample_rows": [{"尺寸": "M", "字体": "F2", "定制信息": "Meiyi", "字体颜色": ""}],
+        "evidence": {},
+    }
+
+    sanitized = sanitize_v2_config(source)
+
+    assert sanitized["field_bindings"]["name"] == "定制信息"
+    assert sanitized["preview"]["sample_rows"] == [{"尺寸": "M", "字体": "F2", "定制信息": "Meiyi", "字体颜色": ""}]
+    assert sanitized["multi_name_customization"] == {"enabled": False}
+    assert sanitized["render_layout"] == {"type": "single_output"}
+    assert sanitized["output"] == {"color_mode": "CMYK"}
 
 
 def test_sanitize_v2_config_drops_legacy_scan_fields_without_mutating_source():
