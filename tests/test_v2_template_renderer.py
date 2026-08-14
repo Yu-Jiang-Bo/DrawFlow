@@ -209,6 +209,43 @@ def test_missing_style_selection_for_final_fit_does_not_enter_illustrator(tmp_pa
     assert not (tmp_path / "task.json").exists()
 
 
+def test_select_style_action_is_renderable_without_final_fit(tmp_path):
+    task = compiled_task()
+    task["option_mappings"].append(
+        {
+            "output": "Output_main",
+            "group": "style",
+            "field": "style",
+            "source_value": "small",
+            "target": "style1",
+        }
+    )
+    task["outputs"][0]["actions"] = [
+        {
+            "type": "select_style",
+            "group": "style",
+            "option_key": "style1",
+            "object_path": "Template/Output_main/Style/style1",
+        }
+    ]
+    bridge = FakeBridge()
+    renderer = V2TemplateRenderer(bridge=bridge, script_path=tmp_path / "render_v2_template.jsx")
+    task_path = tmp_path / "task.json"
+
+    result = renderer.render(
+        task,
+        template_ai=tmp_path / "template.ai",
+        output_ai=tmp_path / "out.ai",
+        values={"style": "small"},
+        task_file=task_path,
+    )
+
+    assert result == "done.ai"
+    assert len(bridge.calls) == 1
+    payload = json.loads(task_path.read_text(encoding="utf-8"))
+    assert payload["selections"] == {"Output_main": {"style": "style1"}}
+
+
 def test_optional_empty_slot_is_passed_to_jsx_for_removal(tmp_path):
     bridge = FakeBridge()
     renderer = V2TemplateRenderer(bridge=bridge, script_path=tmp_path / "render_v2_template.jsx")

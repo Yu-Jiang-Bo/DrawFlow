@@ -54,6 +54,10 @@
         var actions = output.actions || [];
         for (var index = 0; index < actions.length; index++) {
             var action = actions[index] || {};
+            if (action.type === "select_style" && isSelected(action, selected)) {
+                copied[copyKey(outputKey, action)] = copyOptionGroup(sourceDoc, targetLayer, action.object_path, false);
+                renderedItems.push(copied[copyKey(outputKey, action)].item);
+            }
             if (action.type === "copy_option_group" && isSelected(action, selected)) {
                 copied[copyKey(outputKey, action)] = copyOptionGroup(sourceDoc, targetLayer, action.object_path, action.source_only === true);
                 if (action.source_only !== true) renderedItems.push(copied[copyKey(outputKey, action)].item);
@@ -468,38 +472,78 @@
         var targetHeight = mmToPt(Number(dimensions.height_mm || 0));
         if (targetWidth <= 0 || targetHeight <= 0) throw new Error("V2 output target dimensions are invalid");
         var bounds = unionBounds(items, true);
-        var width = Math.abs(Number(bounds[2]) - Number(bounds[0]));
-        var height = Math.abs(Number(bounds[1]) - Number(bounds[3]));
-        if (width <= 0 || height <= 0) throw new Error("V2 output visible bounds are not measurable");
         var fitInset = Math.min(mmToPt(0.001), targetWidth / 1000, targetHeight / 1000);
         var fitTargetWidth = targetWidth - fitInset;
         var fitTargetHeight = targetHeight - fitInset;
-        var scaleX = fitTargetWidth / width * 100;
-        var scaleY = fitTargetHeight / height * 100;
-        for (var index = 0; index < items.length; index++) {
-            try { items[index].resize(scaleX, scaleY, true, true, true, true, 100, Transformation.CENTER); }
-            catch (resizeError1) {
-                try { items[index].resize(scaleX, scaleY); } catch (resizeError2) { throw resizeError2; }
-            }
-        }
-        var fitted = unionBounds(items, true);
         var targetLeft = Number(bounds[0]);
         var targetTop = Number(bounds[1]);
-        translateItems(items, targetLeft - Number(fitted[0]), targetTop - Number(fitted[1]));
-        validateOutputBounds(items, targetWidth, targetHeight);
+        for (var attempt = 0; attempt < 4; attempt++) {
+            var current = unionBounds(items, true);
+            var width = Math.abs(Number(current[2]) - Number(current[0]));
+            var height = Math.abs(Number(current[1]) - Number(current[3]));
+            if (width <= 0 || height <= 0) throw new Error("V2 output visible bounds are not measurable");
+            var scaleX = fitTargetWidth / width * 100;
+            var scaleY = fitTargetHeight / height * 100;
+            if (Math.abs(scaleX - 100) <= 0.001 && Math.abs(scaleY - 100) <= 0.001) break;
+            resizeItemsAroundBounds(items, current, scaleX, scaleY);
+            var fitted = unionBounds(items, true);
+            translateItems(items, targetLeft - Number(fitted[0]), targetTop - Number(fitted[1]));
+            if (outputBoundsWithinTolerance(fitted, targetWidth, targetHeight, mmToPt(Number(dimensions.tolerance_mm || 0.007)))) break;
+        }
+        validateOutputBounds(items, dimensions, targetWidth, targetHeight);
     }
 
-    function validateOutputBounds(items, targetWidth, targetHeight) {
+    function resizeItemsAroundBounds(items, bounds, scaleX, scaleY) {
+        var scaleXRatio = Number(scaleX) / 100;
+        var scaleYRatio = Number(scaleY) / 100;
+        var centerX = (Number(bounds[0]) + Number(bounds[2])) / 2;
+        var centerY = (Number(bounds[1]) + Number(bounds[3])) / 2;
+        for (var index = 0; index < items.length; index++) {
+            var itemBounds = visibleBoundsStrict(items[index]);
+            var itemCenterX = (Number(itemBounds[0]) + Number(itemBounds[2])) / 2;
+            var itemCenterY = (Number(itemBounds[1]) + Number(itemBounds[3])) / 2;
+            var targetCenterX = centerX + (itemCenterX - centerX) * scaleXRatio;
+            var targetCenterY = centerY + (itemCenterY - centerY) * scaleYRatio;
+            resizePageItem(items[index], scaleX, scaleY);
+            var resized = visibleBoundsStrict(items[index]);
+            var resizedCenterX = (Number(resized[0]) + Number(resized[2])) / 2;
+            var resizedCenterY = (Number(resized[1]) + Number(resized[3])) / 2;
+            items[index].translate(targetCenterX - resizedCenterX, targetCenterY - resizedCenterY);
+        }
+    }
+
+    function resizePageItem(item, scaleX, scaleY) {
+        try { item.resize(scaleX, scaleY, true, true, true, true, 100, Transformation.CENTER); }
+        catch (resizeError1) {
+            try { item.resize(scaleX, scaleY); } catch (resizeError2) { throw resizeError2; }
+        }
+    }
+
+    function validateOutputBounds(items, dimensions, targetWidth, targetHeight) {
         var bounds = unionBounds(items, true);
         var width = Math.abs(Number(bounds[2]) - Number(bounds[0]));
         var height = Math.abs(Number(bounds[1]) - Number(bounds[3]));
-        var tolerance = mmToPt(0.007);
-        if (width > targetWidth || height > targetHeight) {
-            throw new Error("V2 output exceeds target bounds");
+        var tolerance = mmToPt(Number(dimensions.tolerance_mm || 0.007));
+        if (width > targetWidth + tolerance || height > targetHeight + tolerance) {
+            throw new Error(
+                "V2 output exceeds target bounds: actual="
+                + width + "x" + height
+                + ", target=" + targetWidth + "x" + targetHeight
+                + ", tolerance=" + tolerance
+            );
         }
         if (width < targetWidth - tolerance || height < targetHeight - tolerance) {
             throw new Error("V2 output is below target tolerance");
         }
+    }
+
+    function outputBoundsWithinTolerance(bounds, targetWidth, targetHeight, tolerance) {
+        var width = Math.abs(Number(bounds[2]) - Number(bounds[0]));
+        var height = Math.abs(Number(bounds[1]) - Number(bounds[3]));
+        return width <= targetWidth + tolerance
+            && width >= targetWidth - tolerance
+            && height <= targetHeight + tolerance
+            && height >= targetHeight - tolerance;
     }
 
     function fitArtboardToVisibleContent(doc, items) {

@@ -219,7 +219,7 @@ def _preflight_renderable_options(
             continue
         options_by_group: dict[str, set[str]] = {}
         for action in output.get("actions", []):
-            if not isinstance(action, Mapping) or action.get("type") != "copy_option_group":
+            if not isinstance(action, Mapping) or action.get("type") not in {"copy_option_group", "select_style"}:
                 if not isinstance(action, Mapping) or action.get("type") != "fit_output_bounds":
                     continue
                 group = str(action.get("group") or "")

@@ -1366,6 +1366,106 @@ if (designCopy.resizeCalls < 1) throw new Error('final output was not resized');
     assert result.returncode == 0, result.stderr
 
 
+def test_v2_renderer_copies_selected_style_option():
+    task = {
+        "$schema": "custom-renderer/v2-render-execution",
+        "template_ai": "template.ai",
+        "output_ai": "out.ai",
+        "values": {"style": "small"},
+        "selections": {"Output_main": {"style": "style1"}},
+        "render_task": {
+            "$schema": "custom-renderer/v2-render-task",
+            "outputs": [
+                {
+                    "key": "Output_main",
+                    "actions": [
+                        {
+                            "type": "select_style",
+                            "group": "style",
+                            "option_key": "style1",
+                            "object_path": "Template/Output_main/Style/style1",
+                        },
+                        {
+                            "type": "select_style",
+                            "group": "style",
+                            "option_key": "style2",
+                            "object_path": "Template/Output_main/Style/style2",
+                        },
+                    ],
+                }
+            ],
+        },
+    }
+    harness = node_mock_harness(task, """
+const copiedNames = outputLayer.pageItems.map(item => item.name);
+if (!copiedNames.includes('style1')) throw new Error('selected style was not copied');
+if (copiedNames.includes('style2')) throw new Error('unselected style was copied');
+""")
+
+    result = run_node(harness)
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_v2_renderer_scales_style_and_font_as_one_final_output():
+    task = {
+        "$schema": "custom-renderer/v2-render-execution",
+        "template_ai": "template.ai",
+        "output_ai": "out.ai",
+        "values": {"style": "small", "font": "F1", "name": "Amy"},
+        "selections": {"Output_main": {"style": "style1", "font": "F1"}},
+        "render_task": {
+            "$schema": "custom-renderer/v2-render-task",
+            "outputs": [
+                {
+                    "key": "Output_main",
+                    "actions": [
+                        {
+                            "type": "select_style",
+                            "group": "style",
+                            "option_key": "style1",
+                            "object_path": "Template/Output_main/Style/style1",
+                        },
+                        {
+                            "type": "copy_option_group",
+                            "group": "font",
+                            "option_key": "F1",
+                            "object_path": "Template/Output_main/Font/F1",
+                        },
+                        {
+                            "type": "replace_slot_text",
+                            "group": "font",
+                            "option_key": "F1",
+                            "slot_key": "slot_name",
+                            "object_path": "Template/Output_main/Font/F1/slot_name",
+                            "source_field": "name",
+                            "required": True,
+                            "tail_paths": [],
+                        },
+                        {
+                            "type": "fit_output_bounds",
+                            "group": "style",
+                            "style_key": "style1",
+                            "dimensions": {"width_mm": 35.2777777778, "height_mm": 10.5833333333},
+                        },
+                    ],
+                }
+            ],
+        },
+    }
+    harness = node_mock_harness(task, """
+const bounds = union(outputLayer.pageItems.map(item => item.visibleBounds));
+const width = bounds[2] - bounds[0];
+const height = bounds[1] - bounds[3];
+if (width > 100 || height > 30) throw new Error('final output exceeded target: ' + width + 'x' + height);
+if (height < 29.96) throw new Error('font and style were not scaled as one output: ' + height);
+""")
+
+    result = run_node(harness)
+
+    assert result.returncode == 0, result.stderr
+
+
 def test_v2_renderer_blocks_unmeasurable_final_output():
     task = {
         "$schema": "custom-renderer/v2-render-execution",
@@ -1444,7 +1544,7 @@ def test_v2_renderer_rejects_final_output_that_exceeds_target():
         "output_ai": "out.ai",
         "values": {"design": "03", "style": "small"},
         "selections": {"Output_main": {"design": "Design03", "style": "style1"}},
-        "visible_bounds_padding_after_resize": {"Design03": 0.01},
+        "visible_bounds_padding_after_resize": {"Design03": 60},
         "render_task": {
             "$schema": "custom-renderer/v2-render-task",
             "outputs": [
@@ -1474,6 +1574,48 @@ def test_v2_renderer_rejects_final_output_that_exceeds_target():
 
     assert result.returncode != 0
     assert "V2 output exceeds target bounds" in result.stderr
+
+
+def test_v2_renderer_allows_sub_tolerance_final_output_rounding():
+    task = {
+        "$schema": "custom-renderer/v2-render-execution",
+        "template_ai": "template.ai",
+        "output_ai": "out.ai",
+        "values": {"design": "03", "style": "small"},
+        "selections": {"Output_main": {"design": "Design03", "style": "style1"}},
+        "visible_bounds_padding_after_resize": {"Design03": 0.004},
+        "render_task": {
+            "$schema": "custom-renderer/v2-render-task",
+            "outputs": [
+                {
+                    "key": "Output_main",
+                    "actions": [
+                        {
+                            "type": "copy_option_group",
+                            "group": "design",
+                            "option_key": "Design03",
+                            "object_path": "Template/Output_main/Design/Design03",
+                        },
+                        {
+                            "type": "fit_output_bounds",
+                            "group": "style",
+                            "style_key": "style1",
+                            "dimensions": {
+                                "width_mm": 35.2777777778,
+                                "height_mm": 10.5833333333,
+                                "tolerance_mm": 0.007,
+                            },
+                        },
+                    ],
+                }
+            ],
+        },
+    }
+    harness = node_mock_harness(task, "")
+
+    result = run_node(harness)
+
+    assert result.returncode == 0, result.stderr
 
 
 def node_mock_harness(task, assertions, disable_native_json=False):
@@ -1694,9 +1836,12 @@ const design03 = item('GroupItem', 'Design03', '', [
   ]),
   item('PathItem', '', '', [])
 ]);
+const style1 = item('GroupItem', 'style1', '', [item('PathItem', 'style1_shape', '', [], '', [0, 100, 100, 0])]);
+const style2 = item('GroupItem', 'style2', '', [item('PathItem', 'style2_shape', '', [], '', [0, 200, 200, 0])]);
+const styleGroup = item('GroupItem', 'Style', '', [style1, style2]);
 const fontGroup = item('GroupItem', 'Font', '', [f1, f10]);
 const designGroup = item('GroupItem', 'Design', '', [design03]);
-const outputMain = item('GroupItem', 'Output_main', '', [fontGroup, designGroup]);
+const outputMain = item('GroupItem', 'Output_main', '', [styleGroup, fontGroup, designGroup]);
 const outputSideB = item('GroupItem', 'Output_SideB', '', [clone(fontGroup), clone(designGroup)]);
 const templateLayer = {{ typename: 'Layer', name: 'Template', pageItems: [outputMain, outputSideB] }};
 outputMain.parent = templateLayer;
