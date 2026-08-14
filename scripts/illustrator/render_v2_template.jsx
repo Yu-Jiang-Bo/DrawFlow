@@ -33,6 +33,9 @@
             renderedOutputCount += 1;
         }
         if (selectedOutputKey && renderedOutputCount !== 1) throw new Error("Selected V2 output was not rendered: " + selectedOutputKey);
+        if (execution.pack_order_blocks === true) {
+            renderedOutputItems = [groupRenderedOutputBlock(layer, renderedOutputItems, 0)];
+        }
         if (execution.preview_png) fitArtboardToVisibleContent(doc, renderedOutputItems);
         var output = File(String(execution.output_ai));
         ensureFolder(output.parent);
@@ -587,6 +590,44 @@
         for (var index = 0; index < items.length; index++) {
             items[index].translate(dx, dy);
         }
+    }
+
+    function groupRenderedOutputBlock(layer, items, blockIndex) {
+        var candidates = directRenderableItems(items);
+        if (!candidates.length) throw new Error("V2 order block has no artwork");
+        if (candidates.length === 1 && candidates[0].typename === "GroupItem") {
+            candidates[0].name = "ORDER_PACK_BLOCK_" + blockIndex;
+            return candidates[0];
+        }
+        var doc = app.activeDocument;
+        doc.selection = null;
+        for (var index = 0; index < candidates.length; index++) {
+            candidates[index].selected = true;
+        }
+        app.executeMenuCommand("group");
+        var block = doc.selection.length ? doc.selection[0] : null;
+        if (!block || block.typename !== "GroupItem") throw new Error("Cannot create V2 order block");
+        block.name = "ORDER_PACK_BLOCK_" + blockIndex;
+        doc.selection = null;
+        return block;
+    }
+
+    function directRenderableItems(items) {
+        var result = [];
+        for (var index = 0; index < items.length; index++) {
+            var item = items[index];
+            if (!item || item.hidden === true) continue;
+            if (containsSamePageItem(result, item)) continue;
+            result.push(item);
+        }
+        return result;
+    }
+
+    function containsSamePageItem(items, candidate) {
+        for (var index = 0; index < items.length; index++) {
+            if (items[index] === candidate) return true;
+        }
+        return false;
     }
 
     function cleanupAuxiliaryObjects(items) {

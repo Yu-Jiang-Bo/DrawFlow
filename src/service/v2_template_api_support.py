@@ -96,7 +96,7 @@ def optional_mapping(payload: Mapping[str, Any], key: str, fallback_key: str = "
     if value in (None, ""):
         return {}
     if not isinstance(value, Mapping):
-        raise V2TemplateApiError("v2_payload_invalid", f"{key} 必须是 JSON 对象。")
+        raise V2TemplateApiError("v2_payload_invalid", f"{key} 内容格式不正确，请刷新页面后重试。")
     return dict(value)
 
 

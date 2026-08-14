@@ -222,7 +222,7 @@ def read_department_rules(path: Path | None = None) -> Mapping[str, Any]:
     except FileNotFoundError as exc:
         raise DepartmentOutputError(f"部门成品规则文件不存在：{source}") from exc
     if not isinstance(data, Mapping):
-        raise DepartmentOutputError("部门成品规则不是有效的 JSON 对象")
+        raise DepartmentOutputError("部门成品规则格式不正确")
     return data
 
 

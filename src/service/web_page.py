@@ -126,9 +126,16 @@ INDEX_HTML = """<!doctype html>
       box-shadow: 0 1px 2px rgba(23, 33, 43, 0.04);
     }
     .tab {
+      display: inline-flex;
+      align-items: center;
+      min-height: 36px;
+      padding: 8px 14px;
       color: #405064;
       border-color: transparent;
       background: transparent;
+      border-radius: 5px;
+      font-weight: 700;
+      text-decoration: none;
     }
     .tab.active {
       color: #fff;
@@ -903,6 +910,7 @@ INDEX_HTML = """<!doctype html>
     <nav class="tabs" aria-label="主导航">
       <button class="tab active" data-page-tab="render">出图任务</button>
       <button class="tab" data-page-tab="templates">模板管理</button>
+      <a class="tab" href="/v2/templates/workbench">V2 工作台</a>
       <button class="tab" data-page-tab="rules">规则配置</button>
       <button class="tab" data-page-tab="jobs">任务记录</button>
     </nav>

@@ -47,6 +47,9 @@ _TOP_LEVEL_FIELDS = {
     "colors",
     "field_bindings",
     "option_mappings",
+    "multi_name_customization",
+    "render_layout",
+    "output",
     "checks",
     "preview",
     "audit",
@@ -178,6 +181,13 @@ def normalize_v2_template_contract(payload: Any) -> Dict[str, Any]:
     colors = _normalize_colors(source.get("colors", []), issues)
     field_bindings = _normalize_string_map(source.get("field_bindings", {}), "$.field_bindings", issues)
     option_mappings = _normalize_option_mappings(source.get("option_mappings", []), output_keys, issues)
+    multi_name_customization = _normalize_metadata_object(
+        source.get("multi_name_customization", {}),
+        "$.multi_name_customization",
+        issues,
+    )
+    render_layout = _normalize_metadata_object(source.get("render_layout", {}), "$.render_layout", issues)
+    output = _normalize_metadata_object(source.get("output", {}), "$.output", issues)
     checks = _normalize_checks(source.get("checks", {}), issues)
     preview = _normalize_preview(source.get("preview", {}), issues)
     audit = _normalize_audit(source.get("audit", {}), issues)
@@ -191,6 +201,9 @@ def normalize_v2_template_contract(payload: Any) -> Dict[str, Any]:
         "colors": colors,
         "field_bindings": field_bindings,
         "option_mappings": option_mappings,
+        "multi_name_customization": multi_name_customization,
+        "render_layout": render_layout,
+        "output": output,
         "checks": checks,
         "preview": preview,
         "audit": audit,
@@ -625,6 +638,24 @@ def _normalize_string_map(value: Any, path: str, issues: list[Dict[str, str]]) -
             continue
         result[key] = _safe_text(raw.strip(), f"{path}.{key}", issues)
     return result
+
+
+def _normalize_metadata_object(value: Any, path: str, issues: list[Dict[str, str]]) -> Dict[str, Any]:
+    if value in ({}, None, ""):
+        return {}
+    data = _mapping(value, path, issues)
+    normalized: Dict[str, Any] = {}
+    for key, raw in data.items():
+        key_text = str(key or "").strip()
+        key_path = f"{path}.{key_text or '<empty>'}"
+        if not key_text:
+            _issue(issues, key_path, "Metadata keys cannot be empty.")
+            continue
+        if _is_execution_field_name(key_text):
+            _issue(issues, key_path, "Metadata cannot contain execution or natural-language rule fields.")
+            continue
+        normalized[key_text] = _safe_metadata_value(raw, key_path, issues)
+    return normalized
 
 
 def _mapping(value: Any, path: str, issues: list[Dict[str, str]]) -> Dict[str, Any]:

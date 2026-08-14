@@ -11,6 +11,10 @@ def test_page_uses_drawflow_branding():
     assert "制图渲染工作台" not in INDEX_HTML
 
 
+def test_main_tabs_link_to_v2_template_workbench():
+    assert '<a class="tab" href="/v2/templates/workbench">V2 工作台</a>' in INDEX_HTML
+
+
 def test_render_page_exposes_single_render_action():
     assert 'id="dryRunBtn"' not in INDEX_HTML
     assert 'id="resetTaskBtn"' not in INDEX_HTML

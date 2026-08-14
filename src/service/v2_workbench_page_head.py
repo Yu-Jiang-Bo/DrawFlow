@@ -42,7 +42,8 @@ PAGE_HEAD = """<!doctype html>
       </div>
       <nav class="v2-nav" aria-label="主导航">
       <a href="/" data-nav-target="render-tasks">出图任务</a>
-      <a href="/templates" data-nav-target="templates" aria-current="page">模板管理</a>
+      <a href="/templates" data-nav-target="templates">模板管理</a>
+      <a href="/v2/templates/workbench" data-nav-target="v2-workbench" aria-current="page">V2 工作台</a>
       <a href="/rules" data-nav-target="rules">规则配置</a>
       <a href="/jobs" data-nav-target="jobs">任务记录</a>
       </nav>

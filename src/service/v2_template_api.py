@@ -310,7 +310,7 @@ class V2TemplateApi:
     def validate_config(self, payload: Mapping[str, Any]) -> dict[str, Any]:
         config = payload.get("config", payload)
         if not isinstance(config, Mapping):
-            raise V2TemplateApiError("v2_config_invalid", "校验内容必须是 JSON 对象。")
+            raise V2TemplateApiError("v2_config_invalid", "校验内容格式不正确，请刷新页面后重试。")
         controlled_config = self._validation_config(config)
         validation = validate_v2_template_configuration(controlled_config)
         validation = self.publication.verify_submitted_if_current(controlled_config, validation)
@@ -362,8 +362,8 @@ class V2TemplateApi:
         except V2ApiError as exc:
             raise V2TemplateApiError(
                 "v2_config_rejected",
-                "配置包含脚本、JSX、自然语言规则或未开放字段，草稿未保存。",
-                suggestion="请删除脚本、自然语言规则、未知字段或错误类型后再保存。",
+                "配置包含脚本内容、自然语言规则或未开放字段，草稿未保存。",
+                suggestion="请删除脚本内容、自然语言规则、未知字段或错误类型后再保存。",
                 cause=exc,
             ) from exc
         validation = validate_v2_template_configuration(controlled_config)

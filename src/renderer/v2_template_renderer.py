@@ -5,7 +5,7 @@ from __future__ import annotations
 from copy import deepcopy
 import json
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 from .illustrator_bridge import IllustratorBridge
 from .v2_template_execution_contract import (
@@ -41,7 +41,9 @@ class V2TemplateRenderer:
         selections: Mapping[str, Any] | None = None,
         output_key: str | None = None,
         preview_png: Path | str | None = None,
+        preview_dpi: int | float | None = None,
         layout_warning_file: Path | str | None = None,
+        pack_order_blocks: bool = False,
     ) -> dict[str, Any]:
         return build_v2_execution_task(
             render_task,
@@ -51,7 +53,9 @@ class V2TemplateRenderer:
             selections=selections,
             output_key=output_key,
             preview_png=preview_png,
+            preview_dpi=preview_dpi,
             layout_warning_file=layout_warning_file,
+            pack_order_blocks=pack_order_blocks,
         )
 
     def render(
@@ -65,7 +69,9 @@ class V2TemplateRenderer:
         task_file: Path | str | None = None,
         output_key: str | None = None,
         preview_png: Path | str | None = None,
+        preview_dpi: int | float | None = None,
         layout_warning_file: Path | str | None = None,
+        pack_order_blocks: bool = False,
     ) -> str:
         execution_task = self.build_execution_task(
             render_task,
@@ -75,7 +81,9 @@ class V2TemplateRenderer:
             selections=selections,
             output_key=output_key,
             preview_png=preview_png,
+            preview_dpi=preview_dpi,
             layout_warning_file=layout_warning_file,
+            pack_order_blocks=pack_order_blocks,
         )
         task_path = Path(task_file) if task_file is not None else _default_task_file(Path(output_ai))
         task_path.parent.mkdir(parents=True, exist_ok=True)
@@ -84,6 +92,114 @@ class V2TemplateRenderer:
             encoding="utf-8",
         )
         return str(self.bridge.render(self.script_path, task_path))
+
+    def compose_order_column(
+        self,
+        *,
+        input_ai_files: Sequence[Path | str],
+        output_ai: Path | str,
+        task_file: Path | str,
+        gap_mm: float = 8.0,
+        compatibility: str = "Illustrator 8",
+    ) -> str:
+        task_path = Path(task_file)
+        task_path.parent.mkdir(parents=True, exist_ok=True)
+        task_path.write_text(
+            json.dumps(
+                {
+                    "type": "compose_v2_order_column",
+                    "output_ai": str(Path(output_ai)),
+                    "gap_mm": float(gap_mm),
+                    "compatibility": str(compatibility or "Illustrator 8"),
+                    "inputs": [{"path": str(Path(path))} for path in input_ai_files],
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        compose_script = self.script_path.with_name("compose_v2_order_column.jsx")
+        return str(self.bridge.render(compose_script, task_path))
+
+    def compose_color_frames(
+        self,
+        *,
+        inputs: Sequence[Mapping[str, Any]],
+        output_ai: Path | str,
+        task_file: Path | str,
+        master_packing: Mapping[str, Any],
+        compatibility: str = "Illustrator 8",
+        show_color_header: bool = False,
+        show_color_frame_boundary: bool = False,
+        debug_report_path: Path | str | None = None,
+    ) -> str:
+        task_path = Path(task_file)
+        task_path.parent.mkdir(parents=True, exist_ok=True)
+        payload: dict[str, Any] = {
+            "type": "compose_color_frames",
+            "output_ai": str(Path(output_ai)),
+            "master_packing": dict(master_packing),
+            "compatibility": str(compatibility or "Illustrator 8"),
+            "show_color_header": bool(show_color_header),
+            "show_color_frame_boundary": bool(show_color_frame_boundary),
+            "inputs": [dict(item) for item in inputs],
+        }
+        if debug_report_path is not None:
+            payload["debug"] = {"report_path": str(Path(debug_report_path))}
+        task_path.write_text(
+            json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2),
+            encoding="utf-8",
+        )
+        compose_script = self.script_path.with_name("compose_color_frames.jsx")
+        return str(self.bridge.render(compose_script, task_path))
+
+    def compose_png_master_pages(
+        self,
+        *,
+        items: Sequence[Mapping[str, Any]],
+        output_ai: Path | str,
+        task_file: Path | str,
+        frame_width_mm: float,
+        frame_height_mm: float,
+        margin_mm: float,
+        column_gap_mm: float,
+        row_gap_mm: float,
+        label_height_mm: float,
+        label_width_mm: float,
+        label_gap_mm: float,
+        compatibility: str = "CS5",
+        preview_background: Mapping[str, Any] | None = None,
+        debug_report_path: Path | str | None = None,
+        page_count: int = 1,
+    ) -> str:
+        task_path = Path(task_file)
+        task_path.parent.mkdir(parents=True, exist_ok=True)
+        payload: dict[str, Any] = {
+            "type": "compose_png_master_pages",
+            "output_ai": str(Path(output_ai)),
+            "compatibility": str(compatibility or "CS5"),
+            "items": [dict(item) for item in items],
+            "frame_width_mm": float(frame_width_mm),
+            "frame_height_mm": float(frame_height_mm),
+            "margin_mm": float(margin_mm),
+            "column_gap_mm": float(column_gap_mm),
+            "row_gap_mm": float(row_gap_mm),
+            "label_height_mm": float(label_height_mm),
+            "label_width_mm": float(label_width_mm),
+            "label_gap_mm": float(label_gap_mm),
+            "page_count": int(page_count),
+        }
+        if preview_background is not None:
+            payload["preview_background"] = dict(preview_background)
+        if debug_report_path is not None:
+            payload["debug"] = {"report_path": str(Path(debug_report_path))}
+        task_path.write_text(
+            json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2),
+            encoding="utf-8",
+        )
+        compose_script = self.script_path.with_name("compose_png_master_pages.jsx")
+        return str(self.bridge.render(compose_script, task_path))
 
 
 def build_v2_execution_task(
@@ -95,7 +211,9 @@ def build_v2_execution_task(
     selections: Mapping[str, Any] | None = None,
     output_key: str | None = None,
     preview_png: Path | str | None = None,
+    preview_dpi: int | float | None = None,
     layout_warning_file: Path | str | None = None,
+    pack_order_blocks: bool = False,
 ) -> dict[str, Any]:
     task = deepcopy(dict(render_task))
     if task.get("$schema") != V2_RENDER_TASK_SCHEMA:
@@ -125,8 +243,12 @@ def build_v2_execution_task(
         execution["output_key"] = selected_output_key
     if preview_path:
         execution["preview_png"] = str(Path(preview_path))
+        if preview_dpi is not None:
+            execution["preview_dpi"] = float(preview_dpi)
     if warning_path:
         execution["layout_warning_file"] = str(Path(warning_path))
+    if pack_order_blocks:
+        execution["pack_order_blocks"] = True
     return execution
 
 

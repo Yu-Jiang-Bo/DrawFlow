@@ -8,6 +8,7 @@ from typing import Any, Mapping
 
 from .job_store import JobStore
 from .v2_order_output import V2OrderOutputRenderer
+from .v2_order_plan import build_v2_order_units
 from .v2_order_preflight import preflight_v2_order_rows
 from .v2_order_render_support import (
     V2OrderRenderError,
@@ -139,10 +140,11 @@ class V2OrderRenderService:
         write_json(task_file, render_task, ensure_ascii=True)
         manifest_path = job_dir / "manifest.json"
         if request.get("dry_run"):
-            write_json(manifest_path, {"orders": len(rows), "outputs": len(render_task.get("outputs", []))})
+            planned_units = build_v2_order_units(config, render_task, rows, preflight)
+            write_json(manifest_path, {"orders": len(rows), "outputs": len(render_task.get("outputs", [])), "items": len(planned_units)})
             return {
                 "outputs": {"render_task": str(task_file), "output_manifest": str(manifest_path)},
-                "stats": stats(rows, render_task, dry_run=True),
+                "stats": stats(rows, render_task, dry_run=True, planned_items=len(planned_units)),
             }
         return V2OrderOutputRenderer(self.renderer).render_outputs(
             record,

@@ -368,6 +368,24 @@ def test_accepts_chinese_field_binding_values_as_order_headers():
     assert "$.field_bindings.name" not in {error["path"] for error in result["errors"]}
 
 
+def test_accepts_safe_output_planning_metadata():
+    payload = base_contract()
+    payload["multi_name_customization"] = {"enabled": True}
+    payload["render_layout"] = {
+        "type": "name_columns",
+        "default": {"group_by": ["order_no"]},
+    }
+    payload["output"] = {"color_mode": "CMYK"}
+
+    normalized = normalize_v2_template_contract(payload)
+    result = check_v2_template_contract(normalized)
+
+    assert result["ok"] is True
+    assert normalized["multi_name_customization"] == {"enabled": True}
+    assert normalized["render_layout"]["type"] == "name_columns"
+    assert normalized["output"] == {"color_mode": "CMYK"}
+
+
 def test_rejects_camel_case_execution_field_aliases():
     payload = base_contract()
     payload["preview"]["sample_rows"] = [

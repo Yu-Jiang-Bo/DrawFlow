@@ -106,8 +106,9 @@ REQUIRED_IDS = [
 
 def test_v2_workbench_page_exposes_independent_entry_contract():
     assert "<title>DrawFlow · V2 模板配置工作台</title>" in INDEX_HTML
-    assert 'href="/templates" data-nav-target="templates" aria-current="page"' in INDEX_HTML
-    assert 'data-nav-target="v2-workbench"' not in INDEX_HTML
+    assert 'href="/templates" data-nav-target="templates"' in INDEX_HTML
+    assert 'href="/templates" data-nav-target="templates" aria-current="page"' not in INDEX_HTML
+    assert 'href="/v2/templates/workbench" data-nav-target="v2-workbench" aria-current="page"' in INDEX_HTML
     assert 'href="/static/v2-workbench/workbench.css"' in INDEX_HTML
     assert 'href="/static/v2-workbench/workbench-stages.css"' in INDEX_HTML
     assert 'src="/static/v2-workbench/workbench.js"' in INDEX_HTML

@@ -180,7 +180,7 @@ def normalize_v2_template_scan(raw_scan: Any, ai_path: str | Path | None = None)
     issues: list[Dict[str, Any]] = []
     raw = dict(raw_scan) if isinstance(raw_scan, Mapping) else {}
     if not raw:
-        _issue(issues, "$", "raw_scan_invalid", "扫描结果必须是 JSON 对象。")
+        _issue(issues, "$", "raw_scan_invalid", "扫描结果格式不正确，请重新扫描模板。")
     _ingest_raw_scan_issues(raw, issues)
     document = _dict(raw.get("document"))
     source_ai = str(ai_path or document.get("source_ai") or "").strip()

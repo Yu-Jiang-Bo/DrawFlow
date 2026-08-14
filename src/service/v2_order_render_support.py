@@ -225,10 +225,11 @@ def stats(
     *,
     dry_run: bool,
     warnings: list[str] | None = None,
+    planned_items: int | None = None,
 ) -> dict[str, Any]:
     output_count = len([item for item in render_task.get("outputs", []) if isinstance(item, Mapping)])
     return {
-        "items": len(rows) * output_count,
+        "items": planned_items if planned_items is not None else len(rows) * output_count,
         "orders": len(rows),
         "outputs": output_count,
         "dry_run": dry_run,

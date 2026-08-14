@@ -1,6 +1,10 @@
 import hashlib
 import json
+import shutil
+import subprocess
+import struct
 import zipfile
+import zlib
 from copy import deepcopy
 from pathlib import Path
 
@@ -21,7 +25,7 @@ def _sha256(payload: bytes) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
-def _v2_payload(template_id: str, template_digest: str) -> dict:
+def _v2_payload(template_id: str, template_digest: str, *, with_styles: bool = False) -> dict:
     config = {
         "$schema": V2_CONTRACT_SCHEMA,
         "schema_version": V2_CONTRACT_VERSION,
@@ -67,6 +71,22 @@ def _v2_payload(template_id: str, template_digest: str) -> dict:
             "config_version": 1,
         },
     }
+    if with_styles:
+        output = config["outputs"][0]
+        output["style"] = {
+            "field": "style",
+            "options": [
+                {"key": "style1", "dimensions": {"mode": "style", "width_mm": 50, "height_mm": 30}},
+                {"key": "style2", "dimensions": {"mode": "style", "width_mm": 200, "height_mm": 50}},
+            ],
+        }
+        config["field_bindings"]["style"] = "尺寸"
+        config["option_mappings"].extend(
+            [
+                {"field": "style", "source_value": "S", "target": "style1", "output": "Output_main", "group": "style"},
+                {"field": "style", "source_value": "M", "target": "style2", "output": "Output_main", "group": "style"},
+            ]
+        )
     scan = {
         "$schema": "custom-renderer/v2-template-scan",
         "scan_protocol_version": 1,
@@ -82,7 +102,14 @@ def _v2_payload(template_id: str, template_digest: str) -> dict:
             {
                 "key": "Output_main",
                 "path": "Template/Output_main",
-                "styles": [],
+                "styles": (
+                    [
+                        {"key": "style1", "path": "Template/Output_main/Style/style1"},
+                        {"key": "style2", "path": "Template/Output_main/Style/style2"},
+                    ]
+                    if with_styles
+                    else []
+                ),
                 "designs": [],
                 "fonts": [
                     {
@@ -107,9 +134,18 @@ def _v2_payload(template_id: str, template_digest: str) -> dict:
     return {"config": config, "scan": scan}
 
 
-def _bundle(path: Path, template_id: str, template_bytes: bytes) -> None:
+def _bundle(
+    path: Path,
+    template_id: str,
+    template_bytes: bytes,
+    *,
+    with_styles: bool = False,
+    config_updates: dict | None = None,
+) -> None:
     digest = _sha256(template_bytes)
-    payload = _v2_payload(template_id, digest)
+    payload = _v2_payload(template_id, digest, with_styles=with_styles)
+    if config_updates:
+        payload["config"].update(config_updates)
     manifest = {
         "version": "v0001",
         "config_sha256": "a" * 64,
@@ -163,14 +199,59 @@ class V2PublishedCentral:
 class CapturingRenderer:
     def __init__(self) -> None:
         self.calls = []
+        self.compose_calls = []
+        self.color_frame_calls = []
+        self.png_master_calls = []
 
     def render(self, render_task, **kwargs):
         self.calls.append({"render_task": deepcopy(render_task), **kwargs})
         Path(kwargs["output_ai"]).parent.mkdir(parents=True, exist_ok=True)
         Path(kwargs["output_ai"]).write_bytes(b"rendered-ai")
-        Path(kwargs["preview_png"]).write_bytes(b"rendered-png")
+        if kwargs.get("preview_png"):
+            Path(kwargs["preview_png"]).write_bytes(_png_bytes())
         Path(kwargs["layout_warning_file"]).write_text('{"warnings": []}', encoding="utf-8")
         return str(kwargs["output_ai"])
+
+    def compose_order_column(self, **kwargs):
+        self.compose_calls.append(kwargs)
+        Path(kwargs["output_ai"]).parent.mkdir(parents=True, exist_ok=True)
+        Path(kwargs["output_ai"]).write_bytes(b"composed-ai")
+        return str(kwargs["output_ai"])
+
+    def compose_color_frames(self, **kwargs):
+        self.color_frame_calls.append(kwargs)
+        Path(kwargs["output_ai"]).parent.mkdir(parents=True, exist_ok=True)
+        Path(kwargs["output_ai"]).write_bytes(b"color-master-ai")
+        return str(kwargs["output_ai"])
+
+    def compose_png_master_pages(self, **kwargs):
+        self.png_master_calls.append(kwargs)
+        output_ai = Path(kwargs["output_ai"])
+        paths = _numbered_paths(output_ai, int(kwargs.get("page_count") or 1))
+        for path in paths:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"png-master-ai")
+        return str(output_ai)
+
+
+def _png_bytes() -> bytes:
+    raw = b"\x00\x00\x00\x00\x00"
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + _png_chunk(b"IHDR", struct.pack(">IIBBBBB", 1, 1, 8, 6, 0, 0, 0))
+        + _png_chunk(b"IDAT", zlib.compress(raw))
+        + _png_chunk(b"IEND", b"")
+    )
+
+
+def _png_chunk(kind: bytes, payload: bytes) -> bytes:
+    return struct.pack(">I", len(payload)) + kind + payload + struct.pack(">I", zlib.crc32(kind + payload) & 0xFFFFFFFF)
+
+
+def _numbered_paths(path: Path, page_count: int) -> list[Path]:
+    if page_count <= 1:
+        return [path]
+    return [path.with_name(f"{path.stem}-{index:02d}{path.suffix}") for index in range(1, page_count + 1)]
 
 
 def test_local_render_routes_published_v2_template_and_chinese_headers(tmp_path):
@@ -239,6 +320,222 @@ def test_v2_order_stats_counts_orders_times_outputs_once():
     assert result["orders"] == 2
     assert result["outputs"] == 2
     assert result["items"] == 4
+
+
+def test_v2_multi_name_quantity_expands_full_text_per_copy(tmp_path):
+    bundle_path = tmp_path / "published.zip"
+    _bundle(
+        bundle_path,
+        "V2ORDER001",
+        b"template-ai",
+        config_updates={
+            "field_bindings": {"font": "字体", "name": "定制信息", "quantity": "数量"},
+            "multi_name_customization": {"enabled": True},
+        },
+    )
+    order_path = tmp_path / "order.xlsx"
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["字体", "定制信息", "数量"])
+    sheet.append(["F1", "Alice|Bob", 3])
+    workbook.save(order_path)
+    renderer = CapturingRenderer()
+    client = LocalDrawFlowClient(
+        V2PublishedCentral(bundle_path),
+        tmp_path / "local",
+        v2_renderer=renderer,
+        font_dirs=[],
+    )
+
+    record = client.render({"template_id": "V2ORDER001", "order_file": str(order_path)})
+
+    assert record["status"] == "completed"
+    assert record["stats"]["items"] == 3
+    assert len(renderer.calls) == 3
+    assert [call["values"]["name"] for call in renderer.calls] == ["Alice|Bob", "Alice|Bob", "Alice|Bob"]
+    manifest = json.loads(Path(record["outputs"]["output_manifest"]).read_text(encoding="utf-8"))
+    assert [item["quantity_index"] for item in manifest["items"]] == [1, 2, 3]
+
+
+def test_v2_single_content_quantity_does_not_expand_without_switch(tmp_path):
+    bundle_path = tmp_path / "published.zip"
+    _bundle(
+        bundle_path,
+        "V2ORDER001",
+        b"template-ai",
+        config_updates={"field_bindings": {"font": "字体", "name": "定制信息", "quantity": "数量"}},
+    )
+    order_path = tmp_path / "order.xlsx"
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["字体", "定制信息", "数量"])
+    sheet.append(["F1", "Alice|Bob", 3])
+    workbook.save(order_path)
+    renderer = CapturingRenderer()
+    client = LocalDrawFlowClient(
+        V2PublishedCentral(bundle_path),
+        tmp_path / "local",
+        v2_renderer=renderer,
+        font_dirs=[],
+    )
+
+    record = client.render({"template_id": "V2ORDER001", "order_file": str(order_path)})
+
+    assert record["status"] == "completed"
+    assert record["stats"]["items"] == 1
+    assert len(renderer.calls) == 1
+
+
+def test_v2_department_single_order_combines_duplicate_order_with_independent_styles(tmp_path):
+    bundle_path = tmp_path / "published.zip"
+    _bundle(bundle_path, "V2ORDER001", b"template-ai", with_styles=True)
+    order_path = tmp_path / "order.xlsx"
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["订单号", "生产部门", "字体", "尺寸", "定制信息"])
+    sheet.append(["ORDER1", "T", "F1", "S", "Alice"])
+    sheet.append(["ORDER1", "T", "F1", "M", "Bob"])
+    workbook.save(order_path)
+    renderer = CapturingRenderer()
+    client = LocalDrawFlowClient(
+        V2PublishedCentral(bundle_path),
+        tmp_path / "local",
+        v2_renderer=renderer,
+        font_dirs=[],
+    )
+
+    record = client.render({"template_id": "V2ORDER001", "order_file": str(order_path)})
+
+    assert record["status"] == "completed"
+    assert record["outputs"]["single_order_files"][0]["name"] == "ORDER1.ai"
+    assert record["outputs"]["single_order_files"][0]["item_count"] == 2
+    assert len(renderer.compose_calls) == 2
+    assert len(renderer.color_frame_calls) == 1
+    rendered_styles = [call["selections"]["Output_main"]["style"] for call in renderer.calls]
+    assert rendered_styles == ["style1", "style2", "style1", "style2"]
+    with zipfile.ZipFile(record["outputs"]["primary_output"]) as archive:
+        names = archive.namelist()
+        assert "single-orders/ORDER1.ai" in names
+        assert any(name.startswith("summary/") and name.endswith(".ai") for name in names)
+
+
+def test_v2_h_department_outputs_png_single_graphics_and_master_pages(tmp_path):
+    bundle_path = tmp_path / "published.zip"
+    _bundle(
+        bundle_path,
+        "V2ORDER001",
+        b"template-ai",
+        with_styles=True,
+        config_updates={
+            "field_bindings": {
+                "order_no": "order_no",
+                "department": "department",
+                "font": "font",
+                "style": "style",
+                "name": "name",
+                "color": "color",
+            }
+        },
+    )
+    order_path = tmp_path / "order.xlsx"
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["order_no", "department", "font", "style", "name", "color"])
+    sheet.append(["ORDER-H", "H", "F1", "S", "Alice", "White"])
+    workbook.save(order_path)
+    renderer = CapturingRenderer()
+    client = LocalDrawFlowClient(
+        V2PublishedCentral(bundle_path),
+        tmp_path / "local",
+        v2_renderer=renderer,
+        font_dirs=[],
+    )
+
+    record = client.render({"template_id": "V2ORDER001", "order_file": str(order_path)})
+
+    assert record["status"] == "completed"
+    assert record["outputs"]["graphic_files"][0]["name"] == "ORDER-H.png"
+    assert record["outputs"]["summary_files"][0]["name"].endswith("580mm-master.ai")
+    assert renderer.calls[0]["preview_dpi"] == 300
+    assert len(renderer.png_master_calls) == 1
+    compose_call = renderer.png_master_calls[0]
+    assert compose_call["frame_width_mm"] == 580.0
+    assert compose_call["frame_height_mm"] == 2000.0
+    assert compose_call["items"][0]["graphic_width_mm"] == 50.0
+    assert compose_call["items"][0]["graphic_height_mm"] == 30.0
+    assert compose_call["items"][0]["width_mm"] == 50.0
+    assert compose_call["items"][0]["height_mm"] == 30.0
+    assert compose_call["items"][0]["label_embedded"] is False
+    with zipfile.ZipFile(record["outputs"]["primary_output"]) as archive:
+        names = archive.namelist()
+        assert "single-graphics/ORDER-H.png" in names
+        assert any(name.startswith("summary/") and name.endswith("580mm-master.ai") for name in names)
+
+
+def test_v2_w120_department_keeps_png_single_graphics_without_master(tmp_path):
+    bundle_path = tmp_path / "published.zip"
+    _bundle(
+        bundle_path,
+        "V2ORDER001",
+        b"template-ai",
+        with_styles=True,
+        config_updates={
+            "field_bindings": {
+                "order_no": "order_no",
+                "department": "department",
+                "manufacturer": "manufacturer",
+                "font": "font",
+                "style": "style",
+                "name": "name",
+                "color": "color",
+            }
+        },
+    )
+    order_path = tmp_path / "order.xlsx"
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["order_no", "department", "manufacturer", "font", "style", "name", "color"])
+    sheet.append(["ORDER-W", "W", "MY-W120", "F1", "M", "Bob", "White"])
+    workbook.save(order_path)
+    renderer = CapturingRenderer()
+    client = LocalDrawFlowClient(
+        V2PublishedCentral(bundle_path),
+        tmp_path / "local",
+        v2_renderer=renderer,
+        font_dirs=[],
+    )
+
+    record = client.render({"template_id": "V2ORDER001", "order_file": str(order_path)})
+
+    assert record["status"] == "completed"
+    assert record["outputs"]["graphic_files"][0]["name"] == "ORDER-W.png"
+    assert record["outputs"]["summary_files"] == []
+    assert renderer.png_master_calls == []
+
+
+def test_compose_v2_order_column_javascript_parses_in_node(tmp_path):
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node.js is unavailable")
+    source_file = tmp_path / "compose-v2.js"
+    source_file.write_text(
+        Path("scripts/illustrator/compose_v2_order_column.jsx").read_text(encoding="utf-8").replace("#target illustrator", "", 1),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [
+            node,
+            "-e",
+            "const fs = require('fs'); new Function(fs.readFileSync(process.argv[1], 'utf8'));",
+            str(source_file),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
 
 
 def test_template_list_includes_active_v2_publication_without_legacy_registry(tmp_path):

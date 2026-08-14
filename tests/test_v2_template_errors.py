@@ -182,6 +182,8 @@ def test_sanitize_v2_config_rejects_executable_fields_or_text(mutator):
     assert error.to_response_payload()["code"] == "v2_config_rejected"
     assert "app.activeDocument" not in dumped
     assert "eval" not in dumped
+    assert "JSX" not in dumped
+    assert "JSON" not in dumped
 
 
 def test_sanitize_v2_config_rejects_non_whitelisted_top_level_fields():
@@ -201,3 +203,13 @@ def test_business_payload_sanitization_returns_only_allowed_fields():
 
     with pytest.raises(V2ApiError):
         sanitize_v2_business_payload({"name": "Demo", "script": "alert(1)"}, {"name", "shop_name"})
+
+
+def test_business_payload_rejection_uses_business_safe_format_message():
+    with pytest.raises(V2ApiError) as raised:
+        sanitize_v2_business_payload(["not", "a", "mapping"], {"name"})
+
+    dumped = json.dumps(raised.value.to_response_payload(), ensure_ascii=False)
+    assert "JSON" not in dumped
+    assert "JSX" not in dumped
+    assert "请求内容格式不正确" in dumped
