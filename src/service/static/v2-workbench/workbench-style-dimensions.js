@@ -59,8 +59,7 @@
     const wrap = inputCell(name, styleDimensionDisplay(rawValue));
     const input = wrap.querySelector(`[data-field="${name}"]`);
     if (input && rawValue !== undefined && rawValue !== null && rawValue !== "") {
-      input.dataset.rawValue = String(rawValue);
-      input.title = "按模板尺寸框取整显示；未手动修改时仍按精确扫描值保存。";
+      input.title = "按模板尺寸框取整显示，保存时使用当前填写的生产尺寸。";
       wrap.title = input.title;
     }
     return wrap;

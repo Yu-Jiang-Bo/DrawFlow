@@ -9,7 +9,13 @@ from typing import Any, Mapping, Sequence
 from src.renderer.illustrator_bridge import IllustratorBridgeError
 from src.renderer.v2_template_renderer import V2TemplateRendererError
 
-from .department_output import DepartmentOutputError, finalize_cmyk_png
+from .department_output import (
+    ANNOTATION_COLOR,
+    ANNOTATION_PRODUCT_NAME,
+    DepartmentOutputError,
+    finalize_cmyk_png,
+    translate_color_to_chinese,
+)
 from .production_output import (
     build_delivery_outputs,
     color_frames,
@@ -255,6 +261,7 @@ class V2OrderOutputRenderer:
                         task_files=task_files,
                         task_suffix=f"single-order-{batch_index:03d}-{single_index:04d}",
                         compatibility=rule.ai_compatibility,
+                        label_lines=_production_label_lines(rule, spec.units),
                     )
                     rendered_count += len(spec.units)
                     detail_ids = [unit.detail_id for unit in spec.units if unit.detail_id]
@@ -410,12 +417,13 @@ class V2OrderOutputRenderer:
                 task_files=task_files,
                 task_suffix=f"{task_suffix}-color-{index:03d}",
                 compatibility=compatibility,
+                force_compose=True,
             )
             inputs.append(
                 {
                     "path": str(component_ai),
                     "color_option": frame.color_option,
-                    "order_nos": [unit.order_no for unit in frame.units],
+                    "order_nos": _unique_order_nos(frame.units),
                 }
             )
         self._compose_color_frames(
@@ -501,13 +509,14 @@ class V2OrderOutputRenderer:
             task_files=task_files,
             task_suffix=f"{task_suffix}-component",
             compatibility=compatibility,
+            force_compose=True,
         )
         self._compose_color_frames(
             inputs=[
                 {
                     "path": str(component_ai),
                     "color_option": "",
-                    "order_nos": [unit.order_no for unit in production_units],
+                    "order_nos": _unique_order_nos(production_units),
                 }
             ],
             output_ai=output_ai,
@@ -573,8 +582,11 @@ class V2OrderOutputRenderer:
         task_files: list[str],
         task_suffix: str,
         compatibility: str,
+        label_lines: Sequence[str] | None = None,
+        force_compose: bool = False,
     ) -> None:
-        if len(production_units) == 1:
+        clean_label_lines = _clean_label_lines(label_lines)
+        if len(production_units) == 1 and not clean_label_lines and not force_compose:
             unit = _v2_payload_unit(production_units[0].payload)
             self._render_one_unit(
                 render_task,
@@ -595,10 +607,12 @@ class V2OrderOutputRenderer:
 
         component_dir = job_dir / ".v2-components" / safe_filename(task_suffix)
         input_files: list[Path] = []
+        input_order_nos: list[str] = []
         for index, production_unit in enumerate(production_units, start=1):
             unit = _v2_payload_unit(production_unit.payload)
             component_ai = component_dir / f"{safe_filename(task_suffix)}-{index:04d}.ai"
             input_files.append(component_ai)
+            input_order_nos.append(str(production_unit.order_no or "").strip())
             self._render_one_unit(
                 render_task,
                 template_ai,
@@ -627,6 +641,8 @@ class V2OrderOutputRenderer:
                 input_ai_files=input_files,
                 output_ai=output_ai,
                 task_file=compose_task,
+                input_order_nos=input_order_nos,
+                label_lines=clean_label_lines,
                 compatibility=compatibility,
             )
         except V2OrderRenderError:
@@ -749,6 +765,36 @@ class V2OrderOutputRenderer:
             ),
             encoding="utf-8",
         )
+
+
+def _production_label_lines(rule: Any, production_units: Sequence[Any]) -> list[str]:
+    if not production_units:
+        return []
+    first = production_units[0]
+    order_no = str(getattr(first, "order_no", "") or "").strip()
+    if getattr(rule, "annotation_type", ANNOTATION_COLOR) == ANNOTATION_PRODUCT_NAME:
+        product_name = str(getattr(first, "product_name", "") or "").strip()
+        return _clean_label_lines([order_no, product_name])
+    if getattr(rule, "annotation_type", ANNOTATION_COLOR) == ANNOTATION_COLOR:
+        color = translate_color_to_chinese(str(getattr(first, "color_option", "") or "").strip())
+        return _clean_label_lines([order_no, color])
+    return _clean_label_lines([order_no])
+
+
+def _clean_label_lines(label_lines: Sequence[str] | None) -> list[str]:
+    return [str(item or "").strip() for item in (label_lines or []) if str(item or "").strip()]
+
+
+def _unique_order_nos(production_units: Sequence[Any]) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for unit in production_units:
+        order_no = str(getattr(unit, "order_no", "") or "").strip()
+        key = order_no.casefold()
+        if order_no and key not in seen:
+            result.append(order_no)
+            seen.add(key)
+    return result
 
 
 def _v2_payload_unit(value: Any) -> V2OrderRenderUnit:

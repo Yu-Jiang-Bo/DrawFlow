@@ -99,20 +99,39 @@ class V2TemplateRenderer:
         input_ai_files: Sequence[Path | str],
         output_ai: Path | str,
         task_file: Path | str,
+        input_order_nos: Sequence[str] | None = None,
+        label_lines: Sequence[str] | None = None,
         gap_mm: float = 8.0,
+        label_height_mm: float = 4.0,
+        label_gap_mm: float = 0.8,
+        label_font_size_pt: float = 6.0,
         compatibility: str = "Illustrator 8",
     ) -> str:
         task_path = Path(task_file)
         task_path.parent.mkdir(parents=True, exist_ok=True)
+        order_nos = [str(item or "").strip() for item in (input_order_nos or [])]
+        inputs = []
+        for index, path in enumerate(input_ai_files):
+            item = {"path": str(Path(path))}
+            if index < len(order_nos) and order_nos[index]:
+                item["order_no"] = order_nos[index]
+            inputs.append(item)
+        payload = {
+            "type": "compose_v2_order_column",
+            "output_ai": str(Path(output_ai)),
+            "gap_mm": float(gap_mm),
+            "label_height_mm": float(label_height_mm),
+            "label_gap_mm": float(label_gap_mm),
+            "label_font_size_pt": float(label_font_size_pt),
+            "compatibility": str(compatibility or "Illustrator 8"),
+            "inputs": inputs,
+        }
+        clean_label_lines = [str(item).strip() for item in (label_lines or []) if str(item or "").strip()]
+        if clean_label_lines:
+            payload["label_lines"] = clean_label_lines
         task_path.write_text(
             json.dumps(
-                {
-                    "type": "compose_v2_order_column",
-                    "output_ai": str(Path(output_ai)),
-                    "gap_mm": float(gap_mm),
-                    "compatibility": str(compatibility or "Illustrator 8"),
-                    "inputs": [{"path": str(Path(path))} for path in input_ai_files],
-                },
+                payload,
                 ensure_ascii=False,
                 sort_keys=True,
                 indent=2,

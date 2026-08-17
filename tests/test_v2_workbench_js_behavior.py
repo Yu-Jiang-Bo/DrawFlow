@@ -333,8 +333,11 @@ def test_v2_workbench_style_dimensions_are_displayed_as_integers():
           for (let index = 0; index < 16; index += 1) await flush();
           assert(draftSaveBody);
           const savedStyle = draftSaveBody.config.outputs[0].style.options.find((option) => option.key === "style1");
-          assert.strictEqual(savedStyle.dimensions.width_mm, 50.28);
-          assert.strictEqual(savedStyle.dimensions.height_mm, 30.28);
+          assert.strictEqual(savedStyle.dimensions.width_mm, 50);
+          assert.strictEqual(savedStyle.dimensions.height_mm, 30);
+          const savedStyle2 = draftSaveBody.config.outputs[0].style.options.find((option) => option.key === "style2");
+          assert.strictEqual(savedStyle2.dimensions.width_mm, 200);
+          assert.strictEqual(savedStyle2.dimensions.height_mm, 50);
         })().catch((error) => { console.error(error); process.exit(1); });
         """
     )

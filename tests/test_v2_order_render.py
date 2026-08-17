@@ -434,6 +434,13 @@ def test_v2_single_name_template_splits_newline_names_into_one_order_column(tmp_
     ]
     assert len(renderer.compose_calls) == 2
     assert len(renderer.color_frame_calls) == 1
+    single_order_compose = renderer.compose_calls[0]
+    assert single_order_compose["input_order_nos"] == ["ORDER-K", "ORDER-K", "ORDER-K"]
+    assert single_order_compose["label_lines"] == ["ORDER-K", "\u767d\u8272"]
+    color_component_compose = renderer.compose_calls[1]
+    assert color_component_compose["input_order_nos"] == ["ORDER-K", "ORDER-K", "ORDER-K"]
+    assert color_component_compose["label_lines"] == []
+    assert renderer.color_frame_calls[0]["inputs"][0]["order_nos"] == ["ORDER-K"]
 
 
 def test_v2_newline_names_do_not_split_when_selected_template_has_multiple_name_slots():
@@ -505,6 +512,9 @@ def test_v2_department_single_order_combines_duplicate_order_with_independent_st
     assert record["outputs"]["single_order_files"][0]["item_count"] == 2
     assert len(renderer.compose_calls) == 2
     assert len(renderer.color_frame_calls) == 1
+    assert renderer.compose_calls[0]["input_order_nos"] == ["ORDER1", "ORDER1"]
+    assert renderer.compose_calls[0]["label_lines"] == ["ORDER1"]
+    assert renderer.color_frame_calls[0]["inputs"][0]["order_nos"] == ["ORDER1"]
     rendered_styles = [call["selections"]["Output_main"]["style"] for call in renderer.calls]
     assert rendered_styles == ["style1", "style2", "style1", "style2"]
     with zipfile.ZipFile(record["outputs"]["primary_output"]) as archive:
@@ -673,38 +683,67 @@ global.ElementPlacement = {{ PLACEATEND: 1 }};
 global.SaveOptions = {{ DONOTSAVECHANGES: 0 }};
 global.Compatibility = {{ ILLUSTRATOR8: 8, ILLUSTRATOR15: 15 }};
 global.IllustratorSaveOptions = function() {{}};
-function attach(parent, childNode) {{
-  childNode.parent = parent;
-  parent.pageItems.push(childNode);
-}}
-function item(name, bounds) {{
-  let box = bounds.slice();
-  return {{
-    typename: 'GroupItem',
+  function attach(parent, childNode) {{
+    childNode.parent = parent;
+    parent.pageItems.push(childNode);
+  }}
+  function detach(childNode) {{
+    if (!childNode.parent || !childNode.parent.pageItems) return;
+    const index = childNode.parent.pageItems.indexOf(childNode);
+    if (index >= 0) childNode.parent.pageItems.splice(index, 1);
+  }}
+  function union(boundsList) {{
+    return boundsList.reduce((result, bounds) => [
+      Math.min(result[0], bounds[0]),
+      Math.max(result[1], bounds[1]),
+      Math.max(result[2], bounds[2]),
+      Math.min(result[3], bounds[3])
+    ]);
+  }}
+  function item(name, bounds) {{
+    let box = bounds.slice();
+    return {{
+      typename: 'GroupItem',
     name,
     hidden: false,
-    pageItems: [],
-    duplicate: function(targetLayer) {{
-      const copy = item(this.name, this.visibleBounds);
-      attach(targetLayer, copy);
-      return copy;
-    }},
-    translate: function(dx, dy) {{
-      box = [box[0] + dx, box[1] + dy, box[2] + dx, box[3] + dy];
-    }},
-    get visibleBounds() {{ return box.slice(); }},
-    get geometricBounds() {{ return box.slice(); }}
+      pageItems: [],
+      duplicate: function(targetLayer) {{
+        const copy = item(this.name, this.visibleBounds);
+        attach(targetLayer, copy);
+        return copy;
+      }},
+      move: function(target) {{
+        detach(this);
+        attach(target, this);
+      }},
+      translate: function(dx, dy) {{
+        if (this.pageItems.length) {{
+          this.pageItems.forEach(child => child.translate(dx, dy));
+          return;
+        }}
+        box = [box[0] + dx, box[1] + dy, box[2] + dx, box[3] + dy];
+      }},
+      get visibleBounds() {{
+        return this.pageItems.length ? union(this.pageItems.map(child => child.visibleBounds)) : box.slice();
+      }},
+      get geometricBounds() {{ return box.slice(); }}
+    }};
+  }}
+  const sourceLayer = {{ visible: true, pageItems: [item('component', [10, 40, 60, 0])] }};
+  const sourceDoc = {{ layers: [sourceLayer], close: () => undefined }};
+  const outputLayer = {{ name: 'Layer 1', pageItems: [] }};
+  outputLayer.groupItems = {{ add: () => {{
+    const group = item('', [0, 0, 0, 0]);
+    attach(outputLayer, group);
+    return group;
+  }} }};
+  const outputDoc = {{
+    layers: [outputLayer],
+    artboards: [{{ artboardRect: [] }}],
+    textFrames: [],
+    saveAs: file => {{ savedAs = file.fsName; }},
+    close: () => undefined
   }};
-}}
-const sourceLayer = {{ visible: true, pageItems: [item('component', [10, 40, 60, 0])] }};
-const sourceDoc = {{ layers: [sourceLayer], close: () => undefined }};
-const outputLayer = {{ name: 'Layer 1', pageItems: [] }};
-const outputDoc = {{
-  layers: [outputLayer],
-  artboards: [{{ artboardRect: [] }}],
-  saveAs: file => {{ savedAs = file.fsName; }},
-  close: () => undefined
-}};
 global.app = {{
   userInteractionLevel: 0,
   documents: {{ add: () => outputDoc }},
@@ -714,11 +753,12 @@ global.app = {{
 global.JSON = undefined;
 new Function(source)();
 global.JSON = NativeJSON;
-console.log(NativeJSON.stringify({{
-  savedAs,
-  copied: outputLayer.pageItems.map(item => item.name),
-  artboard: outputDoc.artboards[0].artboardRect
-}}));
+  console.log(NativeJSON.stringify({{
+    savedAs,
+    copied: outputLayer.pageItems.map(item => item.name),
+    childNames: outputLayer.pageItems[0].pageItems.map(item => item.name),
+    artboard: outputDoc.artboards[0].artboardRect
+  }}));
 """
 
     result = subprocess.run([node, "-e", script], capture_output=True, text=True, check=False)
@@ -727,6 +767,7 @@ console.log(NativeJSON.stringify({{
     payload = json.loads(result.stdout)
     assert payload["savedAs"] == "out.ai"
     assert payload["copied"] == ["ORDER_PACK_BLOCK_0"]
+    assert payload["childNames"] == ["ORDER_PACK_ITEM_0_0"]
     assert payload["artboard"] == [0, 0, 50, -40]
 
 

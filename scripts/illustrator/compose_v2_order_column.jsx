@@ -15,28 +15,34 @@
     var layer = doc.layers[0];
     layer.name = "V2_ORDER_COLUMN";
     var gap = mmToPt(Number(task.gap_mm || 8));
-    var currentTop = 0;
-    var allItems = [];
+    var labelLines = cleanLines(task.label_lines || []);
+    var labelHeight = mmToPt(Number(task.label_height_mm || 4));
+    var labelGap = mmToPt(Number(task.label_gap_mm || 0.8));
+    var labelFontSize = Number(task.label_font_size_pt || 6);
+    var orderBuckets = [];
+    var orderBucketByKey = {};
 
     try {
         for (var inputIndex = 0; inputIndex < inputs.length; inputIndex++) {
-            var sourcePath = String((inputs[inputIndex] || {}).path || "");
+            var input = inputs[inputIndex] || {};
+            var sourcePath = String(input.path || "");
             if (!sourcePath) throw new Error("V2 compose input path missing");
             var source = app.open(File(sourcePath));
             try {
                 var copied = duplicateVisibleArtwork(source, layer);
                 if (!copied.length) throw new Error("V2 compose input has no artwork");
-                var block = groupOrderBlock(layer, copied, inputIndex);
-                var bounds = unionBounds([block]);
-                var dx = 0 - Number(bounds[0]);
-                var dy = currentTop - Number(bounds[1]);
-                translateItems([block], dx, dy);
-                var placed = unionBounds([block]);
-                currentTop = Number(placed[3]) - gap;
-                allItems.push(block);
+                for (var copiedIndex = 0; copiedIndex < copied.length; copiedIndex++) sanitizePackNames(copied[copiedIndex]);
+                var item = groupPageItems(layer, copied, "ORDER_PACK_ITEM_PENDING_" + inputIndex);
+                orderBucketFor(input, inputIndex).items.push(item);
             } finally {
                 try { source.close(SaveOptions.DONOTSAVECHANGES); } catch (closeSourceError) {}
             }
+        }
+        var orderBlocks = layoutOrderBlocks(layer, orderBuckets, gap);
+        var allItems = orderBlocks.slice(0);
+        if (labelLines.length) {
+            var labelItems = addProductionLabels(layer, labelLines, orderBlocks, labelHeight, labelGap, labelFontSize);
+            allItems = labelItems.concat(orderBlocks);
         }
         fitArtboard(doc, allItems);
         var output = File(String(task.output_ai || ""));
@@ -63,17 +69,53 @@
         return copied;
     }
 
+    function orderBucketFor(input, inputIndex) {
+        var orderNo = String(input.order_no || "").replace(/^\s+|\s+$/g, "");
+        var key = orderNo || "__input_" + inputIndex;
+        if (!orderBucketByKey[key]) {
+            orderBucketByKey[key] = { key: key, orderNo: orderNo, items: [] };
+            orderBuckets.push(orderBucketByKey[key]);
+        }
+        return orderBucketByKey[key];
+    }
+
+    function layoutOrderBlocks(layer, buckets, gap) {
+        var currentTop = 0;
+        var blocks = [];
+        for (var orderIndex = 0; orderIndex < buckets.length; orderIndex++) {
+            var bucket = buckets[orderIndex];
+            for (var itemIndex = 0; itemIndex < bucket.items.length; itemIndex++) {
+                bucket.items[itemIndex].name = "ORDER_PACK_ITEM_" + orderIndex + "_" + itemIndex;
+            }
+            var block = groupPageItems(layer, bucket.items, "ORDER_PACK_BLOCK_" + orderIndex);
+            for (var childIndex = 0; childIndex < bucket.items.length; childIndex++) {
+                var item = bucket.items[childIndex];
+                var bounds = unionBounds([item]);
+                translateItems([item], 0 - Number(bounds[0]), currentTop - Number(bounds[1]));
+                var placed = unionBounds([item]);
+                currentTop = Number(placed[3]) - gap;
+            }
+            blocks.push(block);
+        }
+        if (!blocks.length) throw new Error("V2 compose produced no order blocks");
+        return blocks;
+    }
+
     function translateItems(items, dx, dy) {
         for (var index = 0; index < items.length; index++) {
             items[index].translate(dx, dy);
         }
     }
 
-    function groupOrderBlock(layer, items, blockIndex) {
-        if (!items || !items.length) throw new Error("V2 compose order block has no artwork");
-        if (items.length === 1 && items[0].typename === "GroupItem") {
-            items[0].name = "ORDER_PACK_BLOCK_" + blockIndex;
-            return items[0];
+    function groupPageItems(parent, items, name) {
+        if (!items || !items.length) throw new Error("V2 compose group has no artwork");
+        var group = createDomGroup(parent, name);
+        if (group) {
+            for (var itemIndex = 0; itemIndex < items.length; itemIndex++) {
+                items[itemIndex].move(group, ElementPlacement.PLACEATEND);
+            }
+            group.name = name;
+            return group;
         }
         var doc = app.activeDocument;
         doc.selection = null;
@@ -81,11 +123,104 @@
             items[index].selected = true;
         }
         app.executeMenuCommand("group");
-        var block = doc.selection.length ? doc.selection[0] : null;
-        if (!block || block.typename !== "GroupItem") throw new Error("Cannot create V2 compose order block");
-        block.name = "ORDER_PACK_BLOCK_" + blockIndex;
+        group = doc.selection.length ? doc.selection[0] : null;
+        if (!group || group.typename !== "GroupItem") throw new Error("Cannot create V2 compose group");
+        group.name = name;
         doc.selection = null;
-        return block;
+        return group;
+    }
+
+    function createDomGroup(parent, name) {
+        try {
+            if (parent.groupItems && parent.groupItems.add) {
+                var group = parent.groupItems.add();
+                group.name = name;
+                return group;
+            }
+        } catch (groupError) {}
+        return null;
+    }
+
+    function sanitizePackNames(item) {
+        if (!item) return;
+        if (/^ORDER_PACK_(?:BLOCK|ITEM)_/.test(String(item.name || ""))) {
+            item.name = "SOURCE_" + item.name;
+        }
+        var children = item.pageItems || [];
+        for (var childIndex = 0; childIndex < children.length; childIndex++) {
+            sanitizePackNames(children[childIndex]);
+        }
+    }
+
+    function addProductionLabels(layer, lines, orderBlocks, labelHeight, labelGap, fontSize) {
+        var bounds = unionBounds(orderBlocks);
+        var width = Math.max(Number(bounds[2]) - Number(bounds[0]), mmToPt(30));
+        var totalLabelHeight = lines.length * labelHeight + Math.max(lines.length - 1, 0) * labelGap;
+        translateItems(orderBlocks, 0 - Number(bounds[0]), -(totalLabelHeight + labelGap) - Number(bounds[1]));
+        var labels = [];
+        for (var lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+            var top = -(lineIndex * (labelHeight + labelGap));
+            var label = drawLabel(layer, lines[lineIndex], 0, top, width, top - labelHeight, fontSize);
+            if (label) labels.push(label);
+        }
+        return labels;
+    }
+
+    function drawLabel(layer, text, left, top, right, bottom, size) {
+        if (top <= bottom) return null;
+        var frame = layer.textFrames.add();
+        frame.contents = String(text || "");
+        frame.textRange.characterAttributes.size = size;
+        applyBlack(frame);
+        fitLabelToRect(frame, [left, top, right, bottom], 3, size);
+        return frame;
+    }
+
+    function fitLabelToRect(frame, rect, minSize, maxSize) {
+        var rectWidth = rect[2] - rect[0];
+        var rectHeight = rect[1] - rect[3];
+        var size = maxSize;
+        for (var attempt = 0; attempt < 12; attempt++) {
+            frame.textRange.characterAttributes.size = size;
+            var bounds = itemBounds(frame);
+            var width = Math.max(bounds[2] - bounds[0], 0.01);
+            var height = Math.max(bounds[1] - bounds[3], 0.01);
+            if ((width <= rectWidth + 0.01 && height <= rectHeight + 0.01) || size <= minSize) break;
+            size = Math.max(minSize, size * Math.min(rectWidth / width, rectHeight / height, 0.92));
+        }
+        var finalBounds = itemBounds(frame);
+        var finalWidth = finalBounds[2] - finalBounds[0];
+        var finalHeight = finalBounds[1] - finalBounds[3];
+        var targetLeft = rect[0] + Math.max((rectWidth - finalWidth) / 2, 0);
+        var targetTop = rect[1] - Math.max((rectHeight - finalHeight) / 2, 0);
+        frame.translate(targetLeft - finalBounds[0], targetTop - finalBounds[1]);
+    }
+
+    function applyBlack(frame) {
+        try {
+            var color = new CMYKColor();
+            color.cyan = 0;
+            color.magenta = 0;
+            color.yellow = 0;
+            color.black = 100;
+            frame.textRange.characterAttributes.fillColor = color;
+        } catch (colorError) {}
+    }
+
+    function itemBounds(item) {
+        var bounds = item.visibleBounds || item.geometricBounds;
+        if (!validBounds(bounds)) throw new Error("V2 compose bounds are not measurable");
+        return [Number(bounds[0]), Number(bounds[1]), Number(bounds[2]), Number(bounds[3])];
+    }
+
+    function cleanLines(value) {
+        var result = [];
+        if (!value || typeof value.length === "undefined") return result;
+        for (var index = 0; index < value.length; index++) {
+            var text = String(value[index] || "").replace(/^\s+|\s+$/g, "");
+            if (text) result.push(text);
+        }
+        return result;
     }
 
     function fitArtboard(targetDoc, items) {

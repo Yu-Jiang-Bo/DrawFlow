@@ -182,6 +182,30 @@ def test_missing_option_selection_does_not_enter_illustrator(tmp_path):
     assert not (tmp_path / "task.json").exists()
 
 
+def test_compose_order_column_writes_order_metadata_and_labels(tmp_path):
+    bridge = FakeBridge()
+    renderer = V2TemplateRenderer(bridge=bridge, script_path=tmp_path / "render_v2_template.jsx")
+    task_file = tmp_path / "compose.json"
+
+    result = renderer.compose_order_column(
+        input_ai_files=[tmp_path / "a.ai", tmp_path / "b.ai"],
+        output_ai=tmp_path / "out.ai",
+        task_file=task_file,
+        input_order_nos=["ORDER1", "ORDER1"],
+        label_lines=["ORDER1", "\u767d\u8272"],
+        compatibility="Illustrator 8",
+    )
+
+    payload = json.loads(task_file.read_text(encoding="utf-8"))
+    assert result == "done.ai"
+    assert payload["inputs"] == [
+        {"path": str(tmp_path / "a.ai"), "order_no": "ORDER1"},
+        {"path": str(tmp_path / "b.ai"), "order_no": "ORDER1"},
+    ]
+    assert payload["label_lines"] == ["ORDER1", "\u767d\u8272"]
+    assert bridge.calls[0]["script_path"].name == "compose_v2_order_column.jsx"
+
+
 def test_missing_style_selection_for_final_fit_does_not_enter_illustrator(tmp_path):
     task = compiled_task()
     task["outputs"][0]["actions"].append(

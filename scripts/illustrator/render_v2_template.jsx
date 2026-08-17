@@ -489,7 +489,7 @@
         var targetHeight = mmToPt(Number(dimensions.height_mm || 0));
         if (targetWidth <= 0 || targetHeight <= 0) throw new Error("V2 output target dimensions are invalid");
         var bounds = unionBounds(items, true);
-        var fitInset = Math.min(mmToPt(0.001), targetWidth / 1000, targetHeight / 1000);
+        var fitInset = Math.min(mmToPt(0.01), targetWidth / 1000, targetHeight / 1000);
         var fitTargetWidth = targetWidth - fitInset;
         var fitTargetHeight = targetHeight - fitInset;
         var targetLeft = Number(bounds[0]);
@@ -505,7 +505,7 @@
             resizeItemsAroundBounds(items, current, scaleX, scaleY);
             var fitted = unionBounds(items, true);
             translateItems(items, targetLeft - Number(fitted[0]), targetTop - Number(fitted[1]));
-            if (outputBoundsWithinTolerance(fitted, targetWidth, targetHeight, mmToPt(Number(dimensions.tolerance_mm || 0.007)))) break;
+            if (outputBoundsWithinUpperLimit(fitted, fitTargetWidth, fitTargetHeight)) break;
         }
         validateOutputBounds(items, dimensions, targetWidth, targetHeight);
     }
@@ -540,27 +540,23 @@
         var bounds = unionBounds(items, true);
         var width = Math.abs(Number(bounds[2]) - Number(bounds[0]));
         var height = Math.abs(Number(bounds[1]) - Number(bounds[3]));
-        var tolerance = mmToPt(Number(dimensions.tolerance_mm || 0.007));
-        if (width > targetWidth + tolerance || height > targetHeight + tolerance) {
+        var epsilon = mmToPt(0.0005);
+        if (width > targetWidth + epsilon || height > targetHeight + epsilon) {
             throw new Error(
                 "V2 output exceeds target bounds: actual="
                 + width + "x" + height
                 + ", target=" + targetWidth + "x" + targetHeight
-                + ", tolerance=" + tolerance
+                + ", tolerance=" + epsilon
             );
-        }
-        if (width < targetWidth - tolerance || height < targetHeight - tolerance) {
-            throw new Error("V2 output is below target tolerance");
         }
     }
 
-    function outputBoundsWithinTolerance(bounds, targetWidth, targetHeight, tolerance) {
+    function outputBoundsWithinUpperLimit(bounds, targetWidth, targetHeight) {
         var width = Math.abs(Number(bounds[2]) - Number(bounds[0]));
         var height = Math.abs(Number(bounds[1]) - Number(bounds[3]));
-        return width <= targetWidth + tolerance
-            && width >= targetWidth - tolerance
-            && height <= targetHeight + tolerance
-            && height >= targetHeight - tolerance;
+        var epsilon = mmToPt(0.0005);
+        return width <= targetWidth + epsilon
+            && height <= targetHeight + epsilon;
     }
 
     function fitArtboardToVisibleContent(doc, items) {

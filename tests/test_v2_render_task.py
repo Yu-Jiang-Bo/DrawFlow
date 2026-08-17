@@ -325,6 +325,35 @@ def test_compiles_v2_render_task_with_stable_json_and_whitelisted_actions():
     assert asset_action["supported_values"] == ["A", "B"]
 
 
+@pytest.mark.parametrize(
+    ("source_width", "source_height", "expected_width", "expected_height"),
+    [
+        (50.139, 30.139, 50, 30),
+        (200.197, 50.197, 200, 50),
+        (260.537, 70.577, 260, 70),
+        (300.2873, 70.2873, 300, 70),
+    ],
+)
+def test_compiles_style_scan_dimensions_as_production_upper_bounds(source_width, source_height, expected_width, expected_height):
+    config = render_config()
+    config["outputs"][0]["style"]["options"][0]["dimensions"] = {
+        "mode": "style",
+        "width_mm": source_width,
+        "height_mm": source_height,
+        "tolerance_mm": 0.007,
+    }
+
+    task = compile_task(config=config)
+
+    actions = task["outputs"][0]["actions"]
+    select_action = next(action for action in actions if action["type"] == "select_style")
+    fit_action = next(action for action in actions if action["type"] == "fit_output_bounds")
+    assert select_action["dimensions"]["width_mm"] == expected_width
+    assert select_action["dimensions"]["height_mm"] == expected_height
+    assert fit_action["dimensions"]["width_mm"] == expected_width
+    assert fit_action["dimensions"]["height_mm"] == expected_height
+
+
 def test_compiles_path_text_preset_with_scanned_path_text_kind():
     config = render_config()
     config["field_bindings"]["title"] = "Title"

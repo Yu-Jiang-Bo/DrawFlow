@@ -394,11 +394,6 @@
   function styleDimensionValue(row, field) {
     const input = row.querySelector(`[data-field="${field}"]`);
     if (!input) return "";
-    if (Object.prototype.hasOwnProperty.call(input.dataset, "rawValue")) {
-      const rawValue = input.dataset.rawValue;
-      const displayValue = typeof globalThis.styleDimensionDisplay === "function" ? globalThis.styleDimensionDisplay(rawValue) : String(rawValue || "");
-      if (String(input.value || "") === displayValue) return rawValue;
-    }
     return input.value;
   }
 

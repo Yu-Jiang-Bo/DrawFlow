@@ -5,6 +5,7 @@ from __future__ import annotations
 from copy import deepcopy
 import hashlib
 import json
+import math
 import re
 from typing import Any, Mapping
 
@@ -132,16 +133,16 @@ def _compile_output(
             option_key = str(dict(option).get("key") or "")
             option_scan = _scan_ref(scan_index, ("option", output_key, group, option_key), f"$.outputs.{output_key}.{group}.{option_key}")
             if group == "style":
+                dimensions = _production_style_dimensions(dict(option).get("dimensions") or {})
                 actions.append(
                     _action(
                         "select_style",
                         group=group,
                         option_key=option_key,
                         object_path=option_scan["path"],
-                        dimensions=deepcopy(dict(option).get("dimensions") or {}),
+                        dimensions=deepcopy(dimensions),
                     )
                 )
-                dimensions = dict(option).get("dimensions") or {}
                 if dimensions:
                     actions.append(_action("fit_output_bounds", group=group, style_key=option_key, dimensions=deepcopy(dimensions)))
                 continue
@@ -167,6 +168,28 @@ def _compile_output(
         "object_path": output_scan["path"],
         "actions": actions,
     }
+
+
+def _production_style_dimensions(dimensions: Mapping[str, Any]) -> dict[str, Any]:
+    result = deepcopy(dict(dimensions or {}))
+    for field in ("width_mm", "height_mm"):
+        if field in result:
+            result[field] = _production_dimension_upper_bound(result[field])
+    return result
+
+
+def _production_dimension_upper_bound(value: Any) -> Any:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return value
+    if not math.isfinite(number) or number <= 0:
+        return value
+    if number >= 1:
+        floored = math.floor(number)
+        if floored > 0:
+            return int(floored)
+    return number
 
 
 def _slot_actions(
