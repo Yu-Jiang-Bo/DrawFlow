@@ -1515,6 +1515,119 @@ if (height < 29.96) throw new Error('font and style were not scaled as one outpu
     assert result.returncode == 0, result.stderr
 
 
+def test_v2_renderer_pack_order_blocks_groups_rendered_items_without_menu_command():
+    task = {
+        "$schema": "custom-renderer/v2-render-execution",
+        "template_ai": "template.ai",
+        "output_ai": "out.ai",
+        "pack_order_blocks": True,
+        "values": {"style": "small", "font": "F1", "name": "Amy"},
+        "selections": {"Output_main": {"style": "style1", "font": "F1"}},
+        "render_task": {
+            "$schema": "custom-renderer/v2-render-task",
+            "outputs": [
+                {
+                    "key": "Output_main",
+                    "actions": [
+                        {
+                            "type": "select_style",
+                            "group": "style",
+                            "option_key": "style1",
+                            "object_path": "Template/Output_main/Style/style1",
+                        },
+                        {
+                            "type": "copy_option_group",
+                            "group": "font",
+                            "option_key": "F1",
+                            "object_path": "Template/Output_main/Font/F1",
+                        },
+                        {
+                            "type": "replace_slot_text",
+                            "group": "font",
+                            "option_key": "F1",
+                            "slot_key": "slot_name",
+                            "object_path": "Template/Output_main/Font/F1/slot_name",
+                            "source_field": "name",
+                            "required": True,
+                            "tail_paths": [],
+                        },
+                    ],
+                }
+            ],
+        },
+    }
+    harness = node_mock_harness(task, """
+if (outputLayer.pageItems.length !== 1) throw new Error('rendered items were not grouped');
+const block = outputLayer.pageItems[0];
+if (block.name !== 'ORDER_PACK_BLOCK_0') throw new Error('order block was not named');
+const childNames = block.pageItems.map(item => item.name);
+if (!childNames.includes('style1')) throw new Error('style was not moved into order block');
+if (!childNames.includes('F1')) throw new Error('font was not moved into order block');
+""")
+
+    result = run_node(harness)
+
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)["copied"] == ["ORDER_PACK_BLOCK_0"]
+
+
+def test_v2_renderer_pack_order_blocks_cleans_partial_dom_group_before_fallback():
+    task = {
+        "$schema": "custom-renderer/v2-render-execution",
+        "template_ai": "template.ai",
+        "output_ai": "out.ai",
+        "pack_order_blocks": True,
+        "fail_dom_move_once": ["F1"],
+        "values": {"style": "small", "font": "F1", "name": "Amy"},
+        "selections": {"Output_main": {"style": "style1", "font": "F1"}},
+        "render_task": {
+            "$schema": "custom-renderer/v2-render-task",
+            "outputs": [
+                {
+                    "key": "Output_main",
+                    "actions": [
+                        {
+                            "type": "select_style",
+                            "group": "style",
+                            "option_key": "style1",
+                            "object_path": "Template/Output_main/Style/style1",
+                        },
+                        {
+                            "type": "copy_option_group",
+                            "group": "font",
+                            "option_key": "F1",
+                            "object_path": "Template/Output_main/Font/F1",
+                        },
+                        {
+                            "type": "replace_slot_text",
+                            "group": "font",
+                            "option_key": "F1",
+                            "slot_key": "slot_name",
+                            "object_path": "Template/Output_main/Font/F1/slot_name",
+                            "source_field": "name",
+                            "required": True,
+                            "tail_paths": [],
+                        },
+                    ],
+                }
+            ],
+        },
+    }
+    harness = node_mock_harness(task, """
+if (outputLayer.pageItems.length !== 1) throw new Error('partial group was not cleaned');
+const block = outputLayer.pageItems[0];
+if (block.name !== 'ORDER_PACK_BLOCK_0') throw new Error('fallback order block was not named');
+const childNames = block.pageItems.map(item => item.name);
+if (!childNames.includes('style1')) throw new Error('style was lost during fallback');
+if (!childNames.includes('F1')) throw new Error('font was lost during fallback');
+""")
+
+    result = run_node(harness)
+
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)["copied"] == ["ORDER_PACK_BLOCK_0"]
+
+
 def test_v2_renderer_places_standalone_font_text_inside_selected_style_bounds():
     task = {
         "$schema": "custom-renderer/v2-render-execution",
@@ -1746,6 +1859,7 @@ const task = {json.dumps(task)};
 const taskText = NativeJSON.stringify(task);
 const visibleBoundsFailures = new Set(task.visible_bounds_failures || []);
 const visibleBoundsPaddingAfterResize = task.visible_bounds_padding_after_resize || {{}};
+let domMoveFailures = new Set(task.fail_dom_move_once || []);
 const folder = {{ exists: true, parent: null, create: () => true }};
 let savedAs = '';
 let exportedAs = '';
@@ -1797,6 +1911,15 @@ function item(typename, name, contents, children, styleToken, bounds, options) {
       if (!this.parent || !this.parent.pageItems) return;
       const index = this.parent.pageItems.indexOf(this);
       if (index >= 0) this.parent.pageItems.splice(index, 1);
+    }},
+    move: function(target, placement) {{
+      const targetName = String(target && target.name || '');
+      if (targetName.indexOf('ORDER_PACK_BLOCK_') === 0 && domMoveFailures.has(this.name)) {{
+        domMoveFailures.delete(this.name);
+        throw new Error('dom move failed: ' + this.name);
+      }}
+      this.remove();
+      attach(target, this);
     }},
     translate: function(dx, dy) {{
       this.translateCalls++;
@@ -1969,18 +2092,43 @@ outputMain.parent = templateLayer;
 outputSideB.parent = templateLayer;
 const templateDoc = {{ layers: [templateLayer], close: () => undefined }};
 const outputLayer = {{ typename: 'Layer', name: 'Layer 1', pageItems: [] }};
+outputLayer.groupItems = {{
+  add: () => {{
+    const group = item('GroupItem', '', '', []);
+    attach(outputLayer, group);
+    return group;
+  }}
+}};
 const outputDoc = {{
   layers: [outputLayer],
   artboards: [{{ artboardRect: [0, 1000, 1000, 0] }}],
+  selection: [],
   saveAs: file => {{ savedAs = file.fsName; }},
   // Illustrator appends the PNG24 extension automatically.
   exportFile: (file, type, options) => {{ exportedAs = file.fsName + '.png'; exportOptions = options; }},
   close: () => undefined
 }};
+function groupSelectedOutputItems() {{
+  const selected = outputLayer.pageItems.filter(item => item.selected);
+  const group = item('GroupItem', '', '', []);
+  attach(outputLayer, group);
+  for (const childNode of selected.slice()) {{
+    childNode.selected = false;
+    childNode.move(group, ElementPlacement.PLACEATEND);
+  }}
+  outputDoc.selection = [group];
+}}
 global.app = {{
   userInteractionLevel: 0,
   open: () => templateDoc,
-  documents: {{ add: () => outputDoc }}
+  activeDocument: outputDoc,
+  documents: {{ add: () => {{
+    global.app.activeDocument = outputDoc;
+    return outputDoc;
+  }} }},
+  executeMenuCommand: command => {{
+    if (command === 'group') groupSelectedOutputItems();
+  }}
 }};
 if ({str(disable_native_json).lower()}) global.JSON = undefined;
 new Function(source)();

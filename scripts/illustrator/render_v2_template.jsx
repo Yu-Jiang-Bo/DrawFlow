@@ -599,6 +599,8 @@
             candidates[0].name = "ORDER_PACK_BLOCK_" + blockIndex;
             return candidates[0];
         }
+        var domGroup = groupRenderedOutputBlockByDom(layer, candidates, blockIndex);
+        if (domGroup) return domGroup;
         var doc = app.activeDocument;
         doc.selection = null;
         for (var index = 0; index < candidates.length; index++) {
@@ -610,6 +612,34 @@
         block.name = "ORDER_PACK_BLOCK_" + blockIndex;
         doc.selection = null;
         return block;
+    }
+
+    function groupRenderedOutputBlockByDom(layer, candidates, blockIndex) {
+        var group = null;
+        var moved = [];
+        try {
+            if (!layer || !layer.groupItems || !layer.groupItems.add) return null;
+            group = layer.groupItems.add();
+            group.name = "ORDER_PACK_BLOCK_" + blockIndex;
+            for (var index = 0; index < candidates.length; index++) {
+                candidates[index].move(group, ElementPlacement.PLACEATEND);
+                moved.push(candidates[index]);
+            }
+            return group;
+        } catch (ignored) {
+            cleanupFailedDomGroup(layer, group, moved);
+            return null;
+        }
+    }
+
+    function cleanupFailedDomGroup(layer, group, moved) {
+        try {
+            for (var index = moved.length - 1; index >= 0; index--) {
+                moved[index].move(layer, ElementPlacement.PLACEATEND);
+            }
+            if (group && group.remove) group.remove();
+        } catch (cleanupIgnored) {
+        }
     }
 
     function directRenderableItems(items) {

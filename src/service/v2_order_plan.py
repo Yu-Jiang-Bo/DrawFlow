@@ -60,10 +60,11 @@ def build_v2_order_units(
         row_preflight = preflight_by_row.get(row_index, {})
         values = logical_values(config, row)
         quantity = _quantity(config, row, values, enabled=multi_name)
-        repeat_count = quantity if multi_name else 1
         selections = row_selections(row_preflight)
+        split_single_name_lines = not multi_name and _single_name_line_split_enabled(render_task, selections)
+        value_variants = _value_variants(values, quantity if multi_name else 1, split_single_name_lines)
         order_id = _first_value(config, row, "order_no", ORDER_ALIASES) or str(row_preflight.get("order_id") or "")
-        for quantity_index in range(1, repeat_count + 1):
+        for variant_values, quantity_index, variant_quantity in value_variants:
             for output_key in outputs:
                 output_selection = selections.get(output_key, {})
                 units.append(
@@ -72,11 +73,11 @@ def build_v2_order_units(
                         row=row,
                         row_preflight=row_preflight,
                         output_key=output_key,
-                        values=values,
+                        values=variant_values,
                         selections={output_key: dict(output_selection)},
                         order_id=order_id,
                         quantity_index=quantity_index,
-                        quantity=quantity,
+                        quantity=variant_quantity,
                     )
                 )
     return units
@@ -122,6 +123,69 @@ def has_department_delivery_context(config: Mapping[str, Any], rows: Iterable[Ma
 def multi_name_customization_enabled(config: Mapping[str, Any]) -> bool:
     policy = config.get("multi_name_customization")
     return bool(policy.get("enabled", False)) if isinstance(policy, Mapping) else False
+
+
+def _value_variants(
+    values: Mapping[str, str],
+    quantity: int,
+    split_single_name_lines: bool,
+) -> list[tuple[Mapping[str, str], int, int]]:
+    if quantity > 1:
+        return [(values, quantity_index, quantity) for quantity_index in range(1, quantity + 1)]
+    if not split_single_name_lines:
+        return [(values, 1, 1)]
+    name_parts = _split_name_lines(values.get("name", ""))
+    if len(name_parts) <= 1:
+        return [(values, 1, 1)]
+    total = len(name_parts)
+    variants: list[tuple[Mapping[str, str], int, int]] = []
+    for index, name in enumerate(name_parts, start=1):
+        next_values = dict(values)
+        next_values["name"] = name
+        variants.append((next_values, index, total))
+    return variants
+
+
+def _split_name_lines(value: object) -> list[str]:
+    text = str(value or "").replace("\r\n", "\n").replace("\r", "\n")
+    return [part.strip() for part in text.split("\n") if part.strip()]
+
+
+def _single_name_line_split_enabled(
+    render_task: Mapping[str, Any],
+    selections: Mapping[str, Mapping[str, str]],
+) -> bool:
+    active_name_actions = 0
+    for output in render_task.get("outputs", []):
+        if not isinstance(output, Mapping):
+            continue
+        output_key = str(output.get("key") or "").strip()
+        selected = selections.get(output_key, {})
+        if not selected:
+            continue
+        for action in output.get("actions", []):
+            if not isinstance(action, Mapping):
+                continue
+            if not _matches_selected_option(action, selected):
+                continue
+            if str(action.get("type") or "") != "replace_slot_text":
+                continue
+            if str(action.get("source_field") or "") != "name":
+                continue
+            if int(action.get("source_part_index") or 0) != 0:
+                return False
+            if action.get("tail_paths") or action.get("tails"):
+                return False
+            active_name_actions += 1
+            if active_name_actions > 1:
+                return False
+    return active_name_actions == 1
+
+
+def _matches_selected_option(action: Mapping[str, Any], selected: Mapping[str, str]) -> bool:
+    group = str(action.get("group") or "").strip()
+    option_key = str(action.get("option_key") or "").strip()
+    return bool(group and option_key and str(selected.get(group) or "").strip() == option_key)
 
 
 def unit_stem(unit: V2OrderRenderUnit, labels: Mapping[str, str]) -> str:

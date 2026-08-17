@@ -18,6 +18,7 @@ from src.service.v2_template_api import V2TemplateApi
 from src.service.v2_template_boundary import V2_RENDER_PIPELINE, V2_TEMPLATE_TYPE
 from src.service.v2_template_contract import V2_CONTRACT_SCHEMA, V2_CONTRACT_VERSION
 from src.service.v2_template_store import V2TemplateStore
+from src.service.v2_order_plan import build_v2_order_units
 from src.service.v2_order_render_support import stats
 
 
@@ -384,6 +385,99 @@ def test_v2_single_content_quantity_does_not_expand_without_switch(tmp_path):
     assert record["status"] == "completed"
     assert record["stats"]["items"] == 1
     assert len(renderer.calls) == 1
+
+
+def test_v2_single_name_template_splits_newline_names_into_one_order_column(tmp_path):
+    bundle_path = tmp_path / "published.zip"
+    _bundle(
+        bundle_path,
+        "V2ORDER001",
+        b"template-ai",
+        with_styles=True,
+        config_updates={
+            "field_bindings": {
+                "order_no": "订单号",
+                "department": "生产部门",
+                "font": "字体",
+                "style": "尺寸",
+                "name": "定制信息",
+                "quantity": "数量",
+                "color": "字体颜色",
+            }
+        },
+    )
+    order_path = tmp_path / "order.xlsx"
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["订单号", "生产部门", "字体", "尺寸", "定制信息", "数量", "字体颜色"])
+    sheet.append(["ORDER-K", "K", "F1", "M", "Alice\nBob\nCarol", 3, "White"])
+    workbook.save(order_path)
+    renderer = CapturingRenderer()
+    client = LocalDrawFlowClient(
+        V2PublishedCentral(bundle_path),
+        tmp_path / "local",
+        v2_renderer=renderer,
+        font_dirs=[],
+    )
+
+    record = client.render({"template_id": "V2ORDER001", "order_file": str(order_path)})
+
+    assert record["status"] == "completed"
+    assert record["stats"]["items"] == 3
+    assert record["outputs"]["single_order_files"][0]["name"] == "ORDER-K.ai"
+    assert record["outputs"]["single_order_files"][0]["item_count"] == 3
+    assert [call["values"]["name"] for call in renderer.calls[:3]] == ["Alice", "Bob", "Carol"]
+    assert [call["selections"]["Output_main"]["style"] for call in renderer.calls[:3]] == [
+        "style2",
+        "style2",
+        "style2",
+    ]
+    assert len(renderer.compose_calls) == 2
+    assert len(renderer.color_frame_calls) == 1
+
+
+def test_v2_newline_names_do_not_split_when_selected_template_has_multiple_name_slots():
+    config = {"field_bindings": {"name": "Name"}}
+    render_task = {
+        "outputs": [
+            {
+                "key": "Output_main",
+                "actions": [
+                    {
+                        "type": "replace_slot_text",
+                        "group": "font",
+                        "option_key": "F1",
+                        "source_field": "name",
+                        "source_part_index": 0,
+                        "tail_paths": [],
+                        "tails": [],
+                    },
+                    {
+                        "type": "replace_slot_text",
+                        "group": "design",
+                        "option_key": "Design01",
+                        "source_field": "name",
+                        "source_part_index": 0,
+                        "tail_paths": [],
+                        "tails": [],
+                    },
+                ],
+            }
+        ]
+    }
+    preflight = {
+        "preflight_rows": [
+            {
+                "row": 1,
+                "outputs": [{"output": "Output_main", "font": "F1", "design": "Design01"}],
+            }
+        ]
+    }
+
+    units = build_v2_order_units(config, render_task, [{"Name": "Alice\nBob"}], preflight)
+
+    assert len(units) == 1
+    assert units[0].values["name"] == "Alice\nBob"
 
 
 def test_v2_department_single_order_combines_duplicate_order_with_independent_styles(tmp_path):
