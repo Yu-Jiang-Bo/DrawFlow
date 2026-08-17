@@ -1456,6 +1456,65 @@ if (copiedNames.includes('style2')) throw new Error('unselected style was copied
     assert result.returncode == 0, result.stderr
 
 
+def test_v2_renderer_uses_source_only_style_as_bounds_without_outputting_frame():
+    task = {
+        "$schema": "custom-renderer/v2-render-execution",
+        "template_ai": "template.ai",
+        "output_ai": "out.ai",
+        "values": {"style": "small", "font": "F1", "name": "Amy"},
+        "selections": {"Output_main": {"style": "style1", "font": "F1"}},
+        "mock_style1_bounds": [200, 100, 300, 0],
+        "mock_f1_slot_bounds": [0, 30, 30, 0],
+        "render_task": {
+            "$schema": "custom-renderer/v2-render-task",
+            "outputs": [
+                {
+                    "key": "Output_main",
+                    "actions": [
+                        {
+                            "type": "select_style",
+                            "group": "style",
+                            "option_key": "style1",
+                            "object_path": "Template/Output_main/Style/style1",
+                            "source_only": True,
+                        },
+                        {
+                            "type": "copy_option_group",
+                            "group": "font",
+                            "option_key": "F1",
+                            "object_path": "Template/Output_main/Font/F1",
+                        },
+                        {
+                            "type": "replace_slot_text",
+                            "group": "font",
+                            "option_key": "F1",
+                            "slot_key": "slot_name",
+                            "object_path": "Template/Output_main/Font/F1/slot_name",
+                            "source_field": "name",
+                            "required": True,
+                            "tail_paths": [],
+                        },
+                    ],
+                }
+            ],
+        },
+    }
+    harness = node_mock_harness(task, """
+const copiedNames = outputLayer.pageItems.map(item => item.name);
+if (copiedNames.includes('style1')) throw new Error('source-only style frame remained in output');
+const fontCopy = outputLayer.pageItems.find(item => item.name === 'F1');
+if (!fontCopy) throw new Error('font output was not copied');
+const slot = child(fontCopy, 'slot_name');
+const textBounds = slot.visibleBounds;
+if (textBounds[0] < 200 - 0.05 || textBounds[2] > 300 + 0.05) throw new Error('font text escaped source-only style width');
+if (textBounds[1] > 100 + 0.05 || textBounds[3] < 0 - 0.05) throw new Error('font text escaped source-only style height');
+""")
+
+    result = run_node(harness)
+
+    assert result.returncode == 0, result.stderr
+
+
 def test_v2_renderer_scales_style_and_font_as_one_final_output():
     task = {
         "$schema": "custom-renderer/v2-render-execution",

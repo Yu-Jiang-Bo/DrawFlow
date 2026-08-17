@@ -141,6 +141,7 @@ def _compile_output(
                         option_key=option_key,
                         object_path=option_scan["path"],
                         dimensions=deepcopy(dimensions),
+                        source_only=bool(dimensions),
                     )
                 )
                 if dimensions:

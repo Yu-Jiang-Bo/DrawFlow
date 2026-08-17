@@ -58,8 +58,8 @@
         for (var index = 0; index < actions.length; index++) {
             var action = actions[index] || {};
             if (action.type === "select_style" && isSelected(action, selected)) {
-                copied[copyKey(outputKey, action)] = copyOptionGroup(sourceDoc, targetLayer, action.object_path, false);
-                renderedItems.push(copied[copyKey(outputKey, action)].item);
+                copied[copyKey(outputKey, action)] = copyOptionGroup(sourceDoc, targetLayer, action.object_path, action.source_only === true);
+                if (action.source_only !== true) renderedItems.push(copied[copyKey(outputKey, action)].item);
             }
             if (action.type === "copy_option_group" && isSelected(action, selected)) {
                 copied[copyKey(outputKey, action)] = copyOptionGroup(sourceDoc, targetLayer, action.object_path, action.source_only === true);

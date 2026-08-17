@@ -350,6 +350,7 @@ def test_compiles_style_scan_dimensions_as_production_upper_bounds(source_width,
     fit_action = next(action for action in actions if action["type"] == "fit_output_bounds")
     assert select_action["dimensions"]["width_mm"] == expected_width
     assert select_action["dimensions"]["height_mm"] == expected_height
+    assert select_action["source_only"] is True
     assert fit_action["dimensions"]["width_mm"] == expected_width
     assert fit_action["dimensions"]["height_mm"] == expected_height
 
