@@ -632,6 +632,104 @@ def test_compose_v2_order_column_javascript_parses_in_node(tmp_path):
     assert result.returncode == 0, result.stderr
 
 
+def test_compose_v2_order_column_runs_without_native_json_parser(tmp_path):
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node.js is unavailable")
+    task = {
+        "type": "compose_v2_order_column",
+        "inputs": [{"path": "input.ai"}],
+        "output_ai": "out.ai",
+        "gap_mm": 8,
+        "compatibility": "Illustrator 8",
+    }
+    source = Path("scripts/illustrator/compose_v2_order_column.jsx").read_text(encoding="utf-8").replace(
+        "#target illustrator",
+        "",
+        1,
+    )
+    script = f"""
+const NativeJSON = JSON;
+const source = {json.dumps(source)};
+const taskText = NativeJSON.stringify({json.dumps(task)});
+const folder = {{ exists: true, parent: null, create: () => true }};
+let savedAs = '';
+global.$ = {{ getenv: () => 'task.json' }};
+global.File = function(path) {{
+  return {{
+    fsName: path,
+    exists: path === 'task.json' || path === 'input.ai',
+    parent: folder,
+    encoding: '',
+    open: () => true,
+    read: () => taskText,
+    close: () => undefined,
+    remove: () => undefined
+  }};
+}};
+global.UserInteractionLevel = {{ DONTDISPLAYALERTS: 0 }};
+global.DocumentColorSpace = {{ RGB: 1 }};
+global.ElementPlacement = {{ PLACEATEND: 1 }};
+global.SaveOptions = {{ DONOTSAVECHANGES: 0 }};
+global.Compatibility = {{ ILLUSTRATOR8: 8, ILLUSTRATOR15: 15 }};
+global.IllustratorSaveOptions = function() {{}};
+function attach(parent, childNode) {{
+  childNode.parent = parent;
+  parent.pageItems.push(childNode);
+}}
+function item(name, bounds) {{
+  let box = bounds.slice();
+  return {{
+    typename: 'GroupItem',
+    name,
+    hidden: false,
+    pageItems: [],
+    duplicate: function(targetLayer) {{
+      const copy = item(this.name, this.visibleBounds);
+      attach(targetLayer, copy);
+      return copy;
+    }},
+    translate: function(dx, dy) {{
+      box = [box[0] + dx, box[1] + dy, box[2] + dx, box[3] + dy];
+    }},
+    get visibleBounds() {{ return box.slice(); }},
+    get geometricBounds() {{ return box.slice(); }}
+  }};
+}}
+const sourceLayer = {{ visible: true, pageItems: [item('component', [10, 40, 60, 0])] }};
+const sourceDoc = {{ layers: [sourceLayer], close: () => undefined }};
+const outputLayer = {{ name: 'Layer 1', pageItems: [] }};
+const outputDoc = {{
+  layers: [outputLayer],
+  artboards: [{{ artboardRect: [] }}],
+  saveAs: file => {{ savedAs = file.fsName; }},
+  close: () => undefined
+}};
+global.app = {{
+  userInteractionLevel: 0,
+  documents: {{ add: () => outputDoc }},
+  open: () => sourceDoc,
+  executeMenuCommand: () => undefined
+}};
+global.JSON = undefined;
+new Function(source)();
+global.JSON = NativeJSON;
+console.log(NativeJSON.stringify({{
+  savedAs,
+  copied: outputLayer.pageItems.map(item => item.name),
+  artboard: outputDoc.artboards[0].artboardRect
+}}));
+"""
+
+    result = subprocess.run([node, "-e", script], capture_output=True, text=True, check=False)
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["savedAs"] == "out.ai"
+    assert payload["copied"] == ["ORDER_PACK_BLOCK_0"]
+    assert payload["artboard"] == [0, 0, 50, -40]
+
+
 def test_template_list_includes_active_v2_publication_without_legacy_registry(tmp_path):
     template_bytes = b"template-ai"
     digest = _sha256(template_bytes)

@@ -136,7 +136,126 @@
         if (!file.open("r")) throw new Error("Cannot open task file: " + path);
         var text = file.read();
         file.close();
-        return JSON.parse(text);
+        return parseJson(text);
+    }
+
+    function parseJson(text) {
+        if (typeof JSON !== "undefined" && JSON.parse) return JSON.parse(text);
+        return parseJsonFallback(String(text || ""));
+    }
+
+    function parseJsonFallback(text) {
+        var index = 0;
+
+        function fail(message) {
+            throw new Error("Invalid JSON task file: " + message);
+        }
+
+        function skipWhitespace() {
+            while (index < text.length && /[\s]/.test(text.charAt(index))) index++;
+        }
+
+        function parseValue() {
+            skipWhitespace();
+            var ch = text.charAt(index);
+            if (ch === '"') return parseString();
+            if (ch === "{") return parseObject();
+            if (ch === "[") return parseArray();
+            if (ch === "t") return parseLiteral("true", true);
+            if (ch === "f") return parseLiteral("false", false);
+            if (ch === "n") return parseLiteral("null", null);
+            if (ch === "-" || (ch >= "0" && ch <= "9")) return parseNumber();
+            fail("unexpected token at " + index);
+        }
+
+        function parseLiteral(token, value) {
+            if (text.substr(index, token.length) !== token) fail("invalid literal at " + index);
+            index += token.length;
+            return value;
+        }
+
+        function parseNumber() {
+            var match = text.substring(index).match(/^-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+\-]?[0-9]+)?/);
+            if (!match) fail("invalid number at " + index);
+            index += match[0].length;
+            return Number(match[0]);
+        }
+
+        function parseString() {
+            var result = "";
+            index++;
+            while (index < text.length) {
+                var ch = text.charAt(index++);
+                if (ch === '"') return result;
+                if (ch !== "\\") {
+                    result += ch;
+                    continue;
+                }
+                if (index >= text.length) fail("unterminated escape");
+                var esc = text.charAt(index++);
+                if (esc === '"' || esc === "\\" || esc === "/") result += esc;
+                else if (esc === "b") result += "\b";
+                else if (esc === "f") result += "\f";
+                else if (esc === "n") result += "\n";
+                else if (esc === "r") result += "\r";
+                else if (esc === "t") result += "\t";
+                else if (esc === "u") {
+                    var hex = text.substr(index, 4);
+                    if (!/^[0-9a-fA-F]{4}$/.test(hex)) fail("invalid unicode escape at " + index);
+                    result += String.fromCharCode(parseInt(hex, 16));
+                    index += 4;
+                } else {
+                    fail("invalid escape at " + index);
+                }
+            }
+            fail("unterminated string");
+        }
+
+        function parseArray() {
+            var result = [];
+            index++;
+            skipWhitespace();
+            if (text.charAt(index) === "]") {
+                index++;
+                return result;
+            }
+            while (index < text.length) {
+                result.push(parseValue());
+                skipWhitespace();
+                var ch = text.charAt(index++);
+                if (ch === "]") return result;
+                if (ch !== ",") fail("expected comma in array");
+            }
+            fail("unterminated array");
+        }
+
+        function parseObject() {
+            var result = {};
+            index++;
+            skipWhitespace();
+            if (text.charAt(index) === "}") {
+                index++;
+                return result;
+            }
+            while (index < text.length) {
+                skipWhitespace();
+                if (text.charAt(index) !== '"') fail("expected object key");
+                var key = parseString();
+                skipWhitespace();
+                if (text.charAt(index++) !== ":") fail("expected colon after object key");
+                result[key] = parseValue();
+                skipWhitespace();
+                var ch = text.charAt(index++);
+                if (ch === "}") return result;
+                if (ch !== ",") fail("expected comma in object");
+            }
+            fail("unterminated object");
+        }
+
+        var parsed = parseValue();
+        skipWhitespace();
+        if (index !== text.length) fail("trailing content at " + index);
+        return parsed;
     }
 
     function saveAI(targetDoc, file, compatibility) {
