@@ -1012,6 +1012,9 @@ def test_generic_w196_applies_cs5_and_quantity_split(tmp_path):
 
     task = json.loads(Path(record["outputs"]["render_task"]).read_text(encoding="utf-8"))
     assert record["status"] == "completed"
+    assert "master-component" in Path(record["outputs"]["render_task"]).name
+    assert any("compose-color-frames" in Path(path).name for path in record["outputs"]["render_task_files"])
+    assert record["outputs"]["render_batch_files"]
     assert task["output"]["compatibility"] == "CS5"
     assert len(task["orders"]) == 3
     assert [order["quantity_index"] for order in task["orders"]] == [1, 2, 3]
@@ -1094,6 +1097,103 @@ def test_generic_w120_outputs_per_graphic_png_bundle_plan(tmp_path):
         "single-graphics/ORDER-W120-2.png",
     ]
     assert "output_manifest" in record["outputs"]
+    assert all("single-graphic-tasks" in str(path) for path in record["outputs"]["render_task_files"])
+    assert record["outputs"]["render_batch_files"]
+
+
+def test_generic_mixed_w196_and_w120_uses_shared_production_pipeline(tmp_path):
+    config_path = tmp_path / "templates.json"
+    rules_path = tmp_path / "template.rules.json"
+    order_path = tmp_path / "orders.xlsx"
+    fake_ai = tmp_path / "template.ai"
+    fake_ai.write_text("fake ai", encoding="utf-8")
+    rules_path.write_text(
+        json.dumps(
+            {
+                "status": "confirmed",
+                "order_bindings": {
+                    "order_no": "Order",
+                    "text": "Name",
+                    "quantity": "Quantity",
+                    "department": "Department",
+                    "manufacturer": "Manufacturer",
+                },
+                "slot_mappings": [{"field": "text", "slot": "Name"}],
+                "multi_name_customization": {"enabled": True},
+                "render_layout": {
+                    "type": "name_columns",
+                    "output_mode": "single_file",
+                    "default": {"group_by": ["row"], "header_fields": ["order_no"]},
+                },
+                "output": {"color_mode": "CMYK"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    config_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "templates": [
+                    {
+                        "template_id": "GENERIC-MIX",
+                        "name": "Generic Mixed",
+                        "template_type": "pure_text_color_design",
+                        "pipeline": "generic_rules_only",
+                        "status": "active",
+                        "template_ai": str(fake_ai),
+                        "template_rules_config": str(rules_path),
+                        "default_columns": 4,
+                        "default_hide_boxes": True,
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["Order", "Name", "Quantity", "Department", "Manufacturer"])
+    sheet.append(["ORDER-W196", "Alice", 1, "W", "MY-W196"])
+    sheet.append(["ORDER-W120", "Bob|Cara", 2, "W", "MY-W120"])
+    workbook.save(order_path)
+
+    record = RenderService(
+        registry=TemplateRegistry(config_path),
+        jobs=JobStore(tmp_path / "jobs"),
+    ).submit(
+        {"template_id": "GENERIC-MIX", "order_file": str(order_path), "dry_run": True}
+    )
+
+    assert record["status"] == "completed", record.get("error")
+    assert record["outputs"]["delivery_plan"]
+    assert record["outputs"]["render_batch_files"]
+    assert [item["name"] for item in record["outputs"]["graphic_files"]] == [
+        "ORDER-W120-1.png",
+        "ORDER-W120-2.png",
+    ]
+    assert [item["name"] for item in record["outputs"]["summary_files"]] == ["GENERIC-MIX-4col-W-MY-W196.ai"]
+    assert [member["arcname"] for member in record["outputs"]["bundle_plan"]] == [
+        "single-graphics/ORDER-W120-1.png",
+        "single-graphics/ORDER-W120-2.png",
+        "summary/GENERIC-MIX-4col-W-MY-W196.ai",
+    ]
+    component_task_path = next(
+        Path(path)
+        for path in record["outputs"]["render_task_files"]
+        if "master-component" in Path(path).name
+    )
+    graphic_task_path = next(
+        Path(path)
+        for path in record["outputs"]["render_task_files"]
+        if "single-graphic-tasks" in str(path)
+    )
+    component_task = json.loads(component_task_path.read_text(encoding="utf-8"))
+    graphic_task = json.loads(graphic_task_path.read_text(encoding="utf-8"))
+    assert component_task["output"]["compatibility"] == "CS5"
+    assert graphic_task["output"]["format"] == "png"
+    assert graphic_task["render_layout"]["output_mode"] == "per_graphic"
 
 
 def test_202508_task_receives_every_configured_font_boldness_mapping(tmp_path):
