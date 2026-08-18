@@ -11,6 +11,7 @@ from src.service.production_output import ProductionOutputUnit
 from src.service.v2_order_task_builder import (
     V2OrderTaskBuilderError,
     build_v2_order_task,
+    create_v2_component_reuse_strategy,
     create_v2_order_task_builder,
 )
 from src.service.v2_render_task import V2_RENDER_TASK_SCHEMA
@@ -164,6 +165,38 @@ def test_factory_is_compatible_with_shared_pipeline_builder_kwargs(tmp_path, mon
     assert task["production"]["color_summary"] is True
     assert calls[0]["kwargs"]["pack_order_blocks"] is True
     assert calls[0]["kwargs"]["values"] == {"name": "Cara"}
+
+
+def test_component_reuse_strategy_builds_unannotated_v2_component_and_composers(tmp_path):
+    rule = resolve_department_output("K")
+    unit = _production_unit(
+        order_no="ORDER-6",
+        detail_id="D6",
+        color_option="Gold",
+        rule=rule,
+        payload=V2Payload(
+            output_key="Output_main",
+            values={"name": "Gail"},
+            selections={"Output_main": {"font": "F10", "design": "Design03"}},
+        ),
+    )
+    strategy = create_v2_component_reuse_strategy(_compiled_task(), template_ai=tmp_path / "template.ai")
+
+    component = strategy.build_component_task(
+        units=(unit,), output_ai=tmp_path / "component.ai", rule=rule, progress={}
+    )
+    order = strategy.build_order_column_task(
+        input_ai_files=[tmp_path / "component.ai"], input_order_nos=["ORDER-6"],
+        output_ai=tmp_path / "order.ai", label_lines=["ORDER-6", "金色"], compatibility="Illustrator 8",
+    )
+
+    assert component["layout"]["suppress_labels"] is True
+    assert component["production"]["component_reuse"] is True
+    assert component["output"]["format"] == "ai"
+    assert order["type"] == "compose_v2_order_column"
+    assert order["label_lines"] == ["ORDER-6", "金色"]
+    assert strategy.order_column_script.name == "compose_v2_order_column.jsx"
+    assert strategy.color_frames_script.name == "compose_color_frames.jsx"
 
 
 def test_invalid_unit_error_message_is_user_safe(tmp_path):

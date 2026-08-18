@@ -3,10 +3,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from hashlib import sha256
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
-from .department_output import finalize_cmyk_png
+from .department_output import (
+    ANNOTATION_COLOR,
+    ANNOTATION_PRODUCT_NAME,
+    finalize_cmyk_png,
+    translate_color_to_chinese,
+)
 from .production_batch import render_production_batch_files
 from .production_output import (
     GraphicOutput,
@@ -46,6 +52,29 @@ class ProductionGraphicMasterPlan:
     progress_message: str = "生成总图 AI 文件"
 
 
+@dataclass(frozen=True)
+class ReusableProductionComponent:
+    """One unannotated standard artwork component owned by the public pipeline."""
+
+    identity: str
+    unit: ProductionOutputUnit
+    output_path: Path
+
+
+@dataclass(frozen=True)
+class ProductionComponentReuseManifest:
+    """Stable public record of the component files reusable within one job."""
+
+    components: tuple[ReusableProductionComponent, ...]
+
+    def component_for_identity(self, identity: str) -> ReusableProductionComponent:
+        normalized_identity = str(identity or "").strip()
+        for component in self.components:
+            if component.identity == normalized_identity:
+                return component
+        raise ProductionPipelineError("未找到可复用的效果图组件")
+
+
 TaskBuilder = Callable[..., dict[str, Any]]
 ProgressUpdater = Callable[[Mapping[str, Any], int, int, str], None]
 TaskProgressBuilder = Callable[[Mapping[str, Any], int, int, str], Mapping[str, Any]]
@@ -54,6 +83,77 @@ BatchRenderer = Callable[[Iterable[Path], bool], None]
 ErrorFactory = Callable[[str, str], Exception]
 TargetPathBuilder = Callable[[Path, str, ProductionOutputBatch, set[str]], Path]
 GraphicMasterBuilder = Callable[..., ProductionGraphicMasterPlan | None]
+
+
+@dataclass(frozen=True)
+class ProductionComponentReuseStrategy:
+    """Template adapter hooks for component rendering and public composition.
+
+    The public pipeline continues to own department partitioning, delivery files,
+    packing values, annotation policy, batch writing, and ZIP creation.  A
+    template strategy only turns those public inputs into its unannotated
+    component, order-column, color-frame, and master composer tasks.
+    """
+
+    build_component_task: TaskBuilder
+    build_order_column_task: TaskBuilder
+    build_color_frames_task: TaskBuilder
+    build_master_task: TaskBuilder | None = None
+    order_column_script: Path | str | None = None
+    color_frames_script: Path | str | None = None
+
+
+def build_component_reuse_manifest(
+    units: Sequence[ProductionOutputUnit],
+    *,
+    component_dir: Path,
+) -> ProductionComponentReuseManifest:
+    """Plan exactly one stable unannotated component path for every unit identity."""
+
+    components: list[ReusableProductionComponent] = []
+    identities: set[str] = set()
+    for index, unit in enumerate(units, start=1):
+        identity = str(unit.identity or "").strip()
+        if not identity:
+            raise ProductionPipelineError(
+                f"第 {index} 个效果图缺少稳定身份，不能建立组件复用清单",
+                code="component_reuse_identity_missing",
+            )
+        if identity in identities:
+            raise ProductionPipelineError(
+                f"效果图组件身份重复：{identity}",
+                code="component_reuse_identity_duplicate",
+            )
+        identities.add(identity)
+        component_key = sha256(identity.encode("utf-8")).hexdigest()[:20]
+        components.append(
+            ReusableProductionComponent(
+                identity=identity,
+                unit=unit,
+                output_path=component_dir / f"component-{component_key}.ai",
+            )
+        )
+    return ProductionComponentReuseManifest(components=tuple(components))
+
+
+def validate_component_reuse_strategy(strategy: ProductionComponentReuseStrategy) -> None:
+    """Fail fast when an adapter does not supply the complete public task contract."""
+
+    required_builders = (
+        strategy.build_component_task,
+        strategy.build_order_column_task,
+        strategy.build_color_frames_task,
+    )
+    if not all(callable(builder) for builder in required_builders):
+        raise ProductionPipelineError(
+            "组件复用策略不完整，无法生成公共生产成品",
+            code="component_reuse_strategy_invalid",
+        )
+    if strategy.build_master_task is not None and not callable(strategy.build_master_task):
+        raise ProductionPipelineError(
+            "组件复用策略的总图任务构建器无效",
+            code="component_reuse_strategy_invalid",
+        )
 
 
 def run_production_output_pipeline(
@@ -76,6 +176,7 @@ def run_production_output_pipeline(
     graphic_master_builder: GraphicMasterBuilder | None = None,
     graphic_batch_dir: str | None = None,
     graphic_master_batch_dir: str | None = None,
+    component_reuse: ProductionComponentReuseStrategy | None = None,
     prefer_batch_render_task: bool = True,
     require_public_output_metadata: bool = True,
     stats_extra: Mapping[str, Any] | None = None,
@@ -89,10 +190,24 @@ def run_production_output_pipeline(
     request = record["request"]
     job_dir = Path(record["job_dir"]).resolve()
     batches = partition_output_units(output_units)
+    reusable_units = tuple(
+        unit
+        for batch in batches
+        if not requires_graphic_outputs(batch.rule)
+        for unit in batch.units
+    )
+    component_manifest = (
+        build_component_reuse_manifest(reusable_units, component_dir=job_dir / "component-tasks" / "artwork")
+        if component_reuse is not None
+        else None
+    )
+    if component_reuse is not None:
+        validate_component_reuse_strategy(component_reuse)
     graphic_work = sum(len(batch.units) for batch in batches if requires_graphic_outputs(batch.rule))
     single_order_work = sum(len(batch.units) for batch in batches if requires_single_order_ai(batch.rule))
     master_work = sum(len(batch.units) for batch in batches if requires_master_output(batch.rule))
-    total_work = graphic_work + single_order_work + master_work
+    component_work = len(component_manifest.components) if component_manifest is not None else 0
+    total_work = component_work + graphic_work + single_order_work + master_work
     update_progress(record, 0, total_work, "生成部门成品")
 
     delivery_files: list[dict[str, str]] = []
@@ -110,6 +225,34 @@ def run_production_output_pipeline(
     single_order_names: set[str] = set()
     rendered_items = 0
     compose_script = Path(__file__).resolve().parents[2] / "scripts" / "illustrator" / "compose_color_frames.jsx"
+    components_by_identity = {
+        component.identity: component
+        for component in component_manifest.components
+    } if component_manifest is not None else {}
+
+    if component_manifest is not None and component_reuse is not None:
+        for component_index, component in enumerate(component_manifest.components, start=1):
+            rule = component.unit.rule
+            if rule is None:
+                raise make_error("组件复用缺少公共部门规则", "component_reuse_rule_missing")
+            task = component_reuse.build_component_task(
+                component=component,
+                units=(component.unit,),
+                output_ai=component.output_path,
+                output_png=None,
+                columns=1,
+                rule=rule,
+                fixed_canvas=None,
+                progress=task_progress(record, component_index - 1, total_work, "生成标准效果图组件"),
+            )
+            _validate_reusable_component_task(task, make_error)
+            task_file = job_dir / "component-tasks" / f"render-component-{component_index:04d}.json"
+            write_render_task_json(task_file, task)
+            task_files.append(str(task_file))
+            render_entries.append({"script": str(render_script), "task_file": str(task_file)})
+        rendered_items += len(component_manifest.components)
+        if request["dry_run"]:
+            update_progress(record, rendered_items, total_work, "生成标准效果图组件")
 
     for index, batch in enumerate(batches, start=1):
         rule = batch.rule
@@ -173,19 +316,40 @@ def run_production_output_pipeline(
                 single_order_outputs(batch.units, job_dir / "single-orders", single_order_names),
                 start=1,
             ):
-                task = task_builder(
-                    units=spec.units,
-                    output_ai=spec.output_path,
-                    output_png=None,
-                    columns=1,
-                    rule=rule,
-                    fixed_canvas=None,
-                    progress=task_progress(record, rendered_items + single_index - 1, total_work, "生成单订单 AI 文件"),
-                )
+                if component_reuse is None:
+                    task = task_builder(
+                        units=spec.units,
+                        output_ai=spec.output_path,
+                        output_png=None,
+                        columns=1,
+                        rule=rule,
+                        fixed_canvas=None,
+                        progress=task_progress(record, rendered_items + single_index - 1, total_work, "生成单订单 AI 文件"),
+                    )
+                else:
+                    components = _components_for_units(spec.units, components_by_identity, make_error)
+                    task = component_reuse.build_order_column_task(
+                        components=components,
+                        input_ai_files=tuple(component.output_path for component in components),
+                        input_order_nos=tuple(unit.order_no for unit in spec.units),
+                        units=spec.units,
+                        output_ai=spec.output_path,
+                        rule=rule,
+                        label_lines=_production_label_lines(rule, spec.units),
+                        compatibility=rule.ai_compatibility,
+                        progress=task_progress(record, rendered_items + single_index - 1, total_work, "生成单订单 AI 文件"),
+                    )
                 task_file = job_dir / "single-order-tasks" / f"render-task-{index:03d}-{single_index:04d}.json"
                 write_render_task_json(task_file, task)
                 task_files.append(str(task_file))
-                render_entries.append({"script": str(render_script), "task_file": str(task_file)})
+                render_entries.append(
+                    {
+                        "script": str(_strategy_script(component_reuse.order_column_script, render_script))
+                        if component_reuse is not None
+                        else str(render_script),
+                        "task_file": str(task_file),
+                    }
+                )
                 detail_ids = [unit.detail_id for unit in spec.units if unit.detail_id]
                 single_order_files.append(
                     {
@@ -258,39 +422,54 @@ def run_production_output_pipeline(
             summary_item_count = 0
             for frame_index, frame in enumerate(color_frames(batch.units), start=1):
                 component_path = job_dir / f".department-{index:03d}-color-{frame_index:03d}.ai"
-                task = task_builder(
-                    units=frame.units,
-                    output_ai=component_path,
-                    output_png=None,
-                    columns=1,
-                    rule=rule,
-                    fixed_canvas=None,
-                    color_summary=True,
-                    master_packing={**packing, "color_group": frame.color_option},
-                    progress=task_progress(record, rendered_items + summary_item_count, total_work, "生成颜色汇总 AI 文件"),
-                )
+                if component_reuse is None:
+                    task = task_builder(
+                        units=frame.units,
+                        output_ai=component_path,
+                        output_png=None,
+                        columns=1,
+                        rule=rule,
+                        fixed_canvas=None,
+                        color_summary=True,
+                        master_packing={**packing, "color_group": frame.color_option},
+                        progress=task_progress(record, rendered_items + summary_item_count, total_work, "生成颜色汇总 AI 文件"),
+                    )
+                else:
+                    components = _components_for_units(frame.units, components_by_identity, make_error)
+                    task = component_reuse.build_order_column_task(
+                        components=components,
+                        input_ai_files=tuple(component.output_path for component in components),
+                        input_order_nos=tuple(unit.order_no for unit in frame.units),
+                        units=frame.units,
+                        output_ai=component_path,
+                        rule=rule,
+                        label_lines=(),
+                        compatibility=rule.ai_compatibility,
+                        progress=task_progress(record, rendered_items + summary_item_count, total_work, "生成颜色汇总 AI 文件"),
+                    )
                 _mark_composition_intermediate(task, make_error)
                 task_file = job_dir / f"render-task-{index:03d}-color-{frame_index:03d}.json"
                 write_render_task_json(task_file, task)
                 task_files.append(str(task_file))
-                render_entries.append({"script": str(render_script), "task_file": str(task_file)})
+                render_entries.append(
+                    {
+                        "script": str(_strategy_script(component_reuse.order_column_script, render_script))
+                        if component_reuse is not None
+                        else str(render_script),
+                        "task_file": str(task_file),
+                    }
+                )
                 component_paths.append(
                     {
                         "path": str(component_path),
                         "color_option": frame.color_option,
-                        "order_nos": [
-                            str(group.get("order_no") or "")
-                            for group in task.get("groups", [])
-                            if isinstance(group, Mapping)
-                        ],
+                        "order_nos": _unique_order_nos(frame.units),
                     }
                 )
                 summary_item_count += len(frame.units)
 
             compose_file = job_dir / f"compose-color-frames-{index:03d}.json"
-            write_render_task_json(
-                compose_file,
-                {
+            compose_task = {
                     "type": "compose_color_frames",
                     "output_ai": str(target_path),
                     "master_packing": packing,
@@ -299,34 +478,71 @@ def run_production_output_pipeline(
                     "show_color_frame_boundary": True,
                     "inputs": component_paths,
                     "debug": {"report_path": str(target_path.with_suffix(".compact-layout.json"))},
-                },
-            )
+                }
+            if component_reuse is not None:
+                compose_task = component_reuse.build_color_frames_task(
+                    inputs=component_paths,
+                    output_ai=target_path,
+                    master_packing=packing,
+                    compatibility=rule.ai_compatibility,
+                    show_color_header=True,
+                    show_color_frame_boundary=True,
+                    debug_report_path=target_path.with_suffix(".compact-layout.json"),
+                    rule=rule,
+                )
+            write_render_task_json(compose_file, compose_task)
             task_files.append(str(compose_file))
-            render_entries.append({"script": str(compose_script), "task_file": str(compose_file)})
+            render_entries.append(
+                {
+                    "script": str(_strategy_script(component_reuse.color_frames_script, compose_script))
+                    if component_reuse is not None
+                    else str(compose_script),
+                    "task_file": str(compose_file),
+                }
+            )
             rendered_items += summary_item_count
             if request["dry_run"]:
                 update_progress(record, rendered_items, total_work, "生成颜色汇总 AI 文件")
         elif packing is not None:
             component_path = job_dir / f".department-{index:03d}-master-component.ai"
-            task = task_builder(
-                units=batch.units,
-                output_ai=component_path,
-                output_png=None,
-                columns=1,
-                rule=rule,
-                fixed_canvas=None,
-                progress=task_progress(record, rendered_items, total_work, "生成总图 AI 文件"),
-                master_packing=packing,
-            )
+            if component_reuse is None:
+                task = task_builder(
+                    units=batch.units,
+                    output_ai=component_path,
+                    output_png=None,
+                    columns=1,
+                    rule=rule,
+                    fixed_canvas=None,
+                    progress=task_progress(record, rendered_items, total_work, "生成总图 AI 文件"),
+                    master_packing=packing,
+                )
+            else:
+                components = _components_for_units(batch.units, components_by_identity, make_error)
+                task = component_reuse.build_order_column_task(
+                    components=components,
+                    input_ai_files=tuple(component.output_path for component in components),
+                    input_order_nos=tuple(unit.order_no for unit in batch.units),
+                    units=batch.units,
+                    output_ai=component_path,
+                    rule=rule,
+                    label_lines=(),
+                    compatibility=rule.ai_compatibility,
+                    progress=task_progress(record, rendered_items, total_work, "生成总图 AI 文件"),
+                )
             _mark_composition_intermediate(task, make_error)
             task_file = job_dir / f"render-task-{index:03d}-master-component.json"
             write_render_task_json(task_file, task)
             task_files.append(str(task_file))
-            render_entries.append({"script": str(render_script), "task_file": str(task_file)})
-            compose_file = job_dir / f"compose-color-frames-{index:03d}.json"
-            write_render_task_json(
-                compose_file,
+            render_entries.append(
                 {
+                    "script": str(_strategy_script(component_reuse.order_column_script, render_script))
+                    if component_reuse is not None
+                    else str(render_script),
+                    "task_file": str(task_file),
+                }
+            )
+            compose_file = job_dir / f"compose-color-frames-{index:03d}.json"
+            compose_task = {
                     "type": "compose_color_frames",
                     "output_ai": str(target_path),
                     "master_packing": packing,
@@ -335,10 +551,28 @@ def run_production_output_pipeline(
                     "show_color_frame_boundary": False,
                     "inputs": [{"path": str(component_path), "color_option": ""}],
                     "debug": {"report_path": str(target_path.with_suffix(".compact-layout.json"))},
-                },
-            )
+                }
+            if component_reuse is not None:
+                compose_task = component_reuse.build_color_frames_task(
+                    inputs=compose_task["inputs"],
+                    output_ai=target_path,
+                    master_packing=packing,
+                    compatibility=rule.ai_compatibility,
+                    show_color_header=False,
+                    show_color_frame_boundary=False,
+                    debug_report_path=target_path.with_suffix(".compact-layout.json"),
+                    rule=rule,
+                )
+            write_render_task_json(compose_file, compose_task)
             task_files.append(str(compose_file))
-            render_entries.append({"script": str(compose_script), "task_file": str(compose_file)})
+            render_entries.append(
+                {
+                    "script": str(_strategy_script(component_reuse.color_frames_script, compose_script))
+                    if component_reuse is not None
+                    else str(compose_script),
+                    "task_file": str(compose_file),
+                }
+            )
             rendered_items += len(batch.units)
             if request["dry_run"]:
                 update_progress(record, rendered_items, total_work, "生成总图 AI 文件")
@@ -474,6 +708,62 @@ def run_production_output_pipeline(
     }
 
 
+def _validate_reusable_component_task(task: Mapping[str, Any], make_error: ErrorFactory) -> None:
+    layout = task.get("layout")
+    output = task.get("output")
+    production = task.get("production")
+    if not isinstance(layout, Mapping) or not bool(layout.get("suppress_labels")):
+        raise make_error("标准效果图组件必须抑制生产标注", "component_reuse_labels_not_suppressed")
+    if not isinstance(output, Mapping) or str(output.get("format") or "").lower() != "ai":
+        raise make_error("标准效果图组件必须输出 AI 文件", "component_reuse_output_invalid")
+    if not isinstance(production, Mapping) or not bool(production.get("component_reuse")):
+        raise make_error("标准效果图组件缺少公共复用标记", "component_reuse_marker_missing")
+
+
+def _components_for_units(
+    units: Sequence[ProductionOutputUnit],
+    components_by_identity: Mapping[str, ReusableProductionComponent],
+    make_error: ErrorFactory,
+) -> tuple[ReusableProductionComponent, ...]:
+    components: list[ReusableProductionComponent] = []
+    for unit in units:
+        identity = str(unit.identity or "").strip()
+        component = components_by_identity.get(identity)
+        if component is None:
+            raise make_error("单订单或汇总图缺少可复用的效果图组件", "component_reuse_component_missing")
+        components.append(component)
+    return tuple(components)
+
+
+def _strategy_script(configured_script: Path | str | None, fallback_script: Path) -> Path:
+    return Path(configured_script) if configured_script is not None else fallback_script
+
+
+def _production_label_lines(rule: Any, units: Sequence[ProductionOutputUnit]) -> list[str]:
+    if not units:
+        return []
+    first = units[0]
+    order_no = str(first.order_no or "").strip()
+    if getattr(rule, "annotation_type", ANNOTATION_COLOR) == ANNOTATION_PRODUCT_NAME:
+        return [item for item in (order_no, str(first.product_name or "").strip()) if item]
+    if getattr(rule, "annotation_type", ANNOTATION_COLOR) == ANNOTATION_COLOR:
+        color = translate_color_to_chinese(str(first.color_option or "").strip())
+        return [item for item in (order_no, color) if item]
+    return [order_no] if order_no else []
+
+
+def _unique_order_nos(units: Sequence[ProductionOutputUnit]) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for unit in units:
+        order_no = str(unit.order_no or "").strip()
+        key = order_no.casefold()
+        if order_no and key not in seen:
+            result.append(order_no)
+            seen.add(key)
+    return result
+
+
 def _mark_composition_intermediate(task: dict[str, Any], make_error: ErrorFactory) -> None:
     output = task.get("output")
     if not isinstance(output, dict):
@@ -487,7 +777,12 @@ def _pipeline_error(message: str, code: str) -> ProductionPipelineError:
 
 
 __all__ = [
+    "ProductionComponentReuseManifest",
+    "ProductionComponentReuseStrategy",
     "ProductionGraphicMasterPlan",
     "ProductionPipelineError",
+    "ReusableProductionComponent",
+    "build_component_reuse_manifest",
     "run_production_output_pipeline",
+    "validate_component_reuse_strategy",
 ]

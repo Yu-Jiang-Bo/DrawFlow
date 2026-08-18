@@ -7,7 +7,12 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
 from src.renderer.v2_template_execution_contract import V2TemplateRendererError
-from src.renderer.v2_template_renderer import build_v2_execution_task
+from src.renderer.v2_template_renderer import (
+    build_v2_color_frames_task,
+    build_v2_execution_task,
+    build_v2_order_column_task,
+)
+from src.service.production_pipeline import ProductionComponentReuseStrategy
 
 
 class V2OrderTaskBuilderError(ValueError):
@@ -32,6 +37,58 @@ def create_v2_order_task_builder(
     )
 
 
+def create_v2_component_reuse_strategy(
+    render_task: Mapping[str, Any],
+    *,
+    template_ai: Path | str,
+) -> ProductionComponentReuseStrategy:
+    """Bind V2 task builders to the public component-reuse contract."""
+
+    def build_component_task(**kwargs: Any) -> dict[str, Any]:
+        task = build_v2_order_task(
+            render_task,
+            template_ai=template_ai,
+            units=kwargs["units"],
+            output_ai=kwargs["output_ai"],
+            output_png=None,
+            columns=1,
+            rule=kwargs["rule"],
+            fixed_canvas=None,
+            progress=kwargs.get("progress"),
+            master_packing={"component_suppress_labels": True},
+            component_reuse=True,
+        )
+        return task
+
+    def build_order_column_task(**kwargs: Any) -> dict[str, Any]:
+        return build_v2_order_column_task(
+            input_ai_files=kwargs["input_ai_files"],
+            input_order_nos=kwargs["input_order_nos"],
+            output_ai=kwargs["output_ai"],
+            label_lines=kwargs.get("label_lines"),
+            compatibility=str(kwargs.get("compatibility") or "Illustrator 8"),
+        )
+
+    def build_color_frames_task(**kwargs: Any) -> dict[str, Any]:
+        return build_v2_color_frames_task(
+            inputs=kwargs["inputs"],
+            output_ai=kwargs["output_ai"],
+            master_packing=kwargs["master_packing"],
+            compatibility=str(kwargs.get("compatibility") or "Illustrator 8"),
+            show_color_header=bool(kwargs.get("show_color_header")),
+            show_color_frame_boundary=bool(kwargs.get("show_color_frame_boundary")),
+            debug_report_path=kwargs.get("debug_report_path"),
+        )
+
+    return ProductionComponentReuseStrategy(
+        build_component_task=build_component_task,
+        build_order_column_task=build_order_column_task,
+        build_color_frames_task=build_color_frames_task,
+        order_column_script=Path(__file__).resolve().parents[2] / "scripts" / "illustrator" / "compose_v2_order_column.jsx",
+        color_frames_script=Path(__file__).resolve().parents[2] / "scripts" / "illustrator" / "compose_color_frames.jsx",
+    )
+
+
 def build_v2_order_task(
     render_task: Mapping[str, Any],
     *,
@@ -47,6 +104,7 @@ def build_v2_order_task(
     master_packing: Mapping[str, Any] | None = None,
     crop_master_height: bool = False,
     pack_order_blocks: bool | None = None,
+    component_reuse: bool = False,
 ) -> dict[str, Any]:
     """Return a renderer-neutral task dict without writing files or calling Illustrator."""
 
@@ -113,6 +171,7 @@ def build_v2_order_task(
         "file_format": str(getattr(rule, "file_format", "") or ""),
         "output_format": str(getattr(rule, "output_format", "") or ""),
         "component_suppress_labels": component_suppress_labels,
+        "component_reuse": bool(component_reuse),
         "progress": dict(progress or {}),
     }
     task["debug"] = {
@@ -198,5 +257,6 @@ def _safe_renderer_message(exc: V2TemplateRendererError) -> str:
 __all__ = [
     "V2OrderTaskBuilderError",
     "build_v2_order_task",
+    "create_v2_component_reuse_strategy",
     "create_v2_order_task_builder",
 ]
