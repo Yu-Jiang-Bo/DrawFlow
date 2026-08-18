@@ -109,26 +109,17 @@ class V2TemplateRenderer:
     ) -> str:
         task_path = Path(task_file)
         task_path.parent.mkdir(parents=True, exist_ok=True)
-        order_nos = [str(item or "").strip() for item in (input_order_nos or [])]
-        inputs = []
-        for index, path in enumerate(input_ai_files):
-            item = {"path": str(Path(path))}
-            if index < len(order_nos) and order_nos[index]:
-                item["order_no"] = order_nos[index]
-            inputs.append(item)
-        payload = {
-            "type": "compose_v2_order_column",
-            "output_ai": str(Path(output_ai)),
-            "gap_mm": float(gap_mm),
-            "label_height_mm": float(label_height_mm),
-            "label_gap_mm": float(label_gap_mm),
-            "label_font_size_pt": float(label_font_size_pt),
-            "compatibility": str(compatibility or "Illustrator 8"),
-            "inputs": inputs,
-        }
-        clean_label_lines = [str(item).strip() for item in (label_lines or []) if str(item or "").strip()]
-        if clean_label_lines:
-            payload["label_lines"] = clean_label_lines
+        payload = build_v2_order_column_task(
+            input_ai_files=input_ai_files,
+            output_ai=output_ai,
+            input_order_nos=input_order_nos,
+            label_lines=label_lines,
+            gap_mm=gap_mm,
+            label_height_mm=label_height_mm,
+            label_gap_mm=label_gap_mm,
+            label_font_size_pt=label_font_size_pt,
+            compatibility=compatibility,
+        )
         task_path.write_text(
             json.dumps(
                 payload,
@@ -155,17 +146,15 @@ class V2TemplateRenderer:
     ) -> str:
         task_path = Path(task_file)
         task_path.parent.mkdir(parents=True, exist_ok=True)
-        payload: dict[str, Any] = {
-            "type": "compose_color_frames",
-            "output_ai": str(Path(output_ai)),
-            "master_packing": dict(master_packing),
-            "compatibility": str(compatibility or "Illustrator 8"),
-            "show_color_header": bool(show_color_header),
-            "show_color_frame_boundary": bool(show_color_frame_boundary),
-            "inputs": [dict(item) for item in inputs],
-        }
-        if debug_report_path is not None:
-            payload["debug"] = {"report_path": str(Path(debug_report_path))}
+        payload = build_v2_color_frames_task(
+            inputs=inputs,
+            output_ai=output_ai,
+            master_packing=master_packing,
+            compatibility=compatibility,
+            show_color_header=show_color_header,
+            show_color_frame_boundary=show_color_frame_boundary,
+            debug_report_path=debug_report_path,
+        )
         task_path.write_text(
             json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2),
             encoding="utf-8",
@@ -194,25 +183,22 @@ class V2TemplateRenderer:
     ) -> str:
         task_path = Path(task_file)
         task_path.parent.mkdir(parents=True, exist_ok=True)
-        payload: dict[str, Any] = {
-            "type": "compose_png_master_pages",
-            "output_ai": str(Path(output_ai)),
-            "compatibility": str(compatibility or "CS5"),
-            "items": [dict(item) for item in items],
-            "frame_width_mm": float(frame_width_mm),
-            "frame_height_mm": float(frame_height_mm),
-            "margin_mm": float(margin_mm),
-            "column_gap_mm": float(column_gap_mm),
-            "row_gap_mm": float(row_gap_mm),
-            "label_height_mm": float(label_height_mm),
-            "label_width_mm": float(label_width_mm),
-            "label_gap_mm": float(label_gap_mm),
-            "page_count": int(page_count),
-        }
-        if preview_background is not None:
-            payload["preview_background"] = dict(preview_background)
-        if debug_report_path is not None:
-            payload["debug"] = {"report_path": str(Path(debug_report_path))}
+        payload = build_v2_png_master_pages_task(
+            items=items,
+            output_ai=output_ai,
+            frame_width_mm=frame_width_mm,
+            frame_height_mm=frame_height_mm,
+            margin_mm=margin_mm,
+            column_gap_mm=column_gap_mm,
+            row_gap_mm=row_gap_mm,
+            label_height_mm=label_height_mm,
+            label_width_mm=label_width_mm,
+            label_gap_mm=label_gap_mm,
+            compatibility=compatibility,
+            preview_background=preview_background,
+            debug_report_path=debug_report_path,
+            page_count=page_count,
+        )
         task_path.write_text(
             json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2),
             encoding="utf-8",
@@ -269,6 +255,110 @@ def build_v2_execution_task(
     if pack_order_blocks:
         execution["pack_order_blocks"] = True
     return execution
+
+
+def build_v2_order_column_task(
+    *,
+    input_ai_files: Sequence[Path | str],
+    output_ai: Path | str,
+    input_order_nos: Sequence[str] | None = None,
+    label_lines: Sequence[str] | None = None,
+    gap_mm: float = 8.0,
+    label_height_mm: float = 4.0,
+    label_gap_mm: float = 0.8,
+    label_font_size_pt: float = 6.0,
+    compatibility: str = "Illustrator 8",
+) -> dict[str, Any]:
+    """Build a pure V2 order-column composition task for the shared batch executor."""
+
+    order_nos = [str(item or "").strip() for item in (input_order_nos or [])]
+    inputs: list[dict[str, str]] = []
+    for index, path in enumerate(input_ai_files):
+        item = {"path": str(Path(path))}
+        if index < len(order_nos) and order_nos[index]:
+            item["order_no"] = order_nos[index]
+        inputs.append(item)
+    payload: dict[str, Any] = {
+        "type": "compose_v2_order_column",
+        "output_ai": str(Path(output_ai)),
+        "gap_mm": float(gap_mm),
+        "label_height_mm": float(label_height_mm),
+        "label_gap_mm": float(label_gap_mm),
+        "label_font_size_pt": float(label_font_size_pt),
+        "compatibility": str(compatibility or "Illustrator 8"),
+        "inputs": inputs,
+    }
+    clean_label_lines = [str(item).strip() for item in (label_lines or []) if str(item or "").strip()]
+    if clean_label_lines:
+        payload["label_lines"] = clean_label_lines
+    return payload
+
+
+def build_v2_color_frames_task(
+    *,
+    inputs: Sequence[Mapping[str, Any]],
+    output_ai: Path | str,
+    master_packing: Mapping[str, Any],
+    compatibility: str = "Illustrator 8",
+    show_color_header: bool = False,
+    show_color_frame_boundary: bool = False,
+    debug_report_path: Path | str | None = None,
+) -> dict[str, Any]:
+    """Build a pure color-frame composition task for the shared batch executor."""
+
+    payload: dict[str, Any] = {
+        "type": "compose_color_frames",
+        "output_ai": str(Path(output_ai)),
+        "master_packing": deepcopy(dict(master_packing)),
+        "compatibility": str(compatibility or "Illustrator 8"),
+        "show_color_header": bool(show_color_header),
+        "show_color_frame_boundary": bool(show_color_frame_boundary),
+        "inputs": [deepcopy(dict(item)) for item in inputs],
+    }
+    if debug_report_path is not None:
+        payload["debug"] = {"report_path": str(Path(debug_report_path))}
+    return payload
+
+
+def build_v2_png_master_pages_task(
+    *,
+    items: Sequence[Mapping[str, Any]],
+    output_ai: Path | str,
+    frame_width_mm: float,
+    frame_height_mm: float,
+    margin_mm: float,
+    column_gap_mm: float,
+    row_gap_mm: float,
+    label_height_mm: float,
+    label_width_mm: float,
+    label_gap_mm: float,
+    compatibility: str = "CS5",
+    preview_background: Mapping[str, Any] | None = None,
+    debug_report_path: Path | str | None = None,
+    page_count: int = 1,
+) -> dict[str, Any]:
+    """Build a pure paged PNG master composition task for the shared batch executor."""
+
+    payload: dict[str, Any] = {
+        "type": "compose_png_master_pages",
+        "output_ai": str(Path(output_ai)),
+        "compatibility": str(compatibility or "CS5"),
+        "items": [deepcopy(dict(item)) for item in items],
+        "frame_width_mm": float(frame_width_mm),
+        "frame_height_mm": float(frame_height_mm),
+        "margin_mm": float(margin_mm),
+        "column_gap_mm": float(column_gap_mm),
+        "row_gap_mm": float(row_gap_mm),
+        "label_height_mm": float(label_height_mm),
+        "label_width_mm": float(label_width_mm),
+        "label_gap_mm": float(label_gap_mm),
+        "page_count": int(page_count),
+    }
+    if preview_background is not None:
+        payload["preview_background"] = deepcopy(dict(preview_background))
+    if debug_report_path is not None:
+        payload["debug"] = {"report_path": str(Path(debug_report_path))}
+    return payload
 
 
 def stable_v2_execution_task_json(task: Mapping[str, Any]) -> str:
@@ -425,6 +515,9 @@ __all__ = [
     "V2_RENDER_EXECUTION_VERSION",
     "V2TemplateRenderer",
     "V2TemplateRendererError",
+    "build_v2_color_frames_task",
     "build_v2_execution_task",
+    "build_v2_order_column_task",
+    "build_v2_png_master_pages_task",
     "stable_v2_execution_task_json",
 ]
