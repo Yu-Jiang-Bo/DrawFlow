@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
 from .department_output import finalize_cmyk_png
+from .production_batch import render_production_batch_files
 from .production_output import (
     GraphicOutput,
     ProductionOutputUnit,
@@ -68,7 +69,7 @@ def run_production_output_pipeline(
     task_progress: TaskProgressBuilder,
     write_json: JsonWriter,
     write_render_task_json: JsonWriter,
-    render_batch_files: BatchRenderer,
+    render_batch_files: BatchRenderer | None = None,
     error_factory: ErrorFactory | None = None,
     target_path_builder: TargetPathBuilder | None = None,
     graphic_master_builder: GraphicMasterBuilder | None = None,
@@ -81,6 +82,7 @@ def run_production_output_pipeline(
 
     make_error = error_factory or _pipeline_error
     target_path_for = target_path_builder or delivery_path
+    batch_renderer = render_batch_files or render_production_batch_files
     request = record["request"]
     job_dir = Path(record["job_dir"]).resolve()
     batches = partition_output_units(units)
@@ -398,16 +400,16 @@ def run_production_output_pipeline(
 
     if not request["dry_run"]:
         if graphic_batch_task_paths:
-            render_batch_files(graphic_batch_task_paths, request["visible"])
+            batch_renderer(graphic_batch_task_paths, request["visible"])
             for png_path, dpi, color_mode in png_outputs:
                 finalize_cmyk_png(png_path, dpi=dpi, color_mode=color_mode)
             png_outputs.clear()
         if main_batch_task_paths:
-            render_batch_files(main_batch_task_paths, request["visible"])
+            batch_renderer(main_batch_task_paths, request["visible"])
         for png_path, dpi, color_mode in png_outputs:
             finalize_cmyk_png(png_path, dpi=dpi, color_mode=color_mode)
         if graphic_master_batch_task_paths:
-            render_batch_files(graphic_master_batch_task_paths, request["visible"])
+            batch_renderer(graphic_master_batch_task_paths, request["visible"])
 
     manifest_path = job_dir / "manifest.json"
     write_json(

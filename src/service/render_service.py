@@ -307,7 +307,6 @@ class RenderService:
             task_progress=self._task_progress,
             write_json=self._write_json,
             write_render_task_json=self._write_render_task_json,
-            render_batch_files=_render_production_batch_files,
             error_factory=lambda message, code: RenderServiceError(message, code=code),
             prefer_batch_render_task=False,
             stats_extra={
@@ -439,7 +438,6 @@ class RenderService:
             task_progress=self._task_progress,
             write_json=self._write_json,
             write_render_task_json=self._write_render_task_json,
-            render_batch_files=_render_production_batch_files,
             error_factory=lambda message, code: RenderServiceError(message, code=code),
         )
 
@@ -568,7 +566,6 @@ class RenderService:
             task_progress=self._task_progress,
             write_json=self._write_json,
             write_render_task_json=self._write_render_task_json,
-            render_batch_files=_render_production_batch_files,
             error_factory=lambda message, code: RenderServiceError(message, code=code),
             target_path_builder=lambda job_dir, base_name, batch, occupied: _202603_master_ai_path(
                 job_dir,
@@ -1536,31 +1533,6 @@ def _chunked(items: List[Any], size: int) -> Iterable[List[Any]]:
 def _render_generic_chunk(bridge: IllustratorBridge, script: Path, task_file: Path) -> None:
     """Retry only when Illustrator's COM server disappears during a batch."""
 
-    for attempt in range(GENERIC_RULE_COM_RETRY_ATTEMPTS):
-        try:
-            bridge.render(script, task_file)
-            return
-        except IllustratorBridgeError as exc:
-            if attempt + 1 >= GENERIC_RULE_COM_RETRY_ATTEMPTS or not _is_retryable_com_failure(exc):
-                if _is_retryable_com_failure(exc):
-                    raise IllustratorBridgeError(format_com_recovery_message(exc, retries=attempt)) from exc
-                raise
-            bridge.reset()
-            time.sleep(GENERIC_RULE_COM_RETRY_DELAY_SECONDS)
-
-
-def _render_production_batch_files(batch_files: Iterable[Path], visible: bool) -> None:
-    script = Path(__file__).resolve().parents[2] / "scripts" / "illustrator" / "render_batch.jsx"
-    bridge = IllustratorBridge(visible=visible, fresh_instance=True, reuse_instance=True)
-    try:
-        for batch_file in batch_files:
-            _render_202508_batch_chunk(bridge, script, Path(batch_file))
-            time.sleep(1.0)
-    finally:
-        bridge.close()
-
-
-def _render_202508_batch_chunk(bridge: IllustratorBridge, script: Path, task_file: Path) -> None:
     for attempt in range(GENERIC_RULE_COM_RETRY_ATTEMPTS):
         try:
             bridge.render(script, task_file)
