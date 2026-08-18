@@ -99,16 +99,41 @@ def validate_public_output_units(units: Iterable[ProductionOutputUnit]) -> tuple
         raise ProductionOutputError("公共生产输出层没有收到可交付的效果图单元")
     normalized_units: list[ProductionOutputUnit] = []
     for index, unit in enumerate(unit_list, start=1):
+        order_no = str(unit.order_no or "").strip()
+        detail_id = str(unit.detail_id or "").strip()
         department = str(unit.department or "").strip()
         manufacturer = str(unit.manufacturer or "").strip()
+        product_name = str(unit.product_name or "").strip()
+        color_option = str(unit.color_option or "").strip()
+        if not order_no:
+            raise ProductionOutputError(f"第 {index} 个效果图缺少订单号，不能进入公共生产输出层")
+        if not detail_id:
+            raise ProductionOutputError(f"第 {index} 个效果图缺少订单明细号，不能进入公共生产输出层")
         if not department:
             raise ProductionOutputError(f"第 {index} 个效果图缺少生产部门，不能绕过公共生产输出层直接交付")
+        if not product_name:
+            raise ProductionOutputError(f"第 {index} 个效果图缺少产品名称，不能进入公共生产输出层")
+        if not color_option:
+            raise ProductionOutputError(f"第 {index} 个效果图缺少字体颜色，不能进入公共生产输出层")
+        if unit.payload is None:
+            raise ProductionOutputError(f"第 {index} 个效果图缺少出图内容，不能进入公共生产输出层")
         resolved = resolve_department_output(department, manufacturer)
         if resolved.name == "W_CONTAINS" and not manufacturer:
             raise ProductionOutputError("W 部门出图必须提供厂家信息，不能套用模板私有兜底输出")
         if unit.rule is not None and not _same_delivery_rule(unit.rule, resolved):
             raise ProductionOutputError("模板输出层提供的部门规则与公共生产输出规则不一致")
-        normalized_units.append(replace(unit, rule=resolved))
+        normalized_units.append(
+            replace(
+                unit,
+                order_no=order_no,
+                detail_id=detail_id,
+                department=department,
+                manufacturer=manufacturer,
+                product_name=product_name,
+                color_option=color_option,
+                rule=resolved,
+            )
+        )
     return tuple(normalized_units)
 
 

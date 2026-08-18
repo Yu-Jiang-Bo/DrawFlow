@@ -13,6 +13,7 @@ from src.service.v2_render_task import (
     compile_v2_render_task,
     stable_v2_render_task_json,
 )
+from src.service.v2_order_plan import build_v2_order_units
 from src.service.v2_template_contract import V2_CONTRACT_SCHEMA, V2_CONTRACT_VERSION
 from src.service.v2_template_store import V2TemplateStore
 from tests.test_v2_workbench_js_behavior import HARNESS
@@ -323,6 +324,43 @@ def test_compiles_v2_render_task_with_stable_json_and_whitelisted_actions():
     assert asset_action["slot_path"] == "Template/Output_main/Design/Design03/slot_initial"
     assert asset_action["source_field"] == "initial"
     assert asset_action["supported_values"] == ["A", "B"]
+
+
+def test_compiled_preview_warnings_flow_into_v2_production_units():
+    config = render_config()
+    config["preview"] = {"evidence": {"warnings": ["请核对细长文字", "请核对细长文字"]}}
+    task = compile_task(config=config)
+    units = build_v2_order_units(
+        config,
+        task,
+        [
+            {
+                "Order No": "ORDER-1",
+                "Detail ID": "LINE-1",
+                "Dept": "K",
+                "Product": "Bracelet",
+                "Font Color": "Gold",
+                "Size": "small",
+                "Design": "03",
+                "Font": "F10",
+                "Name": "Alice",
+                "Initial": "A",
+            }
+        ],
+        {
+            "preflight_rows": [
+                {
+                    "row": 1,
+                    "order_id": "ORDER-1",
+                    "outputs": [{"output": "Output_main", "style": "style1", "design": "Design03", "font": "F10"}],
+                }
+            ]
+        },
+    )
+
+    assert task["render_warnings"] == ["请核对细长文字"]
+    assert units[0].template_version == "v0007"
+    assert units[0].render_warnings == ("请核对细长文字",)
 
 
 @pytest.mark.parametrize(

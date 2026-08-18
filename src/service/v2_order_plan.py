@@ -35,8 +35,11 @@ class V2OrderRenderUnit:
     values: Mapping[str, str]
     selections: Mapping[str, Mapping[str, str]]
     order_id: str
+    output_index: int = 1
     quantity_index: int = 1
     quantity: int = 1
+    template_version: str = ""
+    render_warnings: tuple[str, ...] = ()
 
 
 def build_v2_order_units(
@@ -64,8 +67,10 @@ def build_v2_order_units(
         split_single_name_lines = not multi_name and _single_name_line_split_enabled(render_task, selections)
         value_variants = _value_variants(values, quantity if multi_name else 1, split_single_name_lines)
         order_id = _first_value(config, row, "order_no", ORDER_ALIASES) or str(row_preflight.get("order_id") or "")
+        template_version = _template_version(render_task)
+        render_warnings = tuple(_render_warnings(render_task))
         for variant_values, quantity_index, variant_quantity in value_variants:
-            for output_key in outputs:
+            for output_index, output_key in enumerate(outputs, start=1):
                 output_selection = selections.get(output_key, {})
                 units.append(
                     V2OrderRenderUnit(
@@ -73,11 +78,14 @@ def build_v2_order_units(
                         row=row,
                         row_preflight=row_preflight,
                         output_key=output_key,
+                        output_index=output_index,
                         values=variant_values,
                         selections={output_key: dict(output_selection)},
                         order_id=order_id,
                         quantity_index=quantity_index,
                         quantity=variant_quantity,
+                        template_version=template_version,
+                        render_warnings=render_warnings,
                     )
                 )
     return units
@@ -89,22 +97,26 @@ def to_production_units(
 ) -> list[ProductionOutputUnit]:
     result: list[ProductionOutputUnit] = []
     for sequence, unit in enumerate(units, start=1):
-        row = unit.row
-        department = _first_value(config, row, "department", DEPARTMENT_ALIASES)
-        manufacturer = _first_value(config, row, "manufacturer", MANUFACTURER_ALIASES)
+        if not str(unit.template_version or "").strip():
+            raise V2OrderRenderError(
+                "当前模板版本信息不完整，不能进入生产输出。请重新下载已发布模板后重试。",
+                code="v2_template_version_missing",
+            )
+        metadata = _unit_metadata(config, unit, sequence)
+        department = metadata["department"]
+        manufacturer = metadata["manufacturer"]
         rule = resolve_department_output(department, manufacturer)
-        detail_id = _first_value(config, row, "detail_id", DETAIL_ALIASES) or str(sequence)
         result.append(
             ProductionOutputUnit(
-                order_no=unit.order_id or f"ROW-{unit.row_index}",
-                detail_id=detail_id,
+                order_no=metadata["order_no"],
+                detail_id=metadata["detail_id"],
                 department=department,
                 manufacturer=manufacturer,
-                product_name=_first_value(config, row, "product_name", PRODUCT_ALIASES),
-                color_option=_first_value(config, row, "color", COLOR_ALIASES),
+                product_name=metadata["product_name"],
+                color_option=metadata["color_option"],
                 payload=unit,
                 quantity_index=unit.quantity_index,
-                identity=detail_id or f"{unit.row_index}-{unit.quantity_index}-{unit.output_key}",
+                identity=metadata["identity"],
                 rule=rule,
             )
         )
@@ -250,6 +262,70 @@ def _first_value(
         if text:
             return text
     return ""
+
+
+def _unit_metadata(config: Mapping[str, Any], unit: V2OrderRenderUnit, sequence: int) -> dict[str, str]:
+    detail_id = _first_unit_value(config, unit, "detail_id", DETAIL_ALIASES)
+    order_no = str(unit.order_id or "").strip() or _first_unit_value(config, unit, "order_no", ORDER_ALIASES)
+    output_index = max(int(getattr(unit, "output_index", 0) or 0), 1)
+    return {
+        "order_no": order_no,
+        "detail_id": detail_id,
+        "department": _first_unit_value(config, unit, "department", DEPARTMENT_ALIASES),
+        "manufacturer": _first_unit_value(config, unit, "manufacturer", MANUFACTURER_ALIASES),
+        "product_name": _first_unit_value(config, unit, "product_name", PRODUCT_ALIASES),
+        "color_option": _first_unit_value(config, unit, "color", COLOR_ALIASES),
+        "identity": f"{detail_id}|output:{output_index:03d}|qty:{unit.quantity_index:03d}|row:{unit.row_index:03d}",
+    }
+
+
+def _first_unit_value(
+    config: Mapping[str, Any],
+    unit: V2OrderRenderUnit,
+    logical: str,
+    aliases: Iterable[str],
+) -> str:
+    for source in (unit.values, unit.row, unit.row_preflight):
+        value = _first_value(config, source, logical, aliases)
+        if value:
+            return value
+    return _metadata_value(unit.row_preflight, logical, aliases)
+
+
+def _metadata_value(source: Mapping[str, Any], logical: str, aliases: Iterable[str]) -> str:
+    candidates = (logical, *aliases)
+    for candidate in candidates:
+        value = source.get(candidate)
+        if value not in (None, ""):
+            return str(value).strip()
+    metadata = source.get("metadata")
+    if isinstance(metadata, Mapping):
+        for candidate in candidates:
+            value = metadata.get(candidate)
+            if value not in (None, ""):
+                return str(value).strip()
+    return ""
+
+
+def _template_version(render_task: Mapping[str, Any]) -> str:
+    template = render_task.get("template")
+    if isinstance(template, Mapping):
+        return str(template.get("version") or "").strip()
+    return ""
+
+
+def _render_warnings(render_task: Mapping[str, Any]) -> list[str]:
+    warnings: list[str] = []
+    for source in (render_task, render_task.get("config")):
+        if not isinstance(source, Mapping):
+            continue
+        for key in ("render_warnings", "warnings"):
+            raw_warnings = source.get(key)
+            for item in raw_warnings if isinstance(raw_warnings, list) else []:
+                text = str(item.get("message") or item.get("code") or "").strip() if isinstance(item, Mapping) else str(item or "").strip()
+                if text and text not in warnings:
+                    warnings.append(text)
+    return warnings
 
 
 def _preflight_rows(preflight: Mapping[str, Any]) -> dict[int, Mapping[str, Any]]:

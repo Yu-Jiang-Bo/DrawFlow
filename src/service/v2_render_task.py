@@ -83,6 +83,7 @@ def compile_v2_render_task(
             "version": str(template_version),
             "sha256": expected_sha,
         },
+        "render_warnings": _preview_render_warnings(contract),
         "config": {
             "version": str(config_version),
             "sha256": _lower_sha(config_sha256) or _stable_sha256(contract),
@@ -603,6 +604,18 @@ def _stable_option_mappings(items: Any) -> list[dict[str, Any]]:
 
 def _stable_sha256(value: Mapping[str, Any]) -> str:
     return hashlib.sha256(stable_v2_render_task_json(value).encode("utf-8")).hexdigest()
+
+
+def _preview_render_warnings(contract: Mapping[str, Any]) -> list[str]:
+    preview = contract.get("preview")
+    evidence = preview.get("evidence") if isinstance(preview, Mapping) else None
+    raw_warnings = evidence.get("warnings") if isinstance(evidence, Mapping) else []
+    warnings: list[str] = []
+    for item in raw_warnings if isinstance(raw_warnings, list) else []:
+        text = str(item or "").strip()
+        if text and text not in warnings:
+            warnings.append(text)
+    return warnings
 
 
 def _has_blocking_scan_issue(scan: Mapping[str, Any]) -> bool:

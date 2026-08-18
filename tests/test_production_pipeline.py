@@ -11,6 +11,9 @@ from src.service.production_output import ProductionOutputUnit
 from src.service.production_pipeline import run_production_output_pipeline
 
 
+_PAYLOAD_DEFAULT = object()
+
+
 def test_production_pipeline_uses_shared_batch_renderer_by_default(tmp_path, monkeypatch):
     record = {
         "job_id": "job-10a2",
@@ -139,6 +142,21 @@ def test_public_output_downstream_gate_rejects_empty_units_instead_of_empty_deli
         production_pipeline.validate_public_output_units([])
 
 
+@pytest.mark.parametrize(
+    ("field_kwargs", "message"),
+    [
+        ({"order_no": ""}, "订单号"),
+        ({"detail_id": ""}, "订单明细号"),
+        ({"product_name": ""}, "产品名称"),
+        ({"color_option": ""}, "字体颜色"),
+        ({"payload": None}, "出图内容"),
+    ],
+)
+def test_public_output_downstream_gate_rejects_missing_required_metadata(field_kwargs, message):
+    with pytest.raises(ProductionOutputError, match=message):
+        production_pipeline.validate_public_output_units([_unit(department="T", manufacturer="", **field_kwargs)])
+
+
 def test_production_pipeline_strict_gate_blocks_private_template_zip_before_render(tmp_path, monkeypatch):
     record = _record(tmp_path, "job-10a3")
     rendered_batches = []
@@ -180,16 +198,21 @@ def _unit(
     *,
     department: str,
     manufacturer: str,
+    order_no: str = "ORDER-1",
+    detail_id: str = "1",
+    product_name: str = "Product",
+    color_option: str = "Red",
+    payload=_PAYLOAD_DEFAULT,
     rule=None,
 ) -> ProductionOutputUnit:
     return ProductionOutputUnit(
-        order_no="ORDER-1",
-        detail_id="1",
+        order_no=order_no,
+        detail_id=detail_id,
         department=department,
         manufacturer=manufacturer,
-        product_name="Product",
-        color_option="Red",
-        payload={},
+        product_name=product_name,
+        color_option=color_option,
+        payload={} if payload is _PAYLOAD_DEFAULT else payload,
         rule=rule,
     )
 

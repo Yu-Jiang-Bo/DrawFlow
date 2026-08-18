@@ -1001,8 +1001,8 @@ def test_generic_w196_applies_cs5_and_quantity_split(tmp_path):
     )
     workbook = Workbook()
     sheet = workbook.active
-    sheet.append(["Order", "Name", "Quantity", "Department", "Manufacturer"])
-    sheet.append(["ORDER-W196", "Alice|Bob", 3, "ZW", "MY-W196"])
+    sheet.append(["Order", "Detail ID", "Product", "Color", "Name", "Quantity", "Department", "Manufacturer"])
+    sheet.append(["ORDER-W196", "LINE-W196", "Generic Pendant", "Gold", "Alice|Bob", 3, "ZW", "MY-W196"])
     workbook.save(order_path)
 
     record = RenderService(
@@ -1074,8 +1074,8 @@ def test_generic_w120_outputs_per_graphic_png_bundle_plan(tmp_path):
     )
     workbook = Workbook()
     sheet = workbook.active
-    sheet.append(["Order", "Name", "Quantity", "Department", "Manufacturer"])
-    sheet.append(["ORDER-W120", "Alice|Bob", 2, "ZW", "MY-W120"])
+    sheet.append(["Order", "Detail ID", "Product", "Color", "Name", "Quantity", "Department", "Manufacturer"])
+    sheet.append(["ORDER-W120", "LINE-W120", "Generic Pendant", "Gold", "Alice|Bob", 2, "ZW", "MY-W120"])
     workbook.save(order_path)
 
     record = RenderService(
@@ -1156,9 +1156,9 @@ def test_generic_mixed_w196_and_w120_uses_shared_production_pipeline(tmp_path):
     )
     workbook = Workbook()
     sheet = workbook.active
-    sheet.append(["Order", "Name", "Quantity", "Department", "Manufacturer"])
-    sheet.append(["ORDER-W196", "Alice", 1, "W", "MY-W196"])
-    sheet.append(["ORDER-W120", "Bob|Cara", 2, "W", "MY-W120"])
+    sheet.append(["Order", "Detail ID", "Product", "Color", "Name", "Quantity", "Department", "Manufacturer"])
+    sheet.append(["ORDER-W196", "LINE-W196", "Generic Pendant", "Gold", "Alice", 1, "W", "MY-W196"])
+    sheet.append(["ORDER-W120", "LINE-W120", "Generic Charm", "White", "Bob|Cara", 2, "W", "MY-W120"])
     workbook.save(order_path)
 
     record = RenderService(

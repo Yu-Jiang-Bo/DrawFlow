@@ -172,8 +172,8 @@ def _bundle(
 def _write_order(path: Path, *, department: str = "", manufacturer: str = "") -> None:
     workbook = Workbook()
     sheet = workbook.active
-    headers = ["字体", "定制信息"]
-    row = ["F1", "Tom&Jerry"]
+    headers = ["订单号", "订单明细号", "产品名称", "字体颜色", "字体", "定制信息"]
+    row = ["ORDER-1", "LINE-1", "Bracelet", "Gold", "F1", "Tom&Jerry"]
     if department:
         headers.append("生产部门")
         row.append(department)
@@ -369,7 +369,9 @@ def test_v2_single_name_template_splits_newline_names_into_one_order_column(tmp_
         config_updates={
             "field_bindings": {
                 "order_no": "订单号",
+                "detail_id": "订单明细号",
                 "department": "生产部门",
+                "product_name": "产品名称",
                 "font": "字体",
                 "style": "尺寸",
                 "name": "定制信息",
@@ -381,8 +383,8 @@ def test_v2_single_name_template_splits_newline_names_into_one_order_column(tmp_
     order_path = tmp_path / "order.xlsx"
     workbook = Workbook()
     sheet = workbook.active
-    sheet.append(["订单号", "生产部门", "字体", "尺寸", "定制信息", "数量", "字体颜色"])
-    sheet.append(["ORDER-K", "K", "F1", "M", "Alice\nBob\nCarol", 3, "White"])
+    sheet.append(["订单号", "订单明细号", "生产部门", "产品名称", "字体", "尺寸", "定制信息", "数量", "字体颜色"])
+    sheet.append(["ORDER-K", "LINE-K", "K", "Bracelet", "F1", "M", "Alice\nBob\nCarol", 3, "White"])
     workbook.save(order_path)
     renderer = CapturingRenderer()
     client = LocalDrawFlowClient(
@@ -465,9 +467,9 @@ def test_v2_department_single_order_combines_duplicate_order_with_independent_st
     order_path = tmp_path / "order.xlsx"
     workbook = Workbook()
     sheet = workbook.active
-    sheet.append(["订单号", "生产部门", "字体", "尺寸", "定制信息"])
-    sheet.append(["ORDER1", "T", "F1", "S", "Alice"])
-    sheet.append(["ORDER1", "T", "F1", "M", "Bob"])
+    sheet.append(["订单号", "订单明细号", "生产部门", "产品名称", "字体颜色", "字体", "尺寸", "定制信息"])
+    sheet.append(["ORDER1", "LINE1", "T", "Bracelet", "Gold", "F1", "S", "Alice"])
+    sheet.append(["ORDER1", "LINE2", "T", "Bracelet", "Gold", "F1", "M", "Bob"])
     workbook.save(order_path)
     renderer = CapturingRenderer()
     client = LocalDrawFlowClient(
@@ -485,7 +487,7 @@ def test_v2_department_single_order_combines_duplicate_order_with_independent_st
     assert len(renderer.compose_calls) == 2
     assert len(renderer.color_frame_calls) == 1
     assert renderer.compose_calls[0]["input_order_nos"] == ["ORDER1", "ORDER1"]
-    assert renderer.compose_calls[0]["label_lines"] == ["ORDER1"]
+    assert renderer.compose_calls[0]["label_lines"] == ["ORDER1", "\u91d1\u8272"]
     assert renderer.color_frame_calls[0]["inputs"][0]["order_nos"] == ["ORDER1"]
     rendered_styles = [call["selections"]["Output_main"]["style"] for call in renderer.calls]
     assert rendered_styles == ["style1", "style2", "style1", "style2"]
@@ -505,7 +507,9 @@ def test_v2_h_department_outputs_png_single_graphics_and_master_pages(tmp_path):
         config_updates={
             "field_bindings": {
                 "order_no": "order_no",
+                "detail_id": "detail_id",
                 "department": "department",
+                "product_name": "product_name",
                 "font": "font",
                 "style": "style",
                 "name": "name",
@@ -516,8 +520,8 @@ def test_v2_h_department_outputs_png_single_graphics_and_master_pages(tmp_path):
     order_path = tmp_path / "order.xlsx"
     workbook = Workbook()
     sheet = workbook.active
-    sheet.append(["order_no", "department", "font", "style", "name", "color"])
-    sheet.append(["ORDER-H", "H", "F1", "S", "Alice", "White"])
+    sheet.append(["order_no", "detail_id", "department", "product_name", "font", "style", "name", "color"])
+    sheet.append(["ORDER-H", "LINE-H", "H", "Charm", "F1", "S", "Alice", "White"])
     workbook.save(order_path)
     renderer = CapturingRenderer()
     client = LocalDrawFlowClient(
@@ -558,8 +562,10 @@ def test_v2_w120_department_keeps_png_single_graphics_without_master(tmp_path):
         config_updates={
             "field_bindings": {
                 "order_no": "order_no",
+                "detail_id": "detail_id",
                 "department": "department",
                 "manufacturer": "manufacturer",
+                "product_name": "product_name",
                 "font": "font",
                 "style": "style",
                 "name": "name",
@@ -570,8 +576,8 @@ def test_v2_w120_department_keeps_png_single_graphics_without_master(tmp_path):
     order_path = tmp_path / "order.xlsx"
     workbook = Workbook()
     sheet = workbook.active
-    sheet.append(["order_no", "department", "manufacturer", "font", "style", "name", "color"])
-    sheet.append(["ORDER-W", "W", "MY-W120", "F1", "M", "Bob", "White"])
+    sheet.append(["order_no", "detail_id", "department", "manufacturer", "product_name", "font", "style", "name", "color"])
+    sheet.append(["ORDER-W", "LINE-W", "W", "MY-W120", "Charm", "F1", "M", "Bob", "White"])
     workbook.save(order_path)
     renderer = CapturingRenderer()
     client = LocalDrawFlowClient(
