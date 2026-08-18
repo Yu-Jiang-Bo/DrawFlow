@@ -24,6 +24,7 @@ from .production_output import (
     requires_graphic_outputs,
     requires_master_output,
     requires_single_order_ai,
+    validate_public_output_units,
     single_order_outputs,
     write_batch_task_files,
 )
@@ -76,6 +77,7 @@ def run_production_output_pipeline(
     graphic_batch_dir: str | None = None,
     graphic_master_batch_dir: str | None = None,
     prefer_batch_render_task: bool = True,
+    require_public_output_metadata: bool = True,
     stats_extra: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Run shared department delivery policy around a template task builder."""
@@ -83,9 +85,10 @@ def run_production_output_pipeline(
     make_error = error_factory or _pipeline_error
     target_path_for = target_path_builder or delivery_path
     batch_renderer = render_batch_files or render_production_batch_files
+    output_units = validate_public_output_units(units) if require_public_output_metadata else tuple(units)
     request = record["request"]
     job_dir = Path(record["job_dir"]).resolve()
-    batches = partition_output_units(units)
+    batches = partition_output_units(output_units)
     graphic_work = sum(len(batch.units) for batch in batches if requires_graphic_outputs(batch.rule))
     single_order_work = sum(len(batch.units) for batch in batches if requires_single_order_ai(batch.rule))
     master_work = sum(len(batch.units) for batch in batches if requires_master_output(batch.rule))

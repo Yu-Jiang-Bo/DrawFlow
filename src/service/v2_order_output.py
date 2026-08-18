@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Iterable, Mapping, Sequence
 
 from src.renderer.illustrator_bridge import IllustratorBridgeError
 from src.renderer.v2_template_renderer import V2TemplateRendererError
@@ -23,11 +23,13 @@ from .production_output import (
     graphic_outputs,
     master_packing_config,
     partition_output_units,
+    ProductionOutputError,
     requires_color_master,
     requires_graphic_outputs,
     requires_master_output,
     requires_single_order_ai,
     single_order_outputs,
+    validate_public_output_units,
 )
 from .v2_order_plan import (
     V2OrderRenderUnit,
@@ -76,15 +78,10 @@ class V2OrderOutputRenderer:
                 task_file,
                 manifest_path,
             )
-        return self._render_simple_outputs(
-            record,
-            config,
-            render_task,
-            template_ai,
-            rows,
-            units,
-            task_file,
-            manifest_path,
+        _require_v2_public_output_units(config, units)
+        raise V2OrderRenderError(
+            "订单缺少生产部门，不能生成生产成品。请在订单表补充生产部门后重试。",
+            code="v2_public_output_metadata_missing",
         )
 
     def _render_simple_outputs(
@@ -145,7 +142,7 @@ class V2OrderOutputRenderer:
         manifest_path: Path,
     ) -> dict[str, Any]:
         job_dir = Path(str(record["job_dir"])).resolve()
-        production_units = to_production_units(config, units)
+        production_units = _require_v2_public_output_units(config, units)
         batches = partition_output_units(production_units)
         total = len(production_units)
         self._update_progress(record, 0, total, "生成部门成品")
@@ -779,6 +776,32 @@ def _production_label_lines(rule: Any, production_units: Sequence[Any]) -> list[
         color = translate_color_to_chinese(str(getattr(first, "color_option", "") or "").strip())
         return _clean_label_lines([order_no, color])
     return _clean_label_lines([order_no])
+
+
+def _require_v2_public_output_units(
+    config: Mapping[str, Any],
+    units: Iterable[V2OrderRenderUnit],
+) -> tuple[Any, ...]:
+    try:
+        return validate_public_output_units(to_production_units(config, units))
+    except ProductionOutputError as exc:
+        raise V2OrderRenderError(
+            _v2_public_output_message(str(exc)),
+            code="v2_public_output_metadata_missing",
+            technical_message=str(exc),
+        ) from exc
+
+
+def _v2_public_output_message(message: str) -> str:
+    if "缺少生产部门" in message:
+        return "订单缺少生产部门，不能生成生产成品。请在订单表补充生产部门后重试。"
+    if "W 部门出图必须提供厂家信息" in message:
+        return "W 部门出图需要厂家信息，请在订单表补充厂家后重试。"
+    if "没有收到可交付" in message:
+        return "当前订单没有可交付的效果图，请检查订单内容后重试。"
+    if "公共生产输出规则不一致" in message:
+        return "当前模板的输出规则与生产部门规则不一致，请联系维护人员检查模板配置。"
+    return "订单生产输出信息不完整，请补充生产部门和厂家后重试。"
 
 
 def _clean_label_lines(label_lines: Sequence[str] | None) -> list[str]:

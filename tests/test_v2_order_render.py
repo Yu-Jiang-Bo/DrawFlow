@@ -169,11 +169,19 @@ def _bundle(
         archive.writestr("assets/template.ai", template_bytes)
 
 
-def _write_order(path: Path) -> None:
+def _write_order(path: Path, *, department: str = "", manufacturer: str = "") -> None:
     workbook = Workbook()
     sheet = workbook.active
-    sheet.append(["字体", "定制信息"])
-    sheet.append(["F1", "Tom&Jerry"])
+    headers = ["字体", "定制信息"]
+    row = ["F1", "Tom&Jerry"]
+    if department:
+        headers.append("生产部门")
+        row.append(department)
+    if manufacturer:
+        headers.append("厂家")
+        row.append(manufacturer)
+    sheet.append(headers)
+    sheet.append(row)
     workbook.save(path)
 
 
@@ -255,7 +263,7 @@ def _numbered_paths(path: Path, page_count: int) -> list[Path]:
     return [path.with_name(f"{path.stem}-{index:02d}{path.suffix}") for index in range(1, page_count + 1)]
 
 
-def test_local_render_routes_published_v2_template_and_chinese_headers(tmp_path):
+def test_v2_formal_output_rejects_missing_department_before_template_renderer(tmp_path):
     bundle_path = tmp_path / "published.zip"
     _bundle(bundle_path, "V2ORDER001", b"template-ai")
     order_path = tmp_path / "order.xlsx"
@@ -268,20 +276,15 @@ def test_local_render_routes_published_v2_template_and_chinese_headers(tmp_path)
         font_dirs=[],
     )
 
-    record = client.render({"template_id": "V2ORDER001", "order_file": str(order_path)})
+    with pytest.raises(LocalClientError) as exc_info:
+        client.render({"template_id": "V2ORDER001", "order_file": str(order_path)})
 
-    assert record["status"] == "completed"
-    assert record["stats"]["items"] == 1
-    assert record["request"]["template_version"] == "v0001"
-    assert Path(record["outputs"]["primary_output"]).suffix == ".zip"
-    assert Path(record["outputs"]["primary_output"]).is_file()
-    assert renderer.calls[0]["values"] == {"font": "F1", "name": "Tom&Jerry"}
-    assert renderer.calls[0]["selections"] == {"Output_main": {"font": "F1"}}
-    with zipfile.ZipFile(record["outputs"]["primary_output"]) as archive:
-        names = archive.namelist()
-        assert "AI/001-主效果图.ai" in names
-        assert "preview/001-主效果图.png" in names
-        assert all(not name.lower().endswith(".json") for name in names)
+    assert exc_info.value.code == "v2_public_output_metadata_missing"
+    assert "生产部门" in str(exc_info.value)
+    assert renderer.calls == []
+    job = client.jobs.list_recent(1)[0]
+    assert job["status"] == "failed"
+    assert job["error_code"] == "v2_public_output_metadata_missing"
 
 
 def test_v2_order_preflight_failure_is_business_safe(tmp_path):
@@ -323,68 +326,37 @@ def test_v2_order_stats_counts_orders_times_outputs_once():
     assert result["items"] == 4
 
 
-def test_v2_multi_name_quantity_expands_full_text_per_copy(tmp_path):
-    bundle_path = tmp_path / "published.zip"
-    _bundle(
-        bundle_path,
-        "V2ORDER001",
-        b"template-ai",
-        config_updates={
-            "field_bindings": {"font": "字体", "name": "定制信息", "quantity": "数量"},
-            "multi_name_customization": {"enabled": True},
-        },
-    )
-    order_path = tmp_path / "order.xlsx"
-    workbook = Workbook()
-    sheet = workbook.active
-    sheet.append(["字体", "定制信息", "数量"])
-    sheet.append(["F1", "Alice|Bob", 3])
-    workbook.save(order_path)
-    renderer = CapturingRenderer()
-    client = LocalDrawFlowClient(
-        V2PublishedCentral(bundle_path),
-        tmp_path / "local",
-        v2_renderer=renderer,
-        font_dirs=[],
+def test_v2_multi_name_quantity_expands_full_text_per_copy():
+    config = _v2_payload("V2ORDER001", "a" * 64)["config"]
+    config["field_bindings"] = {"font": "字体", "name": "定制信息", "quantity": "数量"}
+    config["multi_name_customization"] = {"enabled": True}
+    preflight = {"preflight_rows": [{"row": 1, "outputs": [{"output": "Output_main", "font": "F1"}]}]}
+
+    units = build_v2_order_units(
+        config,
+        {"outputs": [{"key": "Output_main"}]},
+        [{"字体": "F1", "定制信息": "Alice|Bob", "数量": 3}],
+        preflight,
     )
 
-    record = client.render({"template_id": "V2ORDER001", "order_file": str(order_path)})
-
-    assert record["status"] == "completed"
-    assert record["stats"]["items"] == 3
-    assert len(renderer.calls) == 3
-    assert [call["values"]["name"] for call in renderer.calls] == ["Alice|Bob", "Alice|Bob", "Alice|Bob"]
-    manifest = json.loads(Path(record["outputs"]["output_manifest"]).read_text(encoding="utf-8"))
-    assert [item["quantity_index"] for item in manifest["items"]] == [1, 2, 3]
+    assert [unit.values["name"] for unit in units] == ["Alice|Bob", "Alice|Bob", "Alice|Bob"]
+    assert [unit.quantity_index for unit in units] == [1, 2, 3]
 
 
-def test_v2_single_content_quantity_does_not_expand_without_switch(tmp_path):
-    bundle_path = tmp_path / "published.zip"
-    _bundle(
-        bundle_path,
-        "V2ORDER001",
-        b"template-ai",
-        config_updates={"field_bindings": {"font": "字体", "name": "定制信息", "quantity": "数量"}},
-    )
-    order_path = tmp_path / "order.xlsx"
-    workbook = Workbook()
-    sheet = workbook.active
-    sheet.append(["字体", "定制信息", "数量"])
-    sheet.append(["F1", "Alice|Bob", 3])
-    workbook.save(order_path)
-    renderer = CapturingRenderer()
-    client = LocalDrawFlowClient(
-        V2PublishedCentral(bundle_path),
-        tmp_path / "local",
-        v2_renderer=renderer,
-        font_dirs=[],
+def test_v2_single_content_quantity_does_not_expand_without_switch():
+    config = _v2_payload("V2ORDER001", "a" * 64)["config"]
+    config["field_bindings"] = {"font": "字体", "name": "定制信息", "quantity": "数量"}
+    preflight = {"preflight_rows": [{"row": 1, "outputs": [{"output": "Output_main", "font": "F1"}]}]}
+
+    units = build_v2_order_units(
+        config,
+        {"outputs": [{"key": "Output_main"}]},
+        [{"字体": "F1", "定制信息": "Alice|Bob", "数量": 3}],
+        preflight,
     )
 
-    record = client.render({"template_id": "V2ORDER001", "order_file": str(order_path)})
-
-    assert record["status"] == "completed"
-    assert record["stats"]["items"] == 1
-    assert len(renderer.calls) == 1
+    assert len(units) == 1
+    assert units[0].values["name"] == "Alice|Bob"
 
 
 def test_v2_single_name_template_splits_newline_names_into_one_order_column(tmp_path):

@@ -98,7 +98,7 @@ def write_order_xlsx(
     path: Path,
     *,
     template_id: str = "JJMB202508261001394920",
-    department: str = "",
+    department: str = "K",
     manufacturer: str = "",
 ) -> None:
     workbook = Workbook()
@@ -360,6 +360,7 @@ def test_service_dry_run_ignores_template_text_output_flags(tmp_path):
 def test_service_dry_run_uses_department_output_policy_for_task(monkeypatch, tmp_path):
     from dataclasses import replace
 
+    import src.service.production_output as production_output_module
     import src.service.render_service as render_service_module
 
     config_path = tmp_path / "templates.json"
@@ -374,6 +375,7 @@ def test_service_dry_run_uses_department_output_policy_for_task(monkeypatch, tmp
         return rule
 
     monkeypatch.setattr(render_service_module, "resolve_department_output", fake_resolve_department_output)
+    monkeypatch.setattr(production_output_module, "resolve_department_output", fake_resolve_department_output)
 
     record = RenderService(
         registry=TemplateRegistry(config_path),
@@ -1353,7 +1355,7 @@ def test_202603_grouped_task_receives_every_configured_font_boldness_mapping(tmp
     structure_path = tmp_path / "template.config.json"
     rules_path = tmp_path / "template.rules.json"
     write_templates_config(config_path)
-    write_order_xlsx(order_path)
+    write_order_xlsx(order_path, department="")
     structure_path.write_text("{}", encoding="utf-8")
     rules_path.write_text(
         json.dumps(
@@ -1504,7 +1506,7 @@ def test_scan_confirm_publish_then_render_dry_run(tmp_path):
     )
     active = record["template"]
     order_path = tmp_path / "orders.xlsx"
-    write_order_xlsx(order_path, template_id=active.template_id)
+    write_order_xlsx(order_path, template_id=active.template_id, department="W", manufacturer="MY-W196")
 
     result = RenderService(registry=registry, jobs=JobStore(tmp_path / "jobs")).submit(
         {"template_id": active.template_id, "order_file": str(order_path), "dry_run": True}
