@@ -53,6 +53,11 @@ def build_v2_order_task(
     unit_list = tuple(units or ())
     if not unit_list:
         raise V2OrderTaskBuilderError("没有可出图的订单内容，请检查订单后重试。", code="v2_order_task_units_missing")
+    if len(unit_list) != 1:
+        raise V2OrderTaskBuilderError(
+            "当前订单包含多项效果图，当前任务暂不能直接处理，请联系工作人员后重试。",
+            code="v2_order_task_units_multiple",
+        )
 
     items = [_unit_item(unit, index) for index, unit in enumerate(unit_list, start=1)]
     first = items[0]
@@ -81,8 +86,6 @@ def build_v2_order_task(
         ) from exc
     packing = dict(master_packing or {})
     component_suppress_labels = bool(packing.get("component_suppress_labels", False))
-    task["items"] = items
-    task["units"] = items
     task["layout"] = {
         "columns": max(int(columns or 1), 1),
         "fixed_canvas_mm": dict(fixed_canvas or {}),

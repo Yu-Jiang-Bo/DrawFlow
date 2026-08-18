@@ -55,8 +55,8 @@ def test_builds_public_pipeline_v2_task_with_real_execution_task(tmp_path):
     assert task["output_key"] == "Output_main"
     assert task["pack_order_blocks"] is True
     assert task["values"]["name"] == "Alice"
-    assert task["items"] == task["units"]
-    assert task["items"][0]["order_no"] == "ORDER-1"
+    assert "items" not in task
+    assert "units" not in task
     assert task["layout"]["columns"] == 2
     assert task["layout"]["fixed_canvas_mm"] == {"width_mm": 480, "height_mm": 2000}
     assert task["layout"]["master_packing"]["target_width_mm"] == 480
@@ -145,17 +145,6 @@ def test_factory_is_compatible_with_shared_pipeline_builder_kwargs(tmp_path, mon
                     selections={"Output_main": {"font": "F10", "design": "Design03"}},
                 ),
             ),
-            _production_unit(
-                order_no="ORDER-3",
-                detail_id="D4",
-                color_option="Gold",
-                rule=rule,
-                payload=V2Payload(
-                    output_key="Output_main",
-                    values={"name": "Dana"},
-                    selections={"Output_main": {"font": "F10", "design": "Design03"}},
-                ),
-            ),
         ),
         output_ai=tmp_path / "ORDER-3.ai",
         output_png=None,
@@ -170,9 +159,8 @@ def test_factory_is_compatible_with_shared_pipeline_builder_kwargs(tmp_path, mon
 
     assert task["pure"] is True
     assert task["output_key"] == "Output_main"
-    assert len(task["items"]) == 2
-    assert task["items"][0]["values"]["name"] == "Cara"
-    assert task["items"][1]["values"]["name"] == "Dana"
+    assert "items" not in task
+    assert "units" not in task
     assert task["production"]["color_summary"] is True
     assert calls[0]["kwargs"]["pack_order_blocks"] is True
     assert calls[0]["kwargs"]["values"] == {"name": "Cara"}
