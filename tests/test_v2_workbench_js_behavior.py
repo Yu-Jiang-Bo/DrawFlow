@@ -4416,3 +4416,233 @@ def test_v2_workbench_output_policy_toggles_round_trip_through_config():
         })().catch((error) => { console.error(error); process.exit(1); });
         """
     )
+
+
+def test_v2_workbench_save_keeps_scan_when_response_draft_omits_scan():
+    run_node(
+        r"""
+        (async () => {
+          let saveCount = 0;
+          const scanned = {
+            "$schema": "custom-renderer/v2-template-scan",
+            outputs: [{
+              key: "Output_main",
+              design: { options: [
+                { key: "Design01", slots: [{ key: "slot_name" }] },
+                { key: "Design02", slots: [{ key: "slot_name" }] }
+              ] },
+              font: { options: [] },
+              style: { options: [] }
+            }]
+          };
+          let currentDraft = {
+            metadata: { template_id: "V2SCANRETAIN", name: "Scan retention", shop_name: "" },
+            manifest: { draft_revision: "d0001" },
+            config: { outputs: [], field_bindings: {}, option_mappings: [], checks: {} },
+            scan: scanned
+          };
+          async function fakeFetch(url, options = {}) {
+            const textUrl = String(url);
+            if (textUrl === "/api/v2/templates") return response({ templates: [{ template_id: "V2SCANRETAIN", name: "Scan retention" }] });
+            if (textUrl.endsWith("/draft") && (!options.method || options.method === "GET")) return response({ draft: currentDraft });
+            if (textUrl.endsWith("/validate")) return response({ validation: { can_save: true, checks: {} } });
+            if (textUrl.endsWith("/draft") && options.method === "POST") {
+              saveCount += 1;
+              currentDraft = {
+                metadata: currentDraft.metadata,
+                manifest: { draft_revision: `d000${saveCount + 1}` },
+                config: JSON.parse(options.body).config
+              };
+              return response({ draft: currentDraft });
+            }
+            return response({});
+          }
+          const app = createApp(fakeFetch);
+          await flush();
+          app.elements.templateList.children[0].dispatch("click");
+          await flush();
+          global.setWorkbenchStage("structure");
+          await flush();
+          assert(global.DrawFlowV2WorkbenchContext.state.scan.outputs[0].design.options.length === 2);
+
+          await global.saveDraft();
+          assert.strictEqual(saveCount, 1);
+          assert.strictEqual(global.DrawFlowV2WorkbenchContext.state.scan.outputs[0].design.options.length, 2);
+          global.setWorkbenchStage("rules");
+          await flush();
+          assert.strictEqual(document.querySelectorAll("#optionRuleList .option-rule-item").length, 2);
+          global.setWorkbenchStage("upload");
+          await flush();
+          assert(app.elements.scanSummary.textContent.includes("设计 2"));
+        })().catch((error) => { console.error(error); process.exit(1); });
+        """
+    )
+
+
+def test_v2_workbench_save_does_not_retain_scan_after_template_id_switch():
+    run_node(
+        r"""
+        (async () => {
+          const scanned = { outputs: [{ key: "Output_A", design: { options: [{ key: "Design01" }] } }] };
+          let currentDraft = {
+            metadata: { template_id: "V2SCAN-A", name: "Template A", shop_name: "" },
+            config: { outputs: [], field_bindings: {}, option_mappings: [], checks: {} },
+            scan: scanned
+          };
+          let saveBody = null;
+          async function fakeFetch(url, options = {}) {
+            const textUrl = String(url);
+            if (textUrl === "/api/v2/templates") return response({ templates: [{ template_id: "V2SCAN-A", name: "Template A" }, { template_id: "V2SCAN-B", name: "Template B" }] });
+            if (textUrl.endsWith("/draft") && (!options.method || options.method === "GET")) return response({ draft: currentDraft });
+            if (textUrl.endsWith("/validate")) return response({ validation: { can_save: true, checks: {} } });
+            if (textUrl.endsWith("/draft") && options.method === "POST") {
+              saveBody = JSON.parse(options.body);
+              return response({ draft: { metadata: { template_id: "V2SCAN-B", name: "Template B", shop_name: "" }, config: saveBody.config } });
+            }
+            return response({});
+          }
+          const app = createApp(fakeFetch);
+          await flush();
+          app.elements.templateList.children[0].dispatch("click");
+          await flush();
+          app.elements.templateId.value = "V2SCAN-B";
+          app.elements.templateName.value = "Template B";
+          await global.saveDraft();
+          assert(saveBody, "必须发送保存请求");
+          assert.deepStrictEqual(global.DrawFlowV2WorkbenchContext.state.scan, {}, "切换模板后不能沿用 A 的扫描结构");
+        })().catch((error) => { console.error(error); process.exit(1); });
+        """
+    )
+
+
+def test_v2_workbench_invalid_scan_response_does_not_replace_valid_scan():
+    run_node(
+        r"""
+        (async () => {
+          const scanned = { outputs: [{ key: "Output_main", design: { options: [{ key: "Design01" }] } }] };
+          let currentDraft = {
+            metadata: { template_id: "V2SCANVALID", name: "Valid scan", shop_name: "" },
+            config: { outputs: [], field_bindings: {}, option_mappings: [], checks: {} },
+            scan: scanned
+          };
+          let responseScan = { outputs: [] };
+          async function fakeFetch(url, options = {}) {
+            const textUrl = String(url);
+            if (textUrl === "/api/v2/templates") return response({ templates: [{ template_id: "V2SCANVALID", name: "Valid scan" }] });
+            if (textUrl.endsWith("/draft") && (!options.method || options.method === "GET")) return response({ draft: currentDraft });
+            if (textUrl.endsWith("/validate")) return response({ validation: { can_save: true, checks: {} } });
+            if (textUrl.endsWith("/draft") && options.method === "POST") return response({ draft: { ...currentDraft, scan: responseScan, config: JSON.parse(options.body).config } });
+            return response({});
+          }
+          const app = createApp(fakeFetch);
+          await flush();
+          app.elements.templateList.children[0].dispatch("click");
+          await flush();
+          await global.saveDraft();
+          assert.strictEqual(global.DrawFlowV2WorkbenchContext.state.scan.outputs[0].key, "Output_main");
+          responseScan = { unexpected: true };
+          await global.saveDraft();
+          assert.strictEqual(global.DrawFlowV2WorkbenchContext.state.scan.outputs[0].key, "Output_main");
+        })().catch((error) => { console.error(error); process.exit(1); });
+        """
+    )
+
+
+def test_v2_workbench_save_response_does_not_overwrite_newly_selected_template():
+    run_node(
+        r"""
+        (async () => {
+          let resolveSave;
+          const draftA = { metadata: { template_id: "V2ASYNC-A", name: "Template A", shop_name: "" }, config: { outputs: [], field_bindings: {}, option_mappings: [], checks: {} }, scan: { outputs: [{ key: "Output_A" }] } };
+          const draftB = { metadata: { template_id: "V2ASYNC-B", name: "Template B", shop_name: "" }, config: { outputs: [], field_bindings: {}, option_mappings: [], checks: {} }, scan: { outputs: [{ key: "Output_B" }] } };
+          async function fakeFetch(url, options = {}) {
+            const textUrl = String(url);
+            if (textUrl === "/api/v2/templates") return response({ templates: [{ template_id: "V2ASYNC-A", name: "Template A" }, { template_id: "V2ASYNC-B", name: "Template B" }] });
+            if (textUrl.endsWith("V2ASYNC-A/draft") && (!options.method || options.method === "GET")) return response({ draft: draftA });
+            if (textUrl.endsWith("V2ASYNC-B/draft") && (!options.method || options.method === "GET")) return response({ draft: draftB });
+            if (textUrl.endsWith("/validate")) return response({ validation: { can_save: true, checks: {} } });
+            if (textUrl.endsWith("V2ASYNC-A/draft") && options.method === "POST") return new Promise((resolve) => { resolveSave = () => resolve(response({ draft: draftA })); });
+            return response({});
+          }
+          const app = createApp(fakeFetch);
+          await flush();
+          app.elements.templateList.children[0].dispatch("click");
+          await flush();
+          const saving = global.saveDraft();
+          await flush();
+          assert(resolveSave, "保存请求必须仍在等待回包");
+          app.elements.templateList.children[1].dispatch("click");
+          await flush();
+          assert.strictEqual(global.DrawFlowV2WorkbenchContext.state.selectedTemplateId, "V2ASYNC-B");
+          resolveSave();
+          const result = await saving;
+          assert.strictEqual(result.failure, "stale");
+          assert.strictEqual(global.DrawFlowV2WorkbenchContext.state.draft.metadata.template_id, "V2ASYNC-B");
+          assert.strictEqual(global.DrawFlowV2WorkbenchContext.state.scan.outputs[0].key, "Output_B");
+        })().catch((error) => { console.error(error); process.exit(1); });
+        """
+    )
+
+
+def test_v2_workbench_refresh_ignores_draft_returned_for_another_template():
+    run_node(
+        r"""
+        (async () => {
+          const currentDraft = { metadata: { template_id: "V2REFRESH-A", name: "Template A", shop_name: "" }, config: { outputs: [], field_bindings: {}, option_mappings: [], checks: {} }, scan: { outputs: [{ key: "Output_A" }] } };
+          const wrongDraft = { metadata: { template_id: "V2REFRESH-B", name: "Template B", shop_name: "" }, config: {}, scan: { outputs: [{ key: "Output_B" }] } };
+          let refreshRequest = false;
+          async function fakeFetch(url, options = {}) {
+            const textUrl = String(url);
+            if (textUrl === "/api/v2/templates") return response({ templates: [{ template_id: "V2REFRESH-A", name: "Template A" }] });
+            if (textUrl.endsWith("/draft") && (!options.method || options.method === "GET")) {
+              if (refreshRequest) return response({ draft: wrongDraft });
+              return response({ draft: currentDraft });
+            }
+            return response({});
+          }
+          const app = createApp(fakeFetch);
+          await flush();
+          app.elements.templateList.children[0].dispatch("click");
+          await flush();
+          refreshRequest = true;
+          await global.safeRefreshDraft("V2REFRESH-A");
+          assert.strictEqual(global.DrawFlowV2WorkbenchContext.state.draft.metadata.template_id, "V2REFRESH-A");
+          assert.strictEqual(global.DrawFlowV2WorkbenchContext.state.scan.outputs[0].key, "Output_A");
+        })().catch((error) => { console.error(error); process.exit(1); });
+        """
+    )
+
+
+def test_v2_workbench_refresh_keeps_scan_for_missing_or_invalid_scan_response():
+    run_node(
+        r"""
+        (async () => {
+          const currentDraft = { metadata: { template_id: "V2REFRESHSCAN", name: "Refresh scan", shop_name: "" }, config: { outputs: [], field_bindings: {}, option_mappings: [], checks: {} }, scan: { outputs: [{ key: "Output_main", design: { options: [{ key: "Design01" }] } }] } };
+          let responseScan;
+          let loaded = false;
+          async function fakeFetch(url, options = {}) {
+            const textUrl = String(url);
+            if (textUrl === "/api/v2/templates") return response({ templates: [{ template_id: "V2REFRESHSCAN", name: "Refresh scan" }] });
+            if (textUrl.endsWith("/draft") && (!options.method || options.method === "GET")) {
+              const draft = { ...currentDraft };
+              if (loaded) {
+                if (responseScan !== undefined) draft.scan = responseScan;
+                else delete draft.scan;
+              }
+              loaded = true;
+              return response({ draft });
+            }
+            return response({});
+          }
+          const app = createApp(fakeFetch);
+          await flush();
+          app.elements.templateList.children[0].dispatch("click");
+          await flush();
+          for (const scan of [undefined, { outputs: [] }, { unexpected: true }]) {
+            responseScan = scan;
+            await global.safeRefreshDraft("V2REFRESHSCAN");
+            assert.strictEqual(global.DrawFlowV2WorkbenchContext.state.scan.outputs[0].design.options[0].key, "Design01");
+          }
+        })().catch((error) => { console.error(error); process.exit(1); });
+        """
+    )

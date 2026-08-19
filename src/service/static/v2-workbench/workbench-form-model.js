@@ -211,6 +211,41 @@
   }
 
 
+  function hasScanEvidence(scan) {
+    const outputs = objectOf(scan).outputs;
+    return Array.isArray(outputs) && outputs.some((output) => {
+      const item = objectOf(output);
+      return Boolean(String(item.key || "").trim() || String(item.path || "").trim());
+    });
+  }
+
+
+  function canRetainPreviousScan(scan, targetTemplateId) {
+    const targetId = String(targetTemplateId || "").trim();
+    if (!targetId || String(state.selectedTemplateId || "").trim() !== targetId) return false;
+    const draftMetadata = objectOf(objectOf(state.draft).metadata);
+    return String(draftMetadata.template_id || "").trim() === targetId && hasScanEvidence(scan);
+  }
+
+
+  function prepareSaveTarget(templateId) {
+    const targetId = String(templateId || "").trim();
+    const selectedId = String(state.selectedTemplateId || "").trim();
+    if (!selectedId || selectedId === targetId) return;
+    state.draftLoadRequestId += 1;
+    state.selectedTemplateId = targetId;
+    state.draft = null;
+    state.scan = {};
+  }
+
+
+  function isCurrentTemplateResponse(draft, targetTemplateId) {
+    const targetId = String(targetTemplateId || "").trim();
+    const responseId = String(objectOf(objectOf(draft).metadata).template_id || "").trim();
+    return Boolean(targetId && responseId === targetId && String(state.selectedTemplateId || "").trim() === targetId);
+  }
+
+
 
 
   Object.assign(globalThis, {
@@ -228,6 +263,10 @@
     slotFieldName,
     canonicalSlotSourceField,
     optionOutputKey,
-    emptyOutput
+    emptyOutput,
+    hasScanEvidence,
+    canRetainPreviousScan,
+    prepareSaveTarget,
+    isCurrentTemplateResponse
   });
 })();

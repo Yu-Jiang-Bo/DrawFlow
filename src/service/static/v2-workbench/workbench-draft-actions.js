@@ -98,6 +98,7 @@
       return { saved: false, failure: "basics" };
     }
     if (state.isSavingDraft) return { saved: false, failure: "busy" };
+    prepareSaveTarget(basics.template_id);
     state.isSavingDraft = true;
     updateDraftButtons();
     setDraftStatus("正在保存", "pending");
@@ -117,14 +118,23 @@
         setText("draftSaveStatusText", "草稿未保存：当前配置未通过保存校验。");
         return { saved: false, failure: "validation" };
       }
+      const previousScan = objectOf(state.scan);
       const payload = await postJson(`${API_ROOT}/${encodeURIComponent(basics.template_id)}/draft`, {
         name: basics.name,
         shop_name: basics.shop_name,
         config
       }, "草稿保存失败，请检查当前配置。");
-      state.draft = payload.draft || state.draft;
+      const responseDraft = objectOf(payload.draft);
+      if (!isCurrentTemplateResponse(responseDraft, basics.template_id)) return { saved: false, failure: "stale" };
+      const responseScan = normalizeScanFromDraft(responseDraft);
+      const retainedScan = hasScanEvidence(responseScan)
+        ? responseScan
+        : canRetainPreviousScan(previousScan, basics.template_id) ? previousScan : {};
+      state.draft = payload.draft
+        ? { ...responseDraft, ...(hasScanEvidence(retainedScan) ? { scan: retainedScan } : {}) }
+        : state.draft;
       const savedDraft = state.draft;
-      state.scan = normalizeScanFromDraft(state.draft);
+      state.scan = hasScanEvidence(retainedScan) ? retainedScan : normalizeScanFromDraft(state.draft);
       await refreshTemplateList();
       setDraftStatus("草稿已保存", "confirmed");
       setText("draftSaveStatusText", "草稿已保存；发布核验状态见下方。");
@@ -223,9 +233,18 @@
     if (!id) return;
     try {
       const payload = await getJson(`${API_ROOT}/${encodeURIComponent(id)}/draft`, "草稿读取失败，请稍后刷新。");
+      const responseDraft = objectOf(payload.draft);
+      if (!isCurrentTemplateResponse(responseDraft, id)) return;
+      const previousScan = objectOf(state.scan);
+      const responseScan = normalizeScanFromDraft(responseDraft);
+      const retainedScan = hasScanEvidence(responseScan)
+        ? responseScan
+        : canRetainPreviousScan(previousScan, id) ? previousScan : {};
       state.selectedTemplateId = id;
-      state.draft = payload.draft || state.draft;
-      state.scan = normalizeScanFromDraft(state.draft);
+      state.draft = payload.draft
+        ? { ...responseDraft, ...(hasScanEvidence(retainedScan) ? { scan: retainedScan } : {}) }
+        : state.draft;
+      state.scan = hasScanEvidence(retainedScan) ? retainedScan : normalizeScanFromDraft(state.draft);
       fillDraftFields(state.draft, id);
       renderAll();
     } catch (_) {
