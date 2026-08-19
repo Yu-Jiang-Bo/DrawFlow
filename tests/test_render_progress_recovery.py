@@ -78,6 +78,42 @@ def test_production_batch_render_reuses_one_illustrator_bridge(tmp_path, monkeyp
     assert {script.name for script in scripts} == {"render_batch.jsx"}
 
 
+def test_production_batch_sequence_reuses_one_bridge_and_calls_group_hooks_in_order(tmp_path, monkeypatch):
+    instances = []
+    events = []
+
+    class FakeBridge:
+        def __init__(self, **_kwargs):
+            instances.append(self)
+
+        def render(self, _script: Path, task_file: Path) -> str:
+            events.append(("render", task_file.name))
+            return ""
+
+        def close(self) -> None:
+            events.append(("close", ""))
+
+    monkeypatch.setattr(production_batch, "IllustratorBridge", FakeBridge)
+    monkeypatch.setattr(production_batch.time, "sleep", lambda _seconds: None)
+
+    production_batch.render_production_batch_sequence(
+        ([tmp_path / "graphics.json"], [tmp_path / "main.json"], [tmp_path / "master.json"]),
+        visible=False,
+        after_group=lambda index: events.append(("after", str(index))),
+    )
+
+    assert len(instances) == 1
+    assert events == [
+        ("render", "graphics.json"),
+        ("after", "0"),
+        ("render", "main.json"),
+        ("after", "1"),
+        ("render", "master.json"),
+        ("after", "2"),
+        ("close", ""),
+    ]
+
+
 def test_production_batch_render_resets_and_retries_retryable_bridge_failure(tmp_path, monkeypatch):
     events = []
 

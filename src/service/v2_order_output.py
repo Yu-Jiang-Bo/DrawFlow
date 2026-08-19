@@ -7,7 +7,10 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
 from src.renderer.illustrator_bridge import IllustratorBridgeError
-from src.renderer.v2_template_renderer import V2TemplateRendererError
+from src.renderer.v2_template_renderer import (
+    V2TemplateRendererError,
+    build_v2_png_master_pages_task,
+)
 
 from .department_output import (
     ANNOTATION_COLOR,
@@ -31,12 +34,17 @@ from .production_output import (
     single_order_outputs,
     validate_public_output_units,
 )
+from .production_pipeline import ProductionGraphicMasterPlan, run_production_output_pipeline
 from .v2_order_plan import (
     V2OrderRenderUnit,
     build_v2_order_units,
     has_department_delivery_context,
     to_production_units,
     unit_stem,
+)
+from .v2_order_task_builder import (
+    create_v2_component_reuse_strategy,
+    create_v2_order_task_builder,
 )
 from .v2_order_render_support import (
     V2OrderRenderError,
@@ -68,7 +76,7 @@ class V2OrderOutputRenderer:
     ) -> dict[str, Any]:
         units = build_v2_order_units(config, render_task, rows, preflight)
         if has_department_delivery_context(config, rows):
-            return self._render_department_outputs(
+            return self._render_public_department_outputs(
                 record,
                 config,
                 render_task,
@@ -82,6 +90,296 @@ class V2OrderOutputRenderer:
         raise V2OrderRenderError(
             "订单缺少生产部门，不能生成生产成品。请在订单表补充生产部门后重试。",
             code="v2_public_output_metadata_missing",
+        )
+
+    def _render_public_department_outputs(
+        self,
+        record: Mapping[str, Any],
+        config: Mapping[str, Any],
+        render_task: Mapping[str, Any],
+        template_ai: Path,
+        rows: list[Mapping[str, Any]],
+        units: Sequence[V2OrderRenderUnit],
+        task_file: Path,
+        manifest_path: Path,
+    ) -> dict[str, Any]:
+        production_units = _require_v2_public_output_units(config, units)
+        request = dict(record.get("request") or {})
+        pipeline_record = {
+            **record,
+            "request": {
+                **request,
+                "visible": bool(request.get("visible", False)),
+                "columns": max(int(request.get("columns") or 1), 1),
+            },
+        }
+        job_dir = Path(str(record["job_dir"])).resolve()
+        batch_overrides = self._public_batch_renderer_overrides(job_dir)
+        try:
+            result = run_production_output_pipeline(
+                pipeline_record,
+                template_id=str(dict(config.get("template") or {}).get("template_id") or ""),
+                output_ai=job_dir / f"{safe_filename(str(record.get('job_id') or 'v2'))}-production.ai",
+                units=production_units,
+                task_builder=create_v2_order_task_builder(render_task, template_ai=template_ai),
+                component_reuse=create_v2_component_reuse_strategy(render_task, template_ai=template_ai),
+                item_count=len(units),
+                render_script=Path(__file__).resolve().parents[2] / "scripts" / "illustrator" / "render_v2_template.jsx",
+                chunk_size=20,
+                update_progress=self._update_progress,
+                task_progress=lambda _record, current, total, stage: {"current": current, "total": total, "stage": stage},
+                write_json=write_json,
+                write_render_task_json=write_json,
+                graphic_master_builder=lambda **kwargs: self._build_public_png_master_plan(
+                    render_task,
+                    **kwargs,
+                ),
+                graphic_batch_dir="single-graphic-batch",
+                graphic_master_batch_dir="graphic-master-batch",
+                stats_extra={
+                    "orders": len(rows),
+                    "outputs": len([item for item in render_task.get("outputs", []) if isinstance(item, Mapping)]),
+                    "compiled_render_task": str(task_file),
+                },
+                **batch_overrides,
+            )
+        except V2OrderRenderError:
+            raise
+        except Exception as exc:
+            raise V2OrderRenderError(
+                "Illustrator 未能完成生产出图，请确认 Illustrator 可以正常打开后重试。",
+                code="v2_order_render_failed",
+                technical_message=str(exc),
+            ) from exc
+        result["outputs"]["compiled_render_task"] = str(task_file)
+        result["outputs"]["output_manifest"] = str(manifest_path)
+        return result
+
+    def _public_batch_renderer_overrides(self, job_dir: Path) -> dict[str, Any]:
+        """Keep dependency-injected renderer doubles on the public batch path.
+
+        A production V2 renderer exposes its Illustrator bridge, so the shared
+        pipeline owns the one-session ``render_batch`` execution.  Lightweight
+        renderer doubles intentionally have no bridge; dispatching their task
+        files here preserves failure and recovery coverage without opening a
+        real Illustrator process during those tests.
+        """
+
+        if getattr(self.renderer, "bridge", None) is not None:
+            return {}
+        return {
+            "render_batch_files": lambda batch_files, visible: self._render_injected_batch_files(
+                batch_files,
+                visible,
+                job_dir=job_dir,
+            ),
+            "render_batch_sequence": lambda batch_groups, visible, after_group: self._render_injected_batch_sequence(
+                batch_groups,
+                visible,
+                after_group,
+                job_dir=job_dir,
+            ),
+        }
+
+    def _render_injected_batch_sequence(
+        self,
+        batch_groups: Sequence[Iterable[Path]],
+        visible: bool,
+        after_group: Any,
+        *,
+        job_dir: Path,
+    ) -> None:
+        for index, batch_files in enumerate(batch_groups):
+            self._render_injected_batch_files(batch_files, visible, job_dir=job_dir)
+            after_group(index)
+
+    def _render_injected_batch_files(
+        self,
+        batch_files: Iterable[Path],
+        _visible: bool,
+        *,
+        job_dir: Path | None = None,
+    ) -> None:
+        allowed_root = Path(job_dir).resolve() if job_dir is not None else None
+        for batch_file in batch_files:
+            batch_path = self._validated_injected_task_path(batch_file, allowed_root)
+            payload = json.loads(batch_path.read_text(encoding="utf-8"))
+            entries = payload.get("tasks") if isinstance(payload, Mapping) else None
+            if not isinstance(entries, list):
+                raise V2OrderRenderError(
+                    "生产任务准备不完整，请重新提交订单后重试。",
+                    code="v2_order_batch_invalid",
+                )
+            for entry in entries:
+                if not isinstance(entry, Mapping):
+                    raise V2OrderRenderError(
+                        "生产任务准备不完整，请重新提交订单后重试。",
+                        code="v2_order_batch_invalid",
+                    )
+                task_file = self._validated_injected_task_path(entry.get("task_file"), allowed_root)
+                task = json.loads(task_file.read_text(encoding="utf-8"))
+                if not isinstance(task, Mapping):
+                    raise V2OrderRenderError(
+                        "生产任务准备不完整，请重新提交订单后重试。",
+                        code="v2_order_batch_invalid",
+                    )
+                self._render_injected_task(task, task_file)
+
+    @staticmethod
+    def _validated_injected_task_path(value: Any, allowed_root: Path | None) -> Path:
+        path = Path(str(value or "")).resolve()
+        if not str(value or "").strip() or (allowed_root is not None and not path.is_relative_to(allowed_root)):
+            raise V2OrderRenderError(
+                "生产任务准备不完整，请重新提交订单后重试。",
+                code="v2_order_batch_invalid",
+            )
+        return path
+
+    def _render_injected_task(self, task: Mapping[str, Any], task_file: Path) -> None:
+        task_type = str(task.get("type") or "").strip()
+        output_ai = Path(str(task.get("output_ai") or ""))
+        if task_type == "compose_v2_order_column":
+            composer = getattr(self.renderer, "compose_order_column", None)
+            if not callable(composer):
+                raise V2OrderRenderError("当前客户端缺少订单合并能力。", code="v2_order_compose_not_supported")
+            inputs = task.get("inputs") if isinstance(task.get("inputs"), list) else []
+            composer(
+                input_ai_files=[Path(str(item.get("path") or "")) for item in inputs if isinstance(item, Mapping)],
+                input_order_nos=[str(item.get("order_no") or "") for item in inputs if isinstance(item, Mapping)],
+                output_ai=output_ai,
+                task_file=task_file,
+                label_lines=task.get("label_lines") if isinstance(task.get("label_lines"), list) else [],
+                gap_mm=float(task.get("gap_mm") or 8.0),
+                label_height_mm=float(task.get("label_height_mm") or 4.0),
+                label_gap_mm=float(task.get("label_gap_mm") or 0.8),
+                label_font_size_pt=float(task.get("label_font_size_pt") or 6.0),
+                compatibility=str(task.get("compatibility") or "Illustrator 8"),
+            )
+            return
+        if task_type == "compose_color_frames":
+            composer = getattr(self.renderer, "compose_color_frames", None)
+            if not callable(composer):
+                raise V2OrderRenderError("当前客户端缺少汇总图排版能力。", code="v2_order_color_compose_not_supported")
+            debug = task.get("debug") if isinstance(task.get("debug"), Mapping) else {}
+            composer(
+                inputs=task.get("inputs") if isinstance(task.get("inputs"), list) else [],
+                output_ai=output_ai,
+                task_file=task_file,
+                master_packing=task.get("master_packing") if isinstance(task.get("master_packing"), Mapping) else {},
+                compatibility=str(task.get("compatibility") or "Illustrator 8"),
+                show_color_header=bool(task.get("show_color_header")),
+                show_color_frame_boundary=bool(task.get("show_color_frame_boundary")),
+                debug_report_path=debug.get("report_path"),
+            )
+            return
+        if task_type == "compose_png_master_pages":
+            composer = getattr(self.renderer, "compose_png_master_pages", None)
+            if not callable(composer):
+                raise V2OrderRenderError("当前客户端缺少分页汇总图能力。", code="v2_order_png_master_not_supported")
+            debug = task.get("debug") if isinstance(task.get("debug"), Mapping) else {}
+            composer(
+                items=task.get("items") if isinstance(task.get("items"), list) else [],
+                output_ai=output_ai,
+                task_file=task_file,
+                frame_width_mm=float(task.get("frame_width_mm") or 0),
+                frame_height_mm=float(task.get("frame_height_mm") or 0),
+                margin_mm=float(task.get("margin_mm") or 0),
+                column_gap_mm=float(task.get("column_gap_mm") or 0),
+                row_gap_mm=float(task.get("row_gap_mm") or 0),
+                label_height_mm=float(task.get("label_height_mm") or 0),
+                label_width_mm=float(task.get("label_width_mm") or 0),
+                label_gap_mm=float(task.get("label_gap_mm") or 0),
+                compatibility=str(task.get("compatibility") or "CS5"),
+                preview_background=task.get("preview_background") if isinstance(task.get("preview_background"), Mapping) else None,
+                debug_report_path=debug.get("report_path"),
+                page_count=int(task.get("page_count") or 1),
+            )
+            return
+        renderer = getattr(self.renderer, "render", None)
+        if not callable(renderer):
+            raise V2OrderRenderError("当前客户端缺少出图能力。", code="v2_order_render_not_supported")
+        execution_task = task.get("render_task")
+        renderer(
+            execution_task if isinstance(execution_task, Mapping) else task,
+            template_ai=task.get("template_ai"),
+            output_ai=output_ai,
+            preview_png=task.get("preview_png"),
+            preview_dpi=task.get("preview_dpi"),
+            output_key=task.get("output_key"),
+            layout_warning_file=task.get("layout_warning_file"),
+            values=task.get("values") if isinstance(task.get("values"), Mapping) else {},
+            selections=task.get("selections") if isinstance(task.get("selections"), Mapping) else {},
+            task_file=task_file,
+            pack_order_blocks=bool(task.get("pack_order_blocks")),
+        )
+
+    def _build_public_png_master_plan(
+        self,
+        render_task: Mapping[str, Any],
+        *,
+        batch: Any,
+        batch_index: int,
+        rule: Any,
+        target_path: Path,
+        graphic_specs: Sequence[Any],
+        job_dir: Path,
+        progress: Mapping[str, Any],
+        **_kwargs: Any,
+    ) -> ProductionGraphicMasterPlan | None:
+        if not rule.is_png:
+            return None
+        items = [
+            _v2_master_png_item(
+                _v2_payload_unit(spec.unit.payload),
+                spec.unit,
+                spec.output_path,
+                rule,
+                render_task,
+            )
+            for spec in graphic_specs
+        ]
+        plan = _plan_png_master_pages(items, rule)
+        master_path = target_path.with_suffix(".ai")
+        page_paths = _numbered_master_paths(master_path, len(plan["pages"]))
+        task_file = job_dir / "compose-tasks" / f"png-master-{batch_index:03d}.json"
+        task = build_v2_png_master_pages_task(
+            items=items,
+            output_ai=master_path,
+            frame_width_mm=plan["frame_width_mm"],
+            frame_height_mm=plan["frame_height_limit_mm"],
+            margin_mm=plan["margin_mm"],
+            column_gap_mm=plan["column_gap_mm"],
+            row_gap_mm=plan["row_gap_mm"],
+            label_height_mm=plan["label_height_mm"],
+            label_width_mm=plan["label_width_mm"],
+            label_gap_mm=plan["label_gap_mm"],
+            compatibility="CS5",
+            debug_report_path=master_path.with_suffix(".compact-layout.json"),
+            page_count=len(page_paths),
+        ) | {"progress": dict(progress)}
+        write_json(task_file, task)
+        summary_files = tuple(
+            {
+                "path": str(page_path),
+                "name": page_path.name,
+                "format": "ai_cs5",
+                "department": str(rule.department or ""),
+                "page": str(page_index),
+                "artboard_height_mm": str(plan["pages"][page_index - 1]["artboard_height_mm"]),
+            }
+            for page_index, page_path in enumerate(page_paths, start=1)
+        )
+        script = Path(__file__).resolve().parents[2] / "scripts" / "illustrator" / "compose_png_master_pages.jsx"
+        return ProductionGraphicMasterPlan(
+            task_files=(task_file,),
+            render_entries=({"script": str(script), "task_file": str(task_file)},),
+            summary_files=summary_files,
+            bundle_members=tuple(
+                {"path": str(page_path), "arcname": f"summary/{page_path.name}"}
+                for page_path in page_paths
+            ),
+            work_units=len(graphic_specs),
+            progress_message="生成分页总图 AI 文件",
         )
 
     def _render_simple_outputs(
@@ -130,6 +428,10 @@ class V2OrderOutputRenderer:
             manifest_path,
         )
 
+    # Migration legacy only: formal V2 jobs route through the public pipeline
+    # above.  Keep these helpers temporarily for the PNG master item adapter;
+    # remove the private department branch once that pure layout support moves
+    # beside the public V2 task builders.
     def _render_department_outputs(
         self,
         record: Mapping[str, Any],

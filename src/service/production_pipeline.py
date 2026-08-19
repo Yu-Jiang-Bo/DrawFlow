@@ -13,7 +13,7 @@ from .department_output import (
     finalize_cmyk_png,
     translate_color_to_chinese,
 )
-from .production_batch import render_production_batch_files
+from .production_batch import render_production_batch_files, render_production_batch_sequence
 from .production_output import (
     GraphicOutput,
     ProductionOutputUnit,
@@ -80,6 +80,7 @@ ProgressUpdater = Callable[[Mapping[str, Any], int, int, str], None]
 TaskProgressBuilder = Callable[[Mapping[str, Any], int, int, str], Mapping[str, Any]]
 JsonWriter = Callable[[Path, Any], None]
 BatchRenderer = Callable[[Iterable[Path], bool], None]
+BatchSequenceRenderer = Callable[[Sequence[Iterable[Path]], bool, Callable[[int], None]], None]
 ErrorFactory = Callable[[str, str], Exception]
 TargetPathBuilder = Callable[[Path, str, ProductionOutputBatch, set[str]], Path]
 GraphicMasterBuilder = Callable[..., ProductionGraphicMasterPlan | None]
@@ -171,6 +172,7 @@ def run_production_output_pipeline(
     write_json: JsonWriter,
     write_render_task_json: JsonWriter,
     render_batch_files: BatchRenderer | None = None,
+    render_batch_sequence: BatchSequenceRenderer | None = None,
     error_factory: ErrorFactory | None = None,
     target_path_builder: TargetPathBuilder | None = None,
     graphic_master_builder: GraphicMasterBuilder | None = None,
@@ -186,6 +188,7 @@ def run_production_output_pipeline(
     make_error = error_factory or _pipeline_error
     target_path_for = target_path_builder or delivery_path
     batch_renderer = render_batch_files or render_production_batch_files
+    batch_sequence_renderer = render_batch_sequence or render_production_batch_sequence
     output_units = validate_public_output_units(units) if require_public_output_metadata else tuple(units)
     request = record["request"]
     job_dir = Path(record["job_dir"]).resolve()
@@ -636,17 +639,23 @@ def run_production_output_pipeline(
         batch_task_paths = main_batch_task_paths
 
     if not request["dry_run"]:
-        if graphic_batch_task_paths:
-            batch_renderer(graphic_batch_task_paths, request["visible"])
-            for png_path, dpi, color_mode in png_outputs:
-                finalize_cmyk_png(png_path, dpi=dpi, color_mode=color_mode)
-            png_outputs.clear()
-        if main_batch_task_paths:
+        if graphic_batch_task_paths or graphic_master_batch_task_paths:
+            def after_batch_group(index: int) -> None:
+                if index != 0:
+                    return
+                for png_path, dpi, color_mode in png_outputs:
+                    finalize_cmyk_png(png_path, dpi=dpi, color_mode=color_mode)
+                png_outputs.clear()
+
+            batch_sequence_renderer(
+                (graphic_batch_task_paths, main_batch_task_paths, graphic_master_batch_task_paths),
+                request["visible"],
+                after_batch_group,
+            )
+        elif main_batch_task_paths:
             batch_renderer(main_batch_task_paths, request["visible"])
         for png_path, dpi, color_mode in png_outputs:
             finalize_cmyk_png(png_path, dpi=dpi, color_mode=color_mode)
-        if graphic_master_batch_task_paths:
-            batch_renderer(graphic_master_batch_task_paths, request["visible"])
 
     manifest_path = job_dir / "manifest.json"
     write_json(
@@ -765,6 +774,10 @@ def _unique_order_nos(units: Sequence[ProductionOutputUnit]) -> list[str]:
 
 
 def _mark_composition_intermediate(task: dict[str, Any], make_error: ErrorFactory) -> None:
+    if str(task.get("type") or "") == "compose_v2_order_column":
+        task["compatibility"] = "CS5"
+        task["intermediate_component"] = True
+        return
     output = task.get("output")
     if not isinstance(output, dict):
         raise make_error("总图中间渲染任务缺少输出配置", "department_component_output_missing")

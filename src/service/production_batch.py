@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
-from typing import Iterable
+from typing import Callable, Iterable, Sequence
 
 from ..renderer.illustrator_bridge import IllustratorBridge, IllustratorBridgeError, format_com_recovery_message
 
@@ -23,6 +23,26 @@ def render_production_batch_files(batch_files: Iterable[Path], visible: bool) ->
         for batch_file in batch_files:
             _render_production_batch_chunk(bridge, script, Path(batch_file))
             time.sleep(PRODUCTION_BATCH_CHUNK_DELAY_SECONDS)
+    finally:
+        bridge.close()
+
+
+def render_production_batch_sequence(
+    batch_groups: Sequence[Iterable[Path]],
+    visible: bool,
+    after_group: Callable[[int], None] | None = None,
+) -> None:
+    """Run ordered batch groups in one reusable Illustrator session."""
+
+    script = Path(__file__).resolve().parents[2] / "scripts" / "illustrator" / "render_batch.jsx"
+    bridge = IllustratorBridge(visible=visible, fresh_instance=True, reuse_instance=True)
+    try:
+        for index, batch_files in enumerate(batch_groups):
+            for batch_file in batch_files:
+                _render_production_batch_chunk(bridge, script, Path(batch_file))
+                time.sleep(PRODUCTION_BATCH_CHUNK_DELAY_SECONDS)
+            if after_group is not None:
+                after_group(index)
     finally:
         bridge.close()
 
@@ -47,4 +67,5 @@ def _is_retryable_com_failure(exc: IllustratorBridgeError) -> bool:
 
 __all__ = [
     "render_production_batch_files",
+    "render_production_batch_sequence",
 ]
