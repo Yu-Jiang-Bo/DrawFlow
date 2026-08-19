@@ -37,6 +37,9 @@ def test_v2_department_output_routes_through_public_pipeline(monkeypatch, tmp_pa
     assert calls[0]["units"] == ("public-unit",)
     assert calls[0]["chunk_size"] == 8
     assert calls[0]["component_reuse"].build_component_task
+    assert calls[0]["single_order_merge_predicate"](SimpleNamespace(department="K"))
+    assert calls[0]["single_order_merge_predicate"](SimpleNamespace(department="D-BOX"))
+    assert not calls[0]["single_order_merge_predicate"](SimpleNamespace(department="H"))
     assert callable(calls[0]["graphic_master_builder"])
     assert calls[0]["record"]["request"]["visible"] is False
     assert result["outputs"]["compiled_render_task"].endswith("render-task.json")

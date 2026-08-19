@@ -62,6 +62,13 @@ from .v2_trial_render_support import output_labels, read_warnings
 V2_PRODUCTION_BATCH_CHUNK_SIZE = 8
 
 
+def _v2_cross_department_single_order(unit: Any) -> bool:
+    """Merge only the V2 departments whose delivery contract has per-order AI."""
+
+    department = str(getattr(unit, "department", "") or "").strip().upper()
+    return department in {"T", "K", "ZK", "FK", "PW", "EW"} or "D" in department
+
+
 class V2OrderOutputRenderer:
     def __init__(self, renderer: Any) -> None:
         self.renderer = renderer
@@ -141,6 +148,7 @@ class V2OrderOutputRenderer:
                 ),
                 graphic_batch_dir="single-graphic-batch",
                 graphic_master_batch_dir="graphic-master-batch",
+                single_order_merge_predicate=_v2_cross_department_single_order,
                 stats_extra={
                     "orders": len(rows),
                     "outputs": len([item for item in render_task.get("outputs", []) if isinstance(item, Mapping)]),
@@ -159,7 +167,6 @@ class V2OrderOutputRenderer:
         result["outputs"]["compiled_render_task"] = str(task_file)
         result["outputs"]["output_manifest"] = str(manifest_path)
         return result
-
     def _public_batch_renderer_overrides(self, job_dir: Path) -> dict[str, Any]:
         """Keep dependency-injected renderer doubles on the public batch path.
 

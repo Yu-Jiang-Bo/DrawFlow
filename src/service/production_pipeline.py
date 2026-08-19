@@ -18,6 +18,7 @@ from .production_output import (
     GraphicOutput,
     ProductionOutputUnit,
     ProductionOutputBatch,
+    SingleOrderOutput,
     build_delivery_outputs,
     color_frames,
     delivery_path,
@@ -84,6 +85,7 @@ BatchSequenceRenderer = Callable[[Sequence[Iterable[Path]], bool, Callable[[int]
 ErrorFactory = Callable[[str, str], Exception]
 TargetPathBuilder = Callable[[Path, str, ProductionOutputBatch, set[str]], Path]
 GraphicMasterBuilder = Callable[..., ProductionGraphicMasterPlan | None]
+SingleOrderMergePredicate = Callable[[ProductionOutputUnit], bool]
 
 
 @dataclass(frozen=True)
@@ -179,6 +181,7 @@ def run_production_output_pipeline(
     graphic_batch_dir: str | None = None,
     graphic_master_batch_dir: str | None = None,
     component_reuse: ProductionComponentReuseStrategy | None = None,
+    single_order_merge_predicate: SingleOrderMergePredicate | None = None,
     prefer_batch_render_task: bool = True,
     require_public_output_metadata: bool = True,
     stats_extra: Mapping[str, Any] | None = None,
@@ -232,6 +235,12 @@ def run_production_output_pipeline(
         component.identity: component
         for component in component_manifest.components
     } if component_manifest is not None else {}
+    single_order_specs_by_batch = _plan_single_order_outputs(
+        batches,
+        output_dir=job_dir / "single-orders",
+        occupied_names=single_order_names,
+        merge_predicate=single_order_merge_predicate,
+    )
 
     if component_manifest is not None and component_reuse is not None:
         for component_index, component in enumerate(component_manifest.components, start=1):
@@ -314,11 +323,8 @@ def run_production_output_pipeline(
             if request["dry_run"]:
                 update_progress(record, rendered_items, total_work, "生成单图 PNG 文件")
 
-        single_order_specs = ()
+        single_order_specs = single_order_specs_by_batch.get(index, ())
         if requires_single_order_ai(rule):
-            single_order_specs = tuple(
-                single_order_outputs(batch.units, job_dir / "single-orders", single_order_names)
-            )
             for single_index, spec in enumerate(single_order_specs, start=1):
                 if component_reuse is None:
                     task = task_builder(
@@ -339,7 +345,11 @@ def run_production_output_pipeline(
                         units=spec.units,
                         output_ai=spec.output_path,
                         rule=rule,
-                        label_lines=_production_label_lines(rule, spec.units),
+                        label_lines=(
+                            _merged_production_label_lines(spec.units)
+                            if single_order_merge_predicate is not None
+                            else _production_label_lines(rule, spec.units)
+                        ),
                         compatibility=rule.ai_compatibility,
                         progress=task_progress(record, rendered_items + single_index - 1, total_work, "生成单订单 AI 文件"),
                     )
@@ -362,6 +372,7 @@ def run_production_output_pipeline(
                         "arcname": spec.arcname,
                         "format": rule.output_format,
                         "department": rule.department,
+                        "departments": _single_order_departments(spec.units),
                         "order_no": spec.unit.order_no,
                         "detail_id": detail_ids[0] if len(detail_ids) == 1 else "",
                         "detail_ids": detail_ids,
@@ -369,7 +380,7 @@ def run_production_output_pipeline(
                     }
                 )
                 bundle_members.append({"path": str(spec.output_path), "arcname": spec.arcname})
-            rendered_items += len(batch.units)
+            rendered_items += sum(len(spec.units) for spec in single_order_specs)
             if request["dry_run"]:
                 update_progress(record, rendered_items, total_work, "生成单订单 AI 文件")
 
@@ -597,14 +608,29 @@ def run_production_output_pipeline(
                     crop_master_height=requires_cropped_master(rule),
                 )
             else:
-                if not single_order_specs:
+                summary_specs = single_order_specs
+                if single_order_merge_predicate is not None:
+                    summary_specs = _build_department_summary_order_tasks(
+                        batch=batch,
+                        batch_index=index,
+                        job_dir=job_dir,
+                        components_by_identity=components_by_identity,
+                        component_reuse=component_reuse,
+                        make_error=make_error,
+                        write_render_task_json=write_render_task_json,
+                        task_files=task_files,
+                        render_entries=render_entries,
+                        render_script=render_script,
+                        task_progress=task_progress(record, rendered_items, total_work, "生成总图 AI 文件"),
+                    )
+                if not summary_specs:
                     raise make_error(
                         "公共总图缺少可复用的单订单成品",
                         "component_reuse_single_orders_missing",
                     )
                 task = component_reuse.build_order_column_task(
-                    input_ai_files=tuple(spec.output_path for spec in single_order_specs),
-                    input_order_nos=tuple(spec.unit.order_no for spec in single_order_specs),
+                    input_ai_files=tuple(spec.output_path for spec in summary_specs),
+                    input_order_nos=tuple(spec.unit.order_no for spec in summary_specs),
                     units=batch.units,
                     output_ai=target_path,
                     rule=rule,
@@ -771,6 +797,136 @@ def _components_for_units(
             raise make_error("单订单或汇总图缺少可复用的效果图组件", "component_reuse_component_missing")
         components.append(component)
     return tuple(components)
+
+
+def _plan_single_order_outputs(
+    batches: Sequence[ProductionOutputBatch],
+    *,
+    output_dir: Path,
+    occupied_names: set[str],
+    merge_predicate: SingleOrderMergePredicate | None,
+) -> dict[int, tuple[SingleOrderOutput, ...]]:
+    """Plan one-order files without changing department batches used by summaries."""
+
+    if merge_predicate is None:
+        return {
+            index: tuple(single_order_outputs(batch.units, output_dir, occupied_names))
+            for index, batch in enumerate(batches, start=1)
+            if requires_single_order_ai(batch.rule)
+        }
+
+    merged_groups: dict[str, list[tuple[int, ProductionOutputUnit]]] = {}
+    merge_order: list[str] = []
+    unmerged_by_batch: dict[int, list[ProductionOutputUnit]] = {}
+    for batch_index, batch in enumerate(batches, start=1):
+        if not requires_single_order_ai(batch.rule):
+            continue
+        for unit in batch.units:
+            if merge_predicate(unit):
+                order_no = str(unit.order_no or "ORDER")
+                if order_no not in merged_groups:
+                    merged_groups[order_no] = []
+                    merge_order.append(order_no)
+                merged_groups[order_no].append((batch_index, unit))
+            else:
+                unmerged_by_batch.setdefault(batch_index, []).append(unit)
+
+    planned: dict[int, list[SingleOrderOutput]] = {}
+    for order_no in merge_order:
+        entries = merged_groups[order_no]
+        owner_batch_index = entries[0][0]
+        specs = single_order_outputs(
+            [unit for _, unit in entries],
+            output_dir,
+            occupied_names,
+        )
+        planned.setdefault(owner_batch_index, []).extend(specs)
+    for batch_index, units in unmerged_by_batch.items():
+        planned.setdefault(batch_index, []).extend(single_order_outputs(units, output_dir, occupied_names))
+    return {index: tuple(specs) for index, specs in planned.items()}
+
+
+def _single_order_departments(units: Sequence[ProductionOutputUnit]) -> list[str]:
+    departments: list[str] = []
+    seen: set[str] = set()
+    for unit in units:
+        department = str(unit.department or "").strip()
+        key = department.casefold()
+        if department and key not in seen:
+            departments.append(department)
+            seen.add(key)
+    return departments
+
+
+def _merged_production_label_lines(units: Sequence[ProductionOutputUnit]) -> list[str]:
+    """Preserve every participating department's annotation semantics in one order file."""
+
+    if not units:
+        return []
+    lines: list[str] = []
+    seen: set[str] = set()
+    order_no = str(units[0].order_no or "").strip()
+    if order_no:
+        lines.append(order_no)
+        seen.add(order_no.casefold())
+    for unit in units:
+        rule = unit.rule or resolve_department_output(unit.department, unit.manufacturer)
+        if rule.annotation_type == ANNOTATION_PRODUCT_NAME:
+            values = (str(unit.product_name or "").strip(),)
+        elif rule.annotation_type == ANNOTATION_COLOR:
+            values = (translate_color_to_chinese(str(unit.color_option or "").strip()),)
+        else:
+            values = ()
+        for value in values:
+            key = value.casefold()
+            if value and key not in seen:
+                lines.append(value)
+                seen.add(key)
+    return lines
+
+
+def _build_department_summary_order_tasks(
+    *,
+    batch: ProductionOutputBatch,
+    batch_index: int,
+    job_dir: Path,
+    components_by_identity: Mapping[str, ReusableProductionComponent],
+    component_reuse: ProductionComponentReuseStrategy,
+    make_error: ErrorFactory,
+    write_render_task_json: JsonWriter,
+    task_files: list[str],
+    render_entries: list[dict[str, str]],
+    render_script: Path,
+    task_progress: Mapping[str, Any],
+) -> tuple[SingleOrderOutput, ...]:
+    """Rebuild department-local order columns for non-color summaries only."""
+
+    output_dir = job_dir / "department-summary-orders" / f"batch-{batch_index:03d}"
+    specs = tuple(single_order_outputs(batch.units, output_dir, set()))
+    for order_index, spec in enumerate(specs, start=1):
+        components = _components_for_units(spec.units, components_by_identity, make_error)
+        task = component_reuse.build_order_column_task(
+            components=components,
+            input_ai_files=tuple(component.output_path for component in components),
+            input_order_nos=tuple(unit.order_no for unit in spec.units),
+            units=spec.units,
+            output_ai=spec.output_path,
+            rule=batch.rule,
+            label_lines=_production_label_lines(batch.rule, spec.units),
+            compatibility=batch.rule.ai_compatibility,
+            progress=task_progress,
+        )
+        _mark_composition_intermediate(task, make_error)
+        task_file = job_dir / "department-summary-order-tasks" / f"render-task-{batch_index:03d}-{order_index:04d}.json"
+        write_render_task_json(task_file, task)
+        task_files.append(str(task_file))
+        render_entries.append(
+            {
+                "script": str(_strategy_script(component_reuse.order_column_script, render_script)),
+                "task_file": str(task_file),
+            }
+        )
+    return specs
 
 
 def _strategy_script(configured_script: Path | str | None, fallback_script: Path) -> Path:

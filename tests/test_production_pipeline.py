@@ -109,6 +109,142 @@ def test_public_output_downstream_gate_rejects_w_without_manufacturer_instead_of
         )
 
 
+def test_v2_cross_department_single_orders_merge_but_summaries_stay_partitioned(tmp_path):
+    record = _record(tmp_path, "job-cross-order")
+    record["request"]["dry_run"] = True
+    written: list[tuple[Path, dict]] = []
+
+    def write_json(path: Path, payload):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(payload), encoding="utf-8")
+        written.append((path, payload))
+
+    def build_task(*, units, output_ai, **_kwargs):
+        return {
+            "type": "unit_render",
+            "output_ai": str(output_ai),
+            "layout": {"suppress_labels": True},
+            "output": {"format": "ai"},
+            "production": {"component_reuse": True},
+        }
+
+    def build_component_task(**kwargs):
+        return build_task(units=kwargs["units"], output_ai=kwargs["output_ai"])
+
+    def build_order_column_task(**kwargs):
+        return {
+            "type": "compose_v2_order_column",
+            "output_ai": str(kwargs["output_ai"]),
+            "inputs": [{"path": str(path)} for path in kwargs["input_ai_files"]],
+            "label_lines": list(kwargs.get("label_lines") or []),
+        }
+
+    def build_color_frames_task(**kwargs):
+        return {
+            "type": "compose_color_frames",
+            "output_ai": str(kwargs["output_ai"]),
+            "inputs": list(kwargs["inputs"]),
+        }
+
+    strategy = production_pipeline.ProductionComponentReuseStrategy(
+        build_component_task=build_component_task,
+        build_order_column_task=build_order_column_task,
+        build_color_frames_task=build_color_frames_task,
+    )
+    units = [
+        replace(_unit(department="K", manufacturer="", order_no="ORDER-X", detail_id="K-1", rule=resolve_department_output("K")), identity="unit-k"),
+        replace(_unit(department="D-BOX", manufacturer="", order_no="ORDER-X", detail_id="D-1", rule=resolve_department_output("D-BOX")), identity="unit-d"),
+    ]
+
+    result = run_production_output_pipeline(
+        record,
+        template_id="V2",
+        output_ai=tmp_path / "job-cross-order" / "delivery.ai",
+        units=units,
+        task_builder=build_task,
+        component_reuse=strategy,
+        single_order_merge_predicate=lambda unit: unit.department in {"K", "D-BOX"},
+        item_count=2,
+        render_script=Path("render.jsx"),
+        chunk_size=20,
+        update_progress=lambda *_args: None,
+        task_progress=lambda *_args: {},
+        write_json=write_json,
+        write_render_task_json=write_json,
+    )
+
+    single_orders = result["outputs"]["single_order_files"]
+    assert len(single_orders) == 1
+    assert single_orders[0]["name"] == "ORDER-X.ai"
+    assert single_orders[0]["item_count"] == 2
+    assert single_orders[0]["departments"] == ["K", "D-BOX"]
+
+    order_tasks = [payload for path, payload in written if "single-order-tasks" in str(path)]
+    assert len(order_tasks) == 1
+    assert len(order_tasks[0]["inputs"]) == 2
+    assert order_tasks[0]["label_lines"] == ["ORDER-X", "红色", "Product"]
+
+    summary_tasks = [payload for path, payload in written if path.name.startswith("compose-color-frames-")]
+    assert len(summary_tasks) == 1
+    assert [item["order_nos"] for item in summary_tasks[0]["inputs"]] == [["ORDER-X"]]
+
+
+def test_v2_cross_department_merge_keeps_pw_summary_labels_department_local(tmp_path):
+    record = _record(tmp_path, "job-cross-pw")
+    record["request"]["dry_run"] = True
+    written: list[tuple[Path, dict]] = []
+
+    def write_json(path: Path, payload):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(payload), encoding="utf-8")
+        written.append((path, payload))
+
+    def build_task(*, output_ai, **_kwargs):
+        return {"type": "unit_render", "output_ai": str(output_ai), "output": {"format": "ai"}}
+
+    def build_component_task(**kwargs):
+        return {"type": "unit_render", "output_ai": str(kwargs["output_ai"]), "layout": {"suppress_labels": True}, "output": {"format": "ai"}, "production": {"component_reuse": True}}
+
+    def build_order_column_task(**kwargs):
+        return {
+            "type": "compose_v2_order_column",
+            "output_ai": str(kwargs["output_ai"]),
+            "inputs": [{"path": str(path)} for path in kwargs["input_ai_files"]],
+            "label_lines": list(kwargs.get("label_lines") or []),
+        }
+
+    strategy = production_pipeline.ProductionComponentReuseStrategy(
+        build_component_task=build_component_task,
+        build_order_column_task=build_order_column_task,
+        build_color_frames_task=lambda **kwargs: {"type": "compose_color_frames", "inputs": list(kwargs["inputs"]), "output_ai": str(kwargs["output_ai"])},
+    )
+    units = [
+        replace(_unit(department="K", manufacturer="", order_no="ORDER-Y", detail_id="K-1", rule=resolve_department_output("K")), identity="unit-k"),
+        replace(_unit(department="PW", manufacturer="", order_no="ORDER-Y", detail_id="PW-1", product_name="盒子", rule=resolve_department_output("PW")), identity="unit-pw"),
+    ]
+    result = run_production_output_pipeline(
+        record,
+        template_id="V2",
+        output_ai=tmp_path / "job-cross-pw" / "delivery.ai",
+        units=units,
+        task_builder=build_task,
+        component_reuse=strategy,
+        single_order_merge_predicate=lambda unit: unit.department in {"K", "PW"},
+        item_count=2,
+        render_script=Path("render.jsx"),
+        chunk_size=20,
+        update_progress=lambda *_args: None,
+        task_progress=lambda *_args: {},
+        write_json=write_json,
+        write_render_task_json=write_json,
+    )
+
+    assert len(result["outputs"]["single_order_files"]) == 1
+    summary_order_tasks = [payload for path, payload in written if "department-summary-order-tasks" in str(path)]
+    assert len(summary_order_tasks) == 1
+    assert summary_order_tasks[0]["label_lines"] == ["ORDER-Y", "盒子"]
+
+
 def test_public_output_downstream_gate_rejects_template_copied_department_rule_conflict():
     copied_rule = replace(resolve_department_output("K"), layout={"master_packing": {"target_width_mm": 999}})
 
