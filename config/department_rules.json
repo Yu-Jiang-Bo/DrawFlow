@@ -301,6 +301,7 @@
             "fillActualColor": false,
             "outline_text": true,
             "pathfinder_merge": true,
+            "single_order_ai": true,
             "hasMaster": false,
             "save_strategy": "所有其他 W 厂家均按订单保存为标准 AI 文件"
           }

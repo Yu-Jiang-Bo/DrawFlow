@@ -11,7 +11,9 @@ from typing import Any, Iterable, Mapping, Sequence
 
 from .department_output import (
     EXPORT_UNIT_PER_GRAPHIC,
+    FILE_FORMAT_AI8,
     FILE_FORMAT_AI_CS5,
+    FILE_FORMAT_AI_STANDARD,
     FILE_FORMAT_PNG_CMYK,
     DepartmentOutputRule,
     resolve_department_output,
@@ -138,7 +140,7 @@ def validate_public_output_units(units: Iterable[ProductionOutputUnit]) -> tuple
 
 
 def requires_single_order_ai(rule: DepartmentOutputRule) -> bool:
-    return rule.output_format == "ai8" and bool(rule.single_order_ai)
+    return rule.file_format in {FILE_FORMAT_AI8, FILE_FORMAT_AI_STANDARD} and bool(rule.single_order_ai)
 
 
 def requires_graphic_outputs(rule: DepartmentOutputRule) -> bool:

@@ -314,11 +314,12 @@ def run_production_output_pipeline(
             if request["dry_run"]:
                 update_progress(record, rendered_items, total_work, "生成单图 PNG 文件")
 
+        single_order_specs = ()
         if requires_single_order_ai(rule):
-            for single_index, spec in enumerate(
-                single_order_outputs(batch.units, job_dir / "single-orders", single_order_names),
-                start=1,
-            ):
+            single_order_specs = tuple(
+                single_order_outputs(batch.units, job_dir / "single-orders", single_order_names)
+            )
+            for single_index, spec in enumerate(single_order_specs, start=1):
                 if component_reuse is None:
                     task = task_builder(
                         units=spec.units,
@@ -359,7 +360,7 @@ def run_production_output_pipeline(
                         "path": str(spec.output_path),
                         "name": spec.output_path.name,
                         "arcname": spec.arcname,
-                        "format": "ai8",
+                        "format": rule.output_format,
                         "department": rule.department,
                         "order_no": spec.unit.order_no,
                         "detail_id": detail_ids[0] if len(detail_ids) == 1 else "",
@@ -508,7 +509,7 @@ def run_production_output_pipeline(
                 update_progress(record, rendered_items, total_work, "生成颜色汇总 AI 文件")
         elif packing is not None:
             component_path = job_dir / f".department-{index:03d}-master-component.ai"
-            if component_reuse is None:
+            if component_reuse is None or rule.is_png:
                 task = task_builder(
                     units=batch.units,
                     output_ai=component_path,
@@ -539,7 +540,7 @@ def run_production_output_pipeline(
             render_entries.append(
                 {
                     "script": str(_strategy_script(component_reuse.order_column_script, render_script))
-                    if component_reuse is not None
+                    if component_reuse is not None and not rule.is_png
                     else str(render_script),
                     "task_file": str(task_file),
                 }
@@ -580,20 +581,44 @@ def run_production_output_pipeline(
             if request["dry_run"]:
                 update_progress(record, rendered_items, total_work, "生成总图 AI 文件")
         else:
-            task = task_builder(
-                units=batch.units,
-                output_ai=intermediate_ai if rule.is_png else target_path,
-                output_png=target_path if rule.is_png else None,
-                columns=request["columns"],
-                rule=rule,
-                fixed_canvas=canvas,
-                progress=task_progress(record, rendered_items, total_work, "生成总图 AI 文件"),
-                crop_master_height=requires_cropped_master(rule),
-            )
+            if component_reuse is None or rule.is_png:
+                task = task_builder(
+                    units=batch.units,
+                    output_ai=intermediate_ai if rule.is_png else target_path,
+                    output_png=target_path if rule.is_png else None,
+                    columns=request["columns"],
+                    rule=rule,
+                    fixed_canvas=canvas,
+                    progress=task_progress(record, rendered_items, total_work, "生成总图 AI 文件"),
+                    crop_master_height=requires_cropped_master(rule),
+                )
+            else:
+                if not single_order_specs:
+                    raise make_error(
+                        "公共总图缺少可复用的单订单成品",
+                        "component_reuse_single_orders_missing",
+                    )
+                task = component_reuse.build_order_column_task(
+                    input_ai_files=tuple(spec.output_path for spec in single_order_specs),
+                    input_order_nos=tuple(spec.unit.order_no for spec in single_order_specs),
+                    units=batch.units,
+                    output_ai=target_path,
+                    rule=rule,
+                    label_lines=(),
+                    compatibility=rule.ai_compatibility,
+                    progress=task_progress(record, rendered_items, total_work, "生成总图 AI 文件"),
+                )
             task_file = job_dir / f"render-task-{index:03d}.json"
             write_render_task_json(task_file, task)
             task_files.append(str(task_file))
-            render_entries.append({"script": str(render_script), "task_file": str(task_file)})
+            render_entries.append(
+                {
+                    "script": str(_strategy_script(component_reuse.order_column_script, render_script))
+                    if component_reuse is not None and not rule.is_png
+                    else str(render_script),
+                    "task_file": str(task_file),
+                }
+            )
             if rule.is_png:
                 png_outputs.append(
                     (
