@@ -556,7 +556,7 @@
             resizeItemsAroundBounds(items, current, scaleX, scaleY);
             var fitted = unionBounds(items, true);
             translateItems(items, targetLeft - Number(fitted[0]), targetTop - Number(fitted[1]));
-            if (outputBoundsWithinUpperLimit(fitted, fitTargetWidth, fitTargetHeight)) break;
+            if (outputBoundsWithinTargetRange(fitted, fitTargetWidth, fitTargetHeight, dimensions)) break;
         }
         validateOutputBounds(items, dimensions, targetWidth, targetHeight);
     }
@@ -591,8 +591,9 @@
         var bounds = unionBounds(items, true);
         var width = Math.abs(Number(bounds[2]) - Number(bounds[0]));
         var height = Math.abs(Number(bounds[1]) - Number(bounds[3]));
-        var epsilon = mmToPt(0.0005);
-        if (Math.abs(width - targetWidth) > epsilon || Math.abs(height - targetHeight) > epsilon) {
+        var epsilon = dimensionTolerancePoints(dimensions);
+        if (width > targetWidth || height > targetHeight
+            || width < targetWidth - epsilon || height < targetHeight - epsilon) {
             throw new Error(
                 "V2 output exceeds target bounds or does not match target bounds: actual="
                 + width + "x" + height
@@ -602,12 +603,18 @@
         }
     }
 
-    function outputBoundsWithinUpperLimit(bounds, targetWidth, targetHeight) {
+    function outputBoundsWithinTargetRange(bounds, targetWidth, targetHeight, dimensions) {
         var width = Math.abs(Number(bounds[2]) - Number(bounds[0]));
         var height = Math.abs(Number(bounds[1]) - Number(bounds[3]));
-        var epsilon = mmToPt(0.0005);
-        return width <= targetWidth + epsilon
-            && height <= targetHeight + epsilon;
+        var epsilon = dimensionTolerancePoints(dimensions);
+        return width <= targetWidth && height <= targetHeight
+            && width >= targetWidth - epsilon && height >= targetHeight - epsilon;
+    }
+
+    function dimensionTolerancePoints(dimensions) {
+        var toleranceMm = Number(dimensions && dimensions.tolerance_mm);
+        if (!isFinite(toleranceMm) || toleranceMm < 0) toleranceMm = 0.007;
+        return mmToPt(Math.min(toleranceMm, 0.007));
     }
 
     function fitArtboardToVisibleContent(doc, items) {

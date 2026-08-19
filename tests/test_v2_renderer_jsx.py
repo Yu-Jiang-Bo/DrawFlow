@@ -1874,7 +1874,9 @@ def test_v2_renderer_allows_sub_tolerance_final_output_rounding():
         "output_ai": "out.ai",
         "values": {"design": "03", "style": "small"},
         "selections": {"Output_main": {"design": "Design03", "style": "style1"}},
-        "visible_bounds_padding_after_resize": {"Design03": 0.004},
+        # -0.01pt is an inner rounding delta within the contractual 0.007mm
+        # (about 0.0198pt), but exceeds the former 0.0005mm threshold.
+        "visible_bounds_padding_after_resize": {"Design03": -0.01},
         "render_task": {
             "$schema": "custom-renderer/v2-render-task",
             "outputs": [
@@ -1909,6 +1911,51 @@ def test_v2_renderer_allows_sub_tolerance_final_output_rounding():
     assert result.returncode == 0, result.stderr
 
 
+def test_v2_renderer_rejects_sub_tolerance_final_output_overflow():
+    task = {
+        "$schema": "custom-renderer/v2-render-execution",
+        "template_ai": "template.ai",
+        "output_ai": "out.ai",
+        "values": {"font": "F1", "style": "small"},
+        "selections": {"Output_main": {"font": "F1", "style": "style1"}},
+        # 0.01pt is about 0.0035mm: within the tolerance magnitude but outside
+        # the target frame, so it must never be accepted as a final result.
+        "mock_f1_slot_bounds": [0, 30, 100.01, 0],
+        "mock_no_resize_names": ["F1"],
+        "render_task": {
+            "$schema": "custom-renderer/v2-render-task",
+            "outputs": [
+                {
+                    "key": "Output_main",
+                    "actions": [
+                        {
+                            "type": "copy_option_group",
+                            "group": "font",
+                            "option_key": "F1",
+                            "object_path": "Template/Output_main/Font/F1",
+                        },
+                        {
+                            "type": "fit_output_bounds",
+                            "group": "style",
+                            "style_key": "style1",
+                            "dimensions": {
+                                "width_mm": 35.2777777778,
+                                "height_mm": 10.5833333333,
+                                "tolerance_mm": 0.007,
+                            },
+                        },
+                    ],
+                }
+            ],
+        },
+    }
+
+    result = run_node(node_mock_harness(task, ""))
+
+    assert result.returncode != 0
+    assert "V2 output exceeds target bounds" in result.stderr
+
+
 def node_mock_harness(task, assertions, disable_native_json=False):
     return f"""
 const fs = require('fs');
@@ -1918,6 +1965,7 @@ const task = {json.dumps(task)};
 const taskText = NativeJSON.stringify(task);
 const visibleBoundsFailures = new Set(task.visible_bounds_failures || []);
 const visibleBoundsPaddingAfterResize = task.visible_bounds_padding_after_resize || {{}};
+const noResizeNames = new Set(task.mock_no_resize_names || []);
 let domMoveFailures = new Set(task.fail_dom_move_once || []);
 const folder = {{ exists: true, parent: null, create: () => true }};
 let savedAs = '';
@@ -1990,6 +2038,7 @@ function item(typename, name, contents, children, styleToken, bounds, options) {
     }},
     resize: function(horizontalPercent, verticalPercent) {{
       this.resizeCalls++;
+      if (noResizeNames.has(this.name)) return;
       if (this.pageItems.length) {{
         const bounds = this.visibleBounds;
         const cx = (bounds[0] + bounds[2]) / 2;
@@ -2048,8 +2097,9 @@ function item(typename, name, contents, children, styleToken, bounds, options) {
     get: () => {{
       if (node.fromCopy && visibleBoundsFailures.has(node.name)) throw new Error('visible bounds unavailable: ' + node.name);
       const bounds = node.pageItems.length ? union(node.pageItems.map(item => item.visibleBounds)) : box.slice();
-      const padding = node.fromCopy && node.resizeCalls > 0 ? Number(visibleBoundsPaddingAfterResize[node.name] || 0) : 0;
-      return padding > 0 ? [bounds[0] - padding, bounds[1] + padding, bounds[2] + padding, bounds[3] - padding] : bounds;
+      const resizePadding = node.fromCopy && node.resizeCalls > 0 ? Number(visibleBoundsPaddingAfterResize[node.name] || 0) : 0;
+      const padding = resizePadding;
+      return padding ? [bounds[0] - padding, bounds[1] + padding, bounds[2] + padding, bounds[3] - padding] : bounds;
     }},
     set: value => {{ box = value.slice(); }}
   }});
