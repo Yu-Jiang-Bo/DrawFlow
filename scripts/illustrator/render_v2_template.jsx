@@ -541,8 +541,9 @@
         var targetHeight = mmToPt(Number(dimensions.height_mm || 0));
         if (targetWidth <= 0 || targetHeight <= 0) throw new Error("V2 output target dimensions are invalid");
         var bounds = unionBounds(items, true);
-        var fitTargetWidth = targetWidth - mmToPt(0.0001);
-        var fitTargetHeight = targetHeight - mmToPt(0.0001);
+        var fitSafety = outputFitSafetyPoints(dimensions);
+        var fitTargetWidth = targetWidth - fitSafety;
+        var fitTargetHeight = targetHeight - fitSafety;
         var targetLeft = Number(bounds[0]);
         var targetTop = Number(bounds[1]);
         for (var attempt = 0; attempt < 4; attempt++) {
@@ -552,11 +553,12 @@
             if (width <= 0 || height <= 0) throw new Error("V2 output visible bounds are not measurable");
             var scaleX = fitTargetWidth / width * 100;
             var scaleY = fitTargetHeight / height * 100;
-            if (Math.abs(scaleX - 100) <= 0.001 && Math.abs(scaleY - 100) <= 0.001) break;
+            if (Math.abs(scaleX - 100) <= 0.001 && Math.abs(scaleY - 100) <= 0.001
+                && outputBoundsWithinTargetRange(current, targetWidth, targetHeight, dimensions)) break;
             resizeItemsAroundBounds(items, current, scaleX, scaleY);
             var fitted = unionBounds(items, true);
             translateItems(items, targetLeft - Number(fitted[0]), targetTop - Number(fitted[1]));
-            if (outputBoundsWithinTargetRange(fitted, fitTargetWidth, fitTargetHeight, dimensions)) break;
+            if (outputBoundsWithinTargetRange(fitted, targetWidth, targetHeight, dimensions)) break;
         }
         validateOutputBounds(items, dimensions, targetWidth, targetHeight);
     }
@@ -615,6 +617,12 @@
         var toleranceMm = Number(dimensions && dimensions.tolerance_mm);
         if (!isFinite(toleranceMm) || toleranceMm < 0) toleranceMm = 0.007;
         return mmToPt(Math.min(toleranceMm, 0.007));
+    }
+
+    function outputFitSafetyPoints(dimensions) {
+        // Illustrator reports visible bounds on a point grid. Keep the fit target
+        // inside the frame so a sub-point rounding step cannot create an overflow.
+        return Math.min(0.003, dimensionTolerancePoints(dimensions) / 2);
     }
 
     function fitArtboardToVisibleContent(doc, items) {

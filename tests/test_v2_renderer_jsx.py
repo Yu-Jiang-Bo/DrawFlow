@@ -1956,6 +1956,50 @@ def test_v2_renderer_rejects_sub_tolerance_final_output_overflow():
     assert "V2 output exceeds target bounds" in result.stderr
 
 
+def test_v2_renderer_fits_sub_threshold_visible_bounds_overflow_inside_target():
+    task = {
+        "$schema": "custom-renderer/v2-render-execution",
+        "template_ai": "template.ai",
+        "output_ai": "out.ai",
+        "values": {"font": "F1", "style": "small"},
+        "selections": {"Output_main": {"font": "F1", "style": "style1"}},
+        # A 0.0006pt output overflow is smaller than the old 0.001% convergence
+        # threshold. The final fit must still run and leave the result inside the
+        # requested frame, rather than rejecting an Illustrator grid-rounding step.
+        "mock_f1_slot_bounds": [0, 30.0006, 100.0006, 0],
+        "render_task": {
+            "$schema": "custom-renderer/v2-render-task",
+            "outputs": [
+                {
+                    "key": "Output_main",
+                    "actions": [
+                        {
+                            "type": "copy_option_group",
+                            "group": "font",
+                            "option_key": "F1",
+                            "object_path": "Template/Output_main/Font/F1",
+                        },
+                        {
+                            "type": "fit_output_bounds",
+                            "group": "style",
+                            "style_key": "style1",
+                            "dimensions": {
+                                "width_mm": 35.2777777778,
+                                "height_mm": 10.5833333333,
+                                "tolerance_mm": 0.007,
+                            },
+                        },
+                    ],
+                }
+            ],
+        },
+    }
+
+    result = run_node(node_mock_harness(task, ""))
+
+    assert result.returncode == 0, result.stderr
+
+
 def node_mock_harness(task, assertions, disable_native_json=False):
     return f"""
 const fs = require('fs');
