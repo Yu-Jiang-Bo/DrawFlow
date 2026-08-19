@@ -86,6 +86,8 @@ REQUIRED_IDS = [
     "toggleDesignsBtn",
     "toggleFontsBtn",
     "outputConfigRows",
+    "outlineTextToggle",
+    "pathfinderMergeToggle",
     "fieldBindingRows",
     "optionMappingRows",
     "styleDimensionRows",
@@ -289,6 +291,22 @@ def test_v2_workbench_uses_controlled_business_inputs():
     assert "sanitizeMessage" in JS
     assert "setScanningOverlay" in JS
     assert "cancelScan" not in JS
+
+
+def test_v2_workbench_uses_compact_output_policy_controls():
+    assert 'class="pane output-policy-panel"' in INDEX_HTML
+    assert 'class="output-policy-row"' in INDEX_HTML
+    assert 'class="output-policy-toggle"' in INDEX_HTML
+    assert 'role="switch"' in INDEX_HTML
+    assert "保存前将成品画布中的文字转换为轮廓" in INDEX_HTML
+    assert "转曲后合并重叠轮廓" in INDEX_HTML
+    assert "未设置时，按生产部门默认规则处理" in INDEX_HTML
+    assert "toggle-field" not in INDEX_HTML
+    assert ".output-policy-row" in CSS
+    assert "grid-template-columns: minmax(0, 1fr) 44px" in CSS
+    assert "width: 44px; height: 24px" in CSS
+    assert ".output-policy-toggle:checked + .output-policy-switch" in CSS
+    assert ".output-policy-toggle:focus-visible + .output-policy-switch" in CSS
 
 
 def test_v2_workbench_does_not_expose_forbidden_ui_concepts():

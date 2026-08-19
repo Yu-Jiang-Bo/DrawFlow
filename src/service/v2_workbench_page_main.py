@@ -93,9 +93,19 @@ PAGE_MAIN = """
 
       <section class="center-pane" data-stage-panel="structure" aria-label="结构与字段配置">
         <section class="pane"><div class="pane-header"><h3>Output 配置</h3></div><div class="pane-body"><div class="config-table" id="outputConfigRows" aria-live="polite"></div></div></section>
-        <section class="pane"><div class="pane-header"><h3>输出处理</h3><span class="muted">作用于定制内容和生产标注</span></div><div class="pane-body output-policy-grid">
-          <label class="toggle-field"><input id="outlineTextToggle" type="checkbox" checked /><span>文字转曲</span></label>
-          <label class="toggle-field"><input id="pathfinderMergeToggle" type="checkbox" checked /><span>文字去重</span></label>
+        <section class="pane output-policy-panel"><div class="pane-header"><h3>输出处理</h3><span class="v2-badge output-policy-badge">模板输出设置</span></div><div class="pane-body output-policy-body">
+          <p class="output-policy-description">对定制内容和生产标注生效</p>
+          <label class="output-policy-row">
+            <span class="output-policy-copy"><span class="output-policy-title">文字转曲</span><span class="output-policy-note">保存前将成品画布中的文字转换为轮廓</span></span>
+            <input id="outlineTextToggle" class="output-policy-toggle" type="checkbox" checked role="switch" aria-label="文字转曲" />
+            <span class="output-policy-switch" aria-hidden="true"></span>
+          </label>
+          <label class="output-policy-row">
+            <span class="output-policy-copy"><span class="output-policy-title">文字去重</span><span class="output-policy-note">转曲后合并重叠轮廓</span></span>
+            <input id="pathfinderMergeToggle" class="output-policy-toggle" type="checkbox" checked role="switch" aria-label="文字去重" />
+            <span class="output-policy-switch" aria-hidden="true"></span>
+          </label>
+          <p class="output-policy-fallback">未设置时，按生产部门默认规则处理</p>
         </div></section>
         <section class="pane"><div class="pane-header"><h3>订单字段绑定</h3></div><div class="pane-body"><p class="v2-help">将扫描到的模板对象绑定到订单表头；多个槽位可以共用同一个订单字段。</p><div class="config-table" id="fieldBindingRows" aria-live="polite"></div></div></section>
         <section class="pane"><div class="pane-header"><h3>订单原值映射</h3></div><div class="pane-body"><p class="v2-help">将订单中的设计、字体或颜色值映射到扫描到的模板选项；单 Output 默认使用 Output_main。</p><div class="config-table" id="optionMappingRows" aria-live="polite"></div></div></section>
