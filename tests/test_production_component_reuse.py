@@ -85,11 +85,22 @@ def test_public_pipeline_reuses_component_tasks_for_k_single_orders_and_color_fr
 
     def order_task(**kwargs):
         calls["order"].append(kwargs)
-        return {"type": "compose_order", "output_ai": str(kwargs["output_ai"]), "output": {"format": "ai"}}
+        return {
+            "type": "compose_order",
+            "output_ai": str(kwargs["output_ai"]),
+            "input_ai_files": [str(path) for path in kwargs["input_ai_files"]],
+            "label_lines": list(kwargs["label_lines"]),
+            "output": {"format": "ai"},
+        }
 
     def frames_task(**kwargs):
         calls["frames"].append(kwargs)
-        return {"type": "compose_frames", "output_ai": str(kwargs["output_ai"]), "output": {"format": "ai"}}
+        return {
+            "type": "compose_frames",
+            "output_ai": str(kwargs["output_ai"]),
+            "inputs": kwargs["inputs"],
+            "output": {"format": "ai"},
+        }
 
     def write_json(path: Path, payload):
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -160,7 +171,11 @@ def _unit(
         manufacturer="",
         product_name="Product",
         color_option=color_option,
-        payload={"content": "test"},
+        payload={
+            "output_key": "Output_main",
+            "values": {"name": f"Name-{identity}"},
+            "selections": {"Output_main": {"font": "F10", "design": "Design03"}},
+        },
         identity=identity,
         rule=resolve_department_output("K"),
     )
