@@ -46,7 +46,7 @@ def test_component_reuse_performance_gate_renders_fifty_units_only_once(tmp_path
         task_builder=lambda **_kwargs: pytest.fail("component reuse must not call the template task builder"),
         item_count=len(units),
         render_script=Path("scripts/illustrator/render_v2_template.jsx"),
-        chunk_size=20,
+        chunk_size=8,
         update_progress=lambda *_args: None,
         task_progress=lambda *_args: {},
         write_json=_write_json,
@@ -95,8 +95,8 @@ def test_component_reuse_performance_gate_renders_fifty_units_only_once(tmp_path
     assert len(task_plan) == 84
     assert len(batch_entries) == len(batch_task_paths) == len(task_plan)
     assert batch_task_paths == task_paths
-    assert len(batch_paths) == 5
-    assert all(len(json.loads(batch_path.read_text(encoding="utf-8"))["tasks"]) <= 20 for batch_path in batch_paths)
+    assert len(batch_paths) == 11
+    assert [len(json.loads(batch_path.read_text(encoding="utf-8"))["tasks"]) for batch_path in batch_paths] == [8] * 10 + [4]
 
 
 def _write_json(path: Path, payload: dict) -> None:

@@ -59,6 +59,9 @@ from .v2_render_task import V2_RENDERER_VERSION
 from .v2_trial_render_support import output_labels, read_warnings
 
 
+V2_PRODUCTION_BATCH_CHUNK_SIZE = 8
+
+
 class V2OrderOutputRenderer:
     def __init__(self, renderer: Any) -> None:
         self.renderer = renderer
@@ -125,7 +128,9 @@ class V2OrderOutputRenderer:
                 component_reuse=create_v2_component_reuse_strategy(render_task, template_ai=template_ai),
                 item_count=len(units),
                 render_script=Path(__file__).resolve().parents[2] / "scripts" / "illustrator" / "render_v2_template.jsx",
-                chunk_size=20,
+                # Return control to Illustrator regularly while retaining the
+                # single ordered production session required by the public path.
+                chunk_size=V2_PRODUCTION_BATCH_CHUNK_SIZE,
                 update_progress=self._update_progress,
                 task_progress=lambda _record, current, total, stage: {"current": current, "total": total, "stage": stage},
                 write_json=write_json,

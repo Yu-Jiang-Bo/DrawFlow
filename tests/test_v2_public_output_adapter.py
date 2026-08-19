@@ -35,6 +35,7 @@ def test_v2_department_output_routes_through_public_pipeline(monkeypatch, tmp_pa
 
     assert len(calls) == 1
     assert calls[0]["units"] == ("public-unit",)
+    assert calls[0]["chunk_size"] == 8
     assert calls[0]["component_reuse"].build_component_task
     assert callable(calls[0]["graphic_master_builder"])
     assert calls[0]["record"]["request"]["visible"] is False
