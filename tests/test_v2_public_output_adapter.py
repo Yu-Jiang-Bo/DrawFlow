@@ -5,6 +5,7 @@ import json
 import pytest
 
 from src.renderer.illustrator_bridge import IllustratorBridgeError
+from src.service.production_output import ProductionOutputError
 from src.service import v2_order_output
 from src.service.v2_order_output import V2OrderOutputRenderer
 
@@ -38,6 +39,40 @@ def test_v2_department_output_routes_through_public_pipeline(monkeypatch, tmp_pa
     assert callable(calls[0]["graphic_master_builder"])
     assert calls[0]["record"]["request"]["visible"] is False
     assert result["outputs"]["compiled_render_task"].endswith("render-task.json")
+
+
+@pytest.mark.parametrize(
+    ("technical_message", "expected_message"),
+    [
+        ("第 1 个效果图缺少订单号，不能进入公共生产输出层", "内部订单号"),
+        ("第 1 个效果图缺少订单明细号，不能进入公共生产输出层", "订单明细号"),
+        ("第 1 个效果图缺少产品名称，不能进入公共生产输出层", "产品名称"),
+        ("第 1 个效果图缺少字体颜色，不能进入公共生产输出层", "字体颜色"),
+    ],
+)
+def test_v2_public_output_message_identifies_missing_required_metadata(technical_message, expected_message):
+    message = v2_order_output._v2_public_output_message(technical_message)
+
+    assert expected_message in message
+    assert "部门和厂家" not in message
+
+
+def test_v2_public_metadata_error_does_not_expose_technical_message(monkeypatch):
+    monkeypatch.setattr(v2_order_output, "to_production_units", lambda *_args: ())
+    monkeypatch.setattr(
+        v2_order_output,
+        "validate_public_output_units",
+        lambda *_args: (_ for _ in ()).throw(
+            ProductionOutputError("第 1 个效果图缺少订单明细号，不能进入公共生产输出层")
+        ),
+    )
+
+    with pytest.raises(v2_order_output.V2OrderRenderError) as exc_info:
+        v2_order_output._require_v2_public_output_units({}, ())
+
+    assert exc_info.value.code == "v2_public_output_metadata_missing"
+    assert exc_info.value.technical_message == ""
+    assert "公共生产输出层" not in str(exc_info.value)
 
 
 def test_v2_public_h_master_builder_returns_paged_composer_plan(monkeypatch, tmp_path):

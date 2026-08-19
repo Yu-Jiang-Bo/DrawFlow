@@ -154,6 +154,57 @@ def test_v2_order_unit_metadata_can_fall_back_to_preflight_metadata():
     assert production_units[0].payload.template_version == "v0008"
 
 
+def test_v2_order_units_recognize_standard_jjmb_metadata_headers_without_bindings():
+    config = {
+        "field_bindings": {
+            "name": "定制信息",
+            "font": "字体",
+            "style": "尺寸",
+            "color": "字体颜色",
+        }
+    }
+    row = {
+        "内部订单号": "ORD-JJMB",
+        "订单明细id": "DETAIL-JJMB",
+        "生产部门": "K",
+        "厂家": "",
+        "产品中文名称": "吊坠",
+        "字体颜色": "Gold",
+        "定制信息": "Alice",
+    }
+
+    production_units = validate_public_output_units(
+        to_production_units(config, build_v2_order_units(config, _render_task(), [row], _preflight()))
+    )
+
+    assert [unit.order_no for unit in production_units] == ["ORD-JJMB", "ORD-JJMB"]
+    assert [unit.detail_id for unit in production_units] == ["DETAIL-JJMB", "DETAIL-JJMB"]
+    assert [unit.department for unit in production_units] == ["K", "K"]
+    assert [unit.product_name for unit in production_units] == ["吊坠", "吊坠"]
+
+
+def test_v2_order_units_prefer_standard_jjmb_metadata_headers_when_aliases_overlap():
+    config = {"field_bindings": {"name": "定制信息", "color": "字体颜色"}}
+    row = {
+        "内部订单号": "ORD-JJMB",
+        "订单明细id": "STANDARD-DETAIL",
+        "明细id": "OTHER-DETAIL",
+        "生产部门": "K",
+        "产品中文名称": "标准产品",
+        "产品名称": "其他产品",
+        "字体颜色": "Gold",
+        "定制信息": "Alice",
+    }
+
+    production_units = to_production_units(
+        config,
+        build_v2_order_units(config, _render_task(), [row], _preflight()),
+    )
+
+    assert [unit.detail_id for unit in production_units] == ["STANDARD-DETAIL", "STANDARD-DETAIL"]
+    assert [unit.product_name for unit in production_units] == ["标准产品", "标准产品"]
+
+
 def test_v2_public_gate_rejects_missing_department_without_technical_trace():
     units = to_production_units(_config(), build_v2_order_units(_config(), _render_task(), [_row("")], _preflight()))
 

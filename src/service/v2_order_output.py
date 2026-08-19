@@ -1090,13 +1090,20 @@ def _require_v2_public_output_units(
         raise V2OrderRenderError(
             _v2_public_output_message(str(exc)),
             code="v2_public_output_metadata_missing",
-            technical_message=str(exc),
         ) from exc
 
 
 def _v2_public_output_message(message: str) -> str:
+    if "缺少订单号" in message:
+        return "订单缺少内部订单号，不能生成生产成品。请在订单表补充内部订单号后重试。"
+    if "缺少订单明细号" in message:
+        return "订单缺少订单明细号，不能生成生产成品。请在订单表补充订单明细号后重试。"
     if "缺少生产部门" in message:
         return "订单缺少生产部门，不能生成生产成品。请在订单表补充生产部门后重试。"
+    if "缺少产品名称" in message:
+        return "订单缺少产品名称，不能生成生产成品。请在订单表补充产品名称后重试。"
+    if "缺少字体颜色" in message:
+        return "订单缺少字体颜色，不能生成生产成品。请在订单表补充字体颜色后重试。"
     if "W 部门出图必须提供厂家信息" in message:
         return "W 部门出图需要厂家信息，请在订单表补充厂家后重试。"
     if "没有收到可交付" in message:

@@ -18,10 +18,28 @@ from .v2_trial_render_support import logical_values
 
 
 ORDER_ALIASES = ("order_no", "order", "order id", "orderid", "内部订单号", "订单号")
-DETAIL_ALIASES = ("detail_id", "detail id", "item id", "明细号", "订单明细号", "子订单号")
+DETAIL_ALIASES = (
+    "订单明细id",
+    "订单明细ID",
+    "明细id",
+    "detail_id",
+    "detail id",
+    "item id",
+    "明细号",
+    "订单明细号",
+    "子订单号",
+)
 DEPARTMENT_ALIASES = ("department", "production department", "生产部门", "部门")
 MANUFACTURER_ALIASES = ("manufacturer", "factory", "supplier", "外协厂家代码", "厂家代码", "厂家", "厂商", "生产厂家", "供应商")
-PRODUCT_ALIASES = ("product_name", "product", "item name", "产品名称", "商品名称", "品名")
+PRODUCT_ALIASES = (
+    "产品中文名称",
+    "产品名称",
+    "product_name",
+    "product",
+    "item name",
+    "商品名称",
+    "品名",
+)
 COLOR_ALIASES = ("color", "colour", "颜色", "字体颜色")
 QUANTITY_ALIASES = ("quantity", "qty", "购买数量", "数量", "件数")
 
