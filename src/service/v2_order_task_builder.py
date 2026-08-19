@@ -61,23 +61,38 @@ def create_v2_component_reuse_strategy(
         return task
 
     def build_order_column_task(**kwargs: Any) -> dict[str, Any]:
+        units = tuple(kwargs.get("units") or ())
         return build_v2_order_column_task(
             input_ai_files=kwargs["input_ai_files"],
             input_order_nos=kwargs["input_order_nos"],
             output_ai=kwargs["output_ai"],
             label_lines=kwargs.get("label_lines"),
             compatibility=str(kwargs.get("compatibility") or "Illustrator 8"),
+            target_dimensions_by_input=[_v2_unit_dimensions(render_task, unit) for unit in units],
+            output_policy=_v2_output_policy(render_task, kwargs.get("rule")),
         )
 
     def build_color_frames_task(**kwargs: Any) -> dict[str, Any]:
+        units = tuple(kwargs.get("units") or ())
+        unit_groups = tuple(kwargs.get("unit_groups") or ())
+        inputs = []
+        for raw in kwargs.get("inputs") or ():
+            item = deepcopy(dict(raw))
+            order_nos = [str(value or "").strip() for value in item.get("order_nos") or ()]
+            group = unit_groups[len(inputs)] if len(inputs) < len(unit_groups) else units
+            item["order_dimensions"] = [_v2_unit_dimensions(render_task, unit) for unit in group]
+            if len(item["order_dimensions"]) < len(order_nos):
+                item["order_dimensions"].extend({} for _ in range(len(order_nos) - len(item["order_dimensions"])))
+            inputs.append(item)
         return build_v2_color_frames_task(
-            inputs=kwargs["inputs"],
+            inputs=inputs,
             output_ai=kwargs["output_ai"],
             master_packing=kwargs["master_packing"],
             compatibility=str(kwargs.get("compatibility") or "Illustrator 8"),
             show_color_header=bool(kwargs.get("show_color_header")),
             show_color_frame_boundary=bool(kwargs.get("show_color_frame_boundary")),
             debug_report_path=kwargs.get("debug_report_path"),
+            output_policy=_v2_output_policy(render_task, kwargs.get("rule")),
         )
 
     return ProductionComponentReuseStrategy(
@@ -156,8 +171,8 @@ def build_v2_order_task(
         "format": "png" if png_path is not None else "ai",
         "compatibility": str(getattr(rule, "ai_compatibility", "") or "Illustrator 8"),
         "color_mode": str(layout.get("color_mode") or "CMYK"),
-        "outline_text": bool(getattr(rule, "outline_text", True)),
-        "pathfinder_merge": bool(getattr(rule, "pathfinder_merge", True)),
+        "outline_text": _v2_output_policy(render_task, rule)["outline_text"],
+        "pathfinder_merge": _v2_output_policy(render_task, rule)["pathfinder_merge"],
         "png_path": str(png_path) if png_path is not None else "",
         "dpi": dpi,
         "fixed_canvas_mm": dict(fixed_canvas or {}),
@@ -180,6 +195,46 @@ def build_v2_order_task(
     if color_summary:
         task["production"]["color_summary"] = True
     return task
+
+
+def _v2_output_policy(render_task: Mapping[str, Any], rule: Any | None = None) -> dict[str, bool]:
+    configured = render_task.get("output") if isinstance(render_task, Mapping) else None
+    if isinstance(configured, Mapping) and ("outline_text" in configured or "pathfinder_merge" in configured):
+        return {
+            "outline_text": bool(configured.get("outline_text", True)),
+            "pathfinder_merge": bool(configured.get("pathfinder_merge", True)),
+        }
+    return {
+        "outline_text": bool(getattr(rule, "outline_text", True)),
+        "pathfinder_merge": bool(getattr(rule, "pathfinder_merge", True)),
+    }
+
+
+def _v2_unit_dimensions(render_task: Mapping[str, Any], unit: Any) -> dict[str, float]:
+    payload = getattr(unit, "payload", unit)
+    output_key = _text_attr(payload, "output_key")
+    selections = _mapping_attr(payload, "selections")
+    selected = selections.get(output_key) if isinstance(selections.get(output_key), Mapping) else {}
+    style_key = str(selected.get("style") or selected.get("style_option") or "").strip()
+    for output in render_task.get("outputs", []) if isinstance(render_task, Mapping) else []:
+        if output_key and str(output.get("key") or "") != output_key:
+            continue
+        for action in output.get("actions", []) if isinstance(output, Mapping) else []:
+            if action.get("type") != "fit_output_bounds":
+                continue
+            if style_key and str(action.get("style_key") or "") != style_key:
+                continue
+            dimensions = action.get("dimensions")
+            if not isinstance(dimensions, Mapping):
+                continue
+            try:
+                width = float(dimensions.get("width_mm"))
+                height = float(dimensions.get("height_mm"))
+            except (TypeError, ValueError):
+                continue
+            if width > 0 and height > 0:
+                return {"width_mm": width, "height_mm": height, "tolerance_mm": float(dimensions.get("tolerance_mm", 0.007) or 0.007)}
+    return {}
 
 
 def _unit_item(unit: Any, index: int) -> dict[str, Any]:

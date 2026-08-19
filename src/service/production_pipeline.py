@@ -423,6 +423,7 @@ def run_production_output_pipeline(
                     "department_master_packing_missing",
                 )
             component_paths: list[dict[str, str]] = []
+            component_unit_groups: list[tuple[ProductionOutputUnit, ...]] = []
             summary_item_count = 0
             for frame_index, frame in enumerate(color_frames(batch.units), start=1):
                 component_path = job_dir / f".department-{index:03d}-color-{frame_index:03d}.ai"
@@ -470,6 +471,7 @@ def run_production_output_pipeline(
                         "order_nos": _unique_order_nos(frame.units),
                     }
                 )
+                component_unit_groups.append(tuple(frame.units))
                 summary_item_count += len(frame.units)
 
             compose_file = job_dir / f"compose-color-frames-{index:03d}.json"
@@ -493,6 +495,7 @@ def run_production_output_pipeline(
                     show_color_frame_boundary=True,
                     debug_report_path=target_path.with_suffix(".compact-layout.json"),
                     rule=rule,
+                    unit_groups=tuple(component_unit_groups),
                 )
             write_render_task_json(compose_file, compose_task)
             task_files.append(str(compose_file))
@@ -566,6 +569,7 @@ def run_production_output_pipeline(
                     show_color_frame_boundary=False,
                     debug_report_path=target_path.with_suffix(".compact-layout.json"),
                     rule=rule,
+                    units=batch.units,
                 )
             write_render_task_json(compose_file, compose_task)
             task_files.append(str(compose_file))

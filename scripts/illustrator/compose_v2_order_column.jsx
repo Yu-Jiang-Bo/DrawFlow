@@ -32,6 +32,8 @@
                 var copied = duplicateVisibleArtwork(source, layer);
                 if (!copied.length) throw new Error("V2 compose input has no artwork");
                 for (var copiedIndex = 0; copiedIndex < copied.length; copiedIndex++) sanitizePackNames(copied[copiedIndex]);
+                if (input.target_dimensions && (!input.target_dimensions.width_mm || !input.target_dimensions.height_mm)) throw new Error("V2 order column target dimensions missing");
+                fitCopiedArtwork(copied, input.target_dimensions || {});
                 var item = groupPageItems(layer, copied, "ORDER_PACK_ITEM_PENDING_" + inputIndex);
                 orderBucketFor(input, inputIndex).items.push(item);
             } finally {
@@ -45,6 +47,7 @@
             allItems = labelItems.concat(orderBlocks);
         }
         fitArtboard(doc, allItems);
+        applyOutputTransforms(doc, task.output || {});
         var output = File(String(task.output_ai || ""));
         ensureFolder(output.parent);
         if (output.exists) output.remove();
@@ -67,6 +70,57 @@
             }
         }
         return copied;
+    }
+
+    function fitCopiedArtwork(items, dimensions) {
+        var targetWidth = mmToPt(Number(dimensions.width_mm || 0));
+        var targetHeight = mmToPt(Number(dimensions.height_mm || 0));
+        if (targetWidth <= 0 || targetHeight <= 0) return;
+        for (var index = 0; index < items.length; index++) fitPageItem(items[index], targetWidth, targetHeight);
+    }
+
+    function fitPageItem(item, targetWidth, targetHeight) {
+        var bounds = itemBounds(item);
+        var width = Number(bounds[2]) - Number(bounds[0]);
+        var height = Number(bounds[1]) - Number(bounds[3]);
+        if (width <= 0 || height <= 0) throw new Error("V2 compose artwork bounds are empty");
+        item.resize(targetWidth / width * 100, targetHeight / height * 100, true, true, true, true, 100, Transformation.CENTER);
+        var fitted = itemBounds(item);
+        item.translate((Number(bounds[0]) + Number(bounds[2]) - Number(fitted[0]) - Number(fitted[2])) / 2, (Number(bounds[1]) + Number(bounds[3]) - Number(fitted[1]) - Number(fitted[3])) / 2);
+        validatePageItem(item, targetWidth, targetHeight);
+    }
+
+    function validatePageItem(item, targetWidth, targetHeight) {
+        var bounds = itemBounds(item);
+        var epsilon = mmToPt(0.007);
+        if (Math.abs((Number(bounds[2]) - Number(bounds[0])) - targetWidth) > epsilon || Math.abs((Number(bounds[1]) - Number(bounds[3])) - targetHeight) > epsilon) {
+            throw new Error("V2 compose artwork does not match target dimensions");
+        }
+    }
+
+    function applyOutputTransforms(doc, policy) {
+        if (!policy || policy.outline_text !== true) return;
+        var frames = [];
+        for (var layerIndex = 0; layerIndex < doc.layers.length; layerIndex++) collectTextFrames(doc.layers[layerIndex], frames);
+        for (var index = frames.length - 1; index >= 0; index--) {
+            var outline = frames[index].createOutline();
+            if (!outline) throw new Error("V2 order column text outline failed");
+            if (policy.pathfinder_merge === true) {
+                outline.selected = true;
+                app.executeMenuCommand("Live Pathfinder Add");
+                app.executeMenuCommand("expandStyle");
+                outline.selected = false;
+            }
+        }
+    }
+
+    function collectTextFrames(container, result) {
+        if (!container || !container.pageItems) return;
+        for (var index = 0; index < container.pageItems.length; index++) {
+            var item = container.pageItems[index];
+            if (item.typename === "TextFrame") result.push(item);
+            if (item.typename === "GroupItem" || item.typename === "Layer") collectTextFrames(item, result);
+        }
     }
 
     function orderBucketFor(input, inputIndex) {

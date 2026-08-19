@@ -93,6 +93,10 @@ PAGE_MAIN = """
 
       <section class="center-pane" data-stage-panel="structure" aria-label="结构与字段配置">
         <section class="pane"><div class="pane-header"><h3>Output 配置</h3></div><div class="pane-body"><div class="config-table" id="outputConfigRows" aria-live="polite"></div></div></section>
+        <section class="pane"><div class="pane-header"><h3>输出处理</h3><span class="muted">作用于定制内容和生产标注</span></div><div class="pane-body output-policy-grid">
+          <label class="toggle-field"><input id="outlineTextToggle" type="checkbox" checked /><span>文字转曲</span></label>
+          <label class="toggle-field"><input id="pathfinderMergeToggle" type="checkbox" checked /><span>文字去重</span></label>
+        </div></section>
         <section class="pane"><div class="pane-header"><h3>订单字段绑定</h3></div><div class="pane-body"><p class="v2-help">将扫描到的模板对象绑定到订单表头；多个槽位可以共用同一个订单字段。</p><div class="config-table" id="fieldBindingRows" aria-live="polite"></div></div></section>
         <section class="pane"><div class="pane-header"><h3>订单原值映射</h3></div><div class="pane-body"><p class="v2-help">将订单中的设计、字体或颜色值映射到扫描到的模板选项；单 Output 默认使用 Output_main。</p><div class="config-table" id="optionMappingRows" aria-live="polite"></div></div></section>
         <section class="pane"><div class="pane-header"><h3>Style 与尺寸验收</h3><span class="muted">误差上限 0.007mm，禁止超出</span></div><div class="pane-body"><div class="config-table" id="styleDimensionRows" aria-live="polite"></div></div></section>

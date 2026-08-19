@@ -65,6 +65,7 @@
   }
 
   function renderTables() {
+    if (typeof globalThis.syncOutputPolicyControls === "function") globalThis.syncOutputPolicyControls();
     renderOutputRows();
     renderFieldBindingRows();
     renderOptionMappingRows();

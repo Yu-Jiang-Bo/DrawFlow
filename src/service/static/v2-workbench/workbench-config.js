@@ -20,6 +20,7 @@
         scope: "local"
       },
       outputs: outputs.map((output) => withControlledGroups(output, mappings)),
+      output: collectOutputPolicy(),
       colors: collectControlledColors(),
       field_bindings: collectFieldBindings(),
       option_mappings: mappings,
@@ -27,6 +28,24 @@
       preview: { sample_rows: [], evidence: {} },
       audit: nextAudit()
     };
+  }
+
+  function collectOutputPolicy() {
+    const existing = objectOf(state.draft && state.draft.config && state.draft.config.output);
+    const outline = document.getElementById("outlineTextToggle");
+    const merge = document.getElementById("pathfinderMergeToggle");
+    return {
+      outline_text: outline ? outline.checked : existing.outline_text !== false,
+      pathfinder_merge: merge ? merge.checked : existing.pathfinder_merge !== false
+    };
+  }
+
+  function syncOutputPolicyControls() {
+    const existing = objectOf(state.draft && state.draft.config && state.draft.config.output);
+    const outline = document.getElementById("outlineTextToggle");
+    const merge = document.getElementById("pathfinderMergeToggle");
+    if (outline) outline.checked = existing.outline_text !== false;
+    if (merge) merge.checked = existing.pathfinder_merge !== false;
   }
 
 
@@ -482,6 +501,8 @@
     collectChecks,
     manualCheckReasonForConfig,
     collectControlledColors,
+    collectOutputPolicy,
+    syncOutputPolicyControls,
     nextAudit,
     styleOptionsFor,
     designOptionsFor,

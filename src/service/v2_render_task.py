@@ -99,8 +99,19 @@ def compile_v2_render_task(
         "outputs": outputs,
         "font_check": normalized_font_check,
     }
+    configured_output = contract.get("output")
+    if isinstance(configured_output, Mapping) and any(key in configured_output for key in ("outline_text", "pathfinder_merge")):
+        task["output"] = _normalize_output_policy(configured_output)
     task["task_sha256"] = _stable_sha256(task)
     return task
+
+
+def _normalize_output_policy(value: Any) -> dict[str, bool]:
+    policy = dict(value) if isinstance(value, Mapping) else {}
+    return {
+        "outline_text": bool(policy.get("outline_text", True)),
+        "pathfinder_merge": bool(policy.get("pathfinder_merge", True)),
+    }
 
 
 def stable_v2_render_task_json(task: Mapping[str, Any]) -> str:

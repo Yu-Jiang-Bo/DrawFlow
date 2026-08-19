@@ -608,6 +608,7 @@ class V2OrderOutputRenderer:
                         task_suffix=f"summary-{batch_index:03d}",
                         compatibility=rule.ai_compatibility,
                         packing=packing,
+                        rule=rule,
                     )
                 elif packing is not None:
                     self._render_packed_master(
@@ -621,6 +622,7 @@ class V2OrderOutputRenderer:
                         task_suffix=f"summary-{batch_index:03d}",
                         compatibility=rule.ai_compatibility,
                         packing=packing,
+                        rule=rule,
                     )
                 else:
                     self._render_or_compose_units(
@@ -701,6 +703,7 @@ class V2OrderOutputRenderer:
         task_suffix: str,
         compatibility: str,
         packing: Mapping[str, Any],
+        rule: Any,
     ) -> None:
         inputs: list[dict[str, Any]] = []
         component_dir = job_dir / ".v2-master-components" / safe_filename(task_suffix)
@@ -723,6 +726,7 @@ class V2OrderOutputRenderer:
                     "path": str(component_ai),
                     "color_option": frame.color_option,
                     "order_nos": _unique_order_nos(frame.units),
+                    "order_dimensions": [_v2_unit_dimensions(render_task, unit) for unit in frame.units],
                 }
             )
         self._compose_color_frames(
@@ -735,6 +739,7 @@ class V2OrderOutputRenderer:
             show_color_frame_boundary=True,
             debug_report_path=output_ai.with_suffix(".compact-layout.json"),
             task_files=task_files,
+            output_policy=_v2_output_policy(render_task, rule),
         )
 
     def _compose_png_master_pages(
@@ -796,6 +801,7 @@ class V2OrderOutputRenderer:
         task_suffix: str,
         compatibility: str,
         packing: Mapping[str, Any],
+        rule: Any,
     ) -> None:
         component_ai = job_dir / ".v2-master-components" / f"{safe_filename(task_suffix)}.ai"
         self._render_or_compose_units(
@@ -816,6 +822,7 @@ class V2OrderOutputRenderer:
                     "path": str(component_ai),
                     "color_option": "",
                     "order_nos": _unique_order_nos(production_units),
+                    "order_dimensions": [_v2_unit_dimensions(render_task, unit) for unit in production_units],
                 }
             ],
             output_ai=output_ai,
@@ -826,6 +833,7 @@ class V2OrderOutputRenderer:
             show_color_frame_boundary=False,
             debug_report_path=output_ai.with_suffix(".compact-layout.json"),
             task_files=task_files,
+            output_policy=_v2_output_policy(render_task, rule),
         )
 
     def _compose_color_frames(
@@ -840,6 +848,7 @@ class V2OrderOutputRenderer:
         show_color_frame_boundary: bool,
         debug_report_path: Path,
         task_files: list[str],
+        output_policy: Mapping[str, Any] | None = None,
     ) -> None:
         try:
             composer = getattr(self.renderer, "compose_color_frames", None)
@@ -857,6 +866,7 @@ class V2OrderOutputRenderer:
                 show_color_header=show_color_header,
                 show_color_frame_boundary=show_color_frame_boundary,
                 debug_report_path=debug_report_path,
+                output_policy=output_policy,
             )
         except V2OrderRenderError:
             raise
@@ -943,6 +953,8 @@ class V2OrderOutputRenderer:
                 input_order_nos=input_order_nos,
                 label_lines=clean_label_lines,
                 compatibility=compatibility,
+                target_dimensions_by_input=[_v2_unit_dimensions(render_task, production_unit) for production_unit in production_units],
+                output_policy=_v2_output_policy(render_task, getattr(production_units[0], "rule", None) if production_units else None),
             )
         except V2OrderRenderError:
             raise
@@ -1309,6 +1321,41 @@ def _positive_float(*values: Any) -> float:
         if number > 0:
             return number
     return 0.0
+
+
+def _v2_unit_dimensions(render_task: Mapping[str, Any], unit: Any) -> dict[str, float]:
+    payload = getattr(unit, "payload", unit)
+    output_key = str(payload.get("output_key") if isinstance(payload, Mapping) else getattr(payload, "output_key", "") or "").strip()
+    selections = payload.get("selections") if isinstance(payload, Mapping) else getattr(payload, "selections", {})
+    selected = selections.get(output_key) if isinstance(selections, Mapping) and isinstance(selections.get(output_key), Mapping) else {}
+    style_key = str(selected.get("style") or selected.get("style_option") or "").strip()
+    for output in render_task.get("outputs", []) if isinstance(render_task, Mapping) else []:
+        if output_key and str(output.get("key") or "") != output_key:
+            continue
+        for action in output.get("actions", []) if isinstance(output, Mapping) else []:
+            if action.get("type") != "fit_output_bounds" or not isinstance(action.get("dimensions"), Mapping):
+                continue
+            if style_key and str(action.get("style_key") or "") != style_key:
+                continue
+            dimensions = action["dimensions"]
+            width = _positive_float(dimensions.get("width_mm"))
+            height = _positive_float(dimensions.get("height_mm"))
+            if width and height:
+                return {"width_mm": width, "height_mm": height, "tolerance_mm": _positive_float(dimensions.get("tolerance_mm"), 0.007)}
+    return {}
+
+
+def _v2_output_policy(render_task: Mapping[str, Any], rule: Any | None = None) -> dict[str, bool]:
+    configured = render_task.get("output") if isinstance(render_task, Mapping) else None
+    if isinstance(configured, Mapping):
+        return {
+            "outline_text": bool(configured.get("outline_text", True)),
+            "pathfinder_merge": bool(configured.get("pathfinder_merge", True)),
+        }
+    return {
+        "outline_text": bool(getattr(rule, "outline_text", True)),
+        "pathfinder_merge": bool(getattr(rule, "pathfinder_merge", True)),
+    }
 
 
 __all__ = ["V2OrderOutputRenderer"]

@@ -188,6 +188,7 @@ def normalize_v2_template_contract(payload: Any) -> Dict[str, Any]:
     )
     render_layout = _normalize_metadata_object(source.get("render_layout", {}), "$.render_layout", issues)
     output = _normalize_metadata_object(source.get("output", {}), "$.output", issues)
+    _validate_output_policy(output, issues)
     checks = _normalize_checks(source.get("checks", {}), issues)
     preview = _normalize_preview(source.get("preview", {}), issues)
     audit = _normalize_audit(source.get("audit", {}), issues)
@@ -656,6 +657,12 @@ def _normalize_metadata_object(value: Any, path: str, issues: list[Dict[str, str
             continue
         normalized[key_text] = _safe_metadata_value(raw, key_path, issues)
     return normalized
+
+
+def _validate_output_policy(output: Mapping[str, Any], issues: list[Dict[str, str]]) -> None:
+    for key in ("outline_text", "pathfinder_merge"):
+        if key in output and not isinstance(output[key], bool):
+            _issue(issues, f"$.output.{key}", "Output policy values must be boolean.")
 
 
 def _mapping(value: Any, path: str, issues: list[Dict[str, str]]) -> Dict[str, Any]:

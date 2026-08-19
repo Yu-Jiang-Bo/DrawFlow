@@ -106,6 +106,8 @@ class V2TemplateRenderer:
         label_gap_mm: float = 0.8,
         label_font_size_pt: float = 6.0,
         compatibility: str = "Illustrator 8",
+        target_dimensions: Mapping[str, Any] | None = None,
+        output_policy: Mapping[str, Any] | None = None,
     ) -> str:
         task_path = Path(task_file)
         task_path.parent.mkdir(parents=True, exist_ok=True)
@@ -119,6 +121,8 @@ class V2TemplateRenderer:
             label_gap_mm=label_gap_mm,
             label_font_size_pt=label_font_size_pt,
             compatibility=compatibility,
+            target_dimensions=target_dimensions,
+            output_policy=output_policy,
         )
         task_path.write_text(
             json.dumps(
@@ -143,6 +147,7 @@ class V2TemplateRenderer:
         show_color_header: bool = False,
         show_color_frame_boundary: bool = False,
         debug_report_path: Path | str | None = None,
+        output_policy: Mapping[str, Any] | None = None,
     ) -> str:
         task_path = Path(task_file)
         task_path.parent.mkdir(parents=True, exist_ok=True)
@@ -154,6 +159,7 @@ class V2TemplateRenderer:
             show_color_header=show_color_header,
             show_color_frame_boundary=show_color_frame_boundary,
             debug_report_path=debug_report_path,
+            output_policy=output_policy,
         )
         task_path.write_text(
             json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2),
@@ -243,6 +249,7 @@ def build_v2_execution_task(
         "output_ai": str(Path(output_ai)),
         "values": normalized_values,
         "selections": normalized_selections,
+        "output": deepcopy(dict(task.get("output") or {})),
     }
     if selected_output_key:
         execution["output_key"] = selected_output_key
@@ -268,6 +275,9 @@ def build_v2_order_column_task(
     label_gap_mm: float = 0.8,
     label_font_size_pt: float = 6.0,
     compatibility: str = "Illustrator 8",
+    target_dimensions: Mapping[str, Any] | None = None,
+    target_dimensions_by_input: Sequence[Mapping[str, Any]] | None = None,
+    output_policy: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build a pure V2 order-column composition task for the shared batch executor."""
 
@@ -277,6 +287,10 @@ def build_v2_order_column_task(
         item = {"path": str(Path(path))}
         if index < len(order_nos) and order_nos[index]:
             item["order_no"] = order_nos[index]
+        if target_dimensions_by_input is not None and index < len(target_dimensions_by_input):
+            item["target_dimensions"] = deepcopy(dict(target_dimensions_by_input[index] or {}))
+        elif target_dimensions:
+            item["target_dimensions"] = deepcopy(dict(target_dimensions))
         inputs.append(item)
     payload: dict[str, Any] = {
         "type": "compose_v2_order_column",
@@ -288,6 +302,11 @@ def build_v2_order_column_task(
         "compatibility": str(compatibility or "Illustrator 8"),
         "inputs": inputs,
     }
+    if output_policy is not None:
+        payload["output"] = {
+            "outline_text": bool(dict(output_policy).get("outline_text", True)),
+            "pathfinder_merge": bool(dict(output_policy).get("pathfinder_merge", True)),
+        }
     clean_label_lines = [str(item).strip() for item in (label_lines or []) if str(item or "").strip()]
     if clean_label_lines:
         payload["label_lines"] = clean_label_lines
@@ -303,6 +322,7 @@ def build_v2_color_frames_task(
     show_color_header: bool = False,
     show_color_frame_boundary: bool = False,
     debug_report_path: Path | str | None = None,
+    output_policy: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build a pure color-frame composition task for the shared batch executor."""
 
@@ -315,6 +335,11 @@ def build_v2_color_frames_task(
         "show_color_frame_boundary": bool(show_color_frame_boundary),
         "inputs": [deepcopy(dict(item)) for item in inputs],
     }
+    if output_policy is not None:
+        payload["output"] = {
+            "outline_text": bool(dict(output_policy).get("outline_text", True)),
+            "pathfinder_merge": bool(dict(output_policy).get("pathfinder_merge", True)),
+        }
     if debug_report_path is not None:
         payload["debug"] = {"report_path": str(Path(debug_report_path))}
     return payload

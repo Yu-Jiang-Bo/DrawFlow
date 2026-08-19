@@ -36,6 +36,9 @@
         if (execution.pack_order_blocks === true) {
             renderedOutputItems = [groupRenderedOutputBlock(layer, renderedOutputItems, 0)];
         }
+        applyOutputTransforms(doc, execution.output || task.output || {});
+        var finalFitAction = selectedFitAction(task, selectedOutputKey, selections);
+        if (finalFitAction) fitRenderedOutput(renderedOutputItems, finalFitAction);
         if (execution.preview_png) fitArtboardToVisibleContent(doc, renderedOutputItems);
         var output = File(String(execution.output_ai));
         ensureFolder(output.parent);
@@ -88,6 +91,55 @@
         cleanupAuxiliaryObjects(renderedItems);
         removeSourceOnlyCopies(copied);
         return renderedItems;
+    }
+
+    function selectedFitAction(taskData, outputKey, selectedValues) {
+        var chosen = String(outputKey || "");
+        var outputs = taskData.outputs || [];
+        for (var outputIndex = 0; outputIndex < outputs.length; outputIndex++) {
+            var output = outputs[outputIndex] || {};
+            if (chosen && String(output.key || "") !== chosen) continue;
+            var selected = selectedValues[String(output.key || "")] || {};
+            var actions = output.actions || [];
+            for (var actionIndex = 0; actionIndex < actions.length; actionIndex++) {
+                var action = actions[actionIndex] || {};
+                if (action.type === "fit_output_bounds" && String(selected.style || "") === String(action.style_key || "")) return action;
+            }
+        }
+        return null;
+    }
+
+    function applyOutputTransforms(doc, policy) {
+        if (!policy || policy.outline_text !== true) return;
+        outlineAllTextFrames(doc, policy.pathfinder_merge === true);
+    }
+
+    function outlineAllTextFrames(doc, pathfinderMerge) {
+        var frames = [];
+        for (var layerIndex = 0; layerIndex < doc.layers.length; layerIndex++) collectTextFrames(doc.layers[layerIndex], frames);
+        for (var index = frames.length - 1; index >= 0; index--) {
+            var outline = frames[index].createOutline();
+            if (!outline) throw new Error("V2 text outline failed");
+            if (pathfinderMerge) cleanupOutline(outline);
+        }
+    }
+
+    function collectTextFrames(container, result) {
+        if (!container || !container.pageItems) return;
+        for (var index = 0; index < container.pageItems.length; index++) {
+            var item = container.pageItems[index];
+            if (item.typename === "TextFrame") result.push(item);
+            if (item.typename === "GroupItem" || item.typename === "Layer") collectTextFrames(item, result);
+        }
+    }
+
+    function cleanupOutline(item) {
+        if (!item) throw new Error("V2 outline item is missing");
+        try { app.executeMenuCommand("deselectall"); } catch (ignored) {}
+        item.selected = true;
+        app.executeMenuCommand("Live Pathfinder Add");
+        app.executeMenuCommand("expandStyle");
+        item.selected = false;
     }
 
     function isSelected(action, selected) {
@@ -489,9 +541,8 @@
         var targetHeight = mmToPt(Number(dimensions.height_mm || 0));
         if (targetWidth <= 0 || targetHeight <= 0) throw new Error("V2 output target dimensions are invalid");
         var bounds = unionBounds(items, true);
-        var fitInset = Math.min(mmToPt(0.01), targetWidth / 1000, targetHeight / 1000);
-        var fitTargetWidth = targetWidth - fitInset;
-        var fitTargetHeight = targetHeight - fitInset;
+        var fitTargetWidth = targetWidth - mmToPt(0.0001);
+        var fitTargetHeight = targetHeight - mmToPt(0.0001);
         var targetLeft = Number(bounds[0]);
         var targetTop = Number(bounds[1]);
         for (var attempt = 0; attempt < 4; attempt++) {
@@ -541,9 +592,9 @@
         var width = Math.abs(Number(bounds[2]) - Number(bounds[0]));
         var height = Math.abs(Number(bounds[1]) - Number(bounds[3]));
         var epsilon = mmToPt(0.0005);
-        if (width > targetWidth + epsilon || height > targetHeight + epsilon) {
+        if (Math.abs(width - targetWidth) > epsilon || Math.abs(height - targetHeight) > epsilon) {
             throw new Error(
-                "V2 output exceeds target bounds: actual="
+                "V2 output exceeds target bounds or does not match target bounds: actual="
                 + width + "x" + height
                 + ", target=" + targetWidth + "x" + targetHeight
                 + ", tolerance=" + epsilon
