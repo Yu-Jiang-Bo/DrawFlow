@@ -4067,12 +4067,12 @@ def test_v2_workbench_hides_technical_validation_details_in_blockers_and_tooltip
     )
 
 
-def test_v2_workbench_real_trial_render_uses_bound_headers_saved_revision_and_single_output():
+def test_v2_workbench_real_trial_render_uses_draft_template_id_when_list_case_differs():
     run_node(
         r"""
         (async () => {
           let currentDraft = {
-            metadata: { template_id: "V2REALPREVIEW", name: "Real Preview", shop_name: "" },
+            metadata: { template_id: "test", name: "Real Preview", shop_name: "" },
             manifest: { draft_revision: "d0001" },
             scan: { outputs: [{
               key: "Output_main",
@@ -4108,7 +4108,7 @@ def test_v2_workbench_real_trial_render_uses_bound_headers_saved_revision_and_si
           async function fakeFetch(url, options = {}) {
             const textUrl = String(url);
             urls.push(textUrl);
-            if (textUrl === "/api/v2/templates") return response({ templates: [{ template_id: "V2REALPREVIEW", name: "Real Preview" }] });
+            if (textUrl === "/api/v2/templates") return response({ templates: [{ template_id: "Test", name: "Real Preview" }] });
             if (textUrl.endsWith("/draft") && (!options.method || options.method === "GET")) return response({ draft: currentDraft });
             if (textUrl.endsWith("/validate")) return response({ validation: { can_save: true, can_publish: false, checks: { ...confirmedChecks, preview: { status: "pending", reason: "请试渲染" } } } });
             if (textUrl.endsWith("/draft") && options.method === "POST") {
@@ -4159,10 +4159,10 @@ def test_v2_workbench_real_trial_render_uses_bound_headers_saved_revision_and_si
           assert.deepStrictEqual(trialBody.sample_row, { Size: "Small", Design: "2", Name: "Ava", Title: "My title" });
           assert.deepStrictEqual(publicationBody, { expected_draft_revision: "d0003" });
           assert.strictEqual(global.currentDraftRevision(global.DrawFlowV2WorkbenchContext.state.draft), "d0003");
-          assert(urls.indexOf("/api/v2/templates/V2REALPREVIEW/draft") < urls.indexOf("/local/v2/templates/V2REALPREVIEW/trial-render"));
-          const proofIndex = urls.indexOf("/local/v2/templates/V2REALPREVIEW/trial-render");
-          const publicationIndex = urls.indexOf("/api/v2/templates/V2REALPREVIEW/publication-check");
-          const versionsIndex = urls.findIndex((url, index) => index > publicationIndex && url === "/api/v2/templates/V2REALPREVIEW/versions");
+          assert(urls.indexOf("/api/v2/templates/test/draft") < urls.indexOf("/local/v2/templates/test/trial-render"));
+          const proofIndex = urls.indexOf("/local/v2/templates/test/trial-render");
+          const publicationIndex = urls.indexOf("/api/v2/templates/test/publication-check");
+          const versionsIndex = urls.findIndex((url, index) => index > publicationIndex && url === "/api/v2/templates/test/versions");
           assert(proofIndex < publicationIndex && publicationIndex < versionsIndex);
           assert.strictEqual(app.elements.previewSideTabs.hidden, true);
           const images = allDescendants(app.elements.previewArtworkPane).filter((node) => node.tagName === "IMG");

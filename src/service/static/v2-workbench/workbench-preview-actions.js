@@ -56,7 +56,9 @@
       return;
     }
     state.previewSampleValues = { ...sampleRow };
-    const request = beginTrialRequest(sampleRow, state.selectedTemplateId || formBasics().template_id);
+    // 保存草稿会以表单中的规范模板 ID 更新当前选择。这里也必须使用同一 ID，
+    // 否则历史数据中仅大小写不同的目录名会让后续请求被误判为过期。
+    const request = beginTrialRequest(sampleRow, formBasics().template_id || state.selectedTemplateId);
     state.previewMessage = "正在保存草稿并执行真实试渲染。";
     renderPreviewStage();
     try {
