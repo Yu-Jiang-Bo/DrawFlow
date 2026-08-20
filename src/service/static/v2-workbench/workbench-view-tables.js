@@ -31,7 +31,7 @@
 
   function fillDraftFields(draft, fallbackId) {
     const template = objectOf(draft && (draft.metadata || draft.template || objectOf(draft.manifest).template));
-    setValue("templateId", template.template_id || fallbackId || "");
+    setValue("templateId", fallbackId || template.template_id || "");
     setValue("templateName", template.name || "");
     setValue("shopName", template.shop_name || "");
     const manifest = objectOf(draft && draft.manifest);

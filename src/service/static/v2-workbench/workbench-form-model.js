@@ -20,8 +20,12 @@
 
 
   function formBasics() {
+    // A selected template already owns persisted AI assets, scan evidence and
+    // version history.  Its ID is therefore the save identity, not an editable
+    // display value from the form.
+    const selectedTemplateId = cleanText(state.selectedTemplateId);
     return {
-      template_id: cleanText(valueOf("templateId")),
+      template_id: selectedTemplateId || cleanText(valueOf("templateId")),
       name: cleanText(valueOf("templateName")),
       shop_name: cleanText(valueOf("shopName"))
     };
@@ -220,11 +224,18 @@
   }
 
 
+  function sameTemplateIdentity(left, right) {
+    const first = cleanText(left);
+    const second = cleanText(right);
+    return Boolean(first && second && first.toLowerCase() === second.toLowerCase());
+  }
+
+
   function canRetainPreviousScan(scan, targetTemplateId) {
     const targetId = String(targetTemplateId || "").trim();
-    if (!targetId || String(state.selectedTemplateId || "").trim() !== targetId) return false;
+    if (!targetId || !sameTemplateIdentity(state.selectedTemplateId, targetId)) return false;
     const draftMetadata = objectOf(objectOf(state.draft).metadata);
-    return String(draftMetadata.template_id || "").trim() === targetId && hasScanEvidence(scan);
+    return sameTemplateIdentity(draftMetadata.template_id, targetId) && hasScanEvidence(scan);
   }
 
 
@@ -242,7 +253,7 @@
   function isCurrentTemplateResponse(draft, targetTemplateId) {
     const targetId = String(targetTemplateId || "").trim();
     const responseId = String(objectOf(objectOf(draft).metadata).template_id || "").trim();
-    return Boolean(targetId && responseId === targetId && String(state.selectedTemplateId || "").trim() === targetId);
+    return Boolean(targetId && sameTemplateIdentity(responseId, targetId) && sameTemplateIdentity(state.selectedTemplateId, targetId));
   }
 
 
@@ -265,6 +276,7 @@
     optionOutputKey,
     emptyOutput,
     hasScanEvidence,
+    sameTemplateIdentity,
     canRetainPreviousScan,
     prepareSaveTarget,
     isCurrentTemplateResponse

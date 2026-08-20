@@ -4074,7 +4074,7 @@ def test_v2_workbench_hides_technical_validation_details_in_blockers_and_tooltip
     )
 
 
-def test_v2_workbench_real_trial_render_uses_draft_template_id_when_list_case_differs():
+def test_v2_workbench_real_trial_render_keeps_selected_template_id_when_list_case_differs():
     run_node(
         r"""
         (async () => {
@@ -4158,6 +4158,7 @@ def test_v2_workbench_real_trial_render_uses_draft_template_id_when_list_case_di
 
           assert(draftPostBody, "trial render must save draft first");
           assert(trialBody, "trial render endpoint must be called");
+          assert.strictEqual(draftPostBody.config.template.template_id, "Test");
           assert.deepStrictEqual(draftPostBody.config.field_bindings, { style: "Size", design: "Design", name1: "Name", name2: "Title" });
           assert.deepStrictEqual(draftPostBody.config.option_mappings, currentDraft.config.option_mappings);
           assert.deepStrictEqual(draftPostBody.config.outputs[0].design.options[0].slots.map((slot) => slot.source_field), ["name1", "name2"]);
@@ -4166,10 +4167,10 @@ def test_v2_workbench_real_trial_render_uses_draft_template_id_when_list_case_di
           assert.deepStrictEqual(trialBody.sample_row, { Size: "Small", Design: "2", Name: "Ava", Title: "My title" });
           assert.deepStrictEqual(publicationBody, { expected_draft_revision: "d0003" });
           assert.strictEqual(global.currentDraftRevision(global.DrawFlowV2WorkbenchContext.state.draft), "d0003");
-          assert(urls.indexOf("/api/v2/templates/test/draft") < urls.indexOf("/local/v2/templates/test/trial-render"));
-          const proofIndex = urls.indexOf("/local/v2/templates/test/trial-render");
-          const publicationIndex = urls.indexOf("/api/v2/templates/test/publication-check");
-          const versionsIndex = urls.findIndex((url, index) => index > publicationIndex && url === "/api/v2/templates/test/versions");
+          assert(urls.indexOf("/api/v2/templates/Test/draft") < urls.indexOf("/local/v2/templates/Test/trial-render"));
+          const proofIndex = urls.indexOf("/local/v2/templates/Test/trial-render");
+          const publicationIndex = urls.indexOf("/api/v2/templates/Test/publication-check");
+          const versionsIndex = urls.findIndex((url, index) => index > publicationIndex && url === "/api/v2/templates/Test/versions");
           assert(proofIndex < publicationIndex && publicationIndex < versionsIndex);
           assert.strictEqual(app.elements.previewSideTabs.hidden, true);
           const images = allDescendants(app.elements.previewArtworkPane).filter((node) => node.tagName === "IMG");
@@ -4486,7 +4487,7 @@ def test_v2_workbench_save_keeps_scan_when_response_draft_omits_scan():
     )
 
 
-def test_v2_workbench_save_does_not_retain_scan_after_template_id_switch():
+def test_v2_workbench_save_keeps_scan_when_existing_template_id_is_edited():
     run_node(
         r"""
         (async () => {
@@ -4504,7 +4505,7 @@ def test_v2_workbench_save_does_not_retain_scan_after_template_id_switch():
             if (textUrl.endsWith("/validate")) return response({ validation: { can_save: true, checks: {} } });
             if (textUrl.endsWith("/draft") && options.method === "POST") {
               saveBody = JSON.parse(options.body);
-              return response({ draft: { metadata: { template_id: "V2SCAN-B", name: "Template B", shop_name: "" }, config: saveBody.config } });
+              return response({ draft: { metadata: { template_id: "V2SCAN-A", name: "Template B", shop_name: "" }, config: saveBody.config } });
             }
             return response({});
           }
@@ -4516,7 +4517,8 @@ def test_v2_workbench_save_does_not_retain_scan_after_template_id_switch():
           app.elements.templateName.value = "Template B";
           await global.saveDraft();
           assert(saveBody, "必须发送保存请求");
-          assert.deepStrictEqual(global.DrawFlowV2WorkbenchContext.state.scan, {}, "切换模板后不能沿用 A 的扫描结构");
+          assert.strictEqual(saveBody.config.template.template_id, "V2SCAN-A");
+          assert.strictEqual(global.DrawFlowV2WorkbenchContext.state.scan.outputs[0].key, "Output_A", "已有模板不能因编辑 ID 而丢失扫描结构");
         })().catch((error) => { console.error(error); process.exit(1); });
         """
     )
@@ -4650,6 +4652,48 @@ def test_v2_workbench_refresh_keeps_scan_for_missing_or_invalid_scan_response():
             await global.safeRefreshDraft("V2REFRESHSCAN");
             assert.strictEqual(global.DrawFlowV2WorkbenchContext.state.scan.outputs[0].design.options[0].key, "Design01");
           }
+        })().catch((error) => { console.error(error); process.exit(1); });
+        """
+    )
+
+
+def test_v2_workbench_keeps_existing_template_identity_when_display_name_changes():
+    run_node(
+        r"""
+        (async () => {
+          const urls = [];
+          let savedBody = null;
+          const draft = {
+            metadata: { template_id: "TEST", name: "Original name", shop_name: "" },
+            manifest: { draft_revision: "d0001" },
+            config: { outputs: [], field_bindings: {}, option_mappings: [], checks: {} },
+            scan: { outputs: [{ key: "Output_main" }] }
+          };
+          async function fakeFetch(url, options = {}) {
+            const textUrl = String(url);
+            urls.push({ url: textUrl, method: options.method || "GET" });
+            if (textUrl === "/api/v2/templates") return response({ templates: [{ template_id: "TEST", name: "Original name" }] });
+            if (textUrl.endsWith("/draft") && (!options.method || options.method === "GET")) return response({ draft });
+            if (textUrl.endsWith("/validate")) return response({ validation: { can_save: true, checks: {} } });
+            if (textUrl === "/api/v2/templates/TEST/draft" && options.method === "POST") {
+              savedBody = JSON.parse(options.body);
+              return response({ draft: { ...draft, metadata: { ...draft.metadata, name: savedBody.name }, config: savedBody.config } });
+            }
+            throw new Error(`unexpected request ${textUrl}`);
+          }
+          const app = createApp(fakeFetch);
+          await flush();
+          app.elements.templateList.children[0].dispatch("click");
+          await flush();
+          assert.strictEqual(app.elements.templateId.disabled, true, "已有模板的 ID 必须锁定");
+          app.elements.templateId.value = "NEW-TEMPLATE";
+          app.elements.templateName.value = "Renamed display name";
+          assert.strictEqual(global.formBasics().template_id, "TEST");
+          await global.saveDraft();
+          assert.strictEqual(savedBody.name, "Renamed display name");
+          assert.strictEqual(savedBody.config.template.template_id, "TEST");
+          assert(urls.some((item) => item.url === "/api/v2/templates/TEST/draft" && item.method === "POST"));
+          assert(!urls.some((item) => item.url === "/api/v2/templates" && item.method === "POST"));
         })().catch((error) => { console.error(error); process.exit(1); });
         """
     )

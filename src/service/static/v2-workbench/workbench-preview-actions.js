@@ -56,8 +56,7 @@
       return;
     }
     state.previewSampleValues = { ...sampleRow };
-    // 保存草稿会以表单中的规范模板 ID 更新当前选择。这里也必须使用同一 ID，
-    // 否则历史数据中仅大小写不同的目录名会让后续请求被误判为过期。
+    // 已选模板的列表 ID 是唯一请求身份；历史草稿元数据仅大小写不同也不能改写它。
     const request = beginTrialRequest(sampleRow, formBasics().template_id || state.selectedTemplateId);
     state.previewMessage = "正在保存草稿并执行真实试渲染。";
     renderPreviewStage();
@@ -72,7 +71,7 @@
       }
       const savedDraft = saved.draft;
       const revision = currentDraftRevision(savedDraft);
-      const templateId = cleanText(objectOf(savedDraft && savedDraft.metadata).template_id || state.selectedTemplateId || formBasics().template_id);
+      const templateId = cleanText(state.selectedTemplateId || formBasics().template_id);
       if (!templateId || !revision) throw new Error("草稿还没有可用于试渲染的版本，请重新保存草稿。");
       request.savedRevision = revision;
       if (templateId !== request.templateId || !trialRequestIsCurrent(request)) return;
@@ -84,7 +83,7 @@
       if (!trialRequestIsCurrent(request)) return;
       const responseDraft = objectOf(payload.draft);
       const responseTemplateId = cleanText(objectOf(responseDraft.metadata).template_id);
-      if (responseTemplateId && responseTemplateId !== request.templateId) return;
+      if (responseTemplateId && !sameTemplateIdentity(responseTemplateId, request.templateId)) return;
       const responseRevision = currentDraftRevision(responseDraft);
       if (responseRevision) request.savedRevision = responseRevision;
       applyWorkbenchResponse(payload);

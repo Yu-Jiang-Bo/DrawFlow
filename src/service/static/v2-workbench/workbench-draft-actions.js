@@ -31,6 +31,7 @@
     if (typeof resetPreviewState === "function") resetPreviewState();
     if (typeof clearValidationFeedback === "function") clearValidationFeedback("正在读取模板配置。");
     state.selectedTemplateId = templateId || "";
+    setDisabled("templateId", Boolean(state.selectedTemplateId));
     fillDraftFields(null, templateId);
     if (typeof updateCheckRail === "function" && typeof defaultChecks === "function") updateCheckRail(defaultChecks());
     if (!templateId) return;
@@ -62,6 +63,7 @@
     state.draftLoadRequestId += 1;
     state.draft = null;
     state.scan = {};
+    setDisabled("templateId", false);
     if (typeof resetPreviewState === "function") resetPreviewState();
     if (typeof clearValidationFeedback === "function") clearValidationFeedback();
     if (typeof updateCheckRail === "function" && typeof defaultChecks === "function") updateCheckRail(defaultChecks());
