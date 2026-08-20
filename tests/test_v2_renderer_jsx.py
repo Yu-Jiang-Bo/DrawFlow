@@ -404,7 +404,9 @@ if (exportedAs !== 'preview.png') throw new Error('preview PNG was not exported'
 if (!exportOptions || exportOptions.artBoardClipping !== true || exportOptions.transparency !== true) throw new Error('preview PNG options mismatch');
 const visible = outputLayer.pageItems[0].visibleBounds;
 const artboard = outputDoc.artboards[0].artboardRect;
-if (JSON.stringify(artboard) !== JSON.stringify(visible)) throw new Error('preview artboard does not match visible bounds');
+const expectedArtboard = [visible[0] - 12, visible[1] + 12, visible[2] + 12, visible[3] - 12];
+if (JSON.stringify(artboard) !== JSON.stringify(expectedArtboard)) throw new Error('preview artboard does not include safe visible-bounds margin');
+if (JSON.stringify(savedArtboard) !== JSON.stringify(visible)) throw new Error('formal AI saved preview margin into its artboard');
 """)
 
     result = run_node(harness)
@@ -1191,6 +1193,56 @@ const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
 if (child(designCopy, 'slot_name').contents !== '__custom__') throw new Error('direct text did not derive both tail samples for arbitrary end letters: ' + child(designCopy, 'slot_name').contents);
 if (designCopy.pageItems.find(item => item.name === 'tail_name_first_m')) throw new Error('direct text retained first tail sample helper');
 if (designCopy.pageItems.find(item => item.name === 'tail_name_last_a')) throw new Error('direct text retained last tail sample helper');
+""")
+
+    result = run_node(harness)
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_v2_renderer_derives_plain_tail_sample_pua_for_any_end_letter():
+    tails = [
+        {
+            "key": "tail_name_last_m",
+            "position": "last",
+            "sample": "m",
+            "glyph_mode": "plain_text",
+            "path": "Template/Output_main/Design/Design03/tail_name_last_m",
+        }
+    ]
+    task = tail_text_task(tails, value="Mastka")
+    task["render_task"]["outputs"][0]["actions"][1]["preset"] = "direct_text"
+    task["mock_pua_tail_base"] = 0xE054
+    harness = node_mock_harness(task, """
+const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
+const expected = 'Mastk' + String.fromCharCode(0xE054);
+if (child(designCopy, 'slot_name').contents !== expected) throw new Error('direct text did not derive PUA tail glyph: ' + child(designCopy, 'slot_name').contents);
+if (designCopy.pageItems.find(item => item.name === 'tail_name_last_m')) throw new Error('direct text retained plain tail sample helper');
+""")
+
+    result = run_node(harness)
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_v2_renderer_rejects_plain_tail_pua_when_alphabet_is_incomplete():
+    tails = [
+        {
+            "key": "tail_name_last_m",
+            "position": "last",
+            "sample": "m",
+            "glyph_mode": "plain_text",
+            "path": "Template/Output_main/Design/Design03/tail_name_last_m",
+        }
+    ]
+    task = tail_text_task(tails, value="Mastka")
+    task["render_task"]["outputs"][0]["actions"][1]["preset"] = "direct_text"
+    task["mock_pua_tail_base"] = 0xE054
+    task["mock_pua_incomplete_base"] = 0xE054
+    harness = node_mock_harness(task, """
+const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
+if (child(designCopy, 'slot_name').contents !== 'Mastka') throw new Error('incomplete PUA alphabet was adopted: ' + child(designCopy, 'slot_name').contents);
+if (designCopy.pageItems.find(item => item.name === 'tail_name_last_m')) throw new Error('direct text retained rejected tail sample helper');
 """)
 
     result = run_node(harness)
@@ -2023,6 +2075,7 @@ const noResizeNames = new Set(task.mock_no_resize_names || []);
 let domMoveFailures = new Set(task.fail_dom_move_once || []);
 const folder = {{ exists: true, parent: null, create: () => true }};
 let savedAs = '';
+let savedArtboard = null;
 let exportedAs = '';
 let exportOptions = null;
 const writtenFiles = {{}};
@@ -2059,14 +2112,40 @@ function item(typename, name, contents, children, styleToken, bounds, options) {
     name,
     kind: opts.kind || '',
     pathToken: opts.pathToken || '',
+    puaTailBase: opts.puaTailBase || 0,
+    outlineToken: opts.outlineToken || '',
     styleToken: styleToken || '',
     pageItems: children || [],
     translateCalls: 0,
     resizeCalls: 0,
     duplicate: function(targetLayer) {{
       const copy = clone(this);
-      attach(targetLayer, copy);
+      attach(targetLayer || this.parent, copy);
       return copy;
+    }},
+    createOutline: function() {{
+      const code = text.length === 1 ? text.charCodeAt(0) : 0;
+      const matchesTailSample = opts.puaTailBase && (text === 'm' || code === Number(opts.puaTailBase) + 12);
+      const token = matchesTailSample ? 'tail-sample-m' : ('glyph-' + code);
+      let points;
+      if (token === 'tail-sample-m') {{
+        points = [[0, 0], [1, 0], [1, 1], [0, 1]];
+      }} else {{
+        const puaIndex = opts.puaTailBase ? code - Number(opts.puaTailBase) : -1;
+        const geometryCode = task.mock_pua_incomplete_base === Number(opts.puaTailBase) && puaIndex === 1
+          ? code - 1
+          : code;
+        points = [];
+        for (let pointIndex = 0; pointIndex < 4 + (geometryCode % 26); pointIndex++) {{
+          points.push([pointIndex / (3 + (geometryCode % 26)), pointIndex % 2]);
+        }}
+      }}
+      const path = item('PathItem', '', '', [], '', this.visibleBounds, {{ pathPoints: points, closed: true }});
+      const outlined = item('GroupItem', '', '', [path], '', this.visibleBounds);
+      const parent = this.parent;
+      this.remove();
+      if (parent) attach(parent, outlined);
+      return outlined;
     }},
     remove: function() {{
       if (!this.parent || !this.parent.pageItems) return;
@@ -2150,6 +2229,11 @@ function item(typename, name, contents, children, styleToken, bounds, options) {
   Object.defineProperty(node, 'visibleBounds', {{
     get: () => {{
       if (node.fromCopy && visibleBoundsFailures.has(node.name)) throw new Error('visible bounds unavailable: ' + node.name);
+      const code = text.length === 1 ? text.charCodeAt(0) : 0;
+      if (opts.puaTailBase) {{
+        if (text === 'm' || code === Number(opts.puaTailBase) + 12) return [box[0], box[1], box[0] + 40, box[3]];
+        if (code >= 0xE000 && code <= 0xF8FF) return [box[0], box[1], box[0] + 10, box[3]];
+      }}
       const bounds = node.pageItems.length ? union(node.pageItems.map(item => item.visibleBounds)) : box.slice();
       const resizePadding = node.fromCopy && node.resizeCalls > 0 ? Number(visibleBoundsPaddingAfterResize[node.name] || 0) : 0;
       const padding = resizePadding;
@@ -2158,6 +2242,11 @@ function item(typename, name, contents, children, styleToken, bounds, options) {
     set: value => {{ box = value.slice(); }}
   }});
   Object.defineProperty(node, 'geometricBounds', {{ get: () => box.slice() }});
+  node.closed = opts.closed === true;
+  node.pathPoints = (opts.pathPoints || []).map(point => {{
+    const anchor = [box[0] + Number(point[0]) * (box[2] - box[0]), box[3] + Number(point[1]) * (box[1] - box[3])];
+    return {{ anchor, leftDirection: anchor.slice(), rightDirection: anchor.slice() }};
+  }});
   for (const childNode of node.pageItems) childNode.parent = node;
   return node;
 }}
@@ -2192,7 +2281,8 @@ function clone(node) {{
   const copy = item(node.typename, node.name, node.contents, node.pageItems.map(clone), node.styleToken, node.visibleBounds, {{
     kind: node.kind,
     pathToken: node.pathToken,
-    textSize: node.textSize
+    textSize: node.textSize,
+    puaTailBase: node.puaTailBase
   }});
   copy.fromCopy = true;
   return copy;
@@ -2231,6 +2321,7 @@ const design03 = item('GroupItem', 'Design03', '', [
   item('TextFrame', 'tail_name_first_a', task.mock_first_tail_sample || 'a', [], 'First-tail-style'),
   item('TextFrame', 'tail_name_first_m', task.mock_first_tail_sample || 'm', [], 'First-tail-style'),
   item('TextFrame', 'tail_name_last_a', task.mock_last_tail_sample || 'a', [], 'Last-tail-style'),
+  item('TextFrame', 'tail_name_last_m', 'm', [], 'Last-tail-style', undefined, {{ puaTailBase: task.mock_pua_tail_base || 0 }}),
   item('TextFrame', 'tail_year_tail_last_a', 'a', [], 'Year-last-tail-style'),
   item('TextFrame', 'tail_name_1', 'Tail 1', [], 'Tail-style'),
   item('TextFrame', 'tail_name_2', 'Tail 2', [], 'Tail-style'),
@@ -2267,7 +2358,7 @@ const outputDoc = {{
   layers: [outputLayer],
   artboards: [{{ artboardRect: [0, 1000, 1000, 0] }}],
   selection: [],
-  saveAs: file => {{ savedAs = file.fsName; }},
+  saveAs: file => {{ savedAs = file.fsName; savedArtboard = outputDoc.artboards[0].artboardRect.slice(); }},
   // Illustrator appends the PNG24 extension automatically.
   exportFile: (file, type, options) => {{ exportedAs = file.fsName + '.png'; exportOptions = options; }},
   close: () => undefined

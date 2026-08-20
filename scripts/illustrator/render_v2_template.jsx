@@ -24,6 +24,7 @@
     var selectedOutputKey = String(execution.output_key || "");
     var renderedOutputItems = [];
     var renderedOutputCount = 0;
+    var tailPuaBaseCache = {};
 
     try {
         for (var outputIndex = 0; outputIndex < (task.outputs || []).length; outputIndex++) {
@@ -39,12 +40,15 @@
         applyOutputTransforms(doc, execution.output || task.output || {});
         var finalFitAction = selectedFitAction(task, selectedOutputKey, selections);
         if (finalFitAction) fitRenderedOutput(renderedOutputItems, finalFitAction);
-        if (execution.preview_png) fitArtboardToVisibleContent(doc, renderedOutputItems);
+        if (execution.preview_png) fitArtboardToVisibleContent(doc, renderedOutputItems, 0);
         var output = File(String(execution.output_ai));
         ensureFolder(output.parent);
         if (output.exists) output.remove();
         saveAsAI8(doc, output);
-        if (execution.preview_png) exportPreviewPNG(doc, File(String(execution.preview_png)), execution.preview_dpi);
+        if (execution.preview_png) {
+            fitArtboardToVisibleContent(doc, renderedOutputItems, 12);
+            exportPreviewPNG(doc, File(String(execution.preview_png)), execution.preview_dpi);
+        }
         writeLayoutWarnings(execution.layout_warning_file, layoutWarnings);
         return output.fsName;
     } finally {
@@ -340,7 +344,7 @@
             var tail = findPageItemByRelativePath(root, relativePath(String(spec.path || ""), sourcePath));
             var tailFrame = firstTextFrame(tail);
             if (!tailFrame) throw new Error("V2 tail sample has no text frame: " + String(spec.key || ""));
-            var glyph = V2TailText.tailGlyphForSpec(String(endpoint).toLowerCase(), spec);
+            var glyph = directTailGlyph(tailFrame, endpoint, spec, position);
             var segment = V2TailText.tailSampleSegment(String(tailFrame.contents || ""), glyph, position);
             replacements.push({
                 index: endpointIndex,
@@ -355,6 +359,151 @@
         }
         parsed.main_text = text;
         return parsed;
+    }
+
+    function directTailGlyph(tailFrame, endpoint, spec, position) {
+        var letter = String(endpoint || "").toLowerCase();
+        var fallback = V2TailText.tailGlyphForSpec(letter, spec);
+        if (!isPlainTextTailSpec(spec)) return fallback;
+        var sampleText = String(tailFrame.contents || "");
+        var sampleIndex = tailSampleLatinIndex(sampleText, position);
+        if (sampleText.length !== 1 || sampleIndex !== 0) return fallback;
+        var base = inferPuaBaseFromTailSample(tailFrame, sampleText.charAt(0).toLowerCase());
+        return base ? String.fromCharCode(base + letter.charCodeAt(0) - 97) : fallback;
+    }
+
+    function tailSampleLatinIndex(text, position) {
+        var start = position === "first" ? 0 : String(text || "").length - 1;
+        var step = position === "first" ? 1 : -1;
+        for (var index = start; index >= 0 && index < String(text || "").length; index += step) {
+            if (/^[A-Za-z]$/.test(String(text || "").charAt(index))) return index;
+        }
+        return -1;
+    }
+
+    function isPlainTextTailSpec(spec) {
+        if (String((spec || {}).glyph_mode || "") !== "plain_text") return false;
+        if ((spec || {}).pua_base !== undefined && String((spec || {}).pua_base || "") !== "") return false;
+        var map = (spec || {}).glyph_map || {};
+        for (var key in map) if (map.hasOwnProperty(key)) return false;
+        return true;
+    }
+
+    function inferPuaBaseFromTailSample(frame, sampleLetter) {
+        var sampleIndex = sampleLetter.charCodeAt(0) - 97;
+        if (sampleIndex < 0 || sampleIndex > 25) return 0;
+        var sourceEvidence = outlinedTextEvidence(frame);
+        if (!sourceEvidence) return 0;
+        var sourceWidth = Math.abs(Number(sourceEvidence.bounds[2]) - Number(sourceEvidence.bounds[0]));
+        var sourceHeight = Math.abs(Number(sourceEvidence.bounds[1]) - Number(sourceEvidence.bounds[3]));
+        if (sourceWidth <= 0 || sourceHeight <= 0 || !sourceEvidence.signature) return 0;
+        var cacheKey = tailPuaSampleCacheKey(frame, sampleLetter, sourceWidth, sourceHeight);
+        if (tailPuaBaseCache.hasOwnProperty(cacheKey)) return tailPuaBaseCache[cacheKey];
+        var base = 0;
+        for (var candidate = 0xE000; candidate <= 0xF8FF - 25; candidate++) {
+            var candidateEvidence = outlinedTailGlyphEvidence(frame, candidate + sampleIndex);
+            if (!candidateEvidence || candidateEvidence.signature !== sourceEvidence.signature) continue;
+            if (puaTailAlphabetIsComplete(frame, candidate)) {
+                base = candidate;
+                break;
+            }
+        }
+        tailPuaBaseCache[cacheKey] = base;
+        return base;
+    }
+
+    function tailPuaSampleCacheKey(frame, sampleLetter, width, height) {
+        var fontName = "";
+        try { fontName = String(frame.textRange.characterAttributes.textFont.name || ""); } catch (error) {}
+        return fontName + "|" + sampleLetter + "|" + Math.round(width * 100) + "x" + Math.round(height * 100);
+    }
+
+    function puaTailAlphabetIsComplete(frame, base) {
+        var signatures = {};
+        for (var index = 0; index < 26; index++) {
+            var evidence = outlinedTailGlyphEvidence(frame, base + index);
+            if (!evidence || !evidence.signature || signatures.hasOwnProperty(evidence.signature)) return false;
+            signatures[evidence.signature] = true;
+        }
+        return true;
+    }
+
+    function outlinedTailGlyphEvidence(frame, code) {
+        var duplicate = null;
+        try {
+            duplicate = frame.duplicate();
+            duplicate.contents = String.fromCharCode(code);
+            return outlinedTextEvidence(duplicate);
+        } catch (error) {
+            return null;
+        } finally {
+            removePageItem(duplicate);
+        }
+    }
+
+    function outlinedTextEvidence(frame) {
+        var duplicate = null;
+        var outlined = null;
+        try {
+            duplicate = frame.duplicate();
+            outlined = duplicate.createOutline();
+            var bounds = measuredBounds(outlined);
+            var signature = outlineGeometrySignature(outlined, bounds);
+            return signature ? { bounds: bounds, signature: signature } : null;
+        } catch (error) {
+            return null;
+        } finally {
+            removePageItem(outlined || duplicate);
+        }
+    }
+
+    function outlineGeometrySignature(item, bounds) {
+        var paths = [];
+        collectOutlinePathSignatures(item, bounds, paths);
+        if (!paths.length) return "";
+        paths.sort();
+        return paths.join("|");
+    }
+
+    function collectOutlinePathSignatures(item, bounds, paths) {
+        if (!item) return;
+        if (item.typename === "PathItem") {
+            var signature = outlinePathSignature(item, bounds);
+            if (signature) paths.push(signature);
+            return;
+        }
+        if (item.typename === "CompoundPathItem" && item.pathItems) {
+            for (var pathIndex = 0; pathIndex < item.pathItems.length; pathIndex++) {
+                collectOutlinePathSignatures(item.pathItems[pathIndex], bounds, paths);
+            }
+            return;
+        }
+        var children = item.pageItems || [];
+        for (var childIndex = 0; childIndex < children.length; childIndex++) {
+            collectOutlinePathSignatures(children[childIndex], bounds, paths);
+        }
+    }
+
+    function outlinePathSignature(path, bounds) {
+        var points = path.pathPoints || [];
+        if (!points.length) return "";
+        var width = Math.abs(Number(bounds[2]) - Number(bounds[0]));
+        var height = Math.abs(Number(bounds[1]) - Number(bounds[3]));
+        if (width <= 0 || height <= 0) return "";
+        var result = String(path.closed === true ? "C" : "O") + ":" + points.length;
+        for (var index = 0; index < points.length; index++) {
+            var point = points[index];
+            result += ":" + outlinePointSignature(point.anchor, bounds, width, height);
+            result += ":" + outlinePointSignature(point.leftDirection, bounds, width, height);
+            result += ":" + outlinePointSignature(point.rightDirection, bounds, width, height);
+        }
+        return result;
+    }
+
+    function outlinePointSignature(point, bounds, width, height) {
+        if (!point || point.length < 2) return "?";
+        return Math.round((Number(point[0]) - Number(bounds[0])) * 1000 / width)
+            + "," + Math.round((Number(point[1]) - Number(bounds[3])) * 1000 / height);
     }
 
     function removeDirectTailSamples(root, sourcePath, tailSpecs) {
@@ -669,10 +818,16 @@
         return Math.min(0.003, dimensionTolerancePoints(dimensions) / 2);
     }
 
-    function fitArtboardToVisibleContent(doc, items) {
+    function fitArtboardToVisibleContent(doc, items, padding) {
         var bounds = unionBounds(items, true);
         if (!doc.artboards || !doc.artboards.length) throw new Error("V2 preview artboard is unavailable");
-        doc.artboards[0].artboardRect = [Number(bounds[0]), Number(bounds[1]), Number(bounds[2]), Number(bounds[3])];
+        var margin = Number(padding || 0);
+        doc.artboards[0].artboardRect = [
+            Number(bounds[0]) - margin,
+            Number(bounds[1]) + margin,
+            Number(bounds[2]) + margin,
+            Number(bounds[3]) - margin
+        ];
     }
 
     function unionBounds(items, strictVisible) {
