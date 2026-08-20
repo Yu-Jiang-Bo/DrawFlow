@@ -1165,7 +1165,7 @@ if (width >= 99.9) throw new Error('preserved tail text unexpectedly filled full
     assert result.returncode == 0, result.stderr
 
 
-def test_v2_renderer_folds_direct_text_tail_samples_into_the_main_text():
+def test_v2_renderer_derives_direct_text_tail_samples_for_any_end_letters():
     tails = [
         {
             "key": "tail_name_first_m",
@@ -1182,13 +1182,13 @@ def test_v2_renderer_folds_direct_text_tail_samples_into_the_main_text():
             "path": "Template/Output_main/Design/Design03/tail_name_last_a",
         }
     ]
-    task = tail_text_task(tails, value="Madia")
+    task = tail_text_task(tails, value="Custom")
     task["render_task"]["outputs"][0]["actions"][1]["preset"] = "direct_text"
     task["mock_first_tail_sample"] = "__m"
     task["mock_last_tail_sample"] = "a__"
     harness = node_mock_harness(task, """
 const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
-if (child(designCopy, 'slot_name').contents !== '__madia__') throw new Error('direct text did not fold both tail samples into its main text: ' + child(designCopy, 'slot_name').contents);
+if (child(designCopy, 'slot_name').contents !== '__custom__') throw new Error('direct text did not derive both tail samples for arbitrary end letters: ' + child(designCopy, 'slot_name').contents);
 if (designCopy.pageItems.find(item => item.name === 'tail_name_first_m')) throw new Error('direct text retained first tail sample helper');
 if (designCopy.pageItems.find(item => item.name === 'tail_name_last_a')) throw new Error('direct text retained last tail sample helper');
 """)

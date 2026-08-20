@@ -344,7 +344,7 @@
             var segment = V2TailText.tailSampleSegment(String(tailFrame.contents || ""), glyph, position);
             replacements.push({
                 index: endpointIndex,
-                text: segment.sample_letter === String(endpoint).toLowerCase() ? segment.text : glyph
+                text: segment.text
             });
         }
         replacements.sort(function (left, right) { return right.index - left.index; });
