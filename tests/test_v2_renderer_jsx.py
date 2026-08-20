@@ -1165,7 +1165,7 @@ if (width >= 99.9) throw new Error('preserved tail text unexpectedly filled full
     assert result.returncode == 0, result.stderr
 
 
-def test_v2_renderer_applies_plain_tail_evidence_for_direct_text():
+def test_v2_renderer_uses_template_native_tail_behavior_for_direct_text():
     tails = [
         {
             "key": "tail_name_last_a",
@@ -1179,8 +1179,8 @@ def test_v2_renderer_applies_plain_tail_evidence_for_direct_text():
     task["render_task"]["outputs"][0]["actions"][1]["preset"] = "direct_text"
     harness = node_mock_harness(task, """
 const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
-if (child(designCopy, 'slot_name').contents !== 'Alic') throw new Error('plain direct main mismatch: ' + child(designCopy, 'slot_name').contents);
-if (child(designCopy, 'tail_name_last_a').contents !== 'e') throw new Error('plain direct tail mismatch: ' + child(designCopy, 'tail_name_last_a').contents);
+if (child(designCopy, 'slot_name').contents !== 'Alice') throw new Error('direct text did not preserve whole content: ' + child(designCopy, 'slot_name').contents);
+if (designCopy.pageItems.find(item => item.name === 'tail_name_last_a')) throw new Error('direct text retained a tail sample helper');
 """)
 
     result = run_node(harness)

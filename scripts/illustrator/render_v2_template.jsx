@@ -175,7 +175,7 @@
             target = replaceWithFontStyleSource(copied, outputKey, action, selected, slot);
         }
         var tailSpecs = action.tails || [];
-        if (preset === "tail_text" || tailSpecs.length) {
+        if (preset === "tail_text" || (preset === "split_by_pipe" && tailSpecs.length)) {
             var tailSourceValue = preset === "split_by_pipe" ? slotValue : value;
             V2TailText.replaceTailText(
                 tailTextEnvironment(),

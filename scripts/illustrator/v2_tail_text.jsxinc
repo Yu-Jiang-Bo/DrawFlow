@@ -11,8 +11,9 @@ var V2TailText = (function () {
             var text = position === "first" ? parsed.first_tail : (position === "last" ? parsed.last_tail : "");
             var tail = env.findPageItemByRelativePath(root, env.relativePath(String(spec.path || ""), sourcePath));
             if (env.hasText(text)) {
+                var tailBounds = env.measuredBounds(tail);
                 var tailFrame = env.writeTextToItem(tail, tailGlyphForSpec(text, spec));
-                env.fitItemWithinBounds(tailFrame, env.measuredBounds(tail), action);
+                env.fitItemWithinBounds(tailFrame, tailBounds, action);
             } else {
                 env.removePageItem(tail);
             }
