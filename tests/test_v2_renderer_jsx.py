@@ -1165,8 +1165,15 @@ if (width >= 99.9) throw new Error('preserved tail text unexpectedly filled full
     assert result.returncode == 0, result.stderr
 
 
-def test_v2_renderer_uses_template_native_tail_behavior_for_direct_text():
+def test_v2_renderer_folds_direct_text_tail_samples_into_the_main_text():
     tails = [
+        {
+            "key": "tail_name_first_m",
+            "position": "first",
+            "sample": "m",
+            "glyph_mode": "plain_text",
+            "path": "Template/Output_main/Design/Design03/tail_name_first_m",
+        },
         {
             "key": "tail_name_last_a",
             "position": "last",
@@ -1175,12 +1182,15 @@ def test_v2_renderer_uses_template_native_tail_behavior_for_direct_text():
             "path": "Template/Output_main/Design/Design03/tail_name_last_a",
         }
     ]
-    task = tail_text_task(tails, value="Alice")
+    task = tail_text_task(tails, value="Madia")
     task["render_task"]["outputs"][0]["actions"][1]["preset"] = "direct_text"
+    task["mock_first_tail_sample"] = "__m"
+    task["mock_last_tail_sample"] = "a__"
     harness = node_mock_harness(task, """
 const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
-if (child(designCopy, 'slot_name').contents !== 'Alice') throw new Error('direct text did not preserve whole content: ' + child(designCopy, 'slot_name').contents);
-if (designCopy.pageItems.find(item => item.name === 'tail_name_last_a')) throw new Error('direct text retained a tail sample helper');
+if (child(designCopy, 'slot_name').contents !== '__madia__') throw new Error('direct text did not fold both tail samples into its main text: ' + child(designCopy, 'slot_name').contents);
+if (designCopy.pageItems.find(item => item.name === 'tail_name_first_m')) throw new Error('direct text retained first tail sample helper');
+if (designCopy.pageItems.find(item => item.name === 'tail_name_last_a')) throw new Error('direct text retained last tail sample helper');
 """)
 
     result = run_node(harness)
@@ -2218,8 +2228,9 @@ const design03 = item('GroupItem', 'Design03', '', [
     item('PathItem', 'keep_ratio', '', []),
     item('PathItem', 'keep_ratio_heart', '', [])
   ]),
-  item('TextFrame', 'tail_name_first_a', 'a', [], 'First-tail-style'),
-  item('TextFrame', 'tail_name_last_a', 'a', [], 'Last-tail-style'),
+  item('TextFrame', 'tail_name_first_a', task.mock_first_tail_sample || 'a', [], 'First-tail-style'),
+  item('TextFrame', 'tail_name_first_m', task.mock_first_tail_sample || 'm', [], 'First-tail-style'),
+  item('TextFrame', 'tail_name_last_a', task.mock_last_tail_sample || 'a', [], 'Last-tail-style'),
   item('TextFrame', 'tail_year_tail_last_a', 'a', [], 'Year-last-tail-style'),
   item('TextFrame', 'tail_name_1', 'Tail 1', [], 'Tail-style'),
   item('TextFrame', 'tail_name_2', 'Tail 2', [], 'Tail-style'),

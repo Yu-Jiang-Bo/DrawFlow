@@ -188,15 +188,23 @@
             );
             return;
         }
-        var textFrame = writeTextToItem(target, slotValue);
-        fitItemWithinBounds(textFrame, fitBounds, action, shouldPreserveSlotComposition(target, action));
         var tailPaths = action.tail_paths || [];
+        var directTailParts = tailSpecs.length && preset === "direct_text"
+            ? applyDirectTailSamples(holder.item, holder.source_path, tailSpecs, slotValue)
+            : null;
+        var textFrame = writeTextToItem(target, directTailParts ? directTailParts.main_text : slotValue);
+        fitItemWithinBounds(textFrame, fitBounds, action, shouldPreserveSlotComposition(target, action));
+        if (directTailParts) {
+            removeDirectTailSamples(holder.item, holder.source_path, tailSpecs);
+            return;
+        }
         for (var index = 0; index < tailPaths.length; index++) {
             var tail = findPageItemByRelativePath(holder.item, relativePath(String(tailPaths[index] || ""), holder.source_path));
             var tailText = preset === "split_by_pipe" ? parts[index + 1] || "" : "";
             if (hasText(tailText)) {
+                var tailBounds = measuredBounds(tail);
                 var tailFrame = writeTextToItem(tail, tailText);
-                fitItemWithinBounds(tailFrame, measuredBounds(tail), action, shouldPreserveSlotComposition(tail, action));
+                fitItemWithinBounds(tailFrame, tailBounds, action, shouldPreserveSlotComposition(tail, action));
             } else {
                 removePageItem(tail);
             }
@@ -318,6 +326,42 @@
         if (!frame) throw new Error("V2 slot has no text frame: " + String(item && item.name || ""));
         frame.contents = String(text || "");
         return frame;
+    }
+
+    function applyDirectTailSamples(root, sourcePath, tailSpecs, value) {
+        var parsed = V2TailText.tailEndpointParts(String(value || ""), tailSpecs);
+        var replacements = [];
+        for (var index = 0; index < tailSpecs.length; index++) {
+            var spec = tailSpecs[index] || {};
+            var position = String(spec.position || "");
+            var endpointIndex = position === "first" ? parsed.first_index : (position === "last" ? parsed.last_index : -1);
+            var endpoint = position === "first" ? parsed.first_tail : (position === "last" ? parsed.last_tail : "");
+            if (endpointIndex < 0 || !hasText(endpoint)) continue;
+            var tail = findPageItemByRelativePath(root, relativePath(String(spec.path || ""), sourcePath));
+            var tailFrame = firstTextFrame(tail);
+            if (!tailFrame) throw new Error("V2 tail sample has no text frame: " + String(spec.key || ""));
+            var glyph = V2TailText.tailGlyphForSpec(String(endpoint).toLowerCase(), spec);
+            var segment = V2TailText.tailSampleSegment(String(tailFrame.contents || ""), glyph, position);
+            replacements.push({
+                index: endpointIndex,
+                text: segment.sample_letter === String(endpoint).toLowerCase() ? segment.text : glyph
+            });
+        }
+        replacements.sort(function (left, right) { return right.index - left.index; });
+        var text = String(value || "");
+        for (var replacementIndex = 0; replacementIndex < replacements.length; replacementIndex++) {
+            var replacement = replacements[replacementIndex];
+            text = text.substring(0, replacement.index) + replacement.text + text.substring(replacement.index + 1);
+        }
+        parsed.main_text = text;
+        return parsed;
+    }
+
+    function removeDirectTailSamples(root, sourcePath, tailSpecs) {
+        for (var index = 0; index < tailSpecs.length; index++) {
+            var path = String((tailSpecs[index] || {}).path || "");
+            if (path) removePageItem(findPageItemByRelativePath(root, relativePath(path, sourcePath)));
+        }
     }
 
     function firstTextFrame(item) {

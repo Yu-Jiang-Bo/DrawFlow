@@ -38,7 +38,13 @@ var V2TailText = (function () {
         var chars = value.split("");
         if (useFirst) chars[firstIndex] = "";
         if (useLast && lastIndex !== firstIndex) chars[lastIndex] = "";
-        return { main_text: chars.join(""), first_tail: firstTail, last_tail: lastTail };
+        return {
+            main_text: chars.join(""),
+            first_tail: firstTail,
+            last_tail: lastTail,
+            first_index: firstIndex,
+            last_index: lastIndex
+        };
     }
 
     function firstLatinIndex(value) {
@@ -75,6 +81,16 @@ var V2TailText = (function () {
         throw new Error("V2 tail glyph coverage is missing: " + String(spec.key || ""));
     }
 
+    function tailSampleSegment(sampleText, glyph, position) {
+        var text = String(sampleText || "");
+        var index = String(position || "") === "first" ? firstLatinIndex(text) : lastLatinIndex(text);
+        if (index < 0) return { text: String(glyph || ""), sample_letter: "" };
+        return {
+            text: text.substring(0, index) + String(glyph || "") + text.substring(index + 1),
+            sample_letter: text.charAt(index).toLowerCase()
+        };
+    }
+
     function tailCodepoint(value, field) {
         var code;
         if (typeof value === "number") {
@@ -92,6 +108,7 @@ var V2TailText = (function () {
     return {
         replaceTailText: replaceTailText,
         tailEndpointParts: tailEndpointParts,
-        tailGlyphForSpec: tailGlyphForSpec
+        tailGlyphForSpec: tailGlyphForSpec,
+        tailSampleSegment: tailSampleSegment
     };
 }());
