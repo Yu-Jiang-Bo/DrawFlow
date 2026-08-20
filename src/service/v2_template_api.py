@@ -35,6 +35,7 @@ from .v2_template_maintenance import build_maintenance_snapshot, drawing_group_s
 from .v2_template_maintenance import require_central_upload_allowed
 from .v2_preview_proof import preview_config_payload
 from .v2_preview_worker_auth import V2PreviewWorkerChallengeRegistry
+from .template_locks import TEMPLATE_STATE_LOCK
 from .v2_template_publication import V2TemplatePublicationService
 from .v2_template_store import V2TemplateStore, V2TemplateStoreError
 from .v2_template_store_utils import read_json, remove_tree, safe_segment
@@ -136,10 +137,28 @@ class V2TemplateApi:
     def create_template(self, payload: Mapping[str, Any]) -> dict[str, Any]:
         ensure_payload_fields(payload, {"template_id", "name", "shop_name"})
         template_id = required_text(payload, "template_id", "请填写模板 ID。")
-        metadata = metadata_from_payload(template_id, payload, None)
-        state = self.store.save_draft(template_id, metadata=metadata)
+        # Windows template directories are case-insensitive.  Keep lookup and
+        # creation under the same lock so a case-only concurrent request cannot
+        # replace an existing draft with an empty one.
+        with TEMPLATE_STATE_LOCK:
+            existing_id = self._casefold_existing_template_id(template_id)
+            if existing_id and existing_id != template_id:
+                state = self.store.get_state(existing_id)
+                return {"template": state["template"], "state": state_summary(state)}
+            metadata = metadata_from_payload(template_id, payload, None)
+            state = self.store.save_draft(template_id, metadata=metadata)
         self._record_audit("template_created", state)
         return {"template": state["template"], "state": state_summary(state)}
+
+    def _casefold_existing_template_id(self, template_id: str) -> str:
+        wanted = str(template_id or "").strip().casefold()
+        if not wanted:
+            return ""
+        for item in self.list_templates():
+            existing = str(item.get("template_id") or "").strip()
+            if existing and existing.casefold() == wanted:
+                return existing
+        return ""
 
     def save_draft(self, template_id: str, payload: Mapping[str, Any]) -> dict[str, Any]:
         ensure_payload_fields(payload, {"name", "shop_name", "config"})

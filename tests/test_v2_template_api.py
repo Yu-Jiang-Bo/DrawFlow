@@ -79,6 +79,50 @@ def test_v2_api_creates_lists_and_reads_draft_with_optional_shop(tmp_path):
     assert not any("path" in key.lower() for key in listed["templates"][0])
 
 
+def test_v2_api_does_not_reset_existing_template_for_case_only_id_change(tmp_path):
+    api = api_for(tmp_path)
+    api.create_template({"template_id": "Test", "name": "Original"})
+    uploaded = api.upload_asset("Test", "template.ai", TrackingStream(b"ai-bytes"), content_length=8, headers={})
+    api.store.publish_draft("Test")
+    before = api.read_draft("Test")
+    versions_before = api.read_versions("Test")
+
+    reused = api.create_template({"template_id": "test", "name": "Replacement"})
+    after = api.read_draft("Test")
+
+    assert reused["template"]["template_id"] == "Test"
+    assert reused["template"]["name"] == "Original"
+    assert after["manifest"]["draft_revision"] == before["manifest"]["draft_revision"]
+    assert after["manifest"]["assets"][0]["sha256"] == uploaded["asset"]["sha256"]
+    assert api.read_versions("Test") == versions_before
+
+
+def test_v2_api_case_only_concurrent_creates_keep_one_template_state(tmp_path):
+    api = api_for(tmp_path)
+
+    def create(template_id):
+        return api.create_template({"template_id": template_id, "name": template_id})
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        created = list(executor.map(create, ["Test", "test"]))
+
+    templates = api.list_templates()
+    assert len(templates) == 1
+    assert {item["template"]["template_id"] for item in created} == {templates[0]["template"]["template_id"]}
+    assert api.read_draft(templates[0]["template"]["template_id"])["manifest"]["draft_revision"] == "d0001"
+
+
+def test_v2_api_creates_distinct_template_ids_independently(tmp_path):
+    api = api_for(tmp_path)
+
+    first = api.create_template({"template_id": "TestA", "name": "First"})
+    second = api.create_template({"template_id": "TestB", "name": "Second"})
+
+    assert first["template"]["template_id"] == "TestA"
+    assert second["template"]["template_id"] == "TestB"
+    assert {item["template"]["template_id"] for item in api.list_templates()} == {"TestA", "TestB"}
+
+
 def test_v2_api_saves_draft_config_without_accepting_untrusted_scan(tmp_path):
     api = api_for(tmp_path)
     api.create_template({"template_id": "V2API001", "name": "API Demo"})
