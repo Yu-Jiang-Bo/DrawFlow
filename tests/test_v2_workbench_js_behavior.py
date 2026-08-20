@@ -1544,6 +1544,8 @@ def test_v2_workbench_rules_prefer_anchor_dimensions_over_saved_slot_dimensions(
                           preset: "tail_text",
                           anchor: "anchor_name",
                           dimension_rule: { mode: "slot", width_mm: 163.657, height_mm: 85.03, tolerance_mm: 0.007 }
+                          // Historical drafts may retain the retired field. It
+                          // must not recreate the control or be written back.
                           , fit_mode: "fill_width", preserve_composition: true
                         }]
                       }]
@@ -1574,7 +1576,7 @@ def test_v2_workbench_rules_prefer_anchor_dimensions_over_saved_slot_dimensions(
           assert.strictEqual(height.dataset.rawValue, "47.231");
           assert(width.title.includes("精确边界"));
           assert.strictEqual(slot.querySelector('[data-field="slot-fit-mode"]').value, "fill_width");
-          assert.strictEqual(slot.querySelector('[data-field="slot-preserve-composition"]').value, "true");
+          assert.strictEqual(slot.querySelector('[data-field="slot-preserve-composition"]'), null);
 
           const config = buildControlledConfig();
           const savedSlot = config.outputs[0].design.options.find((item) => item.key === "Design05").slots[0];
@@ -1583,7 +1585,7 @@ def test_v2_workbench_rules_prefer_anchor_dimensions_over_saved_slot_dimensions(
           assert.strictEqual(savedSlot.dimension_rule.width_mm, 150.231);
           assert.strictEqual(savedSlot.dimension_rule.height_mm, 47.231);
           assert.strictEqual(savedSlot.fit_mode, "fill_width");
-          assert.strictEqual(savedSlot.preserve_composition, true);
+          assert.strictEqual(Object.prototype.hasOwnProperty.call(savedSlot, "preserve_composition"), false);
         })().catch((error) => { console.error(error); process.exit(1); });
         """
     )

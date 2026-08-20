@@ -87,7 +87,6 @@
       metaCell("槽位处理（按需覆盖）"),
       metaCell("状态"),
       metaCell("填充方式"),
-      metaCell("组合比例"),
       metaCell("素材键（仅素材）"),
       metaCell("适配宽"),
       metaCell("适配高"),
@@ -105,7 +104,6 @@
     row.dataset.option = optionKey;
     row.dataset.slotKey = slot.key;
     row.dataset.anchor = slot.anchor || "";
-    row.dataset.preserveComposition = slot.preserve_composition === true ? "true" : "false";
     row.dataset.fitMode = slot.fit_mode || "fill_both";
     row.__tailConfigs = normalizedTailConfigs(slot.tails);
     row.__colorBinding = safeIdentifier(slot.color_binding || "", "");
@@ -120,7 +118,6 @@
       selectCell("slot-preset", presetOptions(PRESETS, tailPresentation), slotPreset),
       selectCell("slot-required", [["required", "必填"], ["optional", "可选"]], slot.required === false ? "optional" : "required"),
       selectCell("slot-fit-mode", [["fill_both", "宽高均填满"], ["fill_width", "仅宽度填满"], ["fill_height", "仅高度填满"]], row.dataset.fitMode),
-      selectCell("slot-preserve-composition", [["false", "按模板标记"], ["true", "保护组合比例"]], row.dataset.preserveComposition),
       readonlyInputCell("slot-asset-key", slot.asset_key || "", "素材替换槽位才会有素材键；普通文字槽位留空。"),
       readonlyInputCell("slot-width-mm", displayDimension(dimensions.width_mm), "按模板定位框取整显示；实际适配仍按模板的精确边界执行。", dimensions.width_mm),
       readonlyInputCell("slot-height-mm", displayDimension(dimensions.height_mm), "按模板定位框取整显示；实际适配仍按模板的精确边界执行。", dimensions.height_mm),
@@ -201,7 +198,6 @@
       dimension_rule: dimensionRuleFromValues(readonlyRawValue(row, "slot-width-mm"), readonlyRawValue(row, "slot-height-mm"), dimensionMode),
       font_dependencies: splitStringList(rowValue(row, "slot-font-dependencies")),
       color_binding: colorBindingFromRow(row),
-      preserve_composition: rowValue(row, "slot-preserve-composition") === "true",
       fit_mode: rowValue(row, "slot-fit-mode") || "fill_both"
     };
   }
@@ -227,7 +223,6 @@
         dimension_rule: slotDimensionRule(item, optionContext, key),
         font_dependencies: Array.isArray(item.font_dependencies) ? item.font_dependencies.map(cleanText).filter(Boolean) : [],
         color_binding: safeIdentifier(item.color_binding || "", ""),
-        preserve_composition: item.preserve_composition === true,
         fit_mode: ["fill_width", "fill_height"].includes(item.fit_mode) ? item.fit_mode : "fill_both"
       };
     });
