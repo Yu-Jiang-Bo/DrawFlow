@@ -279,6 +279,7 @@ def _slot_actions(
             "font_dependencies": list(slot_data.get("font_dependencies") or []),
             "color_binding": str(slot_data.get("color_binding") or ""),
             "preserve_composition": bool(slot_data.get("preserve_composition") is True or slot_scan.get("preserve_composition") is True),
+            "fit_mode": str(slot_data.get("fit_mode") or "fill_both"),
         }
         if group == "design" and slot_key in font_style_sources:
             action["style_source"] = {

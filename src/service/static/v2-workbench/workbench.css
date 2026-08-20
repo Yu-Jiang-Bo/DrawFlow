@@ -297,29 +297,29 @@ th { color: var(--v2-muted); background: #f7f9fc; font-size: 12px; font-weight: 
 .content-slot-table { min-width: 0; overflow-x: auto; }
 .structured-row.content-slot-head, .structured-row.content-slot-row {
   grid-template-columns:
-    minmax(150px, 1.05fr) minmax(150px, 1fr) minmax(170px, 1.1fr) minmax(96px, 0.65fr)
+    minmax(150px, 1.05fr) minmax(150px, 1fr) minmax(170px, 1.1fr) minmax(96px, 0.65fr) minmax(130px, 0.85fr) minmax(130px, 0.85fr)
     minmax(110px, 0.75fr) minmax(90px, 0.6fr) minmax(90px, 0.6fr) minmax(150px, 1fr);
-  min-width: 1080px;
+  min-width: 1340px;
 }
 .structured-row.content-slot-head.has-tail-samples, .structured-row.content-slot-row.has-tail-samples {
   grid-template-columns:
-    minmax(150px, 1.05fr) minmax(150px, 1fr) minmax(170px, 1.1fr) minmax(96px, 0.65fr)
+    minmax(150px, 1.05fr) minmax(150px, 1fr) minmax(170px, 1.1fr) minmax(96px, 0.65fr) minmax(130px, 0.85fr) minmax(130px, 0.85fr)
     minmax(110px, 0.75fr) minmax(90px, 0.6fr) minmax(90px, 0.6fr) minmax(150px, 1fr) minmax(118px, 0.8fr);
-  min-width: 1200px;
+  min-width: 1460px;
 }
 .structured-row.content-slot-head.has-color-binding, .structured-row.content-slot-row.has-color-binding {
   grid-template-columns:
-    minmax(150px, 1.05fr) minmax(150px, 1fr) minmax(170px, 1.1fr) minmax(96px, 0.65fr)
+    minmax(150px, 1.05fr) minmax(150px, 1fr) minmax(170px, 1.1fr) minmax(96px, 0.65fr) minmax(130px, 0.85fr) minmax(130px, 0.85fr)
     minmax(110px, 0.75fr) minmax(90px, 0.6fr) minmax(90px, 0.6fr) minmax(150px, 1fr) minmax(120px, 0.8fr);
-  min-width: 1200px;
+  min-width: 1460px;
 }
 .structured-row.content-slot-head.has-tail-samples.has-color-binding,
 .structured-row.content-slot-row.has-tail-samples.has-color-binding {
   grid-template-columns:
-    minmax(150px, 1.05fr) minmax(150px, 1fr) minmax(170px, 1.1fr) minmax(96px, 0.65fr)
+    minmax(150px, 1.05fr) minmax(150px, 1fr) minmax(170px, 1.1fr) minmax(96px, 0.65fr) minmax(130px, 0.85fr) minmax(130px, 0.85fr)
     minmax(110px, 0.75fr) minmax(90px, 0.6fr) minmax(90px, 0.6fr) minmax(150px, 1fr)
     minmax(118px, 0.8fr) minmax(120px, 0.8fr);
-  min-width: 1320px;
+  min-width: 1580px;
 }
 .structured-row.content-slot-head {
   color: var(--v2-muted); background: #fbfcfe; font-size: 12px; font-weight: 700;

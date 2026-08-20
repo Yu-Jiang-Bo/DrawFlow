@@ -1142,7 +1142,8 @@ if (child(designCopy, 'slot_name').contents.indexOf('S') < 0) throw new Error('m
     assert result.returncode == 0, result.stderr
 
 
-def test_v2_renderer_tail_text_preserves_composition_when_flagged():
+@pytest.mark.parametrize("fit_mode", ["fill_width", "fill_height"])
+def test_v2_renderer_tail_text_preserves_composition_before_single_axis_fit(fit_mode):
     tails = [
         {
             "key": "tail_name_first_a",
@@ -1153,7 +1154,9 @@ def test_v2_renderer_tail_text_preserves_composition_when_flagged():
         }
     ]
     task = tail_text_task(tails, value="Alice Smith")
-    task["render_task"]["outputs"][0]["actions"][1]["preserve_composition"] = True
+    action = task["render_task"]["outputs"][0]["actions"][1]
+    action["preserve_composition"] = True
+    action["fit_mode"] = fit_mode
     harness = node_mock_harness(task, """
 const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
 const slot = child(designCopy, 'slot_name');
@@ -1200,6 +1203,71 @@ if (designCopy.pageItems.find(item => item.name === 'tail_name_last_a')) throw n
     assert result.returncode == 0, result.stderr
 
 
+def test_v2_renderer_fills_only_requested_axis_and_centers_slot_content():
+    task = tail_text_task([], value="Custom")
+    action = task["render_task"]["outputs"][0]["actions"][1]
+    action["preset"] = "direct_text"
+    action["anchor_path"] = "Template/Output_main/Design/Design03/anchor_name"
+    action["fit_mode"] = "fill_width"
+    task["mock_anchor_name_bounds"] = [200, 140, 260, 100]
+    harness = node_mock_harness(task, """
+const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
+const slot = child(designCopy, 'slot_name');
+const bounds = slot.visibleBounds;
+const width = bounds[2] - bounds[0];
+const height = bounds[1] - bounds[3];
+if (Math.abs(width - 60) > 0.01 || Math.abs(height - 30) > 0.01) {
+  throw new Error('width-only fit did not preserve the non-overflowing height: ' + JSON.stringify(bounds));
+}
+if (Math.abs((bounds[0] + bounds[2]) / 2 - 230) > 0.01 || Math.abs((bounds[1] + bounds[3]) / 2 - 120) > 0.01) {
+  throw new Error('width-only fit did not center content: ' + JSON.stringify(bounds));
+}
+""")
+
+    result = run_node(harness)
+
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize(
+    ("fit_mode", "value", "anchor_bounds", "expected_width", "expected_height", "expected_center"),
+    [
+        ("fill_width", "Custom", [200, 150, 400, 100], 100, 50, (300, 125)),
+        # The long value is deliberately wider than the 50pt slot. Height
+        # fill first reaches 200pt, then cross-axis overflow scales both axes
+        # down together rather than distorting the requested fit.
+        ("fill_height", "CustomCustomCustomCustom", [200, 300, 250, 100], 50, 52.0833, (225, 200)),
+    ],
+)
+def test_v2_renderer_single_axis_fit_shrinks_proportionally_on_cross_axis_overflow(
+    fit_mode, value, anchor_bounds, expected_width, expected_height, expected_center
+):
+    task = tail_text_task([], value=value)
+    action = task["render_task"]["outputs"][0]["actions"][1]
+    action["preset"] = "direct_text"
+    action["anchor_path"] = "Template/Output_main/Design/Design03/anchor_name"
+    action["fit_mode"] = fit_mode
+    task["mock_anchor_name_bounds"] = anchor_bounds
+    task["mock_design_slot_bounds"] = [0, 100, 100, 0]
+    harness = node_mock_harness(task, f"""
+const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
+const slot = child(designCopy, 'slot_name');
+const bounds = slot.visibleBounds;
+const width = bounds[2] - bounds[0];
+const height = bounds[1] - bounds[3];
+if (Math.abs(width - {expected_width}) > 0.01 || Math.abs(height - {expected_height}) > 0.01) {{
+  throw new Error('single-axis overflow was not proportionally reduced: ' + JSON.stringify(bounds));
+}}
+if (Math.abs((bounds[0] + bounds[2]) / 2 - {expected_center[0]}) > 0.01 || Math.abs((bounds[1] + bounds[3]) / 2 - {expected_center[1]}) > 0.01) {{
+  throw new Error('single-axis overflow result was not centered: ' + JSON.stringify(bounds));
+}}
+""")
+
+    result = run_node(harness)
+
+    assert result.returncode == 0, result.stderr
+
+
 def test_v2_renderer_derives_plain_tail_sample_pua_for_any_end_letter():
     tails = [
         {
@@ -1225,6 +1293,14 @@ if (designCopy.pageItems.find(item => item.name === 'tail_name_last_m')) throw n
     assert result.returncode == 0, result.stderr
 
 
+def test_v2_renderer_bounds_plain_tail_pua_probe_candidates():
+    source = SCRIPT.read_text(encoding="utf-8")
+
+    assert "knownTailPuaBases" in source
+    assert "for (var candidate = 0xE000; candidate <= 0xF8FF - 25; candidate++)" not in source
+    assert "puaTailGlyphOrFallback" in source
+
+
 def test_v2_renderer_rejects_plain_tail_pua_when_alphabet_is_incomplete():
     tails = [
         {
@@ -1243,6 +1319,33 @@ def test_v2_renderer_rejects_plain_tail_pua_when_alphabet_is_incomplete():
 const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
 if (child(designCopy, 'slot_name').contents !== 'Mastka') throw new Error('incomplete PUA alphabet was adopted: ' + child(designCopy, 'slot_name').contents);
 if (designCopy.pageItems.find(item => item.name === 'tail_name_last_m')) throw new Error('direct text retained rejected tail sample helper');
+""")
+
+    result = run_node(harness)
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_v2_renderer_falls_back_to_latin_when_the_requested_plain_tail_pua_is_missing():
+    tails = [
+        {
+            "key": "tail_name_last_m",
+            "position": "last",
+            "sample": "m",
+            "glyph_mode": "plain_text",
+            "path": "Template/Output_main/Design/Design03/tail_name_last_m",
+        }
+    ]
+    task = tail_text_task(tails, value="Mastkf")
+    task["render_task"]["outputs"][0]["actions"][1]["preset"] = "direct_text"
+    task["mock_pua_tail_base"] = 0xE054
+    task["mock_pua_missing_base"] = 0xE054
+    task["mock_pua_missing_index"] = 5
+    harness = node_mock_harness(task, """
+const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
+if (child(designCopy, 'slot_name').contents !== 'Mastkf') {
+  throw new Error('missing PUA endpoint did not fall back to the Latin letter: ' + child(designCopy, 'slot_name').contents);
+}
 """)
 
     result = run_node(harness)
@@ -2132,9 +2235,12 @@ function item(typename, name, contents, children, styleToken, bounds, options) {
         points = [[0, 0], [1, 0], [1, 1], [0, 1]];
       }} else {{
         const puaIndex = opts.puaTailBase ? code - Number(opts.puaTailBase) : -1;
-        const geometryCode = task.mock_pua_incomplete_base === Number(opts.puaTailBase) && puaIndex === 1
-          ? code - 1
-          : code;
+        const geometryCode = task.mock_pua_missing_base === Number(opts.puaTailBase)
+            && puaIndex === Number(task.mock_pua_missing_index)
+          ? 0xF8FF
+          : (task.mock_pua_incomplete_base === Number(opts.puaTailBase) && puaIndex === 1
+            ? code - 1
+            : code);
         points = [];
         for (let pointIndex = 0; pointIndex < 4 + (geometryCode % 26); pointIndex++) {{
           points.push([pointIndex / (3 + (geometryCode % 26)), pointIndex % 2]);
@@ -2251,8 +2357,8 @@ function item(typename, name, contents, children, styleToken, bounds, options) {
   return node;
 }}
 function defaultBounds(typename, name, contents) {{
-  if (name === 'anchor_name') return [200, 120, 260, 100];
-  if (typename === 'TextFrame' && name === 'slot_name') return [0, 30, 100, 0];
+  if (name === 'anchor_name') return task.mock_anchor_name_bounds || [200, 120, 260, 100];
+  if (typename === 'TextFrame' && name === 'slot_name') return task.mock_design_slot_bounds || [0, 30, 100, 0];
   if (typename === 'TextFrame') return [0, 20, Math.max(10, String(contents || '').length * 8), 0];
   if (typename === 'PathItem') return [130, 40, 150, 20];
   return [0, 100, 100, 0];

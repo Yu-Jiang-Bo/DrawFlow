@@ -901,6 +901,20 @@ def test_carries_preserve_composition_from_scanned_keep_ratio_slot():
     assert design_slot["preserve_composition"] is True
 
 
+def test_carries_slot_fit_mode_to_illustrator_action():
+    config = render_config()
+    config["outputs"][0]["design"]["options"][0]["slots"][0]["fit_mode"] = "fill_width"
+
+    task = compile_task(config=config)
+
+    design_slot = next(
+        action
+        for action in task["outputs"][0]["actions"]
+        if action["type"] == "replace_slot_text" and action["group"] == "design" and action["slot_key"] == "slot_name"
+    )
+    assert design_slot["fit_mode"] == "fill_width"
+
+
 def test_rejects_duplicate_scan_object_keys_in_same_scope():
     scan = scan_evidence()
     scan["outputs"][0]["fonts"][0]["slots"].append({"key": "slot_name", "path": "Template/other"})

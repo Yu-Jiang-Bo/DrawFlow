@@ -25,6 +25,17 @@
     var renderedOutputItems = [];
     var renderedOutputCount = 0;
     var tailPuaBaseCache = {};
+    // Bounded candidates cover the installed tail fonts while keeping one
+    // preview from ever issuing thousands of Illustrator outline operations.
+    var knownTailPuaBases = [
+        0xE000, 0xE010, 0xE020, 0xE030, 0xE040, 0xE050, 0xE054, 0xE060, 0xE070,
+        0xE100, 0xE110, 0xE120, 0xE130, 0xE140, 0xE150, 0xE160,
+        0xE270, 0xE300, 0xE310, 0xE350, 0xE360, 0xE370, 0xE440, 0xE450,
+        0xE460, 0xE470, 0xE510, 0xE520, 0xE530, 0xE540, 0xE570, 0xE600,
+        0xE610, 0xE650, 0xE660, 0xE670, 0xE700, 0xE710, 0xE720, 0xE730,
+        0xE740, 0xE750, 0xE760, 0xE770, 0xE800, 0xE810, 0xE820, 0xE830,
+        0xE840, 0xE850, 0xE860, 0xE870
+    ];
 
     try {
         for (var outputIndex = 0; outputIndex < (task.outputs || []).length; outputIndex++) {
@@ -368,8 +379,8 @@
         var sampleText = String(tailFrame.contents || "");
         var sampleIndex = tailSampleLatinIndex(sampleText, position);
         if (sampleText.length !== 1 || sampleIndex !== 0) return fallback;
-        var base = inferPuaBaseFromTailSample(tailFrame, sampleText.charAt(0).toLowerCase());
-        return base ? String.fromCharCode(base + letter.charCodeAt(0) - 97) : fallback;
+        var encoding = inferPuaTailEncodingFromSample(tailFrame, sampleText.charAt(0).toLowerCase());
+        return encoding ? puaTailGlyphOrFallback(tailFrame, encoding, letter, fallback) : fallback;
     }
 
     function tailSampleLatinIndex(text, position) {
@@ -389,7 +400,7 @@
         return true;
     }
 
-    function inferPuaBaseFromTailSample(frame, sampleLetter) {
+    function inferPuaTailEncodingFromSample(frame, sampleLetter) {
         var sampleIndex = sampleLetter.charCodeAt(0) - 97;
         if (sampleIndex < 0 || sampleIndex > 25) return 0;
         var sourceEvidence = outlinedTextEvidence(frame);
@@ -399,17 +410,24 @@
         if (sourceWidth <= 0 || sourceHeight <= 0 || !sourceEvidence.signature) return 0;
         var cacheKey = tailPuaSampleCacheKey(frame, sampleLetter, sourceWidth, sourceHeight);
         if (tailPuaBaseCache.hasOwnProperty(cacheKey)) return tailPuaBaseCache[cacheKey];
-        var base = 0;
-        for (var candidate = 0xE000; candidate <= 0xF8FF - 25; candidate++) {
-            var candidateEvidence = outlinedTailGlyphEvidence(frame, candidate + sampleIndex);
-            if (!candidateEvidence || candidateEvidence.signature !== sourceEvidence.signature) continue;
-            if (puaTailAlphabetIsComplete(frame, candidate)) {
-                base = candidate;
+        var encoding = null;
+        for (var index = 0; index < knownTailPuaBases.length; index++) {
+            var candidate = knownTailPuaBases[index];
+            var contiguousEvidence = outlinedTailGlyphEvidence(frame, candidate + sampleIndex);
+            if (contiguousEvidence && contiguousEvidence.signature === sourceEvidence.signature
+                && puaTailAlphabetHasCompleteCoverage(frame, candidate, false)) {
+                encoding = { base: candidate, decimal: false };
+                break;
+            }
+            var decimalEvidence = outlinedTailGlyphEvidence(frame, decimalPuaCodepoint(candidate, sampleIndex));
+            if (decimalEvidence && decimalEvidence.signature === sourceEvidence.signature
+                && puaTailAlphabetHasCompleteCoverage(frame, candidate, true)) {
+                encoding = { base: candidate, decimal: true };
                 break;
             }
         }
-        tailPuaBaseCache[cacheKey] = base;
-        return base;
+        tailPuaBaseCache[cacheKey] = encoding;
+        return encoding;
     }
 
     function tailPuaSampleCacheKey(frame, sampleLetter, width, height) {
@@ -418,14 +436,49 @@
         return fontName + "|" + sampleLetter + "|" + Math.round(width * 100) + "x" + Math.round(height * 100);
     }
 
-    function puaTailAlphabetIsComplete(frame, base) {
+    function puaTailAlphabetHasCompleteCoverage(frame, base, decimal) {
         var signatures = {};
+        var missingSignature = missingPuaGlyphSignature(frame);
+        var missingCount = 0;
+        var usableCount = 0;
         for (var index = 0; index < 26; index++) {
-            var evidence = outlinedTailGlyphEvidence(frame, base + index);
-            if (!evidence || !evidence.signature || signatures.hasOwnProperty(evidence.signature)) return false;
+            var evidence = outlinedTailGlyphEvidence(frame, decimal ? decimalPuaCodepoint(base, index) : base + index);
+            if (!evidence || !evidence.signature) return false;
+            if (missingSignature && evidence.signature === missingSignature) {
+                missingCount += 1;
+                continue;
+            }
+            if (signatures.hasOwnProperty(evidence.signature)) return false;
             signatures[evidence.signature] = true;
+            usableCount += 1;
         }
-        return true;
+        // A font may intentionally leave one endpoint letter in normal Latin
+        // form. That one character falls back to its normal glyph; multiple
+        // missing or duplicated tail glyphs are rejected as unproven.
+        return missingCount <= 1 && usableCount + missingCount === 26;
+    }
+
+    function tailPuaCodepoint(encoding, letter) {
+        var index = String(letter || "").charCodeAt(0) - 97;
+        return encoding.decimal ? decimalPuaCodepoint(encoding.base, index) : encoding.base + index;
+    }
+
+    function puaTailGlyphOrFallback(frame, encoding, letter, fallback) {
+        var code = tailPuaCodepoint(encoding, letter);
+        var evidence = outlinedTailGlyphEvidence(frame, code);
+        var missing = missingPuaGlyphSignature(frame);
+        return evidence && evidence.signature && (!missing || evidence.signature !== missing)
+            ? String.fromCharCode(code)
+            : fallback;
+    }
+
+    function missingPuaGlyphSignature(frame) {
+        var evidence = outlinedTailGlyphEvidence(frame, 0xF8FF);
+        return evidence && evidence.signature ? evidence.signature : "";
+    }
+
+    function decimalPuaCodepoint(base, index) {
+        return Number(base) + Math.floor(Number(index) / 10) * 16 + Number(index) % 10;
     }
 
     function outlinedTailGlyphEvidence(frame, code) {
@@ -557,6 +610,7 @@
         }
         var resizeCount = 0;
         var smallestScale = 1;
+        var fitMode = slotFitMode(action);
         for (var index = 0; index < 20; index++) {
             var current = measuredBounds(item);
             var width = Math.abs(Number(current[2]) - Number(current[0]));
@@ -569,6 +623,20 @@
                 var proportionalScale = Math.min(scaleX, scaleY);
                 scaleX = proportionalScale;
                 scaleY = proportionalScale;
+            } else if (fitMode === "fill_width") {
+                scaleY = 1;
+                if (height > targetHeight) {
+                    var widthFitScale = targetHeight / height;
+                    scaleX *= widthFitScale;
+                    scaleY = widthFitScale;
+                }
+            } else if (fitMode === "fill_height") {
+                scaleX = 1;
+                if (width > targetWidth) {
+                    var heightFitScale = targetWidth / width;
+                    scaleX = heightFitScale;
+                    scaleY *= heightFitScale;
+                }
             }
             if (!isFinite(scaleX) || !isFinite(scaleY) || scaleX <= 0 || scaleY <= 0) break;
             if (Math.abs(scaleX - 1) <= 0.001 && Math.abs(scaleY - 1) <= 0.001) break;
@@ -578,6 +646,7 @@
             catch (resizeError1) {
                 try { item.resize(scaleX * 100, scaleY * 100); } catch (resizeError2) { break; }
             }
+            if (!preserveComposition && fitMode !== "fill_both") break;
         }
         centerItemInBounds(item, bounds);
         var finalBounds = measuredBounds(item);
@@ -612,6 +681,11 @@
     function shouldPreserveSlotComposition(slot, action) {
         if (action && action.preserve_composition === true) return true;
         return slotHasKeepRatioMarker(slot);
+    }
+
+    function slotFitMode(action) {
+        var mode = String(action && action.fit_mode || "fill_both");
+        return mode === "fill_width" || mode === "fill_height" ? mode : "fill_both";
     }
 
     function slotHasKeepRatioMarker(slot) {

@@ -564,6 +564,8 @@
         ".asset_key": "slot-asset-key",
         ".font_dependencies": "slot-font-dependencies",
         ".color_binding": "slot-color-binding",
+        ".fit_mode": "slot-fit-mode",
+        ".preserve_composition": "slot-preserve-composition",
         ".dimension_rule.width_mm": "slot-width-mm",
         ".dimension_rule.height_mm": "slot-height-mm"
       };

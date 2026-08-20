@@ -163,6 +163,27 @@ def test_normalizes_slot_preserve_composition_flag():
     assert contract["outputs"][0]["font"]["options"][0]["slots"][0]["preserve_composition"] is True
 
 
+def test_normalizes_slot_fit_mode_with_default_and_single_axis_modes():
+    payload = base_contract()
+    slot = payload["outputs"][0]["font"]["options"][0]["slots"][0]
+
+    default_contract = normalize_v2_template_contract(payload)
+    assert default_contract["outputs"][0]["font"]["options"][0]["slots"][0]["fit_mode"] == "fill_both"
+
+    slot["fit_mode"] = "fill_width"
+    width_contract = normalize_v2_template_contract(payload)
+    assert width_contract["outputs"][0]["font"]["options"][0]["slots"][0]["fit_mode"] == "fill_width"
+
+    slot["fit_mode"] = "fill_height"
+    height_contract = normalize_v2_template_contract(payload)
+    assert height_contract["outputs"][0]["font"]["options"][0]["slots"][0]["fit_mode"] == "fill_height"
+
+    slot["fit_mode"] = "stretch_anywhere"
+    invalid = check_v2_template_contract(payload)
+    assert invalid["ok"] is False
+    assert any(issue["path"].endswith(".fit_mode") for issue in invalid["errors"])
+
+
 def test_normalizes_mixed_slots_as_option_only_preset():
     payload = base_contract()
     option = payload["outputs"][0]["font"]["options"][0]

@@ -81,6 +81,7 @@ _SLOT_FIELDS = {
     "font_dependencies",
     "color_binding",
     "preserve_composition",
+    "fit_mode",
 }
 _ASSET_FIELDS = {"asset_key", "slot", "supported_values", "component_key", "scope", "component_scope_executable"}
 _TAIL_FIELDS = {"key", "position", "sample", "pua_base", "glyph_map"}
@@ -356,7 +357,16 @@ def _normalize_slot(value: Any, path: str, issues: list[Dict[str, str]]) -> Dict
         "font_dependencies": _string_list(data.get("font_dependencies", []), f"{path}.font_dependencies", issues),
         "color_binding": _optional_string(data, "color_binding", f"{path}.color_binding", issues),
         "preserve_composition": bool(data.get("preserve_composition") is True),
+        "fit_mode": _fit_mode(data.get("fit_mode"), f"{path}.fit_mode", issues),
     }
+
+
+def _fit_mode(value: Any, path: str, issues: list[Dict[str, str]]) -> str:
+    mode = _optional_string({"fit_mode": value}, "fit_mode", path, issues) or "fill_both"
+    if mode not in {"fill_both", "fill_width", "fill_height"}:
+        _issue(issues, path, "fit_mode must be fill_both, fill_width, or fill_height.")
+        return "fill_both"
+    return mode
 
 
 def _normalize_asset(value: Any, path: str, issues: list[Dict[str, str]]) -> Dict[str, Any]:
