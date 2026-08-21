@@ -44,7 +44,7 @@ if ($LASTEXITCODE -ne 0) {
     throw "PyInstaller is required. Install it in the build environment, then rerun deploy\package-client.ps1."
 }
 
-$DataSeparator = ":"
+$DataSeparator = [IO.Path]::PathSeparator
 $PyInstallerArgs = @(
     "--noconfirm",
     "--clean",
@@ -54,7 +54,11 @@ $PyInstallerArgs = @(
     "--distpath", $DistRoot,
     "--workpath", $BuildRoot,
     "--specpath", $BuildRoot,
-    "--add-data", ((Join-Path $ProjectRoot "scripts") + $DataSeparator + "scripts"),
+    "--add-data", ((Join-Path $ProjectRoot "scripts\\illustrator") + $DataSeparator + "scripts\\illustrator"),
+    "--add-data", ((Join-Path $ProjectRoot "src\\service\\static\\v2-workbench") + $DataSeparator + "src\\service\\static\\v2-workbench"),
+    "--add-data", ((Join-Path $ProjectRoot "src\\service\\v2_workbench_page_head.py") + $DataSeparator + "src\\service"),
+    "--add-data", ((Join-Path $ProjectRoot "src\\service\\v2_workbench_page_main.py") + $DataSeparator + "src\\service"),
+    "--add-data", ((Join-Path $ProjectRoot "src\\service\\v2_workbench_page_finish.py") + $DataSeparator + "src\\service"),
     "--add-data", ((Join-Path $ProjectRoot "config") + $DataSeparator + "config"),
     "--collect-submodules", "src",
     "deploy\client\DrawFlowClient.py"
