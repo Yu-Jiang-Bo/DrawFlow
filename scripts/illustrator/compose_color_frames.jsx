@@ -264,8 +264,9 @@
                 for (var childIndex = 0; childIndex < sourceSubItems.length; childIndex++) {
                     var sourceItem = sourceSubItems[childIndex].item;
                     var bounds = pageItemBounds(sourceItem);
-                    var target = targetDimensions[dimensionCursor + childIndex] || input.target_dimensions || {};
-                    if (input.order_dimensions && (!target.width_mm || !target.height_mm)) throw new Error("V2 color frame target dimensions missing");
+                    var requestedDimensions = targetDimensions[dimensionCursor + childIndex] || input.target_dimensions;
+                    var target = requestedDimensions || {};
+                    if (hasDimensionFields(requestedDimensions) && (!target.width_mm || !target.height_mm)) throw new Error("V2 color frame target dimensions missing");
                     var itemWidth = Number(target.width_mm || 0) > 0 ? mmToPt(Number(target.width_mm)) : bounds[2] - bounds[0];
                     var itemHeight = Number(target.height_mm || 0) > 0 ? mmToPt(Number(target.height_mm)) : bounds[1] - bounds[3];
                     if (itemWidth <= 0 || itemHeight <= 0) throw new Error("Order sub-item has empty visible bounds");
@@ -288,6 +289,14 @@
         } finally {
             source.close(SaveOptions.DONOTSAVECHANGES);
         }
+    }
+
+    function hasDimensionFields(dimensions) {
+        if (!dimensions) return false;
+        for (var key in dimensions) {
+            if (Object.prototype.hasOwnProperty.call(dimensions, key)) return true;
+        }
+        return false;
     }
 
     function packAdaptiveGrid(orders, width, verticalGap, minColumnGap, segmentLabelHeight, segmentLabelGap, cellPadding, slackRows, colorOption, keepOrderItemsTogether) {
@@ -659,7 +668,7 @@
     function fitCopiedArtwork(item, dimensions) {
         var targetWidth = mmToPt(Number(dimensions.width_mm || 0));
         var targetHeight = mmToPt(Number(dimensions.height_mm || 0));
-        if (targetWidth <= 0 || targetHeight <= 0) throw new Error("V2 color frame target dimensions missing");
+        if (targetWidth <= 0 || targetHeight <= 0) return;
         var bounds = pageItemBounds(item);
         var width = bounds[2] - bounds[0];
         var height = bounds[1] - bounds[3];

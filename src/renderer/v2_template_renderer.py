@@ -288,7 +288,9 @@ def build_v2_order_column_task(
         if index < len(order_nos) and order_nos[index]:
             item["order_no"] = order_nos[index]
         if target_dimensions_by_input is not None and index < len(target_dimensions_by_input):
-            item["target_dimensions"] = deepcopy(dict(target_dimensions_by_input[index] or {}))
+            dimensions = dict(target_dimensions_by_input[index] or {})
+            if dimensions:
+                item["target_dimensions"] = deepcopy(dimensions)
         elif target_dimensions:
             item["target_dimensions"] = deepcopy(dict(target_dimensions))
         inputs.append(item)
@@ -326,6 +328,21 @@ def build_v2_color_frames_task(
 ) -> dict[str, Any]:
     """Build a pure color-frame composition task for the shared batch executor."""
 
+    clean_inputs: list[dict[str, Any]] = []
+    for raw_input in inputs:
+        item = deepcopy(dict(raw_input))
+        raw_dimensions = item.get("order_dimensions")
+        if isinstance(raw_dimensions, Sequence) and not isinstance(raw_dimensions, (str, bytes)):
+            normalized_dimensions = [
+                None if isinstance(dimensions, Mapping) and not dimensions else deepcopy(dimensions)
+                for dimensions in raw_dimensions
+            ]
+            if any(dimensions is not None for dimensions in normalized_dimensions):
+                item["order_dimensions"] = normalized_dimensions
+            else:
+                item.pop("order_dimensions", None)
+        clean_inputs.append(item)
+
     payload: dict[str, Any] = {
         "type": "compose_color_frames",
         "output_ai": str(Path(output_ai)),
@@ -333,7 +350,7 @@ def build_v2_color_frames_task(
         "compatibility": str(compatibility or "Illustrator 8"),
         "show_color_header": bool(show_color_header),
         "show_color_frame_boundary": bool(show_color_frame_boundary),
-        "inputs": [deepcopy(dict(item)) for item in inputs],
+        "inputs": clean_inputs,
     }
     if output_policy is not None:
         payload["output"] = {
