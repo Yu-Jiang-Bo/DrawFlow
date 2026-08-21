@@ -185,7 +185,7 @@ def _compile_output(
             actions.extend(_slot_actions(output_key, group, dict(option), option_scan, scan_index, font_style_sources, field_bindings))
             actions.extend(_asset_actions(output_key, group, dict(option), scan_index))
             if group == "design" and not has_fixed_dimensions_for_every_style:
-                dimensions = _scanned_option_dimensions(option_scan)
+                dimensions = _scanned_design_dimensions(dict(option), option_scan)
                 if not dimensions:
                     raise V2RenderTaskError(
                         "design_dimensions_missing",
@@ -225,11 +225,49 @@ def _has_fixed_style_dimensions(dimensions: Mapping[str, Any]) -> bool:
     return math.isfinite(width) and math.isfinite(height) and width > 0 and height > 0
 
 
-def _scanned_option_dimensions(option: Mapping[str, Any]) -> dict[str, float]:
-    dimensions = option.get("dimensions") if isinstance(option.get("dimensions"), Mapping) else {}
+def _scanned_design_dimensions(configured_option: Mapping[str, Any], scanned_option: Mapping[str, Any]) -> dict[str, float]:
+    """Choose the configured single-slot frame as the final output frame.
+
+    A Design group may include decorative objects outside its editable text slot.
+    For a design with exactly one non-asset slot, its configured anchor defines the
+    workbench's size boundary when an anchor is present. Otherwise, use that slot's
+    scanned dimensions. Multi-slot designs retain the group-level scan as their
+    final frame.
+    """
+    configured_slots = [
+        dict(slot)
+        for slot in configured_option.get("slots", [])
+        if isinstance(slot, Mapping) and str(dict(slot).get("preset") or "") != "asset_replace"
+    ]
+    if len(configured_slots) == 1:
+        slot = configured_slots[0]
+        anchor_key = str(slot.get("anchor") or "")
+        if anchor_key:
+            for anchor in scanned_option.get("anchors", []):
+                if isinstance(anchor, Mapping) and str(anchor.get("key") or "") == anchor_key:
+                    dimensions = _scanned_dimensions(anchor)
+                    if dimensions:
+                        return dimensions
+            return _scanned_dimensions(scanned_option)
+
+        slot_key = str(slot.get("key") or "")
+        for scanned_slot in scanned_option.get("slots", []):
+            if isinstance(scanned_slot, Mapping) and str(scanned_slot.get("key") or "") == slot_key:
+                dimensions = _scanned_dimensions(scanned_slot)
+                if dimensions:
+                    return dimensions
+    return _scanned_dimensions(scanned_option)
+
+
+def _scanned_dimensions(item: Mapping[str, Any]) -> dict[str, float]:
+    dimensions = item.get("dimensions") if isinstance(item.get("dimensions"), Mapping) else {}
+    raw_width = dimensions.get("width_mm")
+    raw_height = dimensions.get("height_mm")
+    if isinstance(raw_width, bool) or isinstance(raw_height, bool):
+        return {}
     try:
-        width = float(dimensions.get("width_mm"))
-        height = float(dimensions.get("height_mm"))
+        width = float(raw_width)
+        height = float(raw_height)
     except (TypeError, ValueError):
         return {}
     if not math.isfinite(width) or not math.isfinite(height) or width <= 0 or height <= 0:
