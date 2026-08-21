@@ -185,7 +185,7 @@ def _compile_output(
             actions.extend(_slot_actions(output_key, group, dict(option), option_scan, scan_index, font_style_sources, field_bindings))
             actions.extend(_asset_actions(output_key, group, dict(option), scan_index))
             if group == "design" and not has_fixed_dimensions_for_every_style:
-                dimensions = _scanned_option_dimensions(option_scan)
+                dimensions = _scanned_design_dimensions(dict(option), option_scan)
                 if not dimensions:
                     raise V2RenderTaskError(
                         "design_dimensions_missing",
@@ -225,8 +225,33 @@ def _has_fixed_style_dimensions(dimensions: Mapping[str, Any]) -> bool:
     return math.isfinite(width) and math.isfinite(height) and width > 0 and height > 0
 
 
-def _scanned_option_dimensions(option: Mapping[str, Any]) -> dict[str, float]:
-    dimensions = option.get("dimensions") if isinstance(option.get("dimensions"), Mapping) else {}
+def _scanned_design_dimensions(configured_option: Mapping[str, Any], scanned_option: Mapping[str, Any]) -> dict[str, float]:
+    """Choose the visible design slot as the final frame when it is unambiguous.
+
+    A Design group may include decorative objects outside its editable text slot.
+    For a design with exactly one non-asset slot, the slot's scanned dimensions are
+    the workbench's stated size requirement and must therefore drive final output
+    fitting. Multi-slot designs retain the group-level scan as their final frame.
+    """
+    configured_slots = [
+        str(dict(slot).get("key") or "")
+        for slot in configured_option.get("slots", [])
+        if isinstance(slot, Mapping) and str(dict(slot).get("preset") or "") != "asset_replace"
+    ]
+    configured_slot_keys = {key for key in configured_slots if key}
+    slot_dimensions = [
+        _scanned_dimensions(slot)
+        for slot in scanned_option.get("slots", [])
+        if isinstance(slot, Mapping) and str(slot.get("key") or "") in configured_slot_keys
+    ]
+    slot_dimensions = [dimensions for dimensions in slot_dimensions if dimensions]
+    if len(configured_slot_keys) == 1 and len(slot_dimensions) == 1:
+        return slot_dimensions[0]
+    return _scanned_dimensions(scanned_option)
+
+
+def _scanned_dimensions(item: Mapping[str, Any]) -> dict[str, float]:
+    dimensions = item.get("dimensions") if isinstance(item.get("dimensions"), Mapping) else {}
     try:
         width = float(dimensions.get("width_mm"))
         height = float(dimensions.get("height_mm"))
