@@ -418,7 +418,7 @@ def test_compiles_scanned_design_dimensions_when_output_has_no_style_dimension()
     ]
 
 
-def test_compiles_single_design_slot_dimensions_as_final_output_frame():
+def test_compiles_single_design_anchor_dimensions_as_final_output_frame():
     config = render_config()
     config["outputs"][0].pop("style")
     config["field_bindings"].pop("size")
@@ -426,7 +426,8 @@ def test_compiles_single_design_slot_dimensions_as_final_output_frame():
     scan = scan_evidence()
     design = scan["outputs"][0]["designs"][0]
     design["dimensions"] = {"width_mm": 165.15, "height_mm": 131.018}
-    design["slots"][0]["dimensions"] = {"width_mm": 150.0, "height_mm": 47.0}
+    design["slots"][0]["dimensions"] = {"width_mm": 163.657, "height_mm": 85.03}
+    design["anchors"][0]["dimensions"] = {"width_mm": 150.231, "height_mm": 47.231}
 
     task = compile_task(config=config, scan=scan)
 
@@ -436,9 +437,69 @@ def test_compiles_single_design_slot_dimensions_as_final_output_frame():
             "type": "fit_output_bounds",
             "group": "design",
             "option_key": "Design03",
-            "dimensions": {"width_mm": 150.0, "height_mm": 47.0, "tolerance_mm": 0.007},
+            "dimensions": {"width_mm": 150.231, "height_mm": 47.231, "tolerance_mm": 0.007},
         }
     ]
+
+
+def test_falls_back_to_design_group_when_single_design_anchor_has_no_dimensions():
+    config = render_config()
+    config["outputs"][0].pop("style")
+    config["field_bindings"].pop("size")
+    config["option_mappings"] = [item for item in config["option_mappings"] if item["group"] != "style"]
+    scan = scan_evidence()
+    design = scan["outputs"][0]["designs"][0]
+    design["dimensions"] = {"width_mm": 165.15, "height_mm": 131.018}
+    design["slots"][0]["dimensions"] = {"width_mm": 163.657, "height_mm": 85.03}
+
+    task = compile_task(config=config, scan=scan)
+
+    fit_action = next(action for action in task["outputs"][0]["actions"] if action["type"] == "fit_output_bounds")
+    assert fit_action["dimensions"] == {"width_mm": 165.15, "height_mm": 131.018, "tolerance_mm": 0.007}
+
+
+@pytest.mark.parametrize(
+    "invalid_anchor_dimensions",
+    [
+        {"width_mm": 0, "height_mm": 47.231},
+        {"width_mm": -150.231, "height_mm": 47.231},
+        {"width_mm": "invalid", "height_mm": 47.231},
+        {"width_mm": True, "height_mm": 47.231},
+        {"width_mm": 150.231, "height_mm": True},
+    ],
+)
+def test_falls_back_to_design_group_when_single_design_anchor_dimensions_are_invalid(invalid_anchor_dimensions):
+    config = render_config()
+    config["outputs"][0].pop("style")
+    config["field_bindings"].pop("size")
+    config["option_mappings"] = [item for item in config["option_mappings"] if item["group"] != "style"]
+    scan = scan_evidence()
+    design = scan["outputs"][0]["designs"][0]
+    design["dimensions"] = {"width_mm": 165.15, "height_mm": 131.018}
+    design["slots"][0]["dimensions"] = {"width_mm": 163.657, "height_mm": 85.03}
+    design["anchors"][0]["dimensions"] = invalid_anchor_dimensions
+
+    task = compile_task(config=config, scan=scan)
+
+    fit_action = next(action for action in task["outputs"][0]["actions"] if action["type"] == "fit_output_bounds")
+    assert fit_action["dimensions"] == {"width_mm": 165.15, "height_mm": 131.018, "tolerance_mm": 0.007}
+
+
+def test_compiles_single_design_slot_dimensions_when_slot_has_no_anchor():
+    config = render_config()
+    config["outputs"][0].pop("style")
+    config["field_bindings"].pop("size")
+    config["option_mappings"] = [item for item in config["option_mappings"] if item["group"] != "style"]
+    config["outputs"][0]["design"]["options"][0]["slots"][0].pop("anchor")
+    scan = scan_evidence()
+    design = scan["outputs"][0]["designs"][0]
+    design["dimensions"] = {"width_mm": 165.15, "height_mm": 131.018}
+    design["slots"][0]["dimensions"] = {"width_mm": 163.657, "height_mm": 85.03}
+
+    task = compile_task(config=config, scan=scan)
+
+    fit_action = next(action for action in task["outputs"][0]["actions"] if action["type"] == "fit_output_bounds")
+    assert fit_action["dimensions"] == {"width_mm": 163.657, "height_mm": 85.03, "tolerance_mm": 0.007}
 
 
 def test_compiles_multiple_design_slots_with_design_group_dimensions():
