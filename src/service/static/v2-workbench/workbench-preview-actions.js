@@ -44,6 +44,13 @@
     }
   }
 
+  function cancelSupersededTrialRequest(request) {
+    if (objectOf(request).id !== state.activeTrialRequestId) return;
+    state.previewMessage = "模板、配置或样例已更新，本次试渲染未开始，请使用当前数据重新试渲染。";
+    finishTrialRequest(request);
+    renderPreviewStage();
+  }
+
   async function trialRenderCurrentDraft() {
     if (state.isTrialRendering || state.isSavingDraft || state.isPublishing) return;
     if (!state.draft) {
@@ -74,20 +81,32 @@
       const templateId = cleanText(state.selectedTemplateId || formBasics().template_id);
       if (!templateId || !revision) throw new Error("草稿还没有可用于试渲染的版本，请重新保存草稿。");
       request.savedRevision = revision;
-      if (templateId !== request.templateId || !trialRequestIsCurrent(request)) return;
+      if (templateId !== request.templateId || !trialRequestIsCurrent(request)) {
+        cancelSupersededTrialRequest(request);
+        return;
+      }
       state.previewSampleValues = { ...sampleRow };
       const payload = await postJson(`/local/v2/templates/${encodeURIComponent(templateId)}/trial-render`, {
         expected_draft_revision: revision,
         sample_row: sampleRow
       }, "试渲染失败，请检查样例订单数据后重试。");
-      if (!trialRequestIsCurrent(request)) return;
+      if (!trialRequestIsCurrent(request)) {
+        cancelSupersededTrialRequest(request);
+        return;
+      }
       const responseDraft = objectOf(payload.draft);
       const responseTemplateId = cleanText(objectOf(responseDraft.metadata).template_id);
-      if (responseTemplateId && !sameTemplateIdentity(responseTemplateId, request.templateId)) return;
+      if (responseTemplateId && !sameTemplateIdentity(responseTemplateId, request.templateId)) {
+        cancelSupersededTrialRequest(request);
+        return;
+      }
       const responseRevision = currentDraftRevision(responseDraft);
       if (responseRevision) request.savedRevision = responseRevision;
       applyWorkbenchResponse(payload);
-      if (!trialRequestIsCurrent(request)) return;
+      if (!trialRequestIsCurrent(request)) {
+        cancelSupersededTrialRequest(request);
+        return;
+      }
       state.trial = objectOf(payload.trial);
       state.previewOutputIndex = 0;
       state.previewMessage = trialSucceeded() ? "" : "试渲染没有成功完成，请按提示修改后重试。";
@@ -97,10 +116,16 @@
       } else {
         await checkPublicationCurrentDraft(false, request);
       }
-      if (!trialRequestIsCurrent(request)) return;
+      if (!trialRequestIsCurrent(request)) {
+        cancelSupersededTrialRequest(request);
+        return;
+      }
       renderPreviewStage();
     } catch (error) {
-      if (!trialRequestIsCurrent(request)) return;
+      if (!trialRequestIsCurrent(request)) {
+        cancelSupersededTrialRequest(request);
+        return;
+      }
       state.trial = null;
       state.previewMessage = friendlyError(error, "试渲染失败，请检查样例订单数据后重试。");
       showTransientStatus(state.previewMessage);
@@ -204,6 +229,7 @@
     checkPublicationCurrentDraft,
     publishCurrentDraft,
     currentDraftRevision,
-    applyWorkbenchResponse
+    applyWorkbenchResponse,
+    cancelSupersededTrialRequest
   });
 })();

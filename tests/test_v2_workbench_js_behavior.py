@@ -4185,6 +4185,73 @@ def test_v2_workbench_real_trial_render_keeps_selected_template_id_when_list_cas
     )
 
 
+def test_v2_workbench_clears_busy_preview_when_saved_draft_supersedes_request():
+    run_node(
+        r"""
+        (async () => {
+          let currentDraft = {
+            metadata: { template_id: "V2STALE", name: "Stale Preview", shop_name: "" },
+            manifest: { draft_revision: "d0001" },
+            scan: { outputs: [{
+              key: "Output_main",
+              style: { options: [{ key: "style1" }] },
+              design: { options: [{ key: "Design01", slots: [{ key: "slot_name" }] }] },
+              font: { options: [] },
+              summary: { designs: 1, fonts: 0, styles: 1, slots: 1, anchors: 0, tails: 0, assets: 0, fixed_objects: 0 }
+            }] },
+            config: {
+              outputs: [{
+                key: "Output_main", display_name: "主效果图", component_key: "main",
+                style: { field: "", options: [{ key: "style1" }] },
+                design: { field: "design", options: [{ key: "Design01", content_preset: "mixed_slots", slots: [
+                  { key: "slot_name", source_field: "name", preset: "direct_text" }
+                ] }] },
+                font: { field: "", options: [] }
+              }],
+              field_bindings: { design: "Design", name: "Name" },
+              option_mappings: [{ field: "design", source_value: "1", group: "design", target: "Design01", output: "Output_main" }],
+              checks: {}, preview: { sample_rows: [] }
+            }
+          };
+          let trialCalls = 0;
+          const confirmedChecks = Object.fromEntries(["output", "fields", "options", "slots", "content", "dimensions", "colors", "preview"]
+            .map((key) => [key, { status: "confirmed", reason: "" }]));
+          async function fakeFetch(url, options = {}) {
+            const textUrl = String(url);
+            if (textUrl === "/api/v2/templates") return response({ templates: [{ template_id: "V2STALE", name: "Stale Preview" }] });
+            if (textUrl.endsWith("/draft") && (!options.method || options.method === "GET")) return response({ draft: currentDraft });
+            if (textUrl.endsWith("/validate")) return response({ validation: { can_save: true, can_publish: false, checks: confirmedChecks } });
+            if (textUrl.endsWith("/draft") && options.method === "POST") {
+              currentDraft = { ...currentDraft, manifest: { draft_revision: "d0002" } };
+              global.DrawFlowV2WorkbenchContext.state.trialGeneration += 1;
+              return response({ draft: currentDraft });
+            }
+            if (textUrl.endsWith("/trial-render")) {
+              trialCalls += 1;
+              return response({});
+            }
+            return response({});
+          }
+          const app = createApp(fakeFetch);
+          await flush();
+          app.elements.templateList.children[0].dispatch("click");
+          await flush();
+          global.setWorkbenchStage("preview");
+          await flush();
+          const sampleInputs = allDescendants(app.elements.previewSampleRows).filter((node) => node.dataset.sampleHeader);
+          sampleInputs.find((input) => input.dataset.sampleHeader === "Name").value = "Meiyi";
+          app.elements.trialRenderBtn.dispatch("click");
+          for (let index = 0; index < 12; index += 1) await flush();
+
+          assert.strictEqual(trialCalls, 0, "superseded requests must not call Illustrator");
+          assert.strictEqual(global.DrawFlowV2WorkbenchContext.state.isTrialRendering, false);
+          assert(app.elements.previewTrialStatus.textContent.includes("未开始"));
+          assert(!app.elements.previewTrialStatus.textContent.includes("正在保存草稿"));
+        })().catch((error) => { console.error(error); process.exit(1); });
+        """
+    )
+
+
 def test_v2_workbench_multi_output_labels_and_publish_use_real_responses():
     run_node(
         r"""
