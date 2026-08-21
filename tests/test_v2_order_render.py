@@ -490,7 +490,8 @@ def test_v2_department_single_order_combines_duplicate_order_with_independent_st
     assert renderer.compose_calls[0]["label_lines"] == ["ORDER1", "\u91d1\u8272"]
     assert renderer.color_frame_calls[0]["inputs"][0]["order_nos"] == ["ORDER1"]
     rendered_styles = [call["selections"]["Output_main"]["style"] for call in renderer.calls]
-    assert rendered_styles == ["style1", "style2", "style1", "style2"]
+    # The two reusable components feed both the single-order file and color summary.
+    assert rendered_styles == ["style1", "style2"]
     with zipfile.ZipFile(record["outputs"]["primary_output"]) as archive:
         names = archive.namelist()
         assert "single-orders/ORDER1.ai" in names

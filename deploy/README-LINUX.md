@@ -18,7 +18,7 @@ deploy/linux/
 requirements.txt
 ```
 
-运行时模板版本数据放在 `DRAWFLOW_DATA_DIR` 指定的外部目录，推荐为 `/opt/drawflow-data`。不要把真实 API Key、密码或 `.env` 文件放入发布 ZIP。
+如果打包时带入了已启用的 V2 模板，运行数据会位于包内 `drawflow-data/v2-templates/`，其中包括正式版本所需的 `.ai` 文件。首次演示可保持 `DRAWFLOW_DATA_DIR` 未设置，服务会直接使用该目录；如需将数据放在包外，再将完整 `drawflow-data` 迁移到 `DRAWFLOW_DATA_DIR`。不要把真实 API Key、密码或 `.env` 文件放入发布 ZIP。
 
 ## 安装
 
