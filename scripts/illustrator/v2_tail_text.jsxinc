@@ -1,0 +1,114 @@
+var V2TailText = (function () {
+    function replaceTailText(env, root, sourcePath, target, value, fitBounds, action) {
+        var tailSpecs = action.tails || [];
+        if (!tailSpecs.length) throw new Error("V2 tail text has no tail samples: " + String(action.slot_key || ""));
+        var parsed = tailEndpointParts(String(value || ""), tailSpecs);
+        var textFrame = env.writeTextToItem(target, parsed.main_text);
+        env.fitItemWithinBounds(textFrame, fitBounds, action);
+        for (var index = 0; index < tailSpecs.length; index++) {
+            var spec = tailSpecs[index] || {};
+            var position = String(spec.position || "");
+            var text = position === "first" ? parsed.first_tail : (position === "last" ? parsed.last_tail : "");
+            var tail = env.findPageItemByRelativePath(root, env.relativePath(String(spec.path || ""), sourcePath));
+            if (env.hasText(text)) {
+                var tailBounds = env.measuredBounds(tail);
+                var tailFrame = env.writeTextToItem(tail, tailGlyphForSpec(text, spec));
+                env.fitItemWithinBounds(tailFrame, tailBounds, action);
+            } else {
+                env.removePageItem(tail);
+            }
+        }
+    }
+
+    function tailEndpointParts(value, tailSpecs) {
+        var useFirst = false;
+        var useLast = false;
+        for (var index = 0; index < tailSpecs.length; index++) {
+            var position = String((tailSpecs[index] || {}).position || "");
+            if (position === "first") useFirst = true;
+            if (position === "last") useLast = true;
+        }
+        var firstIndex = firstLatinIndex(value);
+        var lastIndex = lastLatinIndex(value);
+        if ((useFirst || useLast) && (firstIndex < 0 || lastIndex < 0)) {
+            throw new Error("V2 tail text requires latin endpoints: " + value);
+        }
+        var firstTail = useFirst ? value.charAt(firstIndex) : "";
+        var lastTail = useLast ? value.charAt(lastIndex) : "";
+        var chars = value.split("");
+        if (useFirst) chars[firstIndex] = "";
+        if (useLast && lastIndex !== firstIndex) chars[lastIndex] = "";
+        return {
+            main_text: chars.join(""),
+            first_tail: firstTail,
+            last_tail: lastTail,
+            first_index: firstIndex,
+            last_index: lastIndex
+        };
+    }
+
+    function firstLatinIndex(value) {
+        for (var index = 0; index < value.length; index++) {
+            if (isLatinLetter(value.charAt(index))) return index;
+        }
+        return -1;
+    }
+
+    function lastLatinIndex(value) {
+        for (var index = value.length - 1; index >= 0; index--) {
+            if (isLatinLetter(value.charAt(index))) return index;
+        }
+        return -1;
+    }
+
+    function isLatinLetter(value) {
+        return /^[A-Za-z]$/.test(String(value || ""));
+    }
+
+    function tailGlyphForSpec(text, spec) {
+        var letter = String(text || "").charAt(0).toLowerCase();
+        if (!isLatinLetter(letter)) throw new Error("V2 tail glyph requires a latin letter: " + String(text || ""));
+        var map = spec.glyph_map || {};
+        if (map && map.hasOwnProperty(letter)) {
+            return String.fromCharCode(tailCodepoint(map[letter], "glyph_map." + letter));
+        }
+        if (spec.pua_base !== undefined && spec.pua_base !== null && String(spec.pua_base) !== "") {
+            var code = tailCodepoint(spec.pua_base, "pua_base") + (letter.charCodeAt(0) - 97);
+            if (code > 0xF8FF) throw new Error("V2 tail glyph codepoint is outside PUA: pua_base");
+            return String.fromCharCode(code);
+        }
+        if (String(spec.glyph_mode || "") === "plain_text") return text;
+        throw new Error("V2 tail glyph coverage is missing: " + String(spec.key || ""));
+    }
+
+    function tailSampleSegment(sampleText, glyph, position) {
+        var text = String(sampleText || "");
+        var index = String(position || "") === "first" ? firstLatinIndex(text) : lastLatinIndex(text);
+        if (index < 0) return { text: String(glyph || ""), sample_letter: "" };
+        return {
+            text: text.substring(0, index) + String(glyph || "") + text.substring(index + 1),
+            sample_letter: text.charAt(index).toLowerCase()
+        };
+    }
+
+    function tailCodepoint(value, field) {
+        var code;
+        if (typeof value === "number") {
+            code = value;
+        } else {
+            var text = String(value || "").toLowerCase();
+            code = text.indexOf("0x") === 0 ? parseInt(text.substring(2), 16) : parseInt(text, 10);
+        }
+        if (!isFinite(code) || code < 0xE000 || code > 0xF8FF) {
+            throw new Error("V2 tail glyph codepoint is outside PUA: " + field);
+        }
+        return code;
+    }
+
+    return {
+        replaceTailText: replaceTailText,
+        tailEndpointParts: tailEndpointParts,
+        tailGlyphForSpec: tailGlyphForSpec,
+        tailSampleSegment: tailSampleSegment
+    };
+}());

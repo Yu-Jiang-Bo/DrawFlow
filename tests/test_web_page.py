@@ -11,6 +11,10 @@ def test_page_uses_drawflow_branding():
     assert "制图渲染工作台" not in INDEX_HTML
 
 
+def test_main_tabs_link_to_v2_template_workbench():
+    assert '<a class="tab" href="/v2/templates/workbench">V2 工作台</a>' in INDEX_HTML
+
+
 def test_render_page_exposes_single_render_action():
     assert 'id="dryRunBtn"' not in INDEX_HTML
     assert 'id="resetTaskBtn"' not in INDEX_HTML
@@ -94,9 +98,16 @@ def test_job_store_merges_live_progress_file(tmp_path):
 
 def test_render_page_downloads_the_department_primary_delivery():
     assert "outputs.primary_output" in INDEX_HTML
-    assert 'job.outputs.primary_output ? "primary_output" : "output_ai"' in INDEX_HTML
+    assert "function primaryOutputKey(outputs)" in INDEX_HTML
+    assert 'if (outputs.output_bundle) return "output_bundle"' in INDEX_HTML
     assert "下载全部成品 ZIP" in INDEX_HTML
     assert "下载 PNG 成品" in INDEX_HTML
+
+
+def test_render_page_lists_v2_workbench_templates_without_legacy_actions():
+    assert 'v2_illustrator_template: "V2 工作台模板"' in INDEX_HTML
+    assert "!isV2Template(template) && template.status" in INDEX_HTML
+    assert "function isV2Template(template)" in INDEX_HTML
 
 
 def test_legacy_render_page_downloads_the_department_primary_delivery():
@@ -200,6 +211,9 @@ def test_template_rule_editor_is_business_readable():
     assert "输出色彩" in INDEX_HTML
     assert "rule_source: \"structured_form\"" in INDEX_HTML
     assert "buildCanonicalRulePack" in INDEX_HTML
+    assert "placeholder='{\"" not in INDEX_HTML
+    assert "placeholder='[{\"" not in INDEX_HTML
+    assert "JSON 格式错误" not in INDEX_HTML
 
 
 def test_template_rule_supports_fixed_dimensions():
@@ -346,7 +360,7 @@ def test_scan_evidence_defaults_to_summary_and_keeps_raw_details_collapsed():
     assert 'id="scanEvidenceLabel">扫描结果摘要（只读）' in INDEX_HTML
     assert 'class="preview-box readonly-summary" id="scanEvidence"' in INDEX_HTML
     assert 'class="advanced-rule-box scan-evidence-details"' in INDEX_HTML
-    assert "完整对象路径、坐标和颜色信息已收起" in INDEX_HTML
+    assert "完整对象定位、坐标和颜色信息已收起" in INDEX_HTML
     assert "fontMappings" in INDEX_HTML
     assert "compareTemplateOptionNames" in INDEX_HTML
     assert "items.reduce" in INDEX_HTML

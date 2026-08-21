@@ -14,7 +14,7 @@ from email.parser import BytesParser
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import unquote, urlparse
+from urllib.parse import quote, unquote, urlparse
 
 from .job_store import JobStore
 from .llm_rule_parser import LlmRuleParser
@@ -28,7 +28,13 @@ from .template_onboarding import TemplateOnboardingStore
 from .template_inspector import TemplateInspector
 from .template_publication import TemplatePublicationService
 from .template_rule_compiler import compile_rule_ast
+from .v2_template_boundary import V2_RENDER_PIPELINE, V2_TEMPLATE_TYPE
+from .v2_template_api import V2TemplateApi, handle_v2_template_api
+from .v2_template_validation import validate_v2_template_configuration
+from .v2_trial_render_support import current_template_asset
 from .web_page import INDEX_HTML as WORKBENCH_HTML
+
+V2_WORKBENCH_STATIC_DIR = Path(__file__).resolve().parent / "static" / "v2-workbench"
 
 
 LEGACY_INDEX_HTML = """<!doctype html>
@@ -774,6 +780,7 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
     llm_parser = LlmRuleParser()
     template_inspector = TemplateInspector()
     runtime_templates = RuntimeTemplateService(registry)
+    v2_template_api = V2TemplateApi()
     render_lock = threading.Lock()
     service_role = "legacy-renderer"
     allow_render = True
@@ -782,6 +789,14 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         path = urlparse(self.path).path
         parts = path.strip("/").split("/")
+        if handle_v2_template_api(self, "GET", path, parts):
+            return
+        if path == "/v2/templates/workbench":
+            self._send_html(_v2_workbench_html())
+            return
+        if path.startswith("/static/v2-workbench/"):
+            self._send_v2_workbench_static(path)
+            return
         if path == "/":
             self._send_html(WORKBENCH_HTML)
             return
@@ -798,7 +813,7 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
             self._send_error(HTTPStatus.NOT_FOUND, "not found")
             return
         if path == "/api/templates":
-            self._send_json({"templates": [self._template_payload(item) for item in self.registry.list_templates()]})
+            self._send_json({"templates": self._template_list_payloads()})
             return
         if len(parts) == 5 and parts[:3] == ["api", "runtime", "templates"] and parts[4] == "manifest":
             try:
@@ -884,13 +899,15 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         path = urlparse(self.path).path
+        parts = path.strip("/").split("/")
+        if handle_v2_template_api(self, "POST", path, parts):
+            return
         if path == "/api/templates/import-scan":
             try:
                 self._send_json(self.runtime_templates.import_scan(self._read_json()))
             except (RuntimeTemplateError, ValueError) as exc:
                 self._send_error(HTTPStatus.BAD_REQUEST, str(exc))
             return
-        parts = path.strip("/").split("/")
         if len(parts) == 5 and parts[:3] == ["api", "runtime", "templates"] and parts[4] == "publish":
             try:
                 payload = self._read_json()
@@ -1147,6 +1164,74 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
         payload["rule_check"] = check_template_definition(template)
         return payload
 
+    def _template_list_payloads(self) -> list[dict[str, object]]:
+        payloads = [self._template_payload(item) for item in self.registry.list_templates()]
+        seen = {str(item.get("template_id") or "") for item in payloads}
+        for item in self._v2_published_template_payloads():
+            template_id = str(item.get("template_id") or "")
+            if template_id and template_id not in seen:
+                payloads.append(item)
+                seen.add(template_id)
+        return payloads
+
+    def _v2_published_template_payloads(self) -> list[dict[str, object]]:
+        try:
+            states = self.v2_template_api.list_templates()
+        except Exception:
+            return []
+        payloads: list[dict[str, object]] = []
+        for state in states:
+            if not isinstance(state, dict):
+                continue
+            publication = dict(state.get("publication") or {})
+            version = str(publication.get("current_version") or "").strip()
+            if str(publication.get("status") or "").strip() != "active" or not version:
+                continue
+            template = dict(state.get("template") or {})
+            template_id = str(template.get("template_id") or state.get("template_id") or "").strip()
+            name = str(template.get("name") or template_id).strip()
+            rule_check = self._v2_rule_check(template_id, version)
+            payloads.append(
+                {
+                    "template_id": template_id,
+                    "name": name,
+                    "shop_name": str(template.get("shop_name") or "").strip(),
+                    "template_type": V2_TEMPLATE_TYPE,
+                    "pipeline": V2_RENDER_PIPELINE,
+                    "status": "active" if rule_check.get("renderable") is True else "draft",
+                    "default_columns": 1,
+                    "default_hide_boxes": True,
+                    "template_ai": "",
+                    "template_ai_role": "",
+                    "template_config": "",
+                    "template_rules_config": "",
+                    "assets": [],
+                    "v2_workbench": True,
+                    "current_version": version,
+                    "rule_check": rule_check,
+                }
+            )
+        return payloads
+
+    def _v2_rule_check(self, template_id: str, version: str) -> dict[str, object]:
+        try:
+            payload = self.v2_template_api.read_version(template_id, version)
+            validation = validate_v2_template_configuration(payload.get("config") or {})
+            manifest = payload.get("manifest") or {}
+            renderable = validation.get("can_save") is True and bool(current_template_asset(manifest))
+        except Exception:
+            renderable = False
+        return {
+            "template_id": template_id,
+            "mode": "v2_workbench",
+            "status": "active" if renderable else "draft",
+            "complete": renderable,
+            "renderable": renderable,
+            "missing": [] if renderable else [{"code": "v2_template", "message": "请回到 V2 工作台重新发布模板。"}],
+            "warnings": [],
+            "capabilities": ["v2_workbench"],
+        }
+
     def _build_template_rule_draft(self, payload: dict[str, object]) -> dict[str, object]:
         template_id = str(payload.get("template_id", "")).strip()
         template_type = str(payload.get("template_type", "")).strip()
@@ -1401,7 +1486,7 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
         download_name = _safe_download_name(f"{template.template_id}.ai")
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", "application/octet-stream")
-        self.send_header("Content-Disposition", f'attachment; filename="{download_name}"')
+        self.send_header("Content-Disposition", _content_disposition("attachment", download_name))
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
         self.wfile.write(data)
@@ -1421,21 +1506,38 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
         download_name = _safe_download_name(str(asset.get("file_name") or asset_path.name))
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", "application/octet-stream")
-        self.send_header("Content-Disposition", f'attachment; filename="{download_name}"')
+        self.send_header("Content-Disposition", _content_disposition("attachment", download_name))
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
         self.wfile.write(data)
 
     def _send_runtime_bundle(self, template_id: str, version: str) -> None:
         path = self.runtime_templates.bundle_path(template_id, version)
-        data = path.read_bytes()
+        self._send_file_stream(
+            path,
+            content_type="application/zip",
+            download_name=_safe_download_name(path.name),
+            extra_headers={"X-DrawFlow-SHA256": sha256_file(path)},
+        )
+
+    def _send_file_stream(
+        self,
+        path: Path,
+        *,
+        content_type: str,
+        download_name: str,
+        extra_headers: dict[str, str] | None = None,
+    ) -> None:
         self.send_response(HTTPStatus.OK)
-        self.send_header("Content-Type", "application/zip")
-        self.send_header("Content-Disposition", f'attachment; filename="{_safe_download_name(path.name)}"')
-        self.send_header("X-DrawFlow-SHA256", sha256_file(path))
-        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Disposition", _content_disposition("attachment", download_name))
+        for key, value in (extra_headers or {}).items():
+            self.send_header(key, str(value))
+        self.send_header("Content-Length", str(path.stat().st_size))
         self.end_headers()
-        self.wfile.write(data)
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                self.wfile.write(chunk)
 
     def _save_uploaded_order(self, filename: str, content: bytes) -> Path:
         if not content:
@@ -1467,7 +1569,7 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
         content_type = "application/zip" if output_path.suffix.lower() == ".zip" else "application/octet-stream"
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", content_type)
-        self.send_header("Content-Disposition", f'attachment; filename="{_safe_download_name(output_path.name)}"')
+        self.send_header("Content-Disposition", _content_disposition("attachment", output_path.name))
         self.send_header("Content-Length", str(output_path.stat().st_size))
         self.end_headers()
         with output_path.open("rb") as source:
@@ -1485,6 +1587,31 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
         data = text.encode("utf-8")
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def _send_v2_workbench_static(self, path: str) -> None:
+        file_name = _safe_static_name(unquote(path.rsplit("/", 1)[-1]))
+        if not file_name:
+            self._send_error(HTTPStatus.NOT_FOUND, "not found")
+            return
+        target = (V2_WORKBENCH_STATIC_DIR / file_name).resolve()
+        try:
+            target.relative_to(V2_WORKBENCH_STATIC_DIR.resolve())
+        except ValueError:
+            self._send_error(HTTPStatus.NOT_FOUND, "not found")
+            return
+        if not target.is_file():
+            self._send_error(HTTPStatus.NOT_FOUND, "not found")
+            return
+        content_types = {
+            ".css": "text/css; charset=utf-8",
+            ".js": "text/javascript; charset=utf-8",
+        }
+        data = target.read_bytes()
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", content_types.get(target.suffix.lower(), "application/octet-stream"))
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
         self.wfile.write(data)
@@ -1519,15 +1646,91 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def _should_prepare_legacy_runtime_templates() -> bool:
+    value = os.environ.get("DRAWFLOW_PREPARE_LEGACY_TEMPLATES", "")
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _safe_download_name(value: str) -> str:
     chars = []
     for char in Path(value).name:
-        if char.isalnum() or char in {"-", "_", "."}:
+        if char.isascii() and (char.isalnum() or char in {"-", "_", "."}):
             chars.append(char)
         else:
             chars.append("_")
     name = "".join(chars).strip("._")
     return name or "file"
+
+
+def _content_disposition(disposition: str, download_name: str) -> str:
+    fallback = _safe_download_name(download_name)
+    utf8_name = quote(Path(download_name or fallback).name or fallback, safe="")
+    return f'{disposition}; filename="{fallback}"; filename*=UTF-8\'\'{utf8_name}'
+
+
+def _safe_static_name(value: str) -> str:
+    name = Path(value).name
+    if name != value or not name:
+        return ""
+    allowed = {
+        "workbench.css",
+        "workbench-stages.css",
+        "workbench.js",
+        "workbench-dom.js",
+        "workbench-api.js",
+        "workbench-scan-model.js",
+        "workbench-form-model.js",
+        "workbench-config.js",
+        "workbench-content.js",
+        "workbench-style-dimensions.js",
+        "workbench-option-rules.js",
+        "workbench-rule-evidence.js",
+        "workbench-stage-view.js",
+        "workbench-preview-state.js",
+        "workbench-preview-versions.js",
+        "workbench-preview.js",
+        "workbench-preview-actions.js",
+        "workbench-view-tables.js",
+        "workbench-validation-checks.js",
+        "workbench-validation-targets.js",
+        "workbench-validation-navigation.js",
+        "workbench-validation-blockers.js",
+        "workbench-view.js",
+        "workbench-structure-tree.js",
+        "workbench-draft-actions.js",
+        "workbench-scan-actions.js",
+    }
+    return name if name in allowed else ""
+
+
+def _v2_workbench_html() -> str:
+    """Read the V2 page fragments for the current request as one bundle.
+
+    Static V2 assets are already read for each request.  Building the HTML
+    from the same source fragments avoids retaining an older script manifest
+    in ``sys.modules`` when the service process remains alive during a safe
+    static-bundle update.
+    """
+    fragments = (
+        "v2_workbench_page_head.py",
+        "v2_workbench_page_main.py",
+        "v2_workbench_page_finish.py",
+    )
+    return "".join(_read_v2_workbench_page_fragment(filename) for filename in fragments)
+
+
+def _read_v2_workbench_page_fragment(filename: str) -> str:
+    """Return the literal HTML body from one V2 page-fragment source file."""
+    source = (Path(__file__).resolve().parent / filename).read_text(encoding="utf-8")
+    marker = ' = """'
+    start = source.find(marker)
+    if start < 0:
+        raise RuntimeError("V2 workbench page fragment is invalid")
+    start += len(marker)
+    end = source.rfind('"""')
+    if end < start:
+        raise RuntimeError("V2 workbench page fragment is invalid")
+    return source[start:end]
 
 
 def _design_asset_count(assets: object) -> int:
@@ -1546,13 +1749,15 @@ def _design_asset_count(assets: object) -> int:
 def main() -> int:
     args = parse_args()
     handler = CentralRequestHandler if args.role == "central" else RenderRequestHandler
-    if args.role == "central":
+    if args.role == "central" and _should_prepare_legacy_runtime_templates():
         prepared = handler.runtime_templates.ensure_active_registry_versions()
         summary = ", ".join(
             f"{item['template_id']}={item['version']}({item['action']})"
             for item in prepared
         )
         print(f"DrawFlow runtime templates ready: {summary or 'none'}")
+    elif args.role == "central":
+        print("DrawFlow legacy runtime template startup check skipped")
     server = ExclusiveThreadingHTTPServer((args.host, args.port), handler)
     print(f"DrawFlow listening on http://{args.host}:{args.port}")
     server.serve_forever()

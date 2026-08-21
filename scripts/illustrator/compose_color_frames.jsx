@@ -107,7 +107,8 @@
         composePlan(layer, plans[planIndex], finalHeight, frameWidth, outerMargin, headerHeight);
     }
 
-    outlineAllTextFrames(doc);
+    var outputPolicy = task.output || {};
+    if (!task.output || outputPolicy.outline_text !== false) outlineAllTextFrames(doc, outputPolicy.pathfinder_merge === true);
     writeDebug(task, plans, docWidth, finalHeight, frameWidth, usableWidth, algorithm, frameLayout);
     var output = File(String(task.output_ai));
     ensureFolder(output.parent);
@@ -170,6 +171,7 @@
                     var sourceItem = item.sourceChildIndex < 0 ? sourceOrder.item : sourceSubItems[item.sourceChildIndex];
                     if (!sourceItem) throw new Error("Missing source order sub-item " + item.sourceChildIndex);
                     var copy = sourceItem.item ? sourceItem.item.duplicate(layer, ElementPlacement.PLACEATEND) : sourceItem.duplicate(layer, ElementPlacement.PLACEATEND);
+                    fitCopiedArtwork(copy, item.target_dimensions || {});
                     var copiedBounds = pageItemBounds(copy);
                     var destinationLeft = plan.frameLeft + margin + placement.x + item.x;
                     var destinationTop = frameTop - margin - labelBandHeight - placement.y - item.y;
@@ -248,6 +250,8 @@
             var sourceOrders = collectOrderBlocks(source);
             assertSourceOrderCount(input, sourceOrders);
             var orderNos = input.order_nos || [];
+            var targetDimensions = input.order_dimensions || [];
+            var dimensionCursor = 0;
             var orders = [];
             for (var orderIndex = 0; orderIndex < sourceOrders.length; orderIndex++) {
                 var sourceOrder = sourceOrders[orderIndex];
@@ -260,13 +264,17 @@
                 for (var childIndex = 0; childIndex < sourceSubItems.length; childIndex++) {
                     var sourceItem = sourceSubItems[childIndex].item;
                     var bounds = pageItemBounds(sourceItem);
-                    var itemWidth = bounds[2] - bounds[0];
-                    var itemHeight = bounds[1] - bounds[3];
+                    var requestedDimensions = targetDimensions[dimensionCursor + childIndex] || input.target_dimensions;
+                    var target = requestedDimensions || {};
+                    if (hasDimensionFields(requestedDimensions) && (!target.width_mm || !target.height_mm)) throw new Error("V2 color frame target dimensions missing");
+                    var itemWidth = Number(target.width_mm || 0) > 0 ? mmToPt(Number(target.width_mm)) : bounds[2] - bounds[0];
+                    var itemHeight = Number(target.height_mm || 0) > 0 ? mmToPt(Number(target.height_mm)) : bounds[1] - bounds[3];
                     if (itemWidth <= 0 || itemHeight <= 0) throw new Error("Order sub-item has empty visible bounds");
                     orderItems.push({
                         sourceChildIndex: sourceSubItems[childIndex].sourceChildIndex,
                         width: itemWidth,
                         height: itemHeight,
+                        target_dimensions: target,
                         sourceOrder: orderIndex
                     });
                 }
@@ -275,11 +283,20 @@
                     orderNo: String(orderNos[orderIndex] || "ORDER_" + (orderIndex + 1)),
                     items: orderItems
                 });
+                dimensionCursor += sourceSubItems.length;
             }
             return orders;
         } finally {
             source.close(SaveOptions.DONOTSAVECHANGES);
         }
+    }
+
+    function hasDimensionFields(dimensions) {
+        if (!dimensions) return false;
+        for (var key in dimensions) {
+            if (Object.prototype.hasOwnProperty.call(dimensions, key)) return true;
+        }
+        return false;
     }
 
     function packAdaptiveGrid(orders, width, verticalGap, minColumnGap, segmentLabelHeight, segmentLabelGap, cellPadding, slackRows, colorOption, keepOrderItemsTogether) {
@@ -449,6 +466,7 @@
                 sourceChildIndex: item.sourceChildIndex,
                 width: item.width,
                 height: item.height,
+                target_dimensions: item.target_dimensions || {},
                 x: 0,
                 y: 0,
                 label_required: false
@@ -647,6 +665,28 @@
         return [Number(bounds[0]), Number(bounds[1]), Number(bounds[2]), Number(bounds[3])];
     }
 
+    function fitCopiedArtwork(item, dimensions) {
+        var targetWidth = mmToPt(Number(dimensions.width_mm || 0));
+        var targetHeight = mmToPt(Number(dimensions.height_mm || 0));
+        if (targetWidth <= 0 || targetHeight <= 0) return;
+        var bounds = pageItemBounds(item);
+        var width = bounds[2] - bounds[0];
+        var height = bounds[1] - bounds[3];
+        if (width <= 0 || height <= 0) throw new Error("V2 color frame artwork bounds are empty");
+        item.resize(targetWidth / width * 100, targetHeight / height * 100, true, true, true, true, 100, Transformation.CENTER);
+        var fitted = pageItemBounds(item);
+        item.translate((bounds[0] + bounds[2] - fitted[0] - fitted[2]) / 2, (bounds[1] + bounds[3] - fitted[1] - fitted[3]) / 2);
+        validateCopiedArtwork(item, targetWidth, targetHeight);
+    }
+
+    function validateCopiedArtwork(item, targetWidth, targetHeight) {
+        var bounds = pageItemBounds(item);
+        var epsilon = mmToPt(0.007);
+        if (Math.abs((bounds[2] - bounds[0]) - targetWidth) > epsilon || Math.abs((bounds[1] - bounds[3]) - targetHeight) > epsilon) {
+            throw new Error("V2 color frame artwork does not match target dimensions");
+        }
+    }
+
     function drawLabel(layer, text, left, top, right, bottom, size) {
         if (top <= bottom) return null;
         var frame = layer.textFrames.add();
@@ -688,11 +728,18 @@
         } catch (e0) {}
     }
 
-    function outlineAllTextFrames(doc) {
+    function outlineAllTextFrames(doc, pathfinderMerge) {
         var frames = [];
         for (var index = 0; index < doc.textFrames.length; index++) frames.push(doc.textFrames[index]);
         for (var frameIndex = 0; frameIndex < frames.length; frameIndex++) {
-            try { frames[frameIndex].createOutline(); } catch (e0) {}
+            var outline = frames[frameIndex].createOutline();
+            if (!outline) throw new Error("V2 color frame text outline failed");
+            if (pathfinderMerge) {
+                outline.selected = true;
+                app.executeMenuCommand("Live Pathfinder Add");
+                app.executeMenuCommand("expandStyle");
+                outline.selected = false;
+            }
         }
     }
 

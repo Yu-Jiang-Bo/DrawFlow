@@ -1,5 +1,6 @@
 import io
 import json
+import hashlib
 import zipfile
 from pathlib import Path
 
@@ -7,8 +8,9 @@ import pytest
 from openpyxl import Workbook
 
 from src.service import local_client
-from src.service.local_client import LocalClientError, LocalDrawFlowClient, LocalTemplateCache
+from src.service.local_client import HttpCentralClient, LocalClientError, LocalDrawFlowClient, LocalTemplateCache
 from src.service.runtime_templates import sha256_file
+from src.service.v2_template_transfer import download_stream_to_file
 
 
 class FakeCentral:
@@ -17,6 +19,7 @@ class FakeCentral:
         self.bundle = bundle
         self.imported = None
         self.downloads = 0
+        self.bundle_read_sizes = []
         self.base_url = "fake://central"
 
     def get_manifest(self, template_id):
@@ -24,8 +27,16 @@ class FakeCentral:
         return self.manifest
 
     def download_bundle(self, template_id, version):
+        raise AssertionError("LocalTemplateCache must use streaming download_bundle_to_file()")
+
+    def download_bundle_to_file(self, template_id, version, target_path):
+        assert template_id == self.manifest["template_id"]
+        assert version == self.manifest["version"]
         self.downloads += 1
-        return self.bundle
+        stream = TrackingBundle(self.bundle)
+        result = download_stream_to_file(stream, target_path, expected_sha256=sha256_bytes(self.bundle), chunk_size=5)
+        self.bundle_read_sizes.extend(stream.read_sizes)
+        return result
 
     def import_scan(self, payload):
         self.imported = payload
@@ -84,6 +95,59 @@ def make_bundle(
     return manifest, buffer.getvalue()
 
 
+class TrackingBundle(io.BytesIO):
+    def __init__(self, payload):
+        super().__init__(payload)
+        self.read_sizes = []
+
+    def read(self, size=-1):
+        self.read_sizes.append(size)
+        if size < 0:
+            raise AssertionError("bundle download must not use unbounded read()")
+        return super().read(size)
+
+
+def sha256_bytes(payload):
+    return hashlib.sha256(payload).hexdigest()
+
+
+def test_http_central_preview_challenge_and_proof_include_trusted_worker_fields(monkeypatch):
+    client = HttpCentralClient("http://central.example")
+    calls = []
+
+    def fake_post(path, payload):
+        calls.append((path, payload))
+        if path.endswith("preview-challenge"):
+            return {"challenge": {"challenge_id": "c1", "nonce": "n1", "worker_id": "worker-1"}}
+        return {"ok": True}
+
+    monkeypatch.setattr(client, "_post_json", fake_post)
+
+    challenge = client.request_v2_preview_challenge(
+        "T1", expected_draft_revision="d0004", worker_id="worker-1"
+    )
+    result = client.submit_v2_preview_proof(
+        "T1",
+        expected_draft_revision="d0004",
+        sample_rows=[{"Name": "Alice"}],
+        evidence={"preview_sha256": "a" * 64},
+        worker_proof={
+            "challenge_id": "c1",
+            "nonce": "n1",
+            "worker_id": "worker-1",
+            "signature": "b" * 64,
+        },
+    )
+
+    assert challenge == {"challenge_id": "c1", "nonce": "n1", "worker_id": "worker-1"}
+    assert result == {"ok": True}
+    assert calls[0] == (
+        "/api/v2/templates/T1/preview-challenge",
+        {"expected_draft_revision": "d0004", "worker_id": "worker-1"},
+    )
+    assert calls[1][1]["worker_proof"]["signature"] == "b" * 64
+
+
 def write_order(path: Path):
     workbook = Workbook()
     sheet = workbook.active
@@ -107,9 +171,65 @@ def test_local_cache_downloads_hits_cache_and_updates_versions(tmp_path):
     assert third.version == "v0002"
     assert third.cache_hit is False
     assert central.downloads == 2
+    assert central.bundle_read_sizes
+    assert all(size == 5 for size in central.bundle_read_sizes)
     template = cache.registry().get_template("DEMO001")
     assert template.assets[0]["file_name"] == "asset.ai"
     assert Path(template.assets[0]["stored_path"]).exists()
+
+
+def test_http_central_proxy_stream_sends_readable_body_without_buffering(monkeypatch):
+    class FakeResponse:
+        status = 201
+
+        def getheaders(self):
+            return [("Content-Type", "application/json")]
+
+        def read(self):
+            return b'{"ok":true}'
+
+    class FakeConnection:
+        instance = None
+
+        def __init__(self, host, port, timeout):
+            self.host = host
+            self.port = port
+            self.timeout = timeout
+            self.read_sizes = []
+            FakeConnection.instance = self
+
+        def request(self, method, path, body=None, headers=None):
+            assert method == "POST"
+            assert path == "/api/v2/templates/T/assets/template.ai"
+            assert not isinstance(body, (bytes, bytearray))
+            while True:
+                chunk = body.read(3)
+                self.read_sizes.append(3)
+                if chunk == b"":
+                    break
+            self.headers = headers
+
+        def getresponse(self):
+            return FakeResponse()
+
+        def close(self):
+            self.closed = True
+
+    monkeypatch.setattr(local_client.http.client, "HTTPConnection", FakeConnection)
+
+    status, headers, body = HttpCentralClient("http://central.example:8765").proxy_stream(
+        "POST",
+        "/api/v2/templates/T/assets/template.ai",
+        TrackingBundle(b"ai-bytes"),
+        content_length=8,
+        headers={"Content-Type": "application/illustrator"},
+    )
+
+    assert status == 201
+    assert headers == {"Content-Type": "application/json"}
+    assert body == b'{"ok":true}'
+    assert FakeConnection.instance.headers["Content-Length"] == "8"
+    assert FakeConnection.instance.read_sizes == [3, 3, 3, 3]
 
 
 def test_local_cache_registers_template_config_for_structured_renderers(tmp_path):

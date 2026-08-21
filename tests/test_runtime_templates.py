@@ -166,7 +166,31 @@ def test_runtime_reconciliation_fails_with_template_id_when_active_source_is_mis
         RuntimeTemplateService(registry, tmp_path / "data").ensure_active_registry_versions()
 
 
-def test_central_main_prepares_runtime_templates_before_listening(monkeypatch):
+def test_central_main_skips_legacy_runtime_templates_by_default(monkeypatch):
+    events = []
+
+    class RuntimeTemplates:
+        def ensure_active_registry_versions(self):
+            raise AssertionError("legacy runtime templates should not block V2 workbench startup")
+
+    class Server:
+        def __init__(self, address, handler):
+            events.append((address, handler))
+
+        def serve_forever(self):
+            events.append("served")
+
+    monkeypatch.setattr(http_server, "parse_args", lambda: Namespace(host="127.0.0.1", port=8765, role="central"))
+    monkeypatch.setattr(http_server.CentralRequestHandler, "runtime_templates", RuntimeTemplates())
+    monkeypatch.setattr(http_server, "ExclusiveThreadingHTTPServer", Server)
+    monkeypatch.delenv("DRAWFLOW_PREPARE_LEGACY_TEMPLATES", raising=False)
+
+    assert http_server.main() == 0
+    assert events[0] == (("127.0.0.1", 8765), http_server.CentralRequestHandler)
+    assert events[-1] == "served"
+
+
+def test_central_main_can_prepare_legacy_runtime_templates_when_enabled(monkeypatch):
     events = []
 
     class RuntimeTemplates:
@@ -184,6 +208,7 @@ def test_central_main_prepares_runtime_templates_before_listening(monkeypatch):
     monkeypatch.setattr(http_server, "parse_args", lambda: Namespace(host="127.0.0.1", port=8765, role="central"))
     monkeypatch.setattr(http_server.CentralRequestHandler, "runtime_templates", RuntimeTemplates())
     monkeypatch.setattr(http_server, "ExclusiveThreadingHTTPServer", Server)
+    monkeypatch.setenv("DRAWFLOW_PREPARE_LEGACY_TEMPLATES", "1")
 
     assert http_server.main() == 0
     assert events[0] == "prepared"

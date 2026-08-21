@@ -126,9 +126,16 @@ INDEX_HTML = """<!doctype html>
       box-shadow: 0 1px 2px rgba(23, 33, 43, 0.04);
     }
     .tab {
+      display: inline-flex;
+      align-items: center;
+      min-height: 36px;
+      padding: 8px 14px;
       color: #405064;
       border-color: transparent;
       background: transparent;
+      border-radius: 5px;
+      font-weight: 700;
+      text-decoration: none;
     }
     .tab.active {
       color: #fff;
@@ -903,6 +910,7 @@ INDEX_HTML = """<!doctype html>
     <nav class="tabs" aria-label="主导航">
       <button class="tab active" data-page-tab="render">出图任务</button>
       <button class="tab" data-page-tab="templates">模板管理</button>
+      <a class="tab" href="/v2/templates/workbench">V2 工作台</a>
       <button class="tab" data-page-tab="rules">规则配置</button>
       <button class="tab" data-page-tab="jobs">任务记录</button>
     </nav>
@@ -1106,12 +1114,12 @@ INDEX_HTML = """<!doctype html>
 
                 <div class="rule-section">
                   <h3 class="rule-section-title">映射与文字策略</h3>
-                  <p class="rule-section-note">以下规则均可编辑；JSON 格式错误会阻止检查与确认。</p>
+                  <p class="rule-section-note">以下规则均可编辑；格式错误会阻止检查与确认。</p>
                   <div class="form-grid">
-                    <div><label for="orderBindingsJson">订单字段绑定</label><textarea id="orderBindingsJson" placeholder='{"text":"定制信息"}'></textarea></div>
-                    <div><label for="assetMappingsJson">设计/资产映射</label><textarea id="assetMappingsJson" placeholder='[{"option":"Design1","asset":"design-1.ai"}]'></textarea></div>
-                    <div><label for="textPoliciesJson">文字适配/拆分策略</label><textarea id="textPoliciesJson" placeholder='{"fit":"scale_to_box"}'></textarea></div>
-                    <div><label for="outputTransformsJson">输出处理</label><textarea id="outputTransformsJson" placeholder='{"color_mode":"CMYK"}'></textarea></div>
+                    <div><label for="orderBindingsJson">订单字段绑定</label><textarea id="orderBindingsJson" placeholder="例如：定制信息对应订单表头中的定制信息列"></textarea></div>
+                    <div><label for="assetMappingsJson">设计/资产映射</label><textarea id="assetMappingsJson" placeholder="例如：Design1 对应第 1 个设计文件"></textarea></div>
+                    <div><label for="textPoliciesJson">文字适配/拆分策略</label><textarea id="textPoliciesJson" placeholder="例如：文字按作图区自动适配"></textarea></div>
+                    <div><label for="outputTransformsJson">输出处理</label><textarea id="outputTransformsJson" placeholder="例如：按部门要求输出颜色"></textarea></div>
                     <div class="field-full"><label for="templateChangeSummary">保存版本备注</label><input id="templateChangeSummary" placeholder="仅用于版本历史和回滚说明，不参与渲染。例如：核对对象命名并补齐 Design 映射" /></div>
                   </div>
                   <div class="preview-box" id="templateVersionHistory">尚无已确认版本</div>
@@ -1363,7 +1371,7 @@ INDEX_HTML = """<!doctype html>
         <h2 class="confirm-title" id="templateRemoveConfirmTitle">确认移除模板登记</h2>
       </div>
       <div class="confirm-body">
-        <p class="confirm-warning" id="templateRemoveConfirmText">此操作会从模板列表移除登记，但不会删除磁盘中的模板文件。请确认目标模板后继续。</p>
+        <p class="confirm-warning" id="templateRemoveConfirmText">此操作会从模板列表移除登记，但不会删除原模板文件。请确认目标模板后继续。</p>
         <p class="confirm-template-id" id="templateRemoveConfirmTarget">-</p>
         <div>
           <label for="templateRemoveConfirmInput">输入上方模板 ID 以确认</label>
@@ -1409,7 +1417,8 @@ INDEX_HTML = """<!doctype html>
       pure_text_style: "纯文字作图区模板",
       curved_title_text: "弯曲标题文字模板",
       annotated_ai: "标准标注 AI 模板",
-      asset_split: "独立设计资产模板"
+      asset_split: "独立设计资产模板",
+      v2_illustrator_template: "V2 工作台模板"
     };
     const statusNames = {
       active: "启用",
@@ -1927,10 +1936,12 @@ INDEX_HTML = """<!doctype html>
             <strong>${escapeHtml(template.template_id)}</strong>
             <span>${escapeHtml(template.name || "-")}</span>
           </button>
-          ${template.status !== "active" && template.rule_check && template.rule_check.renderable
+          ${!isV2Template(template) && template.status !== "active" && template.rule_check && template.rule_check.renderable
             ? `<button class="btn-subtle" data-template-activate="${escapeHtml(template.template_id)}">启用出图</button>`
             : ""}
-          <button class="btn-secondary" data-template-remove="${escapeHtml(template.template_id)}">移除</button>
+          ${!isV2Template(template)
+            ? `<button class="btn-secondary" data-template-remove="${escapeHtml(template.template_id)}">移除</button>`
+            : ""}
         </div>
       `).join("");
       target.querySelectorAll("[data-template-select]").forEach(button => {
@@ -2051,6 +2062,10 @@ INDEX_HTML = """<!doctype html>
       state.textSequenceRowsTouched = false;
       resetTemplateRuleFields();
       updateTemplateWorkflowState(false);
+      if (isV2Template(template)) {
+        renderTemplateRulePreview();
+        return;
+      }
       if (template) {
         try {
           const onboarding = await getJson(`/api/templates/${encodeURIComponent(template.template_id)}/onboarding`);
@@ -2307,7 +2322,7 @@ INDEX_HTML = """<!doctype html>
       const text = document.getElementById(id).value.trim();
       if (!text) return fallback;
       try { return JSON.parse(text); }
-      catch (error) { throw new Error(`${document.querySelector(`label[for="${id}"]`).textContent} JSON 格式错误`); }
+      catch (error) { throw new Error(`${document.querySelector(`label[for="${id}"]`).textContent} 格式错误`); }
     }
 
     function renderOnboardingIssues(result, issues) {
@@ -2990,7 +3005,7 @@ INDEX_HTML = """<!doctype html>
       const typeLabels = {
         TextFrame: "文字对象",
         GroupItem: "编组",
-        PathItem: "路径",
+        PathItem: "对象定位",
         RasterItem: "图片"
       };
       const lines = [];
@@ -3036,7 +3051,7 @@ INDEX_HTML = """<!doctype html>
         lines.push("\\n待确认事项");
         unresolved.forEach(item => lines.push(`- ${formatReadableValue(item)}`));
       }
-      lines.push("\\n完整对象路径、坐标和颜色信息已收起，可在下方原始明细中查看。");
+      lines.push("\\n完整对象定位、坐标和颜色信息已收起，可在下方原始明细中查看。");
       return lines.join("\\n");
     }
 
@@ -3582,7 +3597,7 @@ INDEX_HTML = """<!doctype html>
 
     function progressStages() {
       if (progressMode === "dryRun") {
-        return ["上传订单表格", "解析订单字段", "生成 render task", "等待返回结果"];
+        return ["上传订单表格", "解析订单字段", "生成解析结果", "等待返回结果"];
       }
       return ["上传订单表格", "解析订单字段", "调用 Illustrator", "生成 AI 文件", "完成收尾"];
     }
@@ -3707,7 +3722,7 @@ INDEX_HTML = """<!doctype html>
     }
 
     function renderTaskResult(result) {
-      if (result.status === "completed" && result.outputs && (result.outputs.primary_output || result.outputs.output_ai)) {
+      if (result.status === "completed" && result.outputs && primaryOutputKey(result.outputs)) {
         window.location.href = `/local/jobs/${encodeURIComponent(result.job_id)}/output`;
       } else if (result.status === "failed") {
         showRenderError(result.error || "渲染失败");
@@ -3730,11 +3745,12 @@ INDEX_HTML = """<!doctype html>
       target.innerHTML = state.jobs.map(job => {
         const request = job.request || {};
         const stats = job.stats || {};
-        const hasOutput = job.status === "completed" && job.outputs && (job.outputs.primary_output || job.outputs.output_ai);
+        const hasOutput = job.status === "completed" && job.outputs && primaryOutputKey(job.outputs);
         const hasRenderTask = job.status === "completed" && job.outputs && job.outputs.render_task;
+        const outputKey = primaryOutputKey(job.outputs);
         const link = hasOutput
-          ? `<a class="download-link" href="/api/jobs/${encodeURIComponent(job.job_id)}/download/${job.outputs.primary_output ? "primary_output" : "output_ai"}">${escapeHtml(deliveryDownloadLabel(job.outputs))}</a>`
-          : (hasRenderTask ? `<a class="download-link" href="/api/jobs/${encodeURIComponent(job.job_id)}/download/render_task">下载解析 JSON</a>` : "-");
+          ? `<a class="download-link" href="/api/jobs/${encodeURIComponent(job.job_id)}/download/${outputKey}">${escapeHtml(deliveryDownloadLabel(job.outputs))}</a>`
+          : (hasRenderTask ? `<a class="download-link" href="/api/jobs/${encodeURIComponent(job.job_id)}/download/render_task">下载解析结果</a>` : "-");
         return `
           <tr>
             <td>${escapeHtml(job.job_id)}</td>
@@ -3749,10 +3765,19 @@ INDEX_HTML = """<!doctype html>
     }
 
     function deliveryDownloadLabel(outputs) {
-      const path = String((outputs || {}).primary_output || (outputs || {}).output_ai || "").toLowerCase();
+      const path = String((outputs || {}).primary_output || (outputs || {}).output_bundle || (outputs || {}).output_ai || "").toLowerCase();
       if (path.endsWith(".zip")) return "下载全部成品 ZIP";
       if (path.endsWith(".png")) return "下载 PNG 成品";
       return "下载 AI 成品";
+    }
+
+    function primaryOutputKey(outputs) {
+      if (!outputs) return "";
+      if (outputs.primary_output) return "primary_output";
+      if (outputs.output_bundle) return "output_bundle";
+      if (outputs.output_ai) return "output_ai";
+      if (outputs.output_png) return "output_png";
+      return "";
     }
 
     function renderRuleCategories() {
@@ -4073,6 +4098,10 @@ INDEX_HTML = """<!doctype html>
 
     function displayType(value) {
       return typeNames[value] || value || "-";
+    }
+
+    function isV2Template(template) {
+      return Boolean(template && template.template_type === "v2_illustrator_template");
     }
 
     function displayStatus(value) {

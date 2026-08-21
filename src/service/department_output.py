@@ -222,7 +222,7 @@ def read_department_rules(path: Path | None = None) -> Mapping[str, Any]:
     except FileNotFoundError as exc:
         raise DepartmentOutputError(f"部门成品规则文件不存在：{source}") from exc
     if not isinstance(data, Mapping):
-        raise DepartmentOutputError("部门成品规则不是有效的 JSON 对象")
+        raise DepartmentOutputError("部门成品规则格式不正确")
     return data
 
 
@@ -296,6 +296,14 @@ def resolve_department_output(
             primary_keys=("hasMaster", "has_master"),
             fallback=False,
         )
+        single_order_ai = _resolved_bool(
+            manufacturer_rule,
+            matched,
+            primary_keys=("single_order_ai",),
+            fallback=export_unit == EXPORT_UNIT_PER_ORDER
+            and output_format not in {"png_cmyk", "png_per_item"}
+            and not has_master,
+        )
         return DepartmentOutputRule(
             name=name,
             department=department_text,
@@ -314,9 +322,7 @@ def resolve_department_output(
                 manufacturer_rule,
                 matched,
                 primary_keys=("perOrder", "per_order", "single_order_ai"),
-                fallback=export_unit == EXPORT_UNIT_PER_ORDER
-                and output_format not in {"png_cmyk", "png_per_item"}
-                and not has_master,
+                fallback=single_order_ai,
             ),
             apply_color_to_artwork=fill_actual_color,
             fill_actual_color=fill_actual_color,
@@ -338,6 +344,7 @@ def resolve_department_output(
                 global_key="must_pathfinder_merge",
                 fallback=True,
             ),
+            single_order_ai=single_order_ai,
             has_master=has_master,
             crop_master_height=_resolved_bool(
                 manufacturer_rule,

@@ -5,13 +5,15 @@ from __future__ import annotations
 import json
 import re
 import zipfile
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
 from .department_output import (
     EXPORT_UNIT_PER_GRAPHIC,
+    FILE_FORMAT_AI8,
     FILE_FORMAT_AI_CS5,
+    FILE_FORMAT_AI_STANDARD,
     FILE_FORMAT_PNG_CMYK,
     DepartmentOutputRule,
     resolve_department_output,
@@ -91,8 +93,54 @@ def partition_output_units(units: Iterable[ProductionOutputUnit]) -> list[Produc
     return [ProductionOutputBatch(rule=rules[key], units=tuple(bucket), scope=key[3]) for key, bucket in buckets.items()]
 
 
+def validate_public_output_units(units: Iterable[ProductionOutputUnit]) -> tuple[ProductionOutputUnit, ...]:
+    """Reject production adapters that cannot be safely routed by the shared output layer."""
+
+    unit_list = tuple(units)
+    if not unit_list:
+        raise ProductionOutputError("公共生产输出层没有收到可交付的效果图单元")
+    normalized_units: list[ProductionOutputUnit] = []
+    for index, unit in enumerate(unit_list, start=1):
+        order_no = str(unit.order_no or "").strip()
+        detail_id = str(unit.detail_id or "").strip()
+        department = str(unit.department or "").strip()
+        manufacturer = str(unit.manufacturer or "").strip()
+        product_name = str(unit.product_name or "").strip()
+        color_option = str(unit.color_option or "").strip()
+        if not order_no:
+            raise ProductionOutputError(f"第 {index} 个效果图缺少订单号，不能进入公共生产输出层")
+        if not detail_id:
+            raise ProductionOutputError(f"第 {index} 个效果图缺少订单明细号，不能进入公共生产输出层")
+        if not department:
+            raise ProductionOutputError(f"第 {index} 个效果图缺少生产部门，不能绕过公共生产输出层直接交付")
+        if not product_name:
+            raise ProductionOutputError(f"第 {index} 个效果图缺少产品名称，不能进入公共生产输出层")
+        if not color_option:
+            raise ProductionOutputError(f"第 {index} 个效果图缺少字体颜色，不能进入公共生产输出层")
+        if unit.payload is None:
+            raise ProductionOutputError(f"第 {index} 个效果图缺少出图内容，不能进入公共生产输出层")
+        resolved = resolve_department_output(department, manufacturer)
+        if resolved.name == "W_CONTAINS" and not manufacturer:
+            raise ProductionOutputError("W 部门出图必须提供厂家信息，不能套用模板私有兜底输出")
+        if unit.rule is not None and not _same_delivery_rule(unit.rule, resolved):
+            raise ProductionOutputError("模板输出层提供的部门规则与公共生产输出规则不一致")
+        normalized_units.append(
+            replace(
+                unit,
+                order_no=order_no,
+                detail_id=detail_id,
+                department=department,
+                manufacturer=manufacturer,
+                product_name=product_name,
+                color_option=color_option,
+                rule=resolved,
+            )
+        )
+    return tuple(normalized_units)
+
+
 def requires_single_order_ai(rule: DepartmentOutputRule) -> bool:
-    return rule.output_format == "ai8" and bool(rule.single_order_ai)
+    return rule.file_format in {FILE_FORMAT_AI8, FILE_FORMAT_AI_STANDARD} and bool(rule.single_order_ai)
 
 
 def requires_graphic_outputs(rule: DepartmentOutputRule) -> bool:
@@ -336,6 +384,34 @@ def _batch_scope(rule: DepartmentOutputRule, unit: ProductionOutputUnit) -> str:
 
 def _key_part(value: object) -> str:
     return "".join(character for character in str(value or "").upper() if character.isalnum())
+
+
+def _same_delivery_rule(left: DepartmentOutputRule, right: DepartmentOutputRule) -> bool:
+    return all(getattr(left, field) == getattr(right, field) for field in _DELIVERY_RULE_IDENTITY_FIELDS)
+
+
+_DELIVERY_RULE_IDENTITY_FIELDS = (
+    "name",
+    "output_format",
+    "export_unit",
+    "file_format",
+    "department",
+    "manufacturer",
+    "layout",
+    "omit_order_label",
+    "per_order",
+    "annotation_type",
+    "single_order_ai",
+    "has_master",
+    "crop_master_height",
+    "master_group_by_color",
+    "master_frame_width_mm",
+    "master_frame_height_mm",
+    "apply_color_to_artwork",
+    "fill_actual_color",
+    "outline_text",
+    "pathfinder_merge",
+)
 
 
 def _positive_float(*values: object) -> float | None:

@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 
+from src.service import production_batch
 from src.service import render_service
 from src.service.job_store import JobStore
 from src.service.render_service import RenderService
@@ -45,6 +46,7 @@ def test_job_store_keeps_higher_saved_progress_when_live_file_is_stale(tmp_path)
 def test_production_batch_render_reuses_one_illustrator_bridge(tmp_path, monkeypatch):
     instances = []
     rendered = []
+    scripts = []
 
     class FakeBridge:
         def __init__(self, *, visible=False, fresh_instance=False, reuse_instance=False, **_kwargs):
@@ -55,23 +57,95 @@ def test_production_batch_render_reuses_one_illustrator_bridge(tmp_path, monkeyp
             instances.append(self)
 
         def render(self, _script: Path, task_file: Path) -> str:
+            scripts.append(_script)
             rendered.append(task_file)
             return ""
 
         def close(self) -> None:
             self.closed = True
 
-    monkeypatch.setattr(render_service, "IllustratorBridge", FakeBridge)
-    monkeypatch.setattr(render_service.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(production_batch, "IllustratorBridge", FakeBridge)
+    monkeypatch.setattr(production_batch.time, "sleep", lambda _seconds: None)
     batch_files = [tmp_path / "batch-001.json", tmp_path / "batch-002.json"]
 
-    render_service._render_production_batch_files(batch_files, visible=False)
+    production_batch.render_production_batch_files(batch_files, visible=False)
 
     assert len(instances) == 1
     assert instances[0].fresh_instance is True
     assert instances[0].reuse_instance is True
     assert instances[0].closed is True
     assert rendered == batch_files
+    assert {script.name for script in scripts} == {"render_batch.jsx"}
+
+
+def test_production_batch_sequence_reuses_one_bridge_and_calls_group_hooks_in_order(tmp_path, monkeypatch):
+    instances = []
+    events = []
+
+    class FakeBridge:
+        def __init__(self, **_kwargs):
+            instances.append(self)
+
+        def render(self, _script: Path, task_file: Path) -> str:
+            events.append(("render", task_file.name))
+            return ""
+
+        def close(self) -> None:
+            events.append(("close", ""))
+
+    monkeypatch.setattr(production_batch, "IllustratorBridge", FakeBridge)
+    monkeypatch.setattr(production_batch.time, "sleep", lambda _seconds: None)
+
+    production_batch.render_production_batch_sequence(
+        ([tmp_path / "graphics.json"], [tmp_path / "main.json"], [tmp_path / "master.json"]),
+        visible=False,
+        after_group=lambda index: events.append(("after", str(index))),
+    )
+
+    assert len(instances) == 1
+    assert events == [
+        ("render", "graphics.json"),
+        ("after", "0"),
+        ("render", "main.json"),
+        ("after", "1"),
+        ("render", "master.json"),
+        ("after", "2"),
+        ("close", ""),
+    ]
+
+
+def test_production_batch_render_resets_and_retries_retryable_bridge_failure(tmp_path, monkeypatch):
+    events = []
+
+    class FakeBridge:
+        def __init__(self, **_kwargs):
+            self.attempts = 0
+
+        def render(self, _script: Path, task_file: Path) -> str:
+            events.append(("render", task_file.name, self.attempts))
+            self.attempts += 1
+            if self.attempts == 1:
+                raise production_batch.IllustratorBridgeError("RPC failed -2147417851")
+            return ""
+
+        def reset(self) -> None:
+            events.append(("reset", "", self.attempts))
+
+        def close(self) -> None:
+            events.append(("close", "", self.attempts))
+
+    monkeypatch.setattr(production_batch, "IllustratorBridge", FakeBridge)
+    monkeypatch.setattr(production_batch.time, "sleep", lambda _seconds: None)
+    batch_file = tmp_path / "batch-001.json"
+
+    production_batch.render_production_batch_files([batch_file], visible=False)
+
+    assert events == [
+        ("render", "batch-001.json", 0),
+        ("reset", "", 1),
+        ("render", "batch-001.json", 1),
+        ("close", "", 2),
+    ]
 
 
 def test_jsx_progress_writers_keep_progress_monotonic():
