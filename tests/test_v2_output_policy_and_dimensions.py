@@ -1,7 +1,7 @@
 from pathlib import Path
 from dataclasses import replace
 
-from src.renderer.v2_template_renderer import build_v2_execution_task, build_v2_order_column_task
+from src.renderer.v2_template_renderer import build_v2_color_frames_task, build_v2_execution_task, build_v2_order_column_task
 from src.service.v2_template_contract import V2ContractError, normalize_v2_template_contract
 from src.service.v2_order_task_builder import build_v2_order_task, create_v2_component_reuse_strategy
 from src.service.department_output import resolve_department_output
@@ -35,6 +35,37 @@ def test_order_column_task_carries_target_dimensions_and_policy(tmp_path):
     )
     assert task["inputs"][0]["target_dimensions"]["width_mm"] == 300
     assert task["output"] == {"outline_text": True, "pathfinder_merge": False}
+
+
+def test_order_column_task_omits_empty_per_input_dimensions(tmp_path):
+    task = build_v2_order_column_task(
+        input_ai_files=[tmp_path / "unstyled.ai", tmp_path / "sized.ai", tmp_path / "incomplete.ai"],
+        output_ai=tmp_path / "order.ai",
+        target_dimensions_by_input=[{}, {"width_mm": 300, "height_mm": 70}, {"width_mm": 300}],
+    )
+
+    assert "target_dimensions" not in task["inputs"][0]
+    assert task["inputs"][1]["target_dimensions"] == {"width_mm": 300, "height_mm": 70}
+    assert task["inputs"][2]["target_dimensions"] == {"width_mm": 300}
+
+
+def test_color_frames_task_omits_empty_order_dimensions_and_preserves_mixed_dimensions(tmp_path):
+    task = build_v2_color_frames_task(
+        inputs=[
+            {"path": str(tmp_path / "unstyled.ai"), "order_dimensions": [{}]},
+            {
+                "path": str(tmp_path / "mixed.ai"),
+                "order_dimensions": [{}, {"width_mm": 300, "height_mm": 70}],
+            },
+            {"path": str(tmp_path / "incomplete.ai"), "order_dimensions": [{"width_mm": 300}]},
+        ],
+        output_ai=tmp_path / "summary.ai",
+        master_packing={"target_width_mm": 480},
+    )
+
+    assert "order_dimensions" not in task["inputs"][0]
+    assert task["inputs"][1]["order_dimensions"] == [None, {"width_mm": 300, "height_mm": 70}]
+    assert task["inputs"][2]["order_dimensions"] == [{"width_mm": 300}]
 
 
 def test_v2_order_builder_prefers_template_policy_over_department_defaults(tmp_path):
@@ -78,6 +109,8 @@ def test_v2_jsx_contains_final_object_fit_and_policy_gates():
     assert "fitCopiedArtwork(copied, input.target_dimensions || {})" in order_source
     assert "if (!policy || policy.outline_text !== true) return;" in order_source
     assert "fitCopiedArtwork(copy, item.target_dimensions || {})" in color_source
+    assert "hasDimensionFields(requestedDimensions)" in color_source
+    assert "if (targetWidth <= 0 || targetHeight <= 0) return;" in color_source
     assert "outputPolicy.outline_text !== false" in color_source
 
 
@@ -135,6 +168,41 @@ def test_color_inputs_keep_dimensions_in_unit_order_for_duplicate_order_numbers(
         units=(unit_a, unit_b), output_ai=tmp_path / "color.ai", master_packing={"target_width_mm": 480}, rule=rule,
     )
     assert len(task["inputs"][0]["order_dimensions"]) == 2
+
+
+def test_component_reuse_uses_scanned_bounds_when_template_has_no_style_dimensions(tmp_path):
+    rule = resolve_department_output("K")
+    unit = _production_unit(
+        order_no="ORDER-NO-SIZE",
+        detail_id="NO-SIZE",
+        color_option="White",
+        rule=rule,
+        payload=V2Payload(
+            output_key="Output_main",
+            values={"font": "F10", "design": "03", "name": "Kyra"},
+            selections={"Output_main": {"font": "F10", "design": "Design03", "style": "style1"}},
+        ),
+    )
+    config = render_config()
+    config["outputs"][0]["style"]["options"][0].pop("dimensions")
+    strategy = create_v2_component_reuse_strategy(compile_task(config=config), template_ai=tmp_path / "template.ai")
+    order_task = strategy.build_order_column_task(
+        input_ai_files=[tmp_path / "component.ai"],
+        input_order_nos=["ORDER-NO-SIZE"],
+        units=(unit,),
+        output_ai=tmp_path / "order.ai",
+        rule=rule,
+    )
+    color_task = strategy.build_color_frames_task(
+        inputs=[{"path": str(tmp_path / "order.ai"), "order_nos": ["ORDER-NO-SIZE"]}],
+        units=(unit,),
+        output_ai=tmp_path / "summary.ai",
+        master_packing={"target_width_mm": 480},
+        rule=rule,
+    )
+
+    assert "target_dimensions" not in order_task["inputs"][0]
+    assert "order_dimensions" not in color_task["inputs"][0]
 
 
 def test_output_policy_rejects_non_boolean_values():
