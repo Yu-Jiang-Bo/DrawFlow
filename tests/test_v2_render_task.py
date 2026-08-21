@@ -145,6 +145,7 @@ def scan_evidence():
                     {
                         "key": "Design03",
                         "path": "Template/Output_main/Design/Design03",
+                        "dimensions": {"width_mm": 80, "height_mm": 50},
                         "slots": [
                             {"key": "slot_name", "path": "Template/Output_main/Design/Design03/slot_name"},
                             {"key": "slot_initial", "path": "Template/Output_main/Design/Design03/slot_initial"},
@@ -181,6 +182,7 @@ def multi_output_scan():
                 {
                     "key": "Design03",
                     "path": "Template/Output_SideA/Design/Design03",
+                    "dimensions": {"width_mm": 80, "height_mm": 50},
                     "slots": [{"key": "slot_name", "path": "Template/Output_SideA/Design/Design03/slot_name"}],
                     "anchors": [],
                     "tails": [],
@@ -393,6 +395,80 @@ def test_compiles_style_scan_dimensions_as_production_upper_bounds(source_width,
     assert fit_action["dimensions"]["height_mm"] == expected_height
 
 
+def test_compiles_scanned_design_dimensions_when_output_has_no_style_dimension():
+    config = render_config()
+    config["outputs"][0].pop("style")
+    config["field_bindings"].pop("size")
+    config["option_mappings"] = [item for item in config["option_mappings"] if item["group"] != "style"]
+    scan = scan_evidence()
+    scan["outputs"][0]["styles"] = []
+    scan["outputs"][0]["designs"][0]["dimensions"] = {"width_mm": 155.035, "height_mm": 56.652}
+
+    task = compile_task(config=config, scan=scan)
+
+    fit_actions = [action for action in task["outputs"][0]["actions"] if action["type"] == "fit_output_bounds"]
+    assert fit_actions == [
+        {
+            "type": "fit_output_bounds",
+            "group": "design",
+            "option_key": "Design03",
+            "dimensions": {"width_mm": 155.035, "height_mm": 56.652, "tolerance_mm": 0.007},
+        }
+    ]
+
+
+def test_compiles_scanned_design_dimensions_when_style_metadata_has_no_fixed_size():
+    config = render_config()
+    config["outputs"][0]["style"]["options"][0]["dimensions"] = {"mode": "style"}
+    scan = scan_evidence()
+    scan["outputs"][0]["designs"][0]["dimensions"] = {"width_mm": 155.035, "height_mm": 56.652}
+
+    task = compile_task(config=config, scan=scan)
+
+    fit_actions = [action for action in task["outputs"][0]["actions"] if action["type"] == "fit_output_bounds"]
+    assert fit_actions == [
+        {
+            "type": "fit_output_bounds",
+            "group": "design",
+            "option_key": "Design03",
+            "dimensions": {"width_mm": 155.035, "height_mm": 56.652, "tolerance_mm": 0.007},
+        }
+    ]
+
+
+def test_compiles_design_dimensions_when_any_style_option_lacks_a_fixed_size():
+    config = render_config()
+    config["outputs"][0]["style"]["options"].append({"key": "style2", "dimensions": {"mode": "style"}})
+    config["option_mappings"].append(
+        {"field": "size", "source_value": "large", "target": "style2", "output": "Output_main", "group": "style"}
+    )
+    scan = scan_evidence()
+    scan["outputs"][0]["styles"].append({"key": "style2", "path": "Template/Output_main/Style/style2"})
+
+    task = compile_task(config=config, scan=scan)
+
+    fit_actions = [action for action in task["outputs"][0]["actions"] if action["type"] == "fit_output_bounds"]
+    assert any(action["group"] == "style" and action["style_key"] == "style1" for action in fit_actions)
+    assert any(action["group"] == "design" and action["option_key"] == "Design03" for action in fit_actions)
+    assert not any(action["group"] == "style" and action.get("style_key") == "style2" for action in fit_actions)
+
+
+def test_rejects_no_style_template_when_any_design_lacks_scanned_dimensions():
+    config = render_config()
+    config["outputs"][0].pop("style")
+    config["field_bindings"].pop("size")
+    config["option_mappings"] = [item for item in config["option_mappings"] if item["group"] != "style"]
+    scan = scan_evidence()
+    scan["outputs"][0]["styles"] = []
+    scan["outputs"][0]["designs"][0].pop("dimensions")
+
+    with pytest.raises(V2RenderTaskError) as exc_info:
+        compile_task(config=config, scan=scan)
+
+    assert exc_info.value.code == "design_dimensions_missing"
+    assert "重新扫描并发布模板" in str(exc_info.value)
+
+
 def test_compiles_path_text_preset_with_scanned_path_text_kind():
     config = render_config()
     config["field_bindings"]["title"] = "Title"
@@ -482,6 +558,7 @@ def test_compiles_split_by_pipe_task_from_workbench_controlled_config():
         {
             "key": "Design02",
             "path": "Template/Output_main/Design/Design02",
+            "dimensions": {"width_mm": 80, "height_mm": 50},
             "slots": [
                 {"key": "slot_name1", "path": "Template/Output_main/Design/Design02/slot_name1"},
                 {"key": "slot_name2", "path": "Template/Output_main/Design/Design02/slot_name2"},

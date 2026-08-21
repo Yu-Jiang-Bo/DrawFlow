@@ -1580,6 +1580,59 @@ if (designCopy.resizeCalls < 1) throw new Error('final output was not resized');
     assert result.returncode == 0, result.stderr
 
 
+def test_v2_renderer_fits_final_output_bounds_from_selected_design_without_style():
+    task = {
+        "$schema": "custom-renderer/v2-render-execution",
+        "template_ai": "template.ai",
+        "output_ai": "out.ai",
+        "values": {"design": "03", "name": "Amy"},
+        "selections": {"Output_main": {"design": "Design03"}},
+        "render_task": {
+            "$schema": "custom-renderer/v2-render-task",
+            "outputs": [
+                {
+                    "key": "Output_main",
+                    "actions": [
+                        {
+                            "type": "copy_option_group",
+                            "group": "design",
+                            "option_key": "Design03",
+                            "object_path": "Template/Output_main/Design/Design03",
+                        },
+                        {
+                            "type": "replace_slot_text",
+                            "group": "design",
+                            "option_key": "Design03",
+                            "object_path": "Template/Output_main/Design/Design03/slot_name",
+                            "source_field": "name",
+                            "required": True,
+                            "tail_paths": [],
+                        },
+                        {
+                            "type": "fit_output_bounds",
+                            "group": "design",
+                            "option_key": "Design03",
+                            "dimensions": {"width_mm": 35.2777777778, "height_mm": 10.5833333333},
+                        },
+                    ],
+                }
+            ],
+        },
+    }
+    harness = node_mock_harness(task, """
+const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
+const width = designCopy.visibleBounds[2] - designCopy.visibleBounds[0];
+const height = designCopy.visibleBounds[1] - designCopy.visibleBounds[3];
+if (Math.abs(width - 100) > 0.04) throw new Error('design final width mismatch: ' + width);
+if (Math.abs(height - 30) > 0.04) throw new Error('design final height mismatch: ' + height);
+if (designCopy.resizeCalls < 1) throw new Error('design final output was not resized');
+""")
+
+    result = run_node(harness)
+
+    assert result.returncode == 0, result.stderr
+
+
 def test_v2_renderer_copies_selected_style_option():
     task = {
         "$schema": "custom-renderer/v2-render-execution",

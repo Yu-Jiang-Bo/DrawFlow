@@ -110,6 +110,7 @@
 
     function selectedFitAction(taskData, outputKey, selectedValues) {
         var chosen = String(outputKey || "");
+        var fallback = null;
         var outputs = taskData.outputs || [];
         for (var outputIndex = 0; outputIndex < outputs.length; outputIndex++) {
             var output = outputs[outputIndex] || {};
@@ -118,10 +119,12 @@
             var actions = output.actions || [];
             for (var actionIndex = 0; actionIndex < actions.length; actionIndex++) {
                 var action = actions[actionIndex] || {};
-                if (action.type === "fit_output_bounds" && String(selected.style || "") === String(action.style_key || "")) return action;
+                if (action.type !== "fit_output_bounds" || !isSelected(action, selected)) continue;
+                if (String(action.group || "") === "style") return action;
+                if (!fallback) fallback = action;
             }
         }
-        return null;
+        return fallback;
     }
 
     function applyOutputTransforms(doc, policy) {

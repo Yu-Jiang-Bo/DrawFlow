@@ -492,14 +492,14 @@ def _preflight_renderable_options(
             continue
         options_by_group: dict[str, set[str]] = {}
         for action in output.get("actions", []):
-            if not isinstance(action, Mapping) or action.get("type") not in {"copy_option_group", "select_style"}:
-                if not isinstance(action, Mapping) or action.get("type") != "fit_output_bounds":
-                    continue
+            if isinstance(action, Mapping) and action.get("type") == "fit_output_bounds":
                 group = str(action.get("group") or "")
-                option_key = str(action.get("style_key") or "")
-            else:
+                option_key = str(action.get("option_key") or action.get("style_key") or "")
+            elif isinstance(action, Mapping) and action.get("type") in {"copy_option_group", "select_style"}:
                 group = str(action.get("group") or "")
                 option_key = str(action.get("option_key") or "")
+            else:
+                continue
             if group in {"design", "font"} and option_key:
                 options_by_group.setdefault(group, set()).add(option_key)
             if group == "style" and option_key:

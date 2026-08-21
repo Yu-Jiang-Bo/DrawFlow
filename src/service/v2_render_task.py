@@ -138,6 +138,15 @@ def _compile_output(
     output_scan = _scan_ref(scan_index, ("output", output_key), f"$.outputs.{output_key}")
     font_style_sources = _font_style_sources(output_key, output, scan_index)
     source_only_font = bool(font_style_sources)
+    style_options = [
+        dict(option)
+        for option in dict(output.get("style") or {}).get("options", [])
+        if isinstance(option, Mapping)
+    ]
+    has_fixed_dimensions_for_every_style = bool(style_options) and all(
+        _has_fixed_style_dimensions(_production_style_dimensions(option.get("dimensions") or {}))
+        for option in style_options
+    )
     actions = []
     for group in ("style", "design", "font"):
         group_config = dict(output.get(group) or {})
@@ -156,7 +165,7 @@ def _compile_output(
                         source_only=bool(dimensions),
                     )
                 )
-                if dimensions:
+                if _has_fixed_style_dimensions(dimensions):
                     actions.append(_action("fit_output_bounds", group=group, style_key=option_key, dimensions=deepcopy(dimensions)))
                 continue
             copy_action = {
@@ -175,6 +184,22 @@ def _compile_output(
             )
             actions.extend(_slot_actions(output_key, group, dict(option), option_scan, scan_index, font_style_sources, field_bindings))
             actions.extend(_asset_actions(output_key, group, dict(option), scan_index))
+            if group == "design" and not has_fixed_dimensions_for_every_style:
+                dimensions = _scanned_option_dimensions(option_scan)
+                if not dimensions:
+                    raise V2RenderTaskError(
+                        "design_dimensions_missing",
+                        "当前模板缺少 Design 扫描尺寸，请重新扫描并发布模板后再出图。",
+                        path=f"$.outputs.{output_key}.design.{option_key}.dimensions",
+                    )
+                actions.append(
+                    _action(
+                        "fit_output_bounds",
+                        group=group,
+                        option_key=option_key,
+                        dimensions=dimensions,
+                    )
+                )
     return {
         "key": output_key,
         "order": order,
@@ -189,6 +214,27 @@ def _production_style_dimensions(dimensions: Mapping[str, Any]) -> dict[str, Any
         if field in result:
             result[field] = _production_dimension_upper_bound(result[field])
     return result
+
+
+def _has_fixed_style_dimensions(dimensions: Mapping[str, Any]) -> bool:
+    try:
+        width = float(dimensions.get("width_mm"))
+        height = float(dimensions.get("height_mm"))
+    except (AttributeError, TypeError, ValueError):
+        return False
+    return math.isfinite(width) and math.isfinite(height) and width > 0 and height > 0
+
+
+def _scanned_option_dimensions(option: Mapping[str, Any]) -> dict[str, float]:
+    dimensions = option.get("dimensions") if isinstance(option.get("dimensions"), Mapping) else {}
+    try:
+        width = float(dimensions.get("width_mm"))
+        height = float(dimensions.get("height_mm"))
+    except (TypeError, ValueError):
+        return {}
+    if not math.isfinite(width) or not math.isfinite(height) or width <= 0 or height <= 0:
+        return {}
+    return {"width_mm": width, "height_mm": height, "tolerance_mm": 0.007}
 
 
 def _production_dimension_upper_bound(value: Any) -> Any:

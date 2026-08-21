@@ -170,7 +170,7 @@ def test_color_inputs_keep_dimensions_in_unit_order_for_duplicate_order_numbers(
     assert len(task["inputs"][0]["order_dimensions"]) == 2
 
 
-def test_component_reuse_uses_scanned_bounds_when_template_has_no_style_dimensions(tmp_path):
+def test_component_reuse_uses_selected_design_dimensions_when_template_has_no_style_dimensions(tmp_path):
     rule = resolve_department_output("K")
     unit = _production_unit(
         order_no="ORDER-NO-SIZE",
@@ -201,8 +201,42 @@ def test_component_reuse_uses_scanned_bounds_when_template_has_no_style_dimensio
         rule=rule,
     )
 
-    assert "target_dimensions" not in order_task["inputs"][0]
-    assert "order_dimensions" not in color_task["inputs"][0]
+    expected = {"width_mm": 80.0, "height_mm": 50.0, "tolerance_mm": 0.007}
+    assert order_task["inputs"][0]["target_dimensions"] == expected
+    assert color_task["inputs"][0]["order_dimensions"] == [expected]
+
+
+def test_component_reuse_uses_selected_design_dimensions_without_styles(tmp_path):
+    rule = resolve_department_output("K")
+    unit = _production_unit(
+        order_no="ORDER-DESIGN-SIZE",
+        detail_id="DESIGN-SIZE",
+        color_option="White",
+        rule=rule,
+        payload=V2Payload(
+            output_key="Output_main",
+            values={"font": "F10", "design": "03", "name": "Kyra"},
+            selections={"Output_main": {"font": "F10", "design": "Design03"}},
+        ),
+    )
+    config = render_config()
+    config["outputs"][0].pop("style")
+    config["field_bindings"].pop("size")
+    config["option_mappings"] = [item for item in config["option_mappings"] if item["group"] != "style"]
+    scan = scan_evidence()
+    scan["outputs"][0]["styles"] = []
+    scan["outputs"][0]["designs"][0]["dimensions"] = {"width_mm": 155.035, "height_mm": 56.652}
+    strategy = create_v2_component_reuse_strategy(compile_task(config=config, scan=scan), template_ai=tmp_path / "template.ai")
+
+    task = strategy.build_order_column_task(
+        input_ai_files=[tmp_path / "component.ai"],
+        input_order_nos=["ORDER-DESIGN-SIZE"],
+        units=(unit,),
+        output_ai=tmp_path / "order.ai",
+        rule=rule,
+    )
+
+    assert task["inputs"][0]["target_dimensions"] == {"width_mm": 155.035, "height_mm": 56.652, "tolerance_mm": 0.007}
 
 
 def test_output_policy_rejects_non_boolean_values():

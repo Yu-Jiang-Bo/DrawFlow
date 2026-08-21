@@ -1169,7 +1169,7 @@ def _v2_master_png_item(
     rule: Any,
     render_task: Mapping[str, Any],
 ) -> dict[str, Any]:
-    dimensions = _selected_style_dimensions(render_task, unit)
+    dimensions = _selected_output_dimensions(render_task, unit)
     layout = rule.layout if isinstance(rule.layout, Mapping) else {}
     graphic_width_mm = float(dimensions["width_mm"])
     graphic_height_mm = float(dimensions["height_mm"])
@@ -1195,33 +1195,41 @@ def _v2_master_png_item(
     }
 
 
-def _selected_style_dimensions(render_task: Mapping[str, Any], unit: V2OrderRenderUnit) -> dict[str, float]:
-    selected_style = str(unit.selections.get(unit.output_key, {}).get("style") or "").strip()
-    candidates: list[Mapping[str, Any]] = []
+def _selected_output_dimensions(render_task: Mapping[str, Any], unit: V2OrderRenderUnit) -> dict[str, float]:
+    selected = unit.selections.get(unit.output_key, {})
+    selected = selected if isinstance(selected, Mapping) else {}
+    found = False
     for output in render_task.get("outputs", []):
         if not isinstance(output, Mapping) or str(output.get("key") or "") != unit.output_key:
             continue
-        for action in output.get("actions", []):
-            if not isinstance(action, Mapping) or action.get("type") != "fit_output_bounds":
+        for group in ("style", "design"):
+            selected_key = str(selected.get(group) or selected.get(f"{group}_option") or "").strip()
+            if not selected_key:
                 continue
-            if selected_style and str(action.get("style_key") or "") != selected_style:
-                continue
-            dimensions = action.get("dimensions")
-            if isinstance(dimensions, Mapping):
-                candidates.append(dimensions)
-    if not candidates:
-        raise V2OrderRenderError(
-            "当前订单缺少尺寸配置，无法生成生产部门汇总图，请回到模板配置确认尺寸后重试。",
-            code="v2_order_style_dimensions_missing",
-        )
-    width = _positive_float(candidates[0].get("width_mm"))
-    height = _positive_float(candidates[0].get("height_mm"))
-    if width <= 0 or height <= 0:
+            for action in output.get("actions", []):
+                if not isinstance(action, Mapping) or action.get("type") != "fit_output_bounds":
+                    continue
+                if str(action.get("group") or "") != group:
+                    continue
+                if str(action.get("option_key") or action.get("style_key") or "") != selected_key:
+                    continue
+                dimensions = action.get("dimensions")
+                found = True
+                if not isinstance(dimensions, Mapping):
+                    continue
+                width = _positive_float(dimensions.get("width_mm"))
+                height = _positive_float(dimensions.get("height_mm"))
+                if width > 0 and height > 0:
+                    return {"width_mm": width, "height_mm": height}
+    if found:
         raise V2OrderRenderError(
             "当前订单尺寸配置无效，无法生成生产部门汇总图，请回到模板配置确认尺寸后重试。",
             code="v2_order_style_dimensions_invalid",
         )
-    return {"width_mm": width, "height_mm": height}
+    raise V2OrderRenderError(
+        "当前订单缺少尺寸配置，无法生成生产部门汇总图，请回到模板配置确认尺寸后重试。",
+        code="v2_order_style_dimensions_missing",
+    )
 
 
 def _plan_png_master_pages(items: Sequence[Mapping[str, Any]], rule: Any) -> dict[str, Any]:
@@ -1340,20 +1348,23 @@ def _v2_unit_dimensions(render_task: Mapping[str, Any], unit: Any) -> dict[str, 
     output_key = str(payload.get("output_key") if isinstance(payload, Mapping) else getattr(payload, "output_key", "") or "").strip()
     selections = payload.get("selections") if isinstance(payload, Mapping) else getattr(payload, "selections", {})
     selected = selections.get(output_key) if isinstance(selections, Mapping) and isinstance(selections.get(output_key), Mapping) else {}
-    style_key = str(selected.get("style") or selected.get("style_option") or "").strip()
     for output in render_task.get("outputs", []) if isinstance(render_task, Mapping) else []:
         if output_key and str(output.get("key") or "") != output_key:
             continue
-        for action in output.get("actions", []) if isinstance(output, Mapping) else []:
-            if action.get("type") != "fit_output_bounds" or not isinstance(action.get("dimensions"), Mapping):
+        for group in ("style", "design"):
+            selected_key = str(selected.get(group) or selected.get(f"{group}_option") or "").strip()
+            if not selected_key:
                 continue
-            if style_key and str(action.get("style_key") or "") != style_key:
-                continue
-            dimensions = action["dimensions"]
-            width = _positive_float(dimensions.get("width_mm"))
-            height = _positive_float(dimensions.get("height_mm"))
-            if width and height:
-                return {"width_mm": width, "height_mm": height, "tolerance_mm": _positive_float(dimensions.get("tolerance_mm"), 0.007)}
+            for action in output.get("actions", []) if isinstance(output, Mapping) else []:
+                if action.get("type") != "fit_output_bounds" or str(action.get("group") or "") != group or not isinstance(action.get("dimensions"), Mapping):
+                    continue
+                if str(action.get("option_key") or action.get("style_key") or "") != selected_key:
+                    continue
+                dimensions = action["dimensions"]
+                width = _positive_float(dimensions.get("width_mm"))
+                height = _positive_float(dimensions.get("height_mm"))
+                if width and height:
+                    return {"width_mm": width, "height_mm": height, "tolerance_mm": _positive_float(dimensions.get("tolerance_mm"), 0.007)}
     return {}
 
 
