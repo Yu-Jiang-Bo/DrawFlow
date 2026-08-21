@@ -390,6 +390,7 @@ def _normalize_option(
     return {
         "key": item["name"].strip(),
         "path": item["path"],
+        **_geometry_facts(item),
         "slots": slots,
         "anchors": anchors,
         "tails": tails,

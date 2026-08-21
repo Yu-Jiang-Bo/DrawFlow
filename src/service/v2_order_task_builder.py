@@ -215,25 +215,28 @@ def _v2_unit_dimensions(render_task: Mapping[str, Any], unit: Any) -> dict[str, 
     output_key = _text_attr(payload, "output_key")
     selections = _mapping_attr(payload, "selections")
     selected = selections.get(output_key) if isinstance(selections.get(output_key), Mapping) else {}
-    style_key = str(selected.get("style") or selected.get("style_option") or "").strip()
     for output in render_task.get("outputs", []) if isinstance(render_task, Mapping) else []:
         if output_key and str(output.get("key") or "") != output_key:
             continue
-        for action in output.get("actions", []) if isinstance(output, Mapping) else []:
-            if action.get("type") != "fit_output_bounds":
+        for group in ("style", "design"):
+            selected_key = str(selected.get(group) or selected.get(f"{group}_option") or "").strip()
+            if not selected_key:
                 continue
-            if style_key and str(action.get("style_key") or "") != style_key:
-                continue
-            dimensions = action.get("dimensions")
-            if not isinstance(dimensions, Mapping):
-                continue
-            try:
-                width = float(dimensions.get("width_mm"))
-                height = float(dimensions.get("height_mm"))
-            except (TypeError, ValueError):
-                continue
-            if width > 0 and height > 0:
-                return {"width_mm": width, "height_mm": height, "tolerance_mm": float(dimensions.get("tolerance_mm", 0.007) or 0.007)}
+            for action in output.get("actions", []) if isinstance(output, Mapping) else []:
+                if action.get("type") != "fit_output_bounds" or str(action.get("group") or "") != group:
+                    continue
+                if str(action.get("option_key") or action.get("style_key") or "") != selected_key:
+                    continue
+                dimensions = action.get("dimensions")
+                if not isinstance(dimensions, Mapping):
+                    continue
+                try:
+                    width = float(dimensions.get("width_mm"))
+                    height = float(dimensions.get("height_mm"))
+                except (TypeError, ValueError):
+                    continue
+                if width > 0 and height > 0:
+                    return {"width_mm": width, "height_mm": height, "tolerance_mm": float(dimensions.get("tolerance_mm", 0.007) or 0.007)}
     return {}
 
 

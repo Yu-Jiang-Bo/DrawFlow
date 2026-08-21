@@ -256,6 +256,26 @@ def test_marker_visible_bounds_are_preserved():
     assert option["tails"][0]["font_dependencies"] == ["TailFont"]
 
 
+def test_design_option_visible_bounds_are_preserved_as_output_dimensions():
+    result = normalize_v2_template_scan(
+        base_raw_scan(
+            group("Template", "Template"),
+            group("Template/Output_main", "Output_main"),
+            group("Template/Output_main/Design", "Design"),
+            group(
+                "Template/Output_main/Design/Design14",
+                "Design14",
+                visible_bounds=[0, 160, 440, 0],
+            ),
+            text("Template/Output_main/Design/Design14/slot_name1", "slot_name1"),
+        )
+    )
+
+    option = result["outputs"][0]["design"]["options"][0]
+    assert option["visible_bounds"] == [0, 160, 440, 0]
+    assert option["dimensions"] == {"width_mm": 155.222, "height_mm": 56.444}
+
+
 def test_tail_samples_match_slot_field_exactly_not_by_prefix():
     result = normalize_v2_template_scan(
         base_raw_scan(

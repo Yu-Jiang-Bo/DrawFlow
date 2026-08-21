@@ -26,7 +26,13 @@ def _sha256(payload: bytes) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
-def _v2_payload(template_id: str, template_digest: str, *, with_styles: bool = False) -> dict:
+def _v2_payload(
+    template_id: str,
+    template_digest: str,
+    *,
+    with_styles: bool = False,
+    with_design_dimensions: bool = False,
+) -> dict:
     config = {
         "$schema": V2_CONTRACT_SCHEMA,
         "schema_version": V2_CONTRACT_VERSION,
@@ -132,6 +138,24 @@ def _v2_payload(template_id: str, template_digest: str, *, with_styles: bool = F
         "issues": [],
         "blocked": False,
     }
+    if with_design_dimensions:
+        output = config["outputs"][0]
+        output["design"] = {"field": "design", "options": [{"key": "Design03", "slots": []}]}
+        config["field_bindings"]["design"] = "design"
+        config["option_mappings"].append(
+            {"field": "design", "source_value": "D3", "target": "Design03", "output": "Output_main", "group": "design"}
+        )
+        scan["outputs"][0]["designs"] = [
+            {
+                "key": "Design03",
+                "path": "Template/Output_main/Design/Design03",
+                "dimensions": {"width_mm": 155.035, "height_mm": 56.652},
+                "slots": [],
+                "anchors": [],
+                "tails": [],
+                "assets": [],
+            }
+        ]
     return {"config": config, "scan": scan}
 
 
@@ -141,10 +165,16 @@ def _bundle(
     template_bytes: bytes,
     *,
     with_styles: bool = False,
+    with_design_dimensions: bool = False,
     config_updates: dict | None = None,
 ) -> None:
     digest = _sha256(template_bytes)
-    payload = _v2_payload(template_id, digest, with_styles=with_styles)
+    payload = _v2_payload(
+        template_id,
+        digest,
+        with_styles=with_styles,
+        with_design_dimensions=with_design_dimensions,
+    )
     if config_updates:
         payload["config"].update(config_updates)
     manifest = {
@@ -550,6 +580,51 @@ def test_v2_h_department_outputs_png_single_graphics_and_master_pages(tmp_path):
         names = archive.namelist()
         assert "single-graphics/ORDER-H.png" in names
         assert any(name.startswith("summary/") and name.endswith("580mm-master.ai") for name in names)
+
+
+def test_v2_h_department_uses_selected_design_dimensions_without_style(tmp_path):
+    bundle_path = tmp_path / "published.zip"
+    _bundle(
+        bundle_path,
+        "V2ORDER001",
+        b"template-ai",
+        with_design_dimensions=True,
+        config_updates={
+            "field_bindings": {
+                "order_no": "order_no",
+                "detail_id": "detail_id",
+                "department": "department",
+                "product_name": "product_name",
+                "font": "font",
+                "design": "design",
+                "name": "name",
+                "color": "color",
+            }
+        },
+    )
+    order_path = tmp_path / "order.xlsx"
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["order_no", "detail_id", "department", "product_name", "font", "design", "name", "color"])
+    sheet.append(["ORDER-H-DESIGN", "LINE-H-DESIGN", "H", "Charm", "F1", "D3", "Alice", "White"])
+    workbook.save(order_path)
+    renderer = CapturingRenderer()
+    client = LocalDrawFlowClient(
+        V2PublishedCentral(bundle_path),
+        tmp_path / "local",
+        v2_renderer=renderer,
+        font_dirs=[],
+    )
+
+    record = client.render({"template_id": "V2ORDER001", "order_file": str(order_path)})
+
+    assert record["status"] == "completed"
+    assert len(renderer.png_master_calls) == 1
+    item = renderer.png_master_calls[0]["items"][0]
+    assert item["graphic_width_mm"] == 155.035
+    assert item["graphic_height_mm"] == 56.652
+    assert item["width_mm"] == 155.035
+    assert item["height_mm"] == 56.652
 
 
 def test_v2_w120_department_keeps_png_single_graphics_without_master(tmp_path):
