@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from .job_store import JobStore
+from .local_gateway_support import LOGGER
 from .v2_order_output import V2OrderOutputRenderer
 from .v2_order_plan import build_v2_order_units
 from .v2_order_preflight import preflight_v2_order_rows
@@ -61,8 +62,21 @@ class V2OrderRenderService:
             record["stats"] = result["stats"]
             self.jobs.update(record, status="completed")
         except Exception as exc:
-            message, code = business_error(exc)
-            self.jobs.update(record, status="failed", error=message, error_code=code)
+            failure = business_error(exc)
+            message, code = failure[:2]
+            technical_message = failure[2] if len(failure) > 2 else str(exc)
+            LOGGER.error(
+                "V2 render failed (job_id=%s, code=%s): %s",
+                record["job_id"],
+                code,
+                technical_message,
+            )
+            self.jobs.update(
+                record,
+                status="failed",
+                error=message,
+                error_code=code,
+            )
         return record
 
     def _published_version(self, template_id: str) -> dict[str, str]:

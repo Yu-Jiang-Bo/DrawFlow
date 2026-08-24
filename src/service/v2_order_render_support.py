@@ -246,10 +246,10 @@ def write_json(path: Path, payload: Any, *, ensure_ascii: bool = False) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=ensure_ascii, indent=2), encoding="utf-8")
 
 
-def business_error(exc: BaseException) -> tuple[str, str]:
+def business_error(exc: BaseException) -> tuple[str, str, str]:
     if isinstance(exc, V2OrderRenderError):
-        return str(exc), exc.code
-    return "出图任务未完成，请重新启动本地客户端后重试。", "v2_order_unexpected"
+        return str(exc), exc.code, exc.technical_message
+    return "出图任务未完成，请重新启动本地客户端后重试。", "v2_order_unexpected", str(exc)
 
 
 def to_bool(value: object) -> bool:
