@@ -2163,6 +2163,74 @@ def test_v2_renderer_allows_sub_tolerance_final_output_rounding():
     assert result.returncode == 0, result.stderr
 
 
+def test_v2_renderer_allows_one_illustrator_bounds_grid_below_inner_tolerance():
+    tolerance = 0.007 / 25.4 * 72
+    grid = 1 / 128
+    extra_padding = 0.005
+    target_width = 35.2777777778 / 25.4 * 72
+    target_height = 10.5833333333 / 25.4 * 72
+    # The mock applies the padding to both sides after resize. Keep the final
+    # output one Illustrator visible-bounds grid below target-tolerance, which
+    # is an allowed measurement report rather than a layout overflow.
+    # Leave only a floating-point guard above the exact contractual boundary.
+    final_width = target_width - tolerance - grid + 1e-8
+    final_height = target_height - tolerance - grid + 1e-8
+    task = {
+        "$schema": "custom-renderer/v2-render-execution",
+        "template_ai": "template.ai",
+        "output_ai": "out.ai",
+        "values": {"font": "F1", "style": "small"},
+        "selections": {"Output_main": {"font": "F1", "style": "style1"}},
+        "mock_f1_slot_bounds": [0, final_height + 2 * extra_padding, final_width + 2 * extra_padding, 0],
+        "mock_no_resize_names": ["F1"],
+        "visible_bounds_padding_after_resize": {"F1": -extra_padding},
+        "render_task": {
+            "$schema": "custom-renderer/v2-render-task",
+            "outputs": [{"key": "Output_main", "actions": [
+                {"type": "copy_option_group", "group": "font", "option_key": "F1", "object_path": "Template/Output_main/Font/F1"},
+                {"type": "fit_output_bounds", "group": "style", "style_key": "style1", "dimensions": {"width_mm": 35.2777777778, "height_mm": 10.5833333333, "tolerance_mm": 0.007}},
+            ]}],
+        },
+    }
+
+    result = run_node(node_mock_harness(task, ""))
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_v2_renderer_rejects_more_than_one_illustrator_bounds_grid_below_inner_tolerance():
+    tolerance = 0.007 / 25.4 * 72
+    grid = 1 / 128
+    extra_padding = 0.005
+    target_width = 35.2777777778 / 25.4 * 72
+    target_height = 10.5833333333 / 25.4 * 72
+    # A tiny amount beyond the one-grid boundary must still fail.
+    final_width = target_width - tolerance - grid - 1e-8
+    final_height = target_height - tolerance - grid - 1e-8
+    task = {
+        "$schema": "custom-renderer/v2-render-execution",
+        "template_ai": "template.ai",
+        "output_ai": "out.ai",
+        "values": {"font": "F1", "style": "small"},
+        "selections": {"Output_main": {"font": "F1", "style": "style1"}},
+        "mock_f1_slot_bounds": [0, final_height + 2 * extra_padding, final_width + 2 * extra_padding, 0],
+        "mock_no_resize_names": ["F1"],
+        "visible_bounds_padding_after_resize": {"F1": -extra_padding},
+        "render_task": {
+            "$schema": "custom-renderer/v2-render-task",
+            "outputs": [{"key": "Output_main", "actions": [
+                {"type": "copy_option_group", "group": "font", "option_key": "F1", "object_path": "Template/Output_main/Font/F1"},
+                {"type": "fit_output_bounds", "group": "style", "style_key": "style1", "dimensions": {"width_mm": 35.2777777778, "height_mm": 10.5833333333, "tolerance_mm": 0.007}},
+            ]}],
+        },
+    }
+
+    result = run_node(node_mock_harness(task, ""))
+
+    assert result.returncode != 0
+    assert "V2 output exceeds target bounds" in result.stderr
+
+
 def test_v2_renderer_rejects_sub_tolerance_final_output_overflow():
     task = {
         "$schema": "custom-renderer/v2-render-execution",

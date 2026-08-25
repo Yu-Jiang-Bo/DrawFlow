@@ -847,7 +847,7 @@
         var width = Math.abs(Number(bounds[2]) - Number(bounds[0]));
         var height = Math.abs(Number(bounds[1]) - Number(bounds[3]));
         var epsilon = dimensionTolerancePoints(dimensions);
-        var comparisonEpsilon = dimensionComparisonEpsilon(epsilon);
+        var comparisonEpsilon = dimensionComparisonEpsilon();
         if (width > targetWidth || height > targetHeight
             || width < targetWidth - epsilon - comparisonEpsilon || height < targetHeight - epsilon - comparisonEpsilon) {
             throw new Error(
@@ -863,7 +863,7 @@
         var width = Math.abs(Number(bounds[2]) - Number(bounds[0]));
         var height = Math.abs(Number(bounds[1]) - Number(bounds[3]));
         var epsilon = dimensionTolerancePoints(dimensions);
-        var comparisonEpsilon = dimensionComparisonEpsilon(epsilon);
+        var comparisonEpsilon = dimensionComparisonEpsilon();
         return width <= targetWidth && height <= targetHeight
             && width >= targetWidth - epsilon - comparisonEpsilon && height >= targetHeight - epsilon - comparisonEpsilon;
     }
@@ -874,8 +874,11 @@
         return mmToPt(Math.min(toleranceMm, 0.007));
     }
 
-    function dimensionComparisonEpsilon(tolerancePoints) {
-        return Math.min(0.0001, Number(tolerancePoints || 0) / 100);
+    function dimensionComparisonEpsilon() {
+        // Illustrator reports visible bounds on a 1/128pt grid. This applies
+        // only to the lower-bound comparison after an inward fit; upper-bound
+        // overflow remains a strict failure in validateOutputBounds.
+        return 1 / 128;
     }
 
     function outputFitSafetyPoints(dimensions) {

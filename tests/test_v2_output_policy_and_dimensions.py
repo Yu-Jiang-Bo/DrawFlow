@@ -103,6 +103,7 @@ def test_v2_jsx_contains_final_object_fit_and_policy_gates():
     assert "outputBoundsWithinTargetRange(fitted, targetWidth, targetHeight, dimensions)" in render_source
     assert "var fitSafety = outputFitSafetyPoints(dimensions);" in render_source
     assert "return dimensionTolerancePoints(dimensions);" in render_source
+    assert "return 1 / 128;" in render_source
     assert "width > targetWidth || height > targetHeight" in render_source
     assert "width < targetWidth - epsilon - comparisonEpsilon || height < targetHeight - epsilon - comparisonEpsilon" in render_source
     assert "if (!policy || policy.outline_text !== true) return;" in render_source
