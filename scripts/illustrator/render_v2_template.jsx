@@ -177,7 +177,6 @@
         if (!holder || !holder.item) throw new Error("Selected option was not copied: " + copyKey(outputKey, action));
         var slot = findPageItemByRelativePath(holder.item, relativePath(String(action.object_path || ""), holder.source_path));
         var fitBounds = localFitBounds(holder.item, holder.source_path, action, slot);
-        fitBounds = selectedStyleFitBoundsForFont(copied, outputKey, action, selected, fitBounds);
         var value = String(valuesByField[String(action.source_field || "")] || "");
         var parts = splitPipeValue(value);
         var preset = String(action.preset || "");
@@ -298,17 +297,6 @@
             return measuredBounds(anchor);
         }
         return measuredBounds(slot);
-    }
-
-    function selectedStyleFitBoundsForFont(copied, outputKey, action, selected, fallbackBounds) {
-        if (!action || String(action.group || "") !== "font") return fallbackBounds;
-        if (String(action.anchor_path || "")) return fallbackBounds;
-        if (String(selected.design || "")) return fallbackBounds;
-        var styleKey = String(selected.style || "");
-        if (!styleKey) return fallbackBounds;
-        var holder = copied[String(outputKey || "") + "|style|" + styleKey];
-        if (!holder || !holder.item) return fallbackBounds;
-        return measuredBounds(holder.item);
     }
 
     function replaceWithFontStyleSource(copied, outputKey, action, selected, targetSlot) {
@@ -657,16 +645,11 @@
         var finalHeight = Math.abs(Number(finalBounds[1]) - Number(finalBounds[3]));
         var boundsTolerance = mmToPt(0.007);
         if (finalWidth > targetWidth + boundsTolerance || finalHeight > targetHeight + boundsTolerance) {
-            layoutWarnings.push({
-                code: "text_fit_extreme",
-                severity: "warning",
-                slot_key: String(action && action.slot_key || ""),
-                object_path: String(action && action.object_path || ""),
-                actual_width: finalWidth,
-                actual_height: finalHeight,
-                target_width: targetWidth,
-                target_height: targetHeight
-            });
+            throw new Error(
+                "V2 slot text exceeds anchor bounds: " + String(action && action.slot_key || "")
+                + ", actual=" + finalWidth + "x" + finalHeight
+                + ", target=" + targetWidth + "x" + targetHeight
+            );
         } else if (resizeCount > 0 && smallestScale < 0.35) {
             layoutWarnings.push({
                 code: "text_fit_extreme",

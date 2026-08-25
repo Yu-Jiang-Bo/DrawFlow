@@ -289,3 +289,14 @@ def test_optional_empty_slot_is_passed_to_jsx_for_removal(tmp_path):
     payload = json.loads(task_path.read_text(encoding="utf-8"))
     assert payload["values"]["year"] == ""
     assert payload["selections"]["Output_main"]["design"] == "Design03"
+
+
+def test_v2_jsx_enforces_each_slot_or_anchor_visible_bounds_without_style_fallback():
+    source = (Path(__file__).resolve().parents[1] / "scripts" / "illustrator" / "render_v2_template.jsx").read_text(
+        encoding="utf-8"
+    )
+
+    assert "var fitBounds = localFitBounds(holder.item, holder.source_path, action, slot);" in source
+    assert "selectedStyleFitBoundsForFont" not in source
+    assert "V2 slot text exceeds anchor bounds:" in source
+    assert "V2 path text exceeds anchor bounds:" in source
