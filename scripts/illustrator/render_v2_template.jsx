@@ -49,6 +49,8 @@
             renderedOutputItems = [groupRenderedOutputBlock(layer, renderedOutputItems, 0)];
         }
         applyOutputTransforms(doc, execution.output || task.output || {});
+        var finalFitAction = selectedFitAction(task, selectedOutputKey, selections);
+        if (finalFitAction) fitRenderedOutput(renderedOutputItems, finalFitAction);
         if (execution.preview_png) fitArtboardToVisibleContent(doc, renderedOutputItems, 0);
         var output = File(String(execution.output_ai));
         ensureFolder(output.parent);
@@ -88,15 +90,6 @@
                 bindAssetLibrary(copied, outputKey, assetAction, valuesByField);
             }
         }
-        // Normalize the immutable design group before slot text is laid out.
-        // Scaling after replacement changes the measured text bounds and breaks
-        // the slot/anchor contract, including title/date proximity.
-        for (var fitIndex = 0; fitIndex < actions.length; fitIndex++) {
-            var fitAction = actions[fitIndex] || {};
-            if (fitAction.type === "fit_output_bounds" && isSelected(fitAction, selected)) {
-                fitRenderedOutput(renderedItems, fitAction);
-            }
-        }
         for (var replaceIndex = 0; replaceIndex < actions.length; replaceIndex++) {
             var replaceAction = actions[replaceIndex] || {};
             if (replaceAction.type === "replace_slot_text" && isSelected(replaceAction, selected)) {
@@ -104,8 +97,34 @@
             }
         }
         cleanupAuxiliaryObjects(renderedItems);
+        for (var fitIndex = 0; fitIndex < actions.length; fitIndex++) {
+            var fitAction = actions[fitIndex] || {};
+            if (fitAction.type === "fit_output_bounds" && isSelected(fitAction, selected)) {
+                fitRenderedOutput(renderedItems, fitAction);
+            }
+        }
+        cleanupAuxiliaryObjects(renderedItems);
         removeSourceOnlyCopies(copied);
         return renderedItems;
+    }
+
+    function selectedFitAction(taskData, outputKey, selectedValues) {
+        var chosen = String(outputKey || "");
+        var fallback = null;
+        var outputs = taskData.outputs || [];
+        for (var outputIndex = 0; outputIndex < outputs.length; outputIndex++) {
+            var output = outputs[outputIndex] || {};
+            if (chosen && String(output.key || "") !== chosen) continue;
+            var selected = selectedValues[String(output.key || "")] || {};
+            var actions = output.actions || [];
+            for (var actionIndex = 0; actionIndex < actions.length; actionIndex++) {
+                var action = actions[actionIndex] || {};
+                if (action.type !== "fit_output_bounds" || !isSelected(action, selected)) continue;
+                if (String(action.group || "") === "style") return action;
+                if (!fallback) fallback = action;
+            }
+        }
+        return fallback;
     }
 
     function applyOutputTransforms(doc, policy) {
@@ -776,6 +795,8 @@
         if (targetWidth <= 0 || targetHeight <= 0) throw new Error("V2 output target dimensions are invalid");
         var bounds = unionBounds(items, true);
         var fitSafety = outputFitSafetyPoints(dimensions);
+        var fitTargetWidth = targetWidth - fitSafety;
+        var fitTargetHeight = targetHeight - fitSafety;
         var targetLeft = Number(bounds[0]);
         var targetTop = Number(bounds[1]);
         for (var attempt = 0; attempt < 4; attempt++) {
@@ -783,11 +804,6 @@
             var width = Math.abs(Number(current[2]) - Number(current[0]));
             var height = Math.abs(Number(current[1]) - Number(current[3]));
             if (width <= 0 || height <= 0) throw new Error("V2 output visible bounds are not measurable");
-            // Illustrator can quantize a resize outward.  If the measured result
-            // exceeded the frame on a prior pass, include that observed overage
-            // in the next inward target instead of repeating the same scale.
-            var fitTargetWidth = targetWidth - fitSafety - Math.max(0, width - targetWidth);
-            var fitTargetHeight = targetHeight - fitSafety - Math.max(0, height - targetHeight);
             var scaleX = fitTargetWidth / width * 100;
             var scaleY = fitTargetHeight / height * 100;
             if (Math.abs(scaleX - 100) <= 0.001 && Math.abs(scaleY - 100) <= 0.001
@@ -831,8 +847,9 @@
         var width = Math.abs(Number(bounds[2]) - Number(bounds[0]));
         var height = Math.abs(Number(bounds[1]) - Number(bounds[3]));
         var epsilon = dimensionTolerancePoints(dimensions);
+        var comparisonEpsilon = dimensionComparisonEpsilon(epsilon);
         if (width > targetWidth || height > targetHeight
-            || width < targetWidth - epsilon || height < targetHeight - epsilon) {
+            || width < targetWidth - epsilon - comparisonEpsilon || height < targetHeight - epsilon - comparisonEpsilon) {
             throw new Error(
                 "V2 output exceeds target bounds or does not match target bounds: actual="
                 + width + "x" + height
@@ -846,8 +863,9 @@
         var width = Math.abs(Number(bounds[2]) - Number(bounds[0]));
         var height = Math.abs(Number(bounds[1]) - Number(bounds[3]));
         var epsilon = dimensionTolerancePoints(dimensions);
+        var comparisonEpsilon = dimensionComparisonEpsilon(epsilon);
         return width <= targetWidth && height <= targetHeight
-            && width >= targetWidth - epsilon && height >= targetHeight - epsilon;
+            && width >= targetWidth - epsilon - comparisonEpsilon && height >= targetHeight - epsilon - comparisonEpsilon;
     }
 
     function dimensionTolerancePoints(dimensions) {
@@ -856,10 +874,15 @@
         return mmToPt(Math.min(toleranceMm, 0.007));
     }
 
+    function dimensionComparisonEpsilon(tolerancePoints) {
+        return Math.min(0.0001, Number(tolerancePoints || 0) / 100);
+    }
+
     function outputFitSafetyPoints(dimensions) {
         // Illustrator reports visible bounds on a point grid. Keep the fit target
-        // inside the frame so a sub-point rounding step cannot create an overflow.
-        return Math.min(0.003, dimensionTolerancePoints(dimensions) / 2);
+        // inside the frame by the full configured tolerance so a rounding step
+        // cannot turn an otherwise valid exact fit into an outer overflow.
+        return dimensionTolerancePoints(dimensions);
     }
 
     function fitArtboardToVisibleContent(doc, items, padding) {

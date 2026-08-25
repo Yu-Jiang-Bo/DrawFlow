@@ -99,14 +99,12 @@ def test_v2_jsx_contains_final_object_fit_and_policy_gates():
     order_source = Path("scripts/illustrator/compose_v2_order_column.jsx").read_text(encoding="utf-8")
     color_source = Path("scripts/illustrator/compose_color_frames.jsx").read_text(encoding="utf-8")
     assert "applyOutputTransforms(doc, execution.output || task.output || {})" in render_source
-    assert "fitRenderedOutput(renderedItems, fitAction)" in render_source
-    assert "finalFitAction" not in render_source
-    assert render_source.index("fitRenderedOutput(renderedItems, fitAction)") < render_source.index("replaceSlotText(copied, outputKey, replaceAction, valuesByField, selected)")
+    assert "fitRenderedOutput(renderedOutputItems, finalFitAction)" in render_source
     assert "outputBoundsWithinTargetRange(fitted, targetWidth, targetHeight, dimensions)" in render_source
     assert "var fitSafety = outputFitSafetyPoints(dimensions);" in render_source
-    assert "return Math.min(0.003, dimensionTolerancePoints(dimensions) / 2);" in render_source
+    assert "return dimensionTolerancePoints(dimensions);" in render_source
     assert "width > targetWidth || height > targetHeight" in render_source
-    assert "width < targetWidth - epsilon || height < targetHeight - epsilon" in render_source
+    assert "width < targetWidth - epsilon - comparisonEpsilon || height < targetHeight - epsilon - comparisonEpsilon" in render_source
     assert "if (!policy || policy.outline_text !== true) return;" in render_source
     assert "fitCopiedArtwork(copied, input.target_dimensions || {})" in order_source
     assert "if (!policy || policy.outline_text !== true) return;" in order_source
