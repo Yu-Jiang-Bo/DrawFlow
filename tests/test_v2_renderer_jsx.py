@@ -1674,7 +1674,7 @@ if (copiedNames.includes('style2')) throw new Error('unselected style was copied
     assert result.returncode == 0, result.stderr
 
 
-def test_v2_renderer_uses_source_only_style_as_bounds_without_outputting_frame():
+def test_v2_renderer_keeps_source_only_style_out_of_output_and_fits_font_to_its_slot():
     task = {
         "$schema": "custom-renderer/v2-render-execution",
         "template_ai": "template.ai",
@@ -1724,8 +1724,9 @@ const fontCopy = outputLayer.pageItems.find(item => item.name === 'F1');
 if (!fontCopy) throw new Error('font output was not copied');
 const slot = child(fontCopy, 'slot_name');
 const textBounds = slot.visibleBounds;
-if (textBounds[0] < 200 - 0.05 || textBounds[2] > 300 + 0.05) throw new Error('font text escaped source-only style width');
-if (textBounds[1] > 100 + 0.05 || textBounds[3] < 0 - 0.05) throw new Error('font text escaped source-only style height');
+if (textBounds[0] < -0.05 || textBounds[2] > 30.05) throw new Error('font text escaped scanned slot width');
+if (textBounds[1] > 30.05 || textBounds[3] < -0.05) throw new Error('font text escaped scanned slot height');
+if (textBounds[0] > 100) throw new Error('font text was incorrectly relocated to source-only style');
 """)
 
     result = run_node(harness)
@@ -1905,15 +1906,16 @@ if (!childNames.includes('F1')) throw new Error('font was lost during fallback')
     assert json.loads(result.stdout)["copied"] == ["ORDER_PACK_BLOCK_0"]
 
 
-def test_v2_renderer_places_standalone_font_text_inside_selected_style_bounds():
+def test_v2_renderer_places_standalone_font_text_inside_its_explicit_anchor():
     task = {
         "$schema": "custom-renderer/v2-render-execution",
         "template_ai": "template.ai",
         "output_ai": "out.ai",
-        "values": {"style": "small", "font": "F1", "name": "Amy"},
-        "selections": {"Output_main": {"style": "style1", "font": "F1"}},
-        "mock_style1_bounds": [200, 100, 300, 0],
+        "values": {"font": "F1", "name": "Amy"},
+        "selections": {"Output_main": {"font": "F1"}},
         "mock_f1_slot_bounds": [0, 30, 30, 0],
+        "mock_f1_anchor": True,
+        "mock_anchor_name_bounds": [200, 100, 300, 0],
         "render_task": {
             "$schema": "custom-renderer/v2-render-task",
             "outputs": [
@@ -1921,11 +1923,63 @@ def test_v2_renderer_places_standalone_font_text_inside_selected_style_bounds():
                     "key": "Output_main",
                     "actions": [
                         {
-                            "type": "select_style",
-                            "group": "style",
-                            "option_key": "style1",
-                            "object_path": "Template/Output_main/Style/style1",
+                            "type": "copy_option_group",
+                            "group": "font",
+                            "option_key": "F1",
+                            "object_path": "Template/Output_main/Font/F1",
                         },
+                        {
+                            "type": "replace_slot_text",
+                            "group": "font",
+                            "option_key": "F1",
+                            "slot_key": "slot_name",
+                            "object_path": "Template/Output_main/Font/F1/slot_name",
+                            "anchor_path": "Template/Output_main/Font/F1/anchor_name",
+                            "source_field": "name",
+                            "required": True,
+                            "tail_paths": [],
+                        },
+                    ],
+                }
+            ],
+        },
+    }
+    harness = node_mock_harness(task, """
+const fontCopy = outputLayer.pageItems.find(item => item.name === 'F1');
+const slot = child(fontCopy, 'slot_name');
+const textBounds = slot.visibleBounds;
+const anchorBounds = [200, 100, 300, 0];
+const textWidth = textBounds[2] - textBounds[0];
+const textHeight = textBounds[1] - textBounds[3];
+const anchorWidth = anchorBounds[2] - anchorBounds[0];
+const anchorHeight = anchorBounds[1] - anchorBounds[3];
+if (textBounds[0] < anchorBounds[0] - 0.05 || textBounds[2] > anchorBounds[2] + 0.05) throw new Error('font text escaped explicit anchor width');
+if (textBounds[1] > anchorBounds[1] + 0.05 || textBounds[3] < anchorBounds[3] - 0.05) throw new Error('font text escaped explicit anchor height');
+if (textWidth < anchorWidth - 0.08) throw new Error('font text did not fill anchor width: ' + textWidth + ' vs ' + anchorWidth);
+if (textHeight < anchorHeight - 0.08) throw new Error('font text did not fill anchor height: ' + textHeight + ' vs ' + anchorHeight);
+if (slot.contents !== 'Amy') throw new Error('font slot not replaced: ' + slot.contents);
+""")
+
+    result = run_node(harness)
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_v2_renderer_blocks_plain_text_that_still_exceeds_slot_visible_bounds():
+    task = {
+        "$schema": "custom-renderer/v2-render-execution",
+        "template_ai": "template.ai",
+        "output_ai": "out.ai",
+        "values": {"font": "F1", "name": "Alexandria Catherine Montgomery"},
+        "selections": {"Output_main": {"font": "F1"}},
+        "mock_f1_slot_bounds": [0, 30, 30, 0],
+        "mock_no_resize_names": ["slot_name"],
+        "render_task": {
+            "$schema": "custom-renderer/v2-render-task",
+            "outputs": [
+                {
+                    "key": "Output_main",
+                    "actions": [
                         {
                             "type": "copy_option_group",
                             "group": "font",
@@ -1940,39 +1994,19 @@ def test_v2_renderer_places_standalone_font_text_inside_selected_style_bounds():
                             "object_path": "Template/Output_main/Font/F1/slot_name",
                             "source_field": "name",
                             "required": True,
+                            "preset": "direct_text",
                             "tail_paths": [],
-                        },
-                        {
-                            "type": "fit_output_bounds",
-                            "group": "style",
-                            "style_key": "style1",
-                            "dimensions": {"width_mm": 35.2777777778, "height_mm": 10.5833333333},
                         },
                     ],
                 }
             ],
         },
     }
-    harness = node_mock_harness(task, """
-const styleCopy = outputLayer.pageItems.find(item => item.name === 'style1');
-const fontCopy = outputLayer.pageItems.find(item => item.name === 'F1');
-const slot = child(fontCopy, 'slot_name');
-const styleBounds = styleCopy.visibleBounds;
-const textBounds = slot.visibleBounds;
-const styleWidth = styleBounds[2] - styleBounds[0];
-const styleHeight = styleBounds[1] - styleBounds[3];
-const textWidth = textBounds[2] - textBounds[0];
-const textHeight = textBounds[1] - textBounds[3];
-if (textBounds[0] < styleBounds[0] - 0.05 || textBounds[2] > styleBounds[2] + 0.05) throw new Error('font text escaped selected style width');
-if (textBounds[1] > styleBounds[1] + 0.05 || textBounds[3] < styleBounds[3] - 0.05) throw new Error('font text escaped selected style height');
-if (textWidth < styleWidth - 0.08) throw new Error('font text did not fill selected style width: ' + textWidth + ' vs ' + styleWidth);
-if (textHeight < styleHeight - 0.08) throw new Error('font text did not fill selected style height: ' + textHeight + ' vs ' + styleHeight);
-if (slot.contents !== 'Amy') throw new Error('font slot not replaced: ' + slot.contents);
-""")
 
-    result = run_node(harness)
+    result = run_node(node_mock_harness(task, ""))
 
-    assert result.returncode == 0, result.stderr
+    assert result.returncode != 0
+    assert "V2 slot text exceeds anchor bounds: slot_name" in result.stderr
 
 
 def test_v2_renderer_blocks_unmeasurable_final_output():
@@ -2457,7 +2491,9 @@ function child(parent, name) {{
 }}
 const f1SlotBounds = task.mock_f1_slot_bounds || undefined;
 const style1Bounds = task.mock_style1_bounds || [0, 100, 100, 0];
-const f1 = item('GroupItem', 'F1', '', [item('TextFrame', 'slot_name', 'F1 sample', [], 'F1-style', f1SlotBounds)]);
+const f1Children = [item('TextFrame', 'slot_name', 'F1 sample', [], 'F1-style', f1SlotBounds)];
+if (task.mock_f1_anchor === true) f1Children.push(item('PathItem', 'anchor_name', '', []));
+const f1 = item('GroupItem', 'F1', '', f1Children);
 const f10 = item('GroupItem', 'F10', '', [
   item('TextFrame', 'slot_name', 'F10 sample', [], 'F10-style'),
   item('TextFrame', 'slot_title', 'Arc sample', [], 'Arc-style', [0, 40, 100, 20], {{ kind: 'PATHTEXT', pathToken: 'arc-main', textSize: 18 }}),
