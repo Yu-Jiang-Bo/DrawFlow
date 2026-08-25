@@ -1525,7 +1525,7 @@ if (child(designCopy, 'slot_year_tail').contents !== 'Year') throw new Error('ye
     assert result.returncode == 0, result.stderr
 
 
-def test_v2_renderer_fits_design_before_slot_layout_and_removes_auxiliary_items():
+def test_v2_renderer_fits_final_output_bounds_and_removes_auxiliary_items():
     task = {
         "$schema": "custom-renderer/v2-render-execution",
         "template_ai": "template.ai",
@@ -1569,8 +1569,10 @@ const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
 if (designCopy.pageItems.find(item => item.name === 'anchor_name')) throw new Error('anchor auxiliary was not removed');
 const width = designCopy.visibleBounds[2] - designCopy.visibleBounds[0];
 const height = designCopy.visibleBounds[1] - designCopy.visibleBounds[3];
-if (width > 100 || height > 30) throw new Error('slot-laid output exceeded target');
-if (designCopy.resizeCalls < 1) throw new Error('design was not sized before slot layout');
+if (Math.abs(width - 100) > 0.04) throw new Error('final width mismatch: ' + width);
+if (Math.abs(height - 30) > 0.04) throw new Error('final height mismatch: ' + height);
+if (width > 100 || height > 30) throw new Error('final output exceeded target');
+if (designCopy.resizeCalls < 1) throw new Error('final output was not resized');
 """)
 
     result = run_node(harness)
@@ -1578,7 +1580,7 @@ if (designCopy.resizeCalls < 1) throw new Error('design was not sized before slo
     assert result.returncode == 0, result.stderr
 
 
-def test_v2_renderer_fits_selected_design_before_slot_layout_without_style():
+def test_v2_renderer_fits_final_output_bounds_from_selected_design_without_style():
     task = {
         "$schema": "custom-renderer/v2-render-execution",
         "template_ai": "template.ai",
@@ -1621,8 +1623,9 @@ def test_v2_renderer_fits_selected_design_before_slot_layout_without_style():
 const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
 const width = designCopy.visibleBounds[2] - designCopy.visibleBounds[0];
 const height = designCopy.visibleBounds[1] - designCopy.visibleBounds[3];
-if (width > 100 || height > 30) throw new Error('selected design exceeded target after slot layout');
-if (designCopy.resizeCalls < 1) throw new Error('selected design was not sized before slot layout');
+if (Math.abs(width - 100) > 0.04) throw new Error('design final width mismatch: ' + width);
+if (Math.abs(height - 30) > 0.04) throw new Error('design final height mismatch: ' + height);
+if (designCopy.resizeCalls < 1) throw new Error('design final output was not resized');
 """)
 
     result = run_node(harness)
