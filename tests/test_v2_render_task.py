@@ -224,6 +224,65 @@ def compile_task(config=None, scan=None, **overrides):
     return compile_v2_render_task(config or render_config(), scan or scan_evidence(), **kwargs)
 
 
+def _configure_plain_font_reference(config, scan):
+    design = config["outputs"][0]["design"]["options"][0]
+    design["content_preset"] = "direct_text"
+    design["assets"] = []
+    design["slots"] = [
+        {"key": "slot_name", "source_field": "name", "preset": "direct_text", "anchor": "anchor_name"},
+        {"key": "slot_title", "source_field": "title", "preset": "direct_text"},
+    ]
+    config["field_bindings"]["title"] = "Title"
+    scanned_design = scan["outputs"][0]["designs"][0]
+    scanned_design["slots"] = [
+        {"key": "slot_name", "path": "Template/Output_main/Design/Design03/slot_name"},
+        {"key": "slot_title", "path": "Template/Output_main/Design/Design03/slot_title"},
+    ]
+    scanned_design["assets"] = []
+    config["outputs"][0]["font"]["options"][0]["slots"] = []
+    scanned_font = scan["outputs"][0]["fonts"][0]
+    scanned_font["slots"] = []
+    scanned_font["font_reference"] = {
+        "path": "Template/Output_main/Font/F10/font_sample",
+        "type": "TextFrame",
+        "font_dependencies": ["Milkshake"],
+    }
+
+
+def test_uses_single_unmarked_font_reference_for_all_design_text_slots():
+    config = render_config()
+    scan = scan_evidence()
+    _configure_plain_font_reference(config, scan)
+
+    task = compile_task(config, scan)
+
+    design_actions = [
+        action
+        for action in task["outputs"][0]["actions"]
+        if action["type"] == "replace_slot_text" and action["group"] == "design"
+    ]
+    assert {action["slot_key"] for action in design_actions} == {"slot_name", "slot_title"}
+    assert all(
+        action["style_source"]["paths_by_option"] == {"F10": "Template/Output_main/Font/F10/font_sample"}
+        for action in design_actions
+    )
+    font_actions = [action for action in task["outputs"][0]["actions"] if action.get("group") == "font"]
+    assert [action["type"] for action in font_actions] == ["copy_option_group"]
+    assert font_actions[0]["source_only"] is True
+
+
+def test_rejects_unmarked_font_without_a_single_text_reference():
+    config = render_config()
+    scan = scan_evidence()
+    _configure_plain_font_reference(config, scan)
+    del scan["outputs"][0]["fonts"][0]["font_reference"]
+
+    with pytest.raises(V2RenderTaskError) as exc_info:
+        compile_task(config, scan)
+
+    assert exc_info.value.code == "font_reference_missing"
+
+
 def _workbench_split_config() -> dict:
     script = r"""
         (async () => {

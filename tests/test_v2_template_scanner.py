@@ -118,6 +118,43 @@ def test_normalizes_scan_with_stable_sorting_and_digest():
     assert a["evidence"]["scan_protocol_version"] == V2_SCAN_PROTOCOL_VERSION
 
 
+def test_single_text_font_without_slot_becomes_default_font_reference():
+    items = valid_scan_items()
+    for item in items:
+        if item["path"] == "Template/Output_main/Font/F1/slot_name":
+            item["name"] = "font_sample"
+            item["path"] = "Template/Output_main/Font/F1/font_sample"
+            break
+
+    result = normalize_v2_template_scan(base_raw_scan(*items))
+
+    font = result["outputs"][0]["fonts"][0]
+    assert result["blocked"] is False
+    assert font["slots"] == []
+    assert font["font_reference"]["path"] == "Template/Output_main/Font/F1/font_sample"
+    assert font["font_reference"]["font_dependencies"] == ["ArialMT"]
+
+
+def test_multi_text_font_without_slots_is_not_guessed_as_font_reference():
+    items = valid_scan_items()
+    for item in items:
+        if item["path"] == "Template/Output_main/Font/F1/slot_name":
+            item["name"] = "font_sample_a"
+            item["path"] = "Template/Output_main/Font/F1/font_sample_a"
+            break
+    items.append(text("Template/Output_main/Font/F1/font_sample_b", "font_sample_b", font_name="ArialMT"))
+
+    result = normalize_v2_template_scan(base_raw_scan(*items))
+
+    font = result["outputs"][0]["fonts"][0]
+    assert result["blocked"] is False
+    assert font["slots"] == []
+    assert "font_reference" not in font
+    pending = next(issue for issue in result["issues"] if issue["code"] == "font_reference_confirmation_required")
+    assert pending["status"] == "pending"
+    assert pending["path"] == "Template/Output_main/Font/F1"
+
+
 def test_template_named_layer_does_not_count_as_duplicate_root():
     items = [
         layer("Template", "Template"),

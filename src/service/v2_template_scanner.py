@@ -387,7 +387,7 @@ def _normalize_option(
     if fixed_count is None:
         fixed_count = _fixed_object_count(subtree, marker_items, asset_root_paths)
     fixed_object_type_counts = _raw_fixed_object_type_counts(item)
-    return {
+    normalized = {
         "key": item["name"].strip(),
         "path": item["path"],
         **_geometry_facts(item),
@@ -400,6 +400,17 @@ def _normalize_option(
         "fixed_object_type_counts": fixed_object_type_counts,
         "fixed_objects": [{"key": "unnamed_fixed_objects", "count": fixed_count, "path": item["path"]}] if fixed_count else [],
     }
+    font_reference = _default_font_reference(subtree, kind, slots, tails)
+    if font_reference:
+        normalized["font_reference"] = font_reference
+    elif kind == "font" and not slots:
+        _pending_issue(
+            issues,
+            item["path"],
+            "font_reference_confirmation_required",
+            f"字体选项 {item['name'].strip()} 没有唯一的字体参考文字；请确认字体参考对象，或标注对应 slot_*。",
+        )
+    return normalized
 
 
 def _asset_roots(items: list[Dict[str, Any]], option: Dict[str, Any], kind: str, issues: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
@@ -686,6 +697,10 @@ def _is_group(item: Mapping[str, Any]) -> bool:
     return str(item.get("type") or "").strip().lower() in _GROUP_TYPES
 
 
+def _is_text_frame(item: Mapping[str, Any]) -> bool:
+    return str(item.get("type") or "").strip().lower() == "textframe"
+
+
 def _is_real_group(item: Mapping[str, Any]) -> bool:
     return str(item.get("type") or "").strip().lower() in {"group", "groupitem"}
 
@@ -730,6 +745,32 @@ def _marker_kind(name: str) -> str:
     if lower.startswith("tail_"):
         return "tail"
     return ""
+
+
+def _default_font_reference(
+    subtree: Iterable[Mapping[str, Any]],
+    kind: str,
+    slots: list[Mapping[str, Any]],
+    tails: list[Mapping[str, Any]],
+) -> Dict[str, Any]:
+    """Return the sole unmarked text object for a plain Font option."""
+    if kind != "font" or slots or tails:
+        return {}
+    text_items = [
+        item
+        for item in subtree
+        if _is_text_frame(item) and not _marker_kind(str(item.get("name") or ""))
+    ]
+    if len(text_items) != 1:
+        return {}
+    item = text_items[0]
+    font = _font_name(item)
+    return {
+        "path": str(item.get("path") or ""),
+        "type": str(item.get("type") or ""),
+        "text_kind": str(item.get("text_kind") or item.get("textKind") or ""),
+        "font_dependencies": [font] if font else [],
+    }
 
 
 def _tail_field(name: str) -> str:
@@ -958,6 +999,10 @@ def _issue(issues: list[Dict[str, Any]], path: str, code: str, reason: str, *, l
     if layer_paths is not None:
         issue["layer_paths"] = layer_paths
     issues.append(issue)
+
+
+def _pending_issue(issues: list[Dict[str, Any]], path: str, code: str, reason: str) -> None:
+    issues.append({"status": V2_STATUS_PENDING, "path": path, "code": code, "reason": reason})
 
 
 def _pending(preset: str, path: str, reason: str) -> Dict[str, str]:

@@ -436,13 +436,31 @@ def _font_style_sources(
         str(dict(slot).get("key") or "")
         for option in design.get("options", [])
         for slot in dict(option).get("slots", [])
-        if isinstance(slot, Mapping)
+        if isinstance(slot, Mapping) and str(dict(slot).get("preset") or "") != "asset_replace"
     }
     result: dict[str, dict[str, str]] = {}
     for font_option in font.get("options", []):
         font_data = dict(font_option)
         font_key = str(font_data.get("key") or "")
-        for font_slot in font_data.get("slots", []):
+        font_slots = [dict(slot) for slot in font_data.get("slots", []) if isinstance(slot, Mapping)]
+        if not font_slots:
+            font_option_scan = _scan_ref(
+                scan_index,
+                ("option", output_key, "font", font_key),
+                f"$.outputs.{output_key}.font.{font_key}",
+            )
+            reference = dict(font_option_scan.get("font_reference") or {})
+            reference_path = str(reference.get("path") or "")
+            if not reference_path:
+                raise V2RenderTaskError(
+                    "font_reference_missing",
+                    f"字体选项 {font_key} 没有可用的字体参考文字；请为该字体保留一个文字对象，或标注对应 slot_*。",
+                    path=f"$.outputs.{output_key}.font.{font_key}",
+                )
+            for slot_key in design_slot_keys:
+                result.setdefault(slot_key, {})[font_key] = reference_path
+            continue
+        for font_slot in font_slots:
             slot_key = str(dict(font_slot).get("key") or "")
             if not slot_key:
                 continue
