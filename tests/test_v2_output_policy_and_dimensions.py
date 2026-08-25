@@ -99,7 +99,9 @@ def test_v2_jsx_contains_final_object_fit_and_policy_gates():
     order_source = Path("scripts/illustrator/compose_v2_order_column.jsx").read_text(encoding="utf-8")
     color_source = Path("scripts/illustrator/compose_color_frames.jsx").read_text(encoding="utf-8")
     assert "applyOutputTransforms(doc, execution.output || task.output || {})" in render_source
-    assert "fitRenderedOutput(renderedOutputItems, finalFitAction)" in render_source
+    assert "fitRenderedOutput(renderedItems, fitAction)" in render_source
+    assert "finalFitAction" not in render_source
+    assert render_source.index("fitRenderedOutput(renderedItems, fitAction)") < render_source.index("replaceSlotText(copied, outputKey, replaceAction, valuesByField, selected)")
     assert "outputBoundsWithinTargetRange(fitted, targetWidth, targetHeight, dimensions)" in render_source
     assert "var fitSafety = outputFitSafetyPoints(dimensions);" in render_source
     assert "return Math.min(0.003, dimensionTolerancePoints(dimensions) / 2);" in render_source
