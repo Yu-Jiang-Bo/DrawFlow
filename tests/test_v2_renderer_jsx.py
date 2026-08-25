@@ -1525,7 +1525,7 @@ if (child(designCopy, 'slot_year_tail').contents !== 'Year') throw new Error('ye
     assert result.returncode == 0, result.stderr
 
 
-def test_v2_renderer_fits_final_output_bounds_and_removes_auxiliary_items():
+def test_v2_renderer_fits_design_before_slot_layout_and_removes_auxiliary_items():
     task = {
         "$schema": "custom-renderer/v2-render-execution",
         "template_ai": "template.ai",
@@ -1569,10 +1569,8 @@ const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
 if (designCopy.pageItems.find(item => item.name === 'anchor_name')) throw new Error('anchor auxiliary was not removed');
 const width = designCopy.visibleBounds[2] - designCopy.visibleBounds[0];
 const height = designCopy.visibleBounds[1] - designCopy.visibleBounds[3];
-if (Math.abs(width - 100) > 0.04) throw new Error('final width mismatch: ' + width);
-if (Math.abs(height - 30) > 0.04) throw new Error('final height mismatch: ' + height);
-if (width > 100 || height > 30) throw new Error('final output exceeded target');
-if (designCopy.resizeCalls < 1) throw new Error('final output was not resized');
+if (width > 100 || height > 30) throw new Error('slot-laid output exceeded target');
+if (designCopy.resizeCalls < 1) throw new Error('design was not sized before slot layout');
 """)
 
     result = run_node(harness)
@@ -1580,7 +1578,7 @@ if (designCopy.resizeCalls < 1) throw new Error('final output was not resized');
     assert result.returncode == 0, result.stderr
 
 
-def test_v2_renderer_fits_final_output_bounds_from_selected_design_without_style():
+def test_v2_renderer_fits_selected_design_before_slot_layout_without_style():
     task = {
         "$schema": "custom-renderer/v2-render-execution",
         "template_ai": "template.ai",
@@ -1623,9 +1621,8 @@ def test_v2_renderer_fits_final_output_bounds_from_selected_design_without_style
 const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
 const width = designCopy.visibleBounds[2] - designCopy.visibleBounds[0];
 const height = designCopy.visibleBounds[1] - designCopy.visibleBounds[3];
-if (Math.abs(width - 100) > 0.04) throw new Error('design final width mismatch: ' + width);
-if (Math.abs(height - 30) > 0.04) throw new Error('design final height mismatch: ' + height);
-if (designCopy.resizeCalls < 1) throw new Error('design final output was not resized');
+if (width > 100 || height > 30) throw new Error('selected design exceeded target after slot layout');
+if (designCopy.resizeCalls < 1) throw new Error('selected design was not sized before slot layout');
 """)
 
     result = run_node(harness)
@@ -2219,6 +2216,49 @@ def test_v2_renderer_fits_sub_threshold_visible_bounds_overflow_inside_target():
         # threshold. The final fit must still run and leave the result inside the
         # requested frame, rather than rejecting an Illustrator grid-rounding step.
         "mock_f1_slot_bounds": [0, 30.0006, 100.0006, 0],
+        "render_task": {
+            "$schema": "custom-renderer/v2-render-task",
+            "outputs": [
+                {
+                    "key": "Output_main",
+                    "actions": [
+                        {
+                            "type": "copy_option_group",
+                            "group": "font",
+                            "option_key": "F1",
+                            "object_path": "Template/Output_main/Font/F1",
+                        },
+                        {
+                            "type": "fit_output_bounds",
+                            "group": "style",
+                            "style_key": "style1",
+                            "dimensions": {
+                                "width_mm": 35.2777777778,
+                                "height_mm": 10.5833333333,
+                                "tolerance_mm": 0.007,
+                            },
+                        },
+                    ],
+                }
+            ],
+        },
+    }
+
+    result = run_node(node_mock_harness(task, ""))
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_v2_renderer_retries_rounded_output_overflow_with_an_inward_target():
+    task = {
+        "$schema": "custom-renderer/v2-render-execution",
+        "template_ai": "template.ai",
+        "output_ai": "out.ai",
+        "values": {"font": "F1", "style": "small"},
+        "selections": {"Output_main": {"font": "F1", "style": "style1"}},
+        # The mock expands each post-resize visible bound by 0.01pt per side,
+        # reproducing Illustrator's small positive measurement/rounding drift.
+        "visible_bounds_padding_after_resize": {"F1": 0.01},
         "render_task": {
             "$schema": "custom-renderer/v2-render-task",
             "outputs": [
