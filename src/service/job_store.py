@@ -6,7 +6,7 @@ import json
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Mapping
 
 from .paths import SERVICE_JOBS_DIR
 
@@ -20,7 +20,7 @@ class JobStore:
         self.root = Path(root)
         self.root.mkdir(parents=True, exist_ok=True)
 
-    def create(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    def create(self, request: Dict[str, Any], *, record_fields: Mapping[str, Any] | None = None) -> Dict[str, Any]:
         job_id = uuid.uuid4().hex[:12]
         job_dir = self.root / job_id
         job_dir.mkdir(parents=True, exist_ok=False)
@@ -37,6 +37,7 @@ class JobStore:
             "error": "",
             "error_code": "",
         }
+        record.update(dict(record_fields or {}))
         self.save(record)
         return record
 
