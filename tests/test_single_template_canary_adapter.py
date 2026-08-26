@@ -118,6 +118,28 @@ def test_v2_canary_returns_a_structured_pre_job_snapshot_failure(tmp_path, monke
     )
 
 
+def test_v2_group_render_uses_fixed_snapshot_and_keeps_delivery_outputs(tmp_path, monkeypatch):
+    class FakeV2OrderRenderService:
+        request = {}
+
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def render_fixed_snapshot(self, payload, *, version, template_sha256, config_sha256="", scan_sha256="", suppress_delivery_outputs=False):
+            type(self).request = {"version": version, "template_sha256": template_sha256, "suppress": suppress_delivery_outputs}
+            return {"status": "completed", "outputs": {"primary_output": "production.zip"}, "stats": {"orders": 1}}
+
+    order_file = _write_order_workbook(tmp_path / "orders.xlsx", "V2ORDER001")
+    monkeypatch.setattr(adapter_module, "V2OrderRenderService", FakeV2OrderRenderService)
+
+    result = _adapter(tmp_path).render_group(
+        _group("V2ORDER001"), _v2_snapshot(), group_workbook=order_file, work_dir=tmp_path / "group-v2",
+    )
+
+    assert FakeV2OrderRenderService.request == {"version": "v0003", "template_sha256": "b" * 64, "suppress": False}
+    assert result["outputs"]["primary_output"] == "production.zip"
+
+
 def _adapter(tmp_path: Path) -> SingleTemplateRenderAdapter:
     return SingleTemplateRenderAdapter(
         central=object(), cache=object(), data_dir=tmp_path / "data", v2_renderer=object(), font_dirs=[],

@@ -30,9 +30,10 @@ class MultiTemplateRenderError(RuntimeError):
 class MultiTemplateRenderService:
     """Own the durable parent record; dispatch is intentionally added in MT3.2."""
 
-    def __init__(self, *, preflight_runner: Any, jobs: JobStore) -> None:
+    def __init__(self, *, preflight_runner: Any, jobs: JobStore, dispatcher: Any | None = None) -> None:
         self.preflight_runner = preflight_runner
         self.jobs = jobs
+        self.dispatcher = dispatcher
 
     def preflight(self, payload: Mapping[str, Any]) -> dict[str, Any]:
         sheet_name = str(payload.get("sheet_name") or "").strip()
@@ -92,7 +93,10 @@ class MultiTemplateRenderService:
         metadata = dict(record["multi_template"])
         metadata["execution_gate_checked"] = True
         record["multi_template"] = metadata
-        return self.jobs.update(record, progress={"current": 0, "total": len(metadata["template_checkpoints"]), "stage": "ready_for_dispatch"})
+        ready = self.jobs.update(record, progress={"current": 0, "total": len(metadata["template_checkpoints"]), "stage": "ready_for_dispatch"})
+        if self.dispatcher is None:
+            return ready
+        return self.dispatcher.dispatch(ready, persist_canary=self.record_canary_result)
 
     def record_canary_result(self, parent_job_id: str, result: Mapping[str, Any] | Any) -> dict[str, Any]:
         """Persist per-template canary outcomes before formal dispatch is allowed.

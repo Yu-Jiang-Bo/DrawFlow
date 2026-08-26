@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -62,7 +63,18 @@ class JobStore:
     def save(self, record: Dict[str, Any]) -> None:
         record["updated_at"] = utc_now()
         path = Path(record["job_dir"]) / "job.json"
-        path.write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
+        temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+        try:
+            with temporary.open("w", encoding="utf-8") as target:
+                target.write(json.dumps(record, ensure_ascii=False, indent=2))
+                target.flush()
+                os.fsync(target.fileno())
+            os.replace(temporary, path)
+        finally:
+            try:
+                temporary.unlink()
+            except FileNotFoundError:
+                pass
 
     def update(self, record: Dict[str, Any], **changes: Any) -> Dict[str, Any]:
         record.update(changes)

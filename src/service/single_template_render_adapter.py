@@ -12,6 +12,8 @@ from .canary_diagnostics import suppress_delivery_outputs
 from .multi_template_order import TemplateOrderGroup
 from .multi_template_plan_metrics import PlanMetricsError, planned_row_metrics
 from .multi_template_snapshot import TemplateSnapshot
+from .single_template_render_messages import business_error_message as _business_error_message
+from .single_template_render_messages import failed_render as _failed_render
 from .render_service import RenderService
 from .template_registry import TemplateDefinition
 from .v2_order_render import V2OrderRenderService
@@ -160,6 +162,48 @@ class SingleTemplateRenderAdapter:
         missing_fonts = missing_required_fonts(list(snapshot.required_fonts), self.font_dirs)
         if missing_fonts:
             return _failed_render(payload, "missing_required_fonts", "本机缺少模板字体：" + "、".join(missing_fonts))
+        return self._render_snapshot(
+            payload,
+            snapshot,
+            target,
+            suppress_delivery_outputs=True,
+        )
+
+    def render_group(
+        self,
+        group: TemplateOrderGroup,
+        snapshot: TemplateSnapshot,
+        *,
+        group_workbook: Path | str,
+        work_dir: Path | str,
+    ) -> dict[str, Any]:
+        """Render one complete template group through its ordinary production path."""
+        source = Path(group_workbook)
+        target = Path(work_dir).resolve()
+        payload = {
+            "template_id": snapshot.template_id,
+            "order_file": str(source.resolve()),
+            "sheet_name": group.rows[0].sheet_name if group.rows else "",
+            "dry_run": False,
+            "visible": False,
+        }
+        if group.template_id != snapshot.template_id:
+            return _failed_render(payload, "template_snapshot_mismatch", "模板分组与预检快照不一致，请重新预检。", canary=False)
+        if not source.is_file():
+            return _failed_render(payload, "group_workbook_missing", "模板分组订单文件不存在，请重新预检。", canary=False)
+        missing_fonts = missing_required_fonts(list(snapshot.required_fonts), self.font_dirs)
+        if missing_fonts:
+            return _failed_render(payload, "missing_required_fonts", "本机缺少模板字体：" + "、".join(missing_fonts), canary=False)
+        return self._render_snapshot(payload, snapshot, target, suppress_delivery_outputs=False)
+
+    def _render_snapshot(
+        self,
+        payload: dict[str, Any],
+        snapshot: TemplateSnapshot,
+        target: Path,
+        *,
+        suppress_delivery_outputs: bool,
+    ) -> dict[str, Any]:
         jobs = JobStore(target / "jobs")
         if snapshot.pipeline == V2_RENDER_PIPELINE:
             try:
@@ -175,16 +219,17 @@ class SingleTemplateRenderAdapter:
                     template_sha256=snapshot.template_sha256,
                     config_sha256=snapshot.config_sha256,
                     scan_sha256=snapshot.scan_sha256,
-                    suppress_delivery_outputs=True,
+                    suppress_delivery_outputs=suppress_delivery_outputs,
                 )
             except V2OrderRenderError as exc:
-                return _failed_render(payload, exc.code, str(exc), failure_scope=exc.failure_scope)
+                return _failed_render(payload, exc.code, str(exc), failure_scope=exc.failure_scope, canary=suppress_delivery_outputs)
         else:
             record = RenderService(
                 registry=_SnapshotRegistry(_legacy_template(snapshot)),
                 jobs=jobs,
-            ).submit(payload, suppress_delivery_outputs=True)
-        _mark_diagnostic_canary(jobs, record)
+            ).submit(payload, suppress_delivery_outputs=suppress_delivery_outputs)
+        if suppress_delivery_outputs:
+            _mark_diagnostic_canary(jobs, record)
         return record
 
 
@@ -225,42 +270,10 @@ def _failed(template_id: str, code: str, message: str, *, request: dict[str, Any
     return SingleTemplatePreflightResult(template_id, False, request or {}, {}, code, message)
 
 
-def _failed_render(
-    request: dict[str, Any],
-    code: str,
-    message: str,
-    *,
-    failure_scope: str = "",
-) -> dict[str, Any]:
-    return {
-        "status": "failed",
-        "request": request,
-        "outputs": {},
-        "stats": {},
-        "error_code": code,
-        "error": message,
-        "failure_scope": failure_scope,
-        "canary": True,
-    }
-
-
 def _mark_diagnostic_canary(jobs: JobStore, record: dict[str, Any]) -> None:
     suppress_delivery_outputs(record)
     if record.get("job_id") and record.get("job_dir"):
         jobs.save(record)
-
-
-def _business_error_message(code: str) -> str:
-    messages = {
-        "template_rules_invalid": "模板规则不完整，请补齐配置后重新预检。",
-        "template_config_missing": "模板配置缺失，请重新发布模板后再试。",
-        "template_font_config_missing": "模板字体配置缺失，请重新发布模板后再试。",
-        "v2_template_version_unavailable": "预检时固定的模板版本已不可用，请重新预检后再试。",
-        "v2_template_asset_invalid": "预检时固定的模板文件已变化，请重新预检后再试。",
-        "v2_template_config_invalid": "预检时固定的模板配置已变化，请重新预检后再试。",
-        "v2_order_preflight_failed": "该模板的订单字段或选项未通过预检，请检查订单内容。",
-    }
-    return messages.get(code, "模板订单预检失败，请检查订单字段和模板配置。")
 
 
 __all__ = ["SingleTemplatePreflightResult", "SingleTemplateRenderAdapter"]
