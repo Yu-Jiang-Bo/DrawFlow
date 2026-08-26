@@ -858,6 +858,61 @@ if (!warning.warnings.some(entry => entry.code === 'slot_bounds_audit')) throw n
     assert result.returncode == 0, result.stderr
 
 
+def test_v2_renderer_converges_inside_anchor_when_illustrator_translation_is_quantized():
+    task = {
+        "$schema": "custom-renderer/v2-render-execution",
+        "template_ai": "template.ai",
+        "output_ai": "out.ai",
+        "values": {"design": "03", "name": "ModeratelyLong"},
+        "selections": {"Output_main": {"design": "Design03"}},
+        # Simulate Illustrator snapping a fractional translate to its internal
+        # coordinate grid. The renderer must leave a small real margin and
+        # converge inside the anchor, not waive the containment check.
+        "translation_snap_points": 0.25,
+        "mock_anchor_name_bounds": [200.125, 120.125, 260.125, 100.125],
+        "render_task": {
+            "$schema": "custom-renderer/v2-render-task",
+            "outputs": [
+                {
+                    "key": "Output_main",
+                    "actions": [
+                        {
+                            "type": "copy_option_group",
+                            "group": "design",
+                            "option_key": "Design03",
+                            "object_path": "Template/Output_main/Design/Design03",
+                        },
+                        {
+                            "type": "replace_slot_text",
+                            "group": "design",
+                            "option_key": "Design03",
+                            "object_path": "Template/Output_main/Design/Design03/slot_name",
+                            "source_field": "name",
+                            "required": True,
+                            "anchor_path": "Template/Output_main/Design/Design03/anchor_name",
+                            "tail_paths": [],
+                        },
+                    ],
+                }
+            ],
+        },
+    }
+    harness = node_mock_harness(task, """
+const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
+const slot = child(designCopy, 'slot_name');
+const anchor = [200.125, 120.125, 260.125, 100.125];
+if (slot.visibleBounds[0] < anchor[0] || slot.visibleBounds[1] > anchor[1]
+    || slot.visibleBounds[2] > anchor[2] || slot.visibleBounds[3] < anchor[3]) {
+  throw new Error('quantized translate left visible text outside its anchor: ' + JSON.stringify(slot.visibleBounds));
+}
+if (slot.resizeCalls < 2) throw new Error('renderer did not add convergence margin after quantized translate');
+""")
+
+    result = run_node(harness)
+
+    assert result.returncode == 0, result.stderr
+
+
 def test_v2_renderer_group_slot_fits_text_without_moving_slot_decoration():
     task = {
         "$schema": "custom-renderer/v2-render-execution",
@@ -2471,6 +2526,7 @@ const task = {json.dumps(task)};
 const taskText = NativeJSON.stringify(task);
 const visibleBoundsFailures = new Set(task.visible_bounds_failures || []);
 const visibleBoundsPaddingAfterResize = task.visible_bounds_padding_after_resize || {{}};
+const translationSnapPoints = Number(task.translation_snap_points || 0);
 const noResizeNames = new Set(task.mock_no_resize_names || []);
 let domMoveFailures = new Set(task.fail_dom_move_once || []);
 const folder = {{ exists: true, parent: null, create: () => true }};
@@ -2569,6 +2625,10 @@ function item(typename, name, contents, children, styleToken, bounds, options) {
       if (this.pageItems.length) {{
         for (const childNode of this.pageItems) childNode.translate(dx, dy);
         return;
+      }}
+      if (translationSnapPoints > 0) {{
+        dx = Math.round(dx / translationSnapPoints) * translationSnapPoints;
+        dy = Math.round(dy / translationSnapPoints) * translationSnapPoints;
       }}
       box = [box[0] + dx, box[1] + dy, box[2] + dx, box[3] + dy];
     }},
