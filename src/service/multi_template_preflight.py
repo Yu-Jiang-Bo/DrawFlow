@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 import hashlib
 from pathlib import Path
 from types import MappingProxyType
@@ -224,12 +225,21 @@ def _group_result(
 ) -> MultiTemplateGroupPreflight:
     workbook_sha256 = _sha256_file(group_workbook) if group_workbook else ""
     hash_failed = bool(group_workbook and not workbook_sha256)
-    can_render = bool(result and result.can_render and not hash_failed)
-    resolved_code = "preflight_storage_failed" if hash_failed else (result.error_code if result else error_code)
+    metrics_failed = bool(result and result.can_render and not _has_complete_row_metrics(group, result.plan))
+    can_render = bool(result and result.can_render and not hash_failed and not metrics_failed)
+    resolved_code = (
+        "preflight_storage_failed"
+        if hash_failed
+        else ("preflight_plan_metrics_missing" if metrics_failed else (result.error_code if result else error_code))
+    )
     resolved_message = (
         "无法校验模板分组订单文件，请检查本机磁盘后重新预检。"
         if hash_failed
-        else (result.error_message if result else error_message)
+        else (
+            "模板 dry-run 计划缺少行级 canary 指标，无法安全启动试渲染。"
+            if metrics_failed
+            else (result.error_message if result else error_message)
+        )
     )
     return MultiTemplateGroupPreflight(
         group.template_id,
@@ -244,6 +254,45 @@ def _group_result(
         resolved_code,
         resolved_message,
     )
+
+
+def _has_complete_row_metrics(group: TemplateOrderGroup, plan: Mapping[str, Any]) -> bool:
+    metrics = plan.get("row_metrics") if isinstance(plan, Mapping) else None
+    if not isinstance(metrics, Mapping):
+        return False
+    for row in group.rows:
+        metric = metrics.get(str(row.excel_row)) or metrics.get(row.excel_row)
+        if not isinstance(metric, Mapping):
+            return False
+        if _positive_int(metric.get("planned_output_units")) is None:
+            return False
+        if _nonnegative_int(metric.get("variable_text_length")) is None:
+            return False
+    return True
+
+
+def _positive_int(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    try:
+        number = Decimal(str(value).strip())
+    except (InvalidOperation, TypeError, ValueError):
+        return None
+    if not number.is_finite() or number <= 0 or number != number.to_integral_value():
+        return None
+    return int(number)
+
+
+def _nonnegative_int(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    try:
+        number = Decimal(str(value).strip())
+    except (InvalidOperation, TypeError, ValueError):
+        return None
+    if not number.is_finite() or number < 0 or number != number.to_integral_value():
+        return None
+    return int(number)
 
 
 def _resolution_issues(groups: tuple[TemplateOrderGroup, ...], resolution: TemplateResolutionBatch) -> list[MultiTemplateIssue]:

@@ -109,6 +109,34 @@ def build_v2_order_units(
     return units
 
 
+def v2_preflight_row_metrics(
+    render_task: Mapping[str, Any],
+    units: Iterable[V2OrderRenderUnit],
+) -> dict[str, dict[str, int]]:
+    """Summarize the already-expanded V2 plan without invoking a renderer.
+
+    Unit count reflects each concrete output/quantity variant.  Text length is
+    built only from source fields referenced by the compiled output actions and
+    is de-duplicated across repeated output variants of the same source value.
+    """
+
+    buckets: dict[int, dict[str, Any]] = {}
+    for unit in units:
+        bucket = buckets.setdefault(unit.row_index, {"planned_output_units": 0, "text_values": set()})
+        bucket["planned_output_units"] += 1
+        for slot_key, field in _selected_rendered_text_fields(render_task, unit):
+            text = str(unit.values.get(field) or "").strip()
+            if text:
+                bucket["text_values"].add((slot_key, text))
+    return {
+        str(row_index): {
+            "planned_output_units": int(bucket["planned_output_units"]),
+            "variable_text_length": sum(len(text) for _slot, text in bucket["text_values"]),
+        }
+        for row_index, bucket in sorted(buckets.items())
+    }
+
+
 def to_production_units(
     config: Mapping[str, Any],
     units: Iterable[V2OrderRenderUnit],
@@ -216,6 +244,33 @@ def _matches_selected_option(action: Mapping[str, Any], selected: Mapping[str, s
     group = str(action.get("group") or "").strip()
     option_key = str(action.get("option_key") or "").strip()
     return bool(group and option_key and str(selected.get(group) or "").strip() == option_key)
+
+
+def _selected_rendered_text_fields(
+    render_task: Mapping[str, Any],
+    unit: V2OrderRenderUnit,
+) -> tuple[tuple[str, str], ...]:
+    """Return only slots selected by this unit's compiled option mapping."""
+
+    for output in render_task.get("outputs", []):
+        if not isinstance(output, Mapping):
+            continue
+        output_key = str(output.get("key") or "").strip()
+        if output_key != unit.output_key:
+            continue
+        selected = unit.selections.get(output_key, {})
+        return tuple(
+            (str(action.get("slot_key") or "").strip(), str(action.get("source_field") or "").strip())
+            for action in output.get("actions", [])
+            if (
+                isinstance(action, Mapping)
+                and str(action.get("type") or "") == "replace_slot_text"
+                and _matches_selected_option(action, selected)
+                and str(action.get("slot_key") or "").strip()
+                and str(action.get("source_field") or "").strip()
+            )
+        )
+    return ()
 
 
 def unit_stem(unit: V2OrderRenderUnit, labels: Mapping[str, str]) -> str:
@@ -361,4 +416,5 @@ __all__ = [
     "multi_name_customization_enabled",
     "to_production_units",
     "unit_stem",
+    "v2_preflight_row_metrics",
 ]

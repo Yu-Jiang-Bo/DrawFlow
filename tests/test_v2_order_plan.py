@@ -1,7 +1,7 @@
 import pytest
 
 from src.service.production_output import ProductionOutputError, validate_public_output_units
-from src.service.v2_order_plan import build_v2_order_units, to_production_units
+from src.service.v2_order_plan import build_v2_order_units, to_production_units, v2_preflight_row_metrics
 from src.service.v2_order_render_support import V2OrderRenderError
 
 
@@ -119,6 +119,54 @@ def test_v2_order_unit_identity_keeps_output_order_and_quantity_sequence_stable(
         "LINE-1|output:001|qty:002|row:001",
         "LINE-1|output:002|qty:002|row:001",
     ]
+
+
+def test_v2_preflight_row_metrics_uses_expanded_outputs_and_rendered_text_fields():
+    config = _config(multi_quantity=True)
+    config["outputs"] = [{
+        "key": "Output_front",
+        "font": {"options": [{"key": "F1", "slots": [{"source_field": "name"}]}]},
+    }, {
+        "key": "Output_back",
+        "font": {"options": [{"key": "F2", "slots": [{"source_field": "name"}]}]},
+    }]
+    render_task = {
+        **_render_task(),
+        "outputs": [{
+            "key": "Output_front",
+            "actions": [{"type": "replace_slot_text", "group": "font", "option_key": "F1", "slot_key": "slot_name", "source_field": "name"}],
+        }, {
+            "key": "Output_back",
+            "actions": [{"type": "replace_slot_text", "group": "font", "option_key": "F2", "slot_key": "slot_name", "source_field": "name"}],
+        }],
+    }
+    units = build_v2_order_units(config, render_task, [{**_row("T"), "Qty": "2"}], _preflight())
+
+    assert v2_preflight_row_metrics(render_task, units) == {
+        "1": {"planned_output_units": 4, "variable_text_length": 5},
+    }
+
+
+def test_v2_preflight_row_metrics_ignores_actions_for_unselected_options():
+    config = {
+        "field_bindings": {"name": "Name", "title": "Title"},
+    }
+    render_task = {
+        "template": {"template_id": "V2ORDER001", "version": "v0007"},
+        "outputs": [{
+            "key": "Output_front",
+            "actions": [
+                {"type": "replace_slot_text", "group": "font", "option_key": "F1", "slot_key": "slot_name", "source_field": "name"},
+                {"type": "replace_slot_text", "group": "font", "option_key": "F2", "slot_key": "slot_title", "source_field": "title"},
+            ],
+        }],
+    }
+    preflight = {"preflight_rows": [{"row": 1, "order_id": "ORDER-1", "outputs": [{"output": "Output_front", "font": "F1"}]}]}
+    units = build_v2_order_units(config, render_task, [{"Name": "A", "Title": "LONG-TITLE"}], preflight)
+
+    assert v2_preflight_row_metrics(render_task, units) == {
+        "1": {"planned_output_units": 1, "variable_text_length": 1},
+    }
 
 
 def test_v2_order_unit_metadata_can_fall_back_to_preflight_metadata():

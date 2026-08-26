@@ -4,11 +4,13 @@ import json
 from pathlib import Path
 
 from openpyxl import Workbook
+import pytest
 
 from src.service import render_service as render_service_module
 from src.service import single_template_render_adapter as adapter_module
 from src.service.multi_template_order import MultiTemplateOrderRow, TemplateOrderGroup
 from src.service.multi_template_snapshot import TemplateSnapshot
+from src.service.multi_template_plan_metrics import PlanMetricsError, planned_row_metrics
 from src.service.single_template_render_adapter import SingleTemplateRenderAdapter
 from src.service.template_registry import TemplateDefinition
 from src.service.v2_template_boundary import V2_RENDER_PIPELINE
@@ -97,6 +99,76 @@ def test_preflight_reports_snapshot_mismatch_and_missing_fonts_without_rendering
     assert (font_missing.can_render, font_missing.error_code) == (False, "missing_required_fonts")
 
 
+def test_legacy_plan_metrics_counts_identical_text_in_distinct_render_slots(tmp_path):
+    task = tmp_path / "render-task.json"
+    task.write_text(json.dumps({
+        "type": "generic_template_rules",
+        "orders": [{
+            "row_index": 1,
+            "order_no": "ORDER-1",
+            "variables": [
+                {"target": "slot_name", "value": "Alice"},
+                {"target": "slot_title", "value": "Alice"},
+            ],
+        }],
+    }), encoding="utf-8")
+
+    metrics = planned_row_metrics(group(), {"outputs": {"render_task": str(task)}})
+
+    assert metrics == {"2": {"planned_output_units": 1, "variable_text_length": 10}}
+
+
+def test_legacy_plan_metrics_counts_curved_name_and_title_as_distinct_units(tmp_path):
+    task = tmp_path / "curved-task.json"
+    task.write_text(json.dumps({
+        "type": "jjmb_202509_curved",
+        "groups": [{"order_no": "ORDER-1", "items": [
+            {"order_no": "ORDER-1", "text": "Alice", "text_type": "name", "quantity_index": 1},
+            {"order_no": "ORDER-1", "text": "Alice", "text_type": "title", "quantity_index": 1},
+        ]}],
+    }), encoding="utf-8")
+
+    metrics = planned_row_metrics(group(), {"outputs": {"render_task": str(task)}})
+
+    assert metrics == {"2": {"planned_output_units": 2, "variable_text_length": 10}}
+
+
+def test_legacy_plan_metrics_allocates_a_shared_generic_layout_unit_to_each_member(tmp_path):
+    task = tmp_path / "layout-task.json"
+    task.write_text(json.dumps({
+        "type": "generic_template_rules",
+        "orders": [{
+            "row_index": 1,
+            "layout_members": [
+                {"row_index": 1, "order_no": "ORDER-1", "variables": [{"target": "slot_name", "value": "Alice"}]},
+                {"row_index": 2, "order_no": "ORDER-2", "variables": [{"target": "slot_name", "value": "Longer"}]},
+            ],
+        }],
+    }), encoding="utf-8")
+    layout_group = TemplateOrderGroup("LEGACY001", (
+        MultiTemplateOrderRow("订单", 2, "ORDER-1", "LEGACY001", {}),
+        MultiTemplateOrderRow("订单", 3, "ORDER-2", "LEGACY001", {}),
+    ))
+
+    metrics = planned_row_metrics(layout_group, {"outputs": {"render_task": str(task)}})
+
+    assert metrics == {
+        "2": {"planned_output_units": 1, "variable_text_length": 5},
+        "3": {"planned_output_units": 1, "variable_text_length": 6},
+    }
+
+
+def test_legacy_plan_metrics_rejects_fractional_task_row_indexes(tmp_path):
+    task = tmp_path / "invalid-row.json"
+    task.write_text(json.dumps({
+        "type": "generic_template_rules",
+        "orders": [{"row_index": 1.5, "order_no": "ORDER-1", "variables": []}],
+    }), encoding="utf-8")
+
+    with pytest.raises(PlanMetricsError, match="row index"):
+        planned_row_metrics(group(), {"outputs": {"render_task": str(task)}})
+
+
 def test_legacy_preflight_maps_internal_rule_failure_to_business_message(tmp_path):
     order_file = tmp_path / "orders.xlsx"
     write_group_workbook(order_file)
@@ -125,7 +197,13 @@ def test_v2_preflight_uses_only_the_fixed_snapshot_version(tmp_path, monkeypatch
                 "config_sha256": config_sha256,
                 "scan_sha256": scan_sha256,
             }
-            return {"status": "completed", "request": payload, "stats": {"orders": 1}, "outputs": {"render_task": "task.json"}}
+            return {
+                "status": "completed",
+                "request": payload,
+                "stats": {"orders": 1},
+                "outputs": {"render_task": "task.json"},
+                "_preflight_row_metrics": {"1": {"planned_output_units": 1, "variable_text_length": 5}},
+            }
 
     order_file = tmp_path / "orders.xlsx"
     write_group_workbook(order_file)
@@ -143,3 +221,4 @@ def test_v2_preflight_uses_only_the_fixed_snapshot_version(tmp_path, monkeypatch
     assert FakeV2OrderRenderService.request["config_sha256"] == "c" * 64
     assert FakeV2OrderRenderService.request["scan_sha256"] == "d" * 64
     assert FakeV2OrderRenderService.request["dry_run"] is True
+    assert result.plan["row_metrics"] == {"2": {"planned_output_units": 1, "variable_text_length": 5}}

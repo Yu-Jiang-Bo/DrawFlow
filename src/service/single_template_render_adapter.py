@@ -9,6 +9,7 @@ from typing import Any, Mapping
 
 from .job_store import JobStore
 from .multi_template_order import TemplateOrderGroup
+from .multi_template_plan_metrics import PlanMetricsError, planned_row_metrics
 from .multi_template_snapshot import TemplateSnapshot
 from .render_service import RenderService
 from .template_registry import TemplateDefinition
@@ -106,6 +107,15 @@ class SingleTemplateRenderAdapter:
                 _business_error_message(str(record.get("error_code") or "template_preflight_failed")),
                 request=dict(record.get("request") or {}),
             )
+        try:
+            row_metrics = planned_row_metrics(group, record)
+        except PlanMetricsError:
+            return _failed(
+                snapshot.template_id,
+                "preflight_plan_metrics_missing",
+                "无法从模板 dry-run 计划确认每行订单的效果图数量，请检查模板渲染配置后重新预检。",
+                request=dict(record.get("request") or {}),
+            )
         return SingleTemplatePreflightResult(
             snapshot.template_id,
             True,
@@ -114,6 +124,7 @@ class SingleTemplateRenderAdapter:
                 "stats": dict(record.get("stats") or {}),
                 "output_keys": sorted(dict(record.get("outputs") or {}).keys()),
                 "group_order_count": len(group.rows),
+                "row_metrics": row_metrics,
             },
         )
 

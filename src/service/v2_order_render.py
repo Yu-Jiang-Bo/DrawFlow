@@ -9,7 +9,7 @@ from typing import Any, Mapping
 from .job_store import JobStore
 from .local_gateway_support import LOGGER
 from .v2_order_output import V2OrderOutputRenderer
-from .v2_order_plan import build_v2_order_units
+from .v2_order_plan import build_v2_order_units, v2_preflight_row_metrics
 from .v2_order_preflight import preflight_v2_order_rows
 from .v2_order_render_support import (
     V2OrderRenderError,
@@ -69,6 +69,7 @@ class V2OrderRenderService:
             fixed_template_sha256=str(template_sha256 or "").strip().lower(),
             fixed_config_sha256=str(config_sha256 or "").strip().lower(),
             fixed_scan_sha256=str(scan_sha256 or "").strip().lower(),
+            include_preflight_metrics=True,
         )
 
     def _render(
@@ -79,6 +80,7 @@ class V2OrderRenderService:
         fixed_template_sha256: str = "",
         fixed_config_sha256: str = "",
         fixed_scan_sha256: str = "",
+        include_preflight_metrics: bool = False,
     ) -> dict[str, Any]:
         template_id = safe_template_id(payload.get("template_id"))
         publication = self._published_version(
@@ -91,6 +93,7 @@ class V2OrderRenderService:
             fixed_template_sha256=fixed_template_sha256,
             fixed_config_sha256=fixed_config_sha256,
             fixed_scan_sha256=fixed_scan_sha256,
+            include_preflight_metrics=include_preflight_metrics,
         )
         record = self.jobs.create(request)
         try:
@@ -98,6 +101,8 @@ class V2OrderRenderService:
             result = self._run(record, request)
             record["outputs"] = result["outputs"]
             record["stats"] = result["stats"]
+            if "_preflight_row_metrics" in result:
+                record["_preflight_row_metrics"] = result["_preflight_row_metrics"]
             self.jobs.update(record, status="completed")
         except Exception as exc:
             failure = business_error(exc)
@@ -160,6 +165,7 @@ class V2OrderRenderService:
         fixed_template_sha256: str = "",
         fixed_config_sha256: str = "",
         fixed_scan_sha256: str = "",
+        include_preflight_metrics: bool = False,
     ) -> dict[str, Any]:
         order_file_value = str(payload.get("order_file") or "").strip()
         if not order_file_value:
@@ -183,6 +189,8 @@ class V2OrderRenderService:
                 "_fixed_config_sha256": fixed_config_sha256,
                 "_fixed_scan_sha256": fixed_scan_sha256,
             })
+        if include_preflight_metrics:
+            request["_include_preflight_metrics"] = True
         return request
 
     def _run(self, record: Mapping[str, Any], request: Mapping[str, Any]) -> dict[str, Any]:
@@ -235,10 +243,13 @@ class V2OrderRenderService:
         if request.get("dry_run"):
             planned_units = build_v2_order_units(config, render_task, rows, preflight)
             write_json(manifest_path, {"orders": len(rows), "outputs": len(render_task.get("outputs", [])), "items": len(planned_units)})
-            return {
+            result = {
                 "outputs": {"render_task": str(task_file), "output_manifest": str(manifest_path)},
                 "stats": stats(rows, render_task, dry_run=True, planned_items=len(planned_units)),
             }
+            if request.get("_include_preflight_metrics"):
+                result["_preflight_row_metrics"] = v2_preflight_row_metrics(render_task, planned_units)
+            return result
         return V2OrderOutputRenderer(self.renderer).render_outputs(
             record,
             config,

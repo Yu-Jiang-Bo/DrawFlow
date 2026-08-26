@@ -51,7 +51,14 @@ class FakeAdapter:
             group.template_id,
             True,
             {"template_id": group.template_id, "dry_run": True},
-            {"stats": {"orders": len(group.rows)}, "department_plan": {"template_id": group.template_id}},
+            {
+                "stats": {"orders": len(group.rows)},
+                "department_plan": {"template_id": group.template_id},
+                "row_metrics": {
+                    str(row.excel_row): {"planned_output_units": 1, "variable_text_length": 0}
+                    for row in group.rows
+                },
+            },
         )
 
 
@@ -185,3 +192,39 @@ def test_preflight_maps_source_or_group_hash_read_failures_to_business_issues(tm
     assert {(issue.template_id, issue.code, issue.excel_row) for issue in group_result.issues} == {
         ("TEMPLATE-A", "preflight_storage_failed", 2),
     }
+
+
+def test_preflight_rejects_a_successful_adapter_result_without_row_metrics(tmp_path):
+    class MetricsMissingAdapter(FakeAdapter):
+        def preflight(self, group, snapshot, *, group_workbook, work_dir):
+            return SingleTemplatePreflightResult(group.template_id, True, {}, {"stats": {"orders": len(group.rows)}})
+
+    source = tmp_path / "orders.xlsx"
+    _write_orders(source, [("A-1", "TEMPLATE-A")])
+
+    result = MultiTemplatePreflight(
+        resolver=FakeResolver(snapshots=(_snapshot("TEMPLATE-A"),)), adapter=MetricsMissingAdapter(),
+    ).preflight(source, work_dir=tmp_path / "parent")
+
+    assert result.status == "preflight_failed"
+    assert [(issue.code, issue.excel_row) for issue in result.issues] == [("preflight_plan_metrics_missing", 2)]
+
+
+def test_preflight_rejects_fractional_row_metrics(tmp_path):
+    class FractionalMetricsAdapter(FakeAdapter):
+        def preflight(self, group, snapshot, *, group_workbook, work_dir):
+            return SingleTemplatePreflightResult(
+                group.template_id,
+                True,
+                {},
+                {"row_metrics": {str(group.rows[0].excel_row): {"planned_output_units": 1.5, "variable_text_length": 0}}},
+            )
+
+    source = tmp_path / "orders.xlsx"
+    _write_orders(source, [("A-1", "TEMPLATE-A")])
+
+    result = MultiTemplatePreflight(
+        resolver=FakeResolver(snapshots=(_snapshot("TEMPLATE-A"),)), adapter=FractionalMetricsAdapter(),
+    ).preflight(source, work_dir=tmp_path / "parent")
+
+    assert [(issue.code, issue.excel_row) for issue in result.issues] == [("preflight_plan_metrics_missing", 2)]

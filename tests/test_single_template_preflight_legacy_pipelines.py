@@ -101,6 +101,9 @@ def test_legacy_adapter_preflight_uses_every_existing_pipeline_without_illustrat
         assert result.can_render is True, (template.pipeline, result.error_code, result.error_message)
         assert result.normalized_request["dry_run"] is True
         assert "render_task" in result.plan["output_keys"]
+        metric = result.plan["row_metrics"]["2"]
+        assert metric["planned_output_units"] >= 1
+        assert metric["variable_text_length"] >= 1
         assert not list((tmp_path / f"p{index}").rglob("*.ai"))
 
     assert UnexpectedIllustrator.calls == 0
