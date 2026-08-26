@@ -1,3 +1,4 @@
 pywin32>=306; sys_platform == "win32"
 pytest>=7.4.0
-openpyxl>=3.1.0
+# 多模板订单的单次公式/缓存值扫描使用 3.1.5 已验证的 worksheet parser；3.2+ 需重新验证私有解析适配层。
+openpyxl>=3.1.5,<3.2
