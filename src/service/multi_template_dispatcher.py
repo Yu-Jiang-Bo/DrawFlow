@@ -12,10 +12,12 @@ from .multi_template_delivery import apply_delivery_error, apply_delivery_result
 from .multi_template_dispatch_support import (
     attempt as _attempt,
     checkpoint as _checkpoint,
+    checkpoint_with_elapsed_total as _checkpoint_with_elapsed_total,
     child_dir as _child_dir,
     finished_count as _finished_count,
     owned_output as _owned_output,
     pending_canary_preflight as _pending_canary_preflight,
+    persist_interrupted_record as _persist_interrupted_record,
     preflight_from_metadata as _preflight_from_metadata,
     primary_output as _primary_output,
     sha256_file as _sha256_file,
@@ -95,7 +97,11 @@ class MultiTemplateRenderDispatcher:
                 status="canary_running",
                 progress={"current": _finished_count(metadata), "total": len(preflight.groups), "stage": "canary_running"},
             )
-            canary = self.canary_renderer.run(canary_preflight, work_dir=Path(record["job_dir"]))
+            canary = self.canary_renderer.run(
+                canary_preflight,
+                work_dir=Path(record["job_dir"]),
+                on_group_started=lambda template_id: self._mark_canary_running(record, template_id),
+            )
             try:
                 record = persist_canary(str(record["job_id"]), canary)
             except OSError as exc:
@@ -202,13 +208,28 @@ class MultiTemplateRenderDispatcher:
                 )
         return self._finish(record)
 
-    def _save_checkpoint(self, record: dict[str, Any], template_id: str, **changes: Any) -> dict[str, Any]:
+    def _mark_canary_running(self, record: dict[str, Any], template_id: str) -> dict[str, Any]:
+        checkpoint = _checkpoint(record, template_id)
+        if checkpoint is None:
+            raise MultiTemplateDispatchError("模板检查点不存在。", code="multi_template_checkpoint_missing")
+        return self._save_checkpoint(
+            record,
+            template_id,
+            stage="canary_running",
+            status="canary_running",
+            canary_attempt=_attempt(checkpoint, "canary_attempt") + 1,
+            canary_started_at=utc_now(),
+        )
+
+    def _save_checkpoint(
+        self, record: dict[str, Any], template_id: str, *, stage: str = "rendering", **changes: Any,
+    ) -> dict[str, Any]:
         metadata = dict(record["multi_template"])
         checkpoints = [dict(item) for item in metadata.get("template_checkpoints") or []]
         checkpoint = next((item for item in checkpoints if item.get("template_id") == template_id), None)
         if checkpoint is None:
             raise MultiTemplateDispatchError("模板检查点不存在。", code="multi_template_checkpoint_missing")
-        checkpoint.update(changes)
+        checkpoint.update(_checkpoint_with_elapsed_total(checkpoint, changes))
         metadata["template_checkpoints"] = checkpoints
         child_id = str(checkpoint.get("child_job_id") or "")
         if child_id:
@@ -217,7 +238,7 @@ class MultiTemplateRenderDispatcher:
             metadata["child_jobs"] = child_jobs
         record["multi_template"] = metadata
         completed = sum(item.get("status") in {"succeeded", "failed"} for item in checkpoints)
-        return self._update(record, progress={"current": completed, "total": len(checkpoints), "stage": "rendering"})
+        return self._update(record, progress={"current": completed, "total": len(checkpoints), "stage": stage})
 
     def _stop_system(self, record: dict[str, Any], template_id: str, code: str, message: str) -> dict[str, Any]:
         metadata = dict(record["multi_template"])
@@ -272,24 +293,5 @@ class MultiTemplateRenderDispatcher:
             raise _RecordPersistenceError(record) from exc
 
     def _persistence_interrupted(self, record: dict[str, Any]) -> dict[str, Any]:
-        metadata = dict(record.get("multi_template") or {})
-        metadata["persistence_failure"] = True
-        record["multi_template"] = metadata
-        record.update(
-            status="interrupted",
-            error="父任务状态保存失败，已停止后续模板渲染。",
-            error_code="multi_template_checkpoint_persist_failed",
-            progress={
-                "current": _finished_count(metadata),
-                "total": len(metadata.get("template_checkpoints") or []),
-                "stage": "interrupted",
-            },
-        )
-        try:
-            self.jobs.save(record)
-        except OSError:
-            pass
-        return record
-
-
+        return _persist_interrupted_record(record, self.jobs)
 __all__ = ["MultiTemplateDispatchError", "MultiTemplateRenderDispatcher"]

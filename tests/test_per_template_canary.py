@@ -121,6 +121,27 @@ def test_template_canary_failure_does_not_prevent_later_templates(tmp_path):
     assert result.groups[1].child_job_id == "canary-B"
 
 
+def test_canary_marks_each_template_started_before_its_adapter_call(tmp_path):
+    started: list[str] = []
+
+    class StartAwareAdapter(FakeAdapter):
+        def render_canary(self, group, snapshot, *, group_workbook, work_dir):
+            assert started[-1] == group.template_id
+            return super().render_canary(group, snapshot, group_workbook=group_workbook, work_dir=work_dir)
+
+    adapter = StartAwareAdapter()
+
+    result = PerTemplateCanaryRenderer(adapter=adapter).run(
+        _preflight(tmp_path, ("A", "B")),
+        work_dir=tmp_path / "parent",
+        on_group_started=started.append,
+    )
+
+    assert result.status == "completed"
+    assert started == ["A", "B"]
+    assert [call[0] for call in adapter.calls] == ["A", "B"]
+
+
 def test_legacy_and_v2_formal_failure_codes_continue_without_a_handwritten_scope(tmp_path):
     for template_id, error_code in (("A", "illustrator_render_failed"), ("B", "v2_order_render_failed")):
         adapter = FakeAdapter({template_id: {"status": "failed", "error_code": error_code}})

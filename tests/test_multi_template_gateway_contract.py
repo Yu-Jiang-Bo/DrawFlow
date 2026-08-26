@@ -61,6 +61,7 @@ def test_multi_template_public_job_sanitizes_parent_checkpoint_and_issue_message
                 "error_code": r"C:\Users\Alice\secret_error_code",
                 "error": r"open C:\Users\Alice\secret.ai failed",
                 "child_job_id": r"C:\Users\Alice\secret-job",
+                "canary_child_job_id": r"C:\Users\Alice\secret-canary",
             }],
         },
     }
@@ -72,9 +73,117 @@ def test_multi_template_public_job_sanitizes_parent_checkpoint_and_issue_message
     assert response["template_summaries"][0]["error_code"] == "multi_template_error"
     assert response["template_summaries"][0]["error"] == "模板组渲染未完成，请检查模板配置和订单数据后重试。"
     assert response["template_summaries"][0]["child_job_id"] == ""
+    assert response["template_summaries"][0]["canary_child_job_id"] == ""
     assert response["issues"][0]["message"] == "模板不存在或尚未发布。"
     assert response["issues"][0]["suggestion"] == "请确认模板已发布且处于启用状态。"
     assert "C:\\Users" not in serialized
+
+
+def test_multi_template_public_job_exposes_resumable_group_summary_without_text_parsing():
+    record = {
+        "job_id": "parent-2",
+        "status": "completed_with_errors",
+        "outputs": {"partial_output": "internal.zip", "output_file_count": 7},
+        "multi_template": {
+            "preflight": {"groups": [
+                {"template_id": "A", "order_count": 2, "excel_rows": [2], "can_render": True},
+                {"template_id": "B", "order_count": 3, "excel_rows": [3, 4], "can_render": True},
+                {"template_id": "C", "order_count": 1, "excel_rows": [5], "can_render": True},
+                {"template_id": "D", "order_count": 1, "excel_rows": [6], "can_render": True},
+            ]},
+            "template_checkpoints": [
+                {"template_id": "A", "status": "succeeded", "attempt": 1, "elapsed_seconds": 2.25, "child_job_id": "child-A"},
+                {"template_id": "B", "status": "failed", "attempt": 2, "elapsed_seconds": 3.5, "failure_scope": "template", "error_code": "template_rules_invalid", "canary_child_job_id": "canary-B"},
+                {"template_id": "C", "status": "ready"},
+                {"template_id": "D", "status": "interrupted", "failure_scope": "system"},
+            ],
+            "canary": {"groups": [{
+                "template_id": "A",
+                "started_at": "2026-08-26T00:00:00+00:00",
+                "finished_at": "2026-08-26T00:00:02+00:00",
+            }]},
+            "canary_history": [{"groups": [{
+                "template_id": "B",
+                "started_at": "2026-08-26T00:01:00+00:00",
+                "finished_at": "2026-08-26T00:01:03+00:00",
+            }]}],
+        },
+    }
+
+    response = public_multi_template_job(record)
+
+    assert response["group_counts"] == {"succeeded": 1, "failed": 1, "unstarted": 1, "interrupted": 1, "running": 0}
+    assert response["succeeded_template_ids"] == ["A"]
+    assert response["failed_template_ids"] == ["B"]
+    assert response["pending_template_ids"] == ["C"]
+    assert response["running_template_ids"] == []
+    assert response["interrupted_template_ids"] == ["D"]
+    assert response["failed_templates"] == [{
+        "template_id": "B",
+        "failure_scope": "template",
+        "error_code": "template_rules_invalid",
+        "child_job_id": "canary-B",
+        "excel_rows": [3, 4],
+    }]
+    assert response["child_jobs"] == [
+        {"template_id": "A", "job_id": "child-A", "status": "succeeded", "attempt": 1, "kind": "formal"},
+        {"template_id": "B", "job_id": "canary-B", "status": "pending", "attempt": 0, "kind": "canary"},
+    ]
+    assert response["formal_elapsed_seconds"] == 5.75
+    assert response["canary_elapsed_seconds"] == 5.0
+    assert response["recorded_execution_elapsed_seconds"] == 10.75
+    assert response["output_file_count"] == 7
+    assert response["actions"]["can_retry_failed"] is True
+    assert response["actions"]["can_download_partial"] is True
+
+    record["status"] = "interrupted"
+    resumed = public_multi_template_job(record)
+    assert resumed["actions"]["can_resume"] is True
+    assert resumed["actions"]["can_retry_failed"] is False
+
+
+def test_multi_template_public_job_classifies_real_system_failure_checkpoint_as_interrupted():
+    record = {
+        "status": "interrupted",
+        "multi_template": {
+            "preflight": {"groups": [
+                {"template_id": "A", "can_render": True},
+                {"template_id": "B", "can_render": True},
+                {"template_id": "C", "can_render": True},
+            ]},
+            "template_checkpoints": [
+                {"template_id": "A", "status": "succeeded"},
+                {"template_id": "B", "status": "failed", "failure_scope": "system", "error_code": "multi_template_child_unavailable"},
+                {"template_id": "C", "status": "ready"},
+            ],
+        },
+    }
+
+    response = public_multi_template_job(record)
+
+    assert response["group_counts"] == {"succeeded": 1, "failed": 0, "unstarted": 1, "interrupted": 1, "running": 0}
+    assert response["failed_template_ids"] == ["B"]
+    assert response["interrupted_template_ids"] == ["B"]
+    assert response["pending_template_ids"] == ["C"]
+    assert response["running_template_ids"] == []
+    assert response["failed_templates"][0]["failure_scope"] == "system"
+
+
+def test_multi_template_public_job_prefers_current_canary_running_checkpoint_to_prior_canary_result():
+    record = {
+        "status": "canary_running",
+        "multi_template": {
+            "preflight": {"groups": [{"template_id": "A", "can_render": True}]},
+            "template_checkpoints": [{"template_id": "A", "status": "canary_running", "canary_attempt": 2}],
+            "canary": {"groups": [{"template_id": "A", "status": "ready"}]},
+        },
+    }
+
+    response = public_multi_template_job(record)
+
+    assert response["group_counts"] == {"succeeded": 0, "failed": 0, "unstarted": 0, "interrupted": 0, "running": 1}
+    assert response["running_template_ids"] == ["A"]
+    assert response["template_summaries"][0]["canary_status"] == "running"
 
 
 def test_local_client_render_multi_is_additive_facade(monkeypatch, tmp_path):

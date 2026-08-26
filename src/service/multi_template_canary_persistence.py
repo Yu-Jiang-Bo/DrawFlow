@@ -33,7 +33,7 @@ class MultiTemplateCanaryPersistence:
         checkpoint_by_id = {str(item.get("template_id") or ""): item for item in current}
         pending_ids = {
             template_id for template_id, item in checkpoint_by_id.items()
-            if str(item.get("status") or "") == "pending"
+            if str(item.get("status") or "") in {"pending", "canary_running"}
         }
         groups = payload.get("groups")
         if not isinstance(groups, list) or not checkpoint_by_id or not pending_ids:
@@ -48,11 +48,12 @@ class MultiTemplateCanaryPersistence:
                 raise MultiTemplateRenderError("试渲染结果与预检模板不一致。", code="multi_template_canary_invalid")
             seen.add(template_id)
             checkpoint = checkpoint_by_id[template_id]
+            started = str(group.get("started_at") or checkpoint.get("canary_started_at") or "")
             checkpoint.update({
                 "status": status,
                 "canary_child_job_id": str(group.get("child_job_id") or ""),
-                "canary_attempt": safe_count(checkpoint.get("canary_attempt")) + 1,
-                "canary_started_at": str(group.get("started_at") or ""),
+                "canary_attempt": safe_count(checkpoint.get("canary_attempt")) + (0 if str(checkpoint.get("status") or "") == "canary_running" else 1),
+                "canary_started_at": started,
                 "canary_finished_at": str(group.get("finished_at") or ""),
                 "canary_representative": dict(group.get("representative") or {}) if isinstance(group.get("representative"), Mapping) else {},
                 "canary_workbook": str(group.get("canary_workbook") or ""),

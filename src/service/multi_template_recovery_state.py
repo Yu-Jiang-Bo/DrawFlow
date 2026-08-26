@@ -88,7 +88,8 @@ def template_bindings(
 
 def reset_for_recovery(checkpoint: dict[str, Any], snapshot: Mapping[str, Any], group: Mapping[str, Any]) -> None:
     for key in (
-        "canary_child_job_id", "child_job_id", "primary_output", "primary_output_sha256", "stats",
+        "canary_child_job_id", "canary_started_at", "canary_finished_at", "canary_representative",
+        "canary_workbook", "canary_error", "child_job_id", "primary_output", "primary_output_sha256", "stats",
         "started_at", "finished_at", "elapsed_seconds", "error_code", "error", "failure_scope",
         "illustrator_recovery",
     ):

@@ -14,10 +14,12 @@ from src.service import multi_template_dispatcher as dispatcher_module
 from src.service import multi_template_output as output_module
 from src.service.local_client_errors import LocalClientError
 from src.service.multi_template_dispatcher import MultiTemplateDispatchError, MultiTemplateRenderDispatcher
+from src.service.multi_template_gateway_response import public_multi_template_job
 from src.service.multi_template_group_workbooks import GroupWorkbookWriter
 from src.service.multi_template_order import MultiTemplateOrderParser
 from src.service.multi_template_preflight import MultiTemplateGroupPreflight, MultiTemplatePreflightResult
 from src.service.multi_template_render import MultiTemplateRenderError, MultiTemplateRenderService
+from src.service.multi_template_recovery_state import reset_for_recovery
 from src.service.multi_template_snapshot import TemplateSnapshot
 from src.service.render_service import RenderServiceError
 from src.service.v2_order_render_support import V2OrderRenderError
@@ -72,15 +74,42 @@ class PassingCanary:
         self.template_ids: list[tuple[str, ...]] = []
         self.outcomes = outcomes or {}
 
-    def run(self, preflight, *, work_dir):
+    def run(self, preflight, *, work_dir, on_group_started=None):
         self.calls += 1
         self.template_ids.append(tuple(group.template_id for group in preflight.groups))
+        if on_group_started is not None:
+            for group in preflight.groups:
+                on_group_started(group.template_id)
         groups = [{
             "template_id": group.template_id,
             "status": self.outcomes.get(group.template_id, "ready"),
             "child_job_id": f"canary-{group.template_id}",
         } for group in preflight.groups]
         return {"status": "completed" if all(item["status"] == "ready" for item in groups) else "completed_with_errors", "groups": groups}
+
+
+class BlockingCanary(PassingCanary):
+    def __init__(self) -> None:
+        super().__init__()
+        self.started = threading.Event()
+        self.release = threading.Event()
+
+    def run(self, preflight, *, work_dir, on_group_started=None):
+        self.calls += 1
+        self.template_ids.append(tuple(group.template_id for group in preflight.groups))
+        groups = []
+        for index, group in enumerate(preflight.groups):
+            if on_group_started is not None:
+                on_group_started(group.template_id)
+            if index == 0:
+                self.started.set()
+                assert self.release.wait(timeout=3)
+            groups.append({
+                "template_id": group.template_id,
+                "status": "ready",
+                "child_job_id": f"canary-{group.template_id}",
+            })
+        return {"status": "completed", "groups": groups}
 
 
 class GroupRenderer:
@@ -162,9 +191,10 @@ def _service(
     render_lock: threading.Lock | None = None,
     store: JobStore | None = None,
     illustrator_recovery: RecoveryGate | None = None,
+    canary_renderer: PassingCanary | None = None,
 ):
     store = store or JobStore(tmp_path / "jobs")
-    canary = PassingCanary(canary_outcomes)
+    canary = canary_renderer or PassingCanary(canary_outcomes)
     renderer = GroupRenderer(outcomes or {})
     dispatcher = MultiTemplateRenderDispatcher(
         jobs=store,
@@ -361,6 +391,31 @@ def test_canary_failed_template_is_not_dispatched_but_later_templates_are(tmp_pa
     assert [item["status"] for item in result["multi_template"]["template_checkpoints"]] == ["succeeded", "canary_failed", "succeeded"]
 
 
+def test_parent_detail_reports_template_canary_running_while_canary_is_blocked(tmp_path):
+    source = tmp_path / "orders.xlsx"
+    _write_orders(source, ("A", "B"))
+    canary = BlockingCanary()
+    service, _, _ = _service(tmp_path, canary_renderer=canary)
+    parent = service.preflight({"order_file": str(source), "sheet_name": "订单"})
+    result: dict[str, object] = {}
+    worker = threading.Thread(target=lambda: result.setdefault("value", service.execute(parent["job_id"])))
+    worker.start()
+    try:
+        assert canary.started.wait(timeout=3)
+        detail = public_multi_template_job(service.jobs.load(parent["job_id"]))
+        assert detail["status"] == "canary_running"
+        assert detail["group_counts"] == {"succeeded": 0, "failed": 0, "unstarted": 1, "interrupted": 0, "running": 1}
+        assert detail["running_template_ids"] == ["A"]
+        assert detail["template_summaries"][0]["status"] == "canary_running"
+        assert detail["template_summaries"][0]["canary_status"] == "running"
+        assert detail["template_summaries"][0]["canary_attempt"] == 1
+    finally:
+        canary.release.set()
+        worker.join(timeout=3)
+    assert not worker.is_alive()
+    assert result["value"]["status"] == "completed"
+
+
 def test_retry_failed_renders_only_the_failed_template_with_a_new_canary(tmp_path):
     source = tmp_path / "orders.xlsx"
     _write_orders(source, ("A", "B", "C"))
@@ -382,6 +437,34 @@ def test_retry_failed_renders_only_the_failed_template_with_a_new_canary(tmp_pat
     assert "partial_output" not in recovered["outputs"]
     assert Path(recovered["outputs"]["primary_output"]).is_file()
     assert recovered["multi_template"]["output_history"][0]["kind"] == "partial_output"
+
+
+def test_checkpoint_preserves_cumulative_formal_elapsed_seconds_across_recovery_reset(tmp_path):
+    source = tmp_path / "orders.xlsx"
+    _write_orders(source, ("A",))
+    service, _, _ = _service(tmp_path)
+    parent = service.preflight({"order_file": str(source), "sheet_name": "订单"})
+
+    first = service.dispatcher._save_checkpoint(
+        parent,
+        "A",
+        status="failed",
+        elapsed_seconds=1.25,
+    )
+    checkpoint = first["multi_template"]["template_checkpoints"][0]
+    reset_for_recovery(
+        checkpoint,
+        first["multi_template"]["template_snapshots"][0],
+        first["multi_template"]["preflight"]["groups"][0],
+    )
+    second = service.dispatcher._save_checkpoint(
+        first,
+        "A",
+        status="succeeded",
+        elapsed_seconds=2.5,
+    )
+
+    assert second["multi_template"]["template_checkpoints"][0]["formal_elapsed_seconds_total"] == 3.75
 
 
 def test_resume_replays_the_interrupted_boundary_and_pending_ready_templates_only(tmp_path):

@@ -107,6 +107,7 @@ class PerTemplateCanaryRenderer:
         preflight: MultiTemplatePreflightResult,
         *,
         work_dir: Path | str,
+        on_group_started: Callable[[str], Any] | None = None,
     ) -> CanaryRunResult:
         if not preflight.can_render:
             return CanaryRunResult("preflight_failed", ())
@@ -130,6 +131,8 @@ class PerTemplateCanaryRenderer:
             if group is None or summary is None or snapshot is None:
                 return _interrupted(results, representative, snapshot, "canary_snapshot_missing")
             started_at = _utc_now()
+            if on_group_started is not None:
+                on_group_started(group.template_id)
             try:
                 _require_group_sha256(summary, representative)
                 representative_row = _representative_row(group, representative)

@@ -117,9 +117,9 @@ def owned_output(output: Path, expected_child_dir: Path) -> bool:
     return resolved_output.is_file() and resolved_child_dir in resolved_output.parents
 
 
-def attempt(checkpoint: Mapping[str, Any]) -> int:
+def attempt(checkpoint: Mapping[str, Any], key: str = "attempt") -> int:
     try:
-        return max(int(checkpoint.get("attempt") or 0), 0)
+        return max(int(checkpoint.get(key) or 0), 0)
     except (TypeError, ValueError):
         return 0
 
@@ -138,9 +138,47 @@ def sha256_file(path: Path) -> str:
         with path.open("rb") as source:
             for chunk in iter(lambda: source.read(1024 * 1024), b""):
                 digest.update(chunk)
+        return digest.hexdigest()
     except OSError:
         return ""
-    return digest.hexdigest()
+
+
+def elapsed_total(value: Any) -> float:
+    try:
+        return max(float(value), 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def checkpoint_with_elapsed_total(checkpoint: Mapping[str, Any], changes: Mapping[str, Any]) -> dict[str, Any]:
+    updated = dict(changes)
+    if "elapsed_seconds" in updated:
+        updated["formal_elapsed_seconds_total"] = (
+            elapsed_total(checkpoint.get("formal_elapsed_seconds_total"))
+            + elapsed_total(updated.get("elapsed_seconds"))
+        )
+    return updated
+
+
+def persist_interrupted_record(record: dict[str, Any], jobs: Any) -> dict[str, Any]:
+    metadata = dict(record.get("multi_template") or {})
+    metadata["persistence_failure"] = True
+    record["multi_template"] = metadata
+    record.update(
+        status="interrupted",
+        error="父任务状态保存失败，已停止后续模板渲染。",
+        error_code="multi_template_checkpoint_persist_failed",
+        progress={
+            "current": finished_count(metadata),
+            "total": len(metadata.get("template_checkpoints") or []),
+            "stage": "interrupted",
+        },
+    )
+    try:
+        jobs.save(record)
+    except OSError:
+        pass
+    return record
 
 
 __all__ = [
@@ -152,5 +190,5 @@ __all__ = [
     "pending_canary_preflight",
     "preflight_from_metadata",
     "primary_output",
-    "sha256_file",
+    "checkpoint_with_elapsed_total", "elapsed_total", "persist_interrupted_record", "sha256_file",
 ]

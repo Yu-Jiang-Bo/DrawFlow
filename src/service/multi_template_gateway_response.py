@@ -4,6 +4,16 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
+from .multi_template_gateway_summary import (
+    canary_elapsed_totals,
+    failed_templates,
+    failure_scope,
+    failure_template_ids,
+    group_counts,
+    non_negative_float,
+    template_ids,
+)
+
 
 def public_multi_template_job(record: Mapping[str, Any]) -> dict[str, Any]:
     """Return parent task detail without local paths or mutable snapshots."""
@@ -24,14 +34,23 @@ def public_multi_template_job(record: Mapping[str, Any]) -> dict[str, Any]:
         _list_of_mappings(preflight.get("issues"))
         + _list_of_mappings(metadata.get("issues"))
     )
+    canary_elapsed_by_template = canary_elapsed_totals(metadata)
     summaries = [
-        _template_summary(group, checkpoints.get(str(group.get("template_id") or ""), {}), canary_groups)
+        _template_summary(
+            group,
+            checkpoints.get(str(group.get("template_id") or ""), {}),
+            canary_groups,
+            canary_elapsed_by_template,
+        )
         for group in groups
         if str(group.get("template_id") or "")
     ]
     outputs = _public_outputs(_mapping(record.get("outputs")))
     status = str(record.get("status") or "")
     parent_error_code = _public_code(record.get("error_code"))
+    counts = group_counts(summaries)
+    formal_elapsed_seconds = round(sum(non_negative_float(item.get("formal_elapsed_seconds")) for item in summaries), 3)
+    canary_elapsed_seconds = round(sum(non_negative_float(item.get("canary_elapsed_seconds")) for item in summaries), 3)
     return {
         "job_id": str(record.get("job_id") or ""),
         "job_type": "multi_template_parent",
@@ -49,9 +68,20 @@ def public_multi_template_job(record: Mapping[str, Any]) -> dict[str, Any]:
         "template_count": len(summaries),
         "group_count": len(summaries),
         "order_count": sum(_non_negative_int(item.get("order_count")) for item in summaries),
+        "group_counts": counts,
+        "formal_elapsed_seconds": formal_elapsed_seconds,
+        "canary_elapsed_seconds": canary_elapsed_seconds,
+        "recorded_execution_elapsed_seconds": round(formal_elapsed_seconds + canary_elapsed_seconds, 3),
+        "output_file_count": _non_negative_int(outputs.get("file_count")),
+        "succeeded_template_ids": template_ids(summaries, {"succeeded"}),
+        "failed_template_ids": failure_template_ids(summaries),
+        "pending_template_ids": template_ids(summaries, {"pending", "ready"}),
+        "running_template_ids": template_ids(summaries, {"running"}),
+        "interrupted_template_ids": template_ids(summaries, {"interrupted"}),
+        "failed_templates": failed_templates(summaries),
         "template_summaries": summaries,
         "issues": [_issue(item) for item in issues],
-        "child_jobs": [_child_job(summary) for summary in summaries if summary["child_job_id"]],
+        "child_jobs": _child_jobs(summaries),
         "actions": _actions(status, summaries, outputs),
         "outputs": outputs,
     }
@@ -61,6 +91,7 @@ def _template_summary(
     group: Mapping[str, Any],
     checkpoint: Mapping[str, Any],
     canary_groups: Mapping[str, Mapping[str, Any]],
+    canary_elapsed_by_template: Mapping[str, float],
 ) -> dict[str, Any]:
     template_id = str(group.get("template_id") or "")
     canary = _mapping(canary_groups.get(template_id))
@@ -74,14 +105,20 @@ def _template_summary(
         "preflight_status": "ready" if bool(group.get("can_render")) else "failed",
         "preflight_error_code": preflight_error_code,
         "preflight_error": _public_error(preflight_error_code, kind="preflight"),
-        "canary_status": str(canary.get("status") or "pending"),
+        "canary_status": "running" if checkpoint.get("status") == "canary_running" else str(canary.get("status") or "pending"),
         "status": str(checkpoint.get("status") or "pending"),
         "attempt": _non_negative_int(checkpoint.get("attempt")),
+        "canary_attempt": _non_negative_int(checkpoint.get("canary_attempt")),
+        "formal_elapsed_seconds": non_negative_float(
+            checkpoint.get("formal_elapsed_seconds_total", checkpoint.get("elapsed_seconds")),
+        ),
+        "canary_elapsed_seconds": non_negative_float(canary_elapsed_by_template.get(template_id)),
         "template_version": str(checkpoint.get("template_version") or ""),
         "child_job_id": _public_child_job_id(checkpoint.get("child_job_id")),
+        "canary_child_job_id": _public_child_job_id(checkpoint.get("canary_child_job_id")),
         "error_code": error_code,
         "error": _public_error(error_code, kind="checkpoint"),
-        "failure_scope": str(checkpoint.get("failure_scope") or ""),
+        "failure_scope": failure_scope(checkpoint.get("failure_scope")),
     }
 
 
@@ -91,7 +128,24 @@ def _child_job(summary: Mapping[str, Any]) -> dict[str, Any]:
         "job_id": str(summary.get("child_job_id") or ""),
         "status": str(summary.get("status") or ""),
         "attempt": _non_negative_int(summary.get("attempt")),
+        "kind": "formal",
     }
+
+
+def _child_jobs(summaries: list[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    jobs: list[dict[str, Any]] = []
+    for summary in summaries:
+        if summary["child_job_id"]:
+            jobs.append(_child_job(summary))
+        if summary["canary_child_job_id"]:
+            jobs.append({
+                "template_id": str(summary["template_id"]),
+                "job_id": str(summary["canary_child_job_id"]),
+                "status": str(summary.get("canary_status") or ""),
+                "attempt": _non_negative_int(summary.get("canary_attempt")),
+                "kind": "canary",
+            })
+    return jobs
 
 
 def _public_outputs(outputs: Mapping[str, Any]) -> dict[str, Any]:
@@ -114,6 +168,9 @@ def _actions(
         "resume": status == "interrupted",
         "download_primary_output": bool(outputs.get("primary_output_available")),
         "download_partial_output": bool(outputs.get("partial_output_available")),
+        "can_retry_failed": status in {"ready", "completed_with_errors", "failed"} and has_failed,
+        "can_resume": status == "interrupted",
+        "can_download_partial": bool(outputs.get("partial_output_available")),
     }
 
 
