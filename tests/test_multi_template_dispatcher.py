@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import threading
+import zipfile
 from pathlib import Path
 
 from openpyxl import Workbook
@@ -10,6 +11,7 @@ import pytest
 from src.renderer.illustrator_bridge import IllustratorBridgeError
 from src.service.job_store import JobStore
 from src.service import multi_template_dispatcher as dispatcher_module
+from src.service import multi_template_output as output_module
 from src.service.local_client_errors import LocalClientError
 from src.service.multi_template_dispatcher import MultiTemplateDispatchError, MultiTemplateRenderDispatcher
 from src.service.multi_template_group_workbooks import GroupWorkbookWriter
@@ -120,7 +122,8 @@ class GroupRenderer:
             return {"status": "failed", "error_code": f"{group.template_id}-failed", "error": "模板渲染失败", "failure_scope": outcome}
         target.mkdir(parents=True, exist_ok=True)
         output = target / f"{group.template_id}.zip"
-        output.write_bytes(group.template_id.encode("utf-8"))
+        with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr(f"department/K/{group.template_id}.ai", group.template_id.encode("utf-8"))
         return {
             "status": "completed",
             "job_id": "" if outcome == "missing_job_id" else f"child-{group.template_id}",
@@ -188,6 +191,12 @@ def test_dispatches_each_template_once_in_order_and_keeps_outputs_isolated(tmp_p
     assert [item["status"] for item in checkpoints] == ["succeeded", "succeeded", "succeeded"]
     assert len({work_dir for _, _, work_dir in renderer.calls}) == 3
     assert all(item["primary_output_sha256"] for item in checkpoints)
+    with zipfile.ZipFile(result["outputs"]["primary_output"]) as archive:
+        assert archive.namelist() == [
+            "templates/A/department/K/A.ai",
+            "templates/B/department/K/B.ai",
+            "templates/C/department/K/C.ai",
+        ]
 
 
 def test_template_failure_keeps_later_template_rendering(tmp_path):
@@ -201,6 +210,27 @@ def test_template_failure_keeps_later_template_rendering(tmp_path):
     assert result["status"] == "completed_with_errors"
     assert [template_id for template_id, _, _ in renderer.calls] == ["A", "B", "C"]
     assert [item["status"] for item in result["multi_template"]["template_checkpoints"]] == ["succeeded", "failed", "succeeded"]
+    assert "primary_output" not in result["outputs"]
+    with zipfile.ZipFile(result["outputs"]["partial_output"]) as archive:
+        assert archive.namelist() == ["templates/A/department/K/A.ai", "templates/C/department/K/C.ai"]
+
+
+def test_output_packaging_storage_failure_interrupts_without_downloadable_result(tmp_path, monkeypatch):
+    source = tmp_path / "orders.xlsx"
+    _write_orders(source, ("A", "B"))
+    service, _, renderer = _service(tmp_path)
+    parent = service.preflight({"order_file": str(source), "sheet_name": "订单"})
+
+    def fail_mkstemp(**_kwargs):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(output_module.tempfile, "mkstemp", fail_mkstemp)
+    result = service.execute(parent["job_id"])
+
+    assert [template_id for template_id, _, _ in renderer.calls] == ["A", "B"]
+    assert (result["status"], result["error_code"]) == ("interrupted", "multi_template_output_package_failed")
+    assert "primary_output" not in result["outputs"]
+    assert "partial_output" not in result["outputs"]
 
 
 def test_known_template_error_code_keeps_later_template_rendering_without_message_matching(tmp_path):
@@ -349,6 +379,9 @@ def test_retry_failed_renders_only_the_failed_template_with_a_new_canary(tmp_pat
     assert [item["status"] for item in checkpoints] == ["succeeded", "succeeded", "succeeded"]
     assert checkpoints[1]["attempt"] == 2
     assert checkpoints[1]["retry_count"] == 1
+    assert "partial_output" not in recovered["outputs"]
+    assert Path(recovered["outputs"]["primary_output"]).is_file()
+    assert recovered["multi_template"]["output_history"][0]["kind"] == "partial_output"
 
 
 def test_resume_replays_the_interrupted_boundary_and_pending_ready_templates_only(tmp_path):

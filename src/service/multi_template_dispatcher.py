@@ -2,18 +2,27 @@
 
 from __future__ import annotations
 
-import hashlib
 import threading
 import time
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
 from .job_store import JobStore, utc_now
+from .multi_template_delivery import apply_delivery_error, apply_delivery_result
+from .multi_template_dispatch_support import (
+    attempt as _attempt,
+    checkpoint as _checkpoint,
+    child_dir as _child_dir,
+    finished_count as _finished_count,
+    owned_output as _owned_output,
+    pending_canary_preflight as _pending_canary_preflight,
+    preflight_from_metadata as _preflight_from_metadata,
+    primary_output as _primary_output,
+    sha256_file as _sha256_file,
+)
 from .multi_template_failures import FAILURE_SCOPES, is_recoverable_com_failure, normalize_failure
 from .multi_template_illustrator_recovery import FreshIllustratorSessionRecovery
-from .multi_template_order import MultiTemplateIssue, MultiTemplateOrderBatch
-from .multi_template_preflight import MultiTemplateGroupPreflight, MultiTemplatePreflightResult
-from .multi_template_snapshot import TemplateSnapshot
+from .multi_template_output import MultiTemplateOutputError, MultiTemplateResultCollector
 
 
 class MultiTemplateDispatchError(RuntimeError):
@@ -40,6 +49,7 @@ class MultiTemplateRenderDispatcher:
         render_lock: threading.Lock,
         failure_scope: Callable[[Mapping[str, Any]], str] | None = None,
         illustrator_recovery: Any | None = None,
+        output_collector: MultiTemplateResultCollector | None = None,
     ) -> None:
         self.jobs = jobs
         self.group_renderer = group_renderer
@@ -47,6 +57,7 @@ class MultiTemplateRenderDispatcher:
         self.render_lock = render_lock
         self.failure_scope = failure_scope
         self.illustrator_recovery = illustrator_recovery or FreshIllustratorSessionRecovery()
+        self.output_collector = output_collector or MultiTemplateResultCollector()
 
     def dispatch(
         self,
@@ -76,8 +87,8 @@ class MultiTemplateRenderDispatcher:
         persist_canary: Callable[[str, Any], dict[str, Any]],
     ) -> dict[str, Any]:
         metadata = dict(record.get("multi_template") or {})
-        preflight = _preflight_from_metadata(metadata)
-        canary_preflight = _pending_canary_preflight(record, preflight)
+        preflight = _preflight_from_metadata(metadata, MultiTemplateDispatchError)
+        canary_preflight = _pending_canary_preflight(record, preflight, MultiTemplateDispatchError)
         if canary_preflight is not None:
             record = self._update(
                 record,
@@ -212,6 +223,9 @@ class MultiTemplateRenderDispatcher:
         metadata = dict(record["multi_template"])
         metadata["interrupted_template_id"] = template_id
         record["multi_template"] = metadata
+        collected = self._collect_output(record, status="interrupted")
+        if collected is not None:
+            return collected
         return self._update(
             record,
             status="interrupted",
@@ -229,6 +243,10 @@ class MultiTemplateRenderDispatcher:
         metadata["failed_templates"] = failed
         record["multi_template"] = metadata
         status = "completed" if succeeded and not failed else ("completed_with_errors" if succeeded else "failed")
+        if status != "failed":
+            collected = self._collect_output(record, status=status)
+            if collected is not None:
+                return collected
         return self._update(
             record,
             status=status,
@@ -236,6 +254,16 @@ class MultiTemplateRenderDispatcher:
             error="" if status == "completed" else str(record.get("error") or ""),
             error_code="" if status == "completed" else str(record.get("error_code") or ""),
         )
+
+    def _collect_output(self, record: dict[str, Any], *, status: str) -> dict[str, Any] | None:
+        try:
+            result = self.output_collector.collect(record, status=status)
+        except MultiTemplateOutputError as exc:
+            return self._update(record, **apply_delivery_error(record, exc))
+        if result is None:
+            return None
+        apply_delivery_result(record, result)
+        return None
 
     def _update(self, record: dict[str, Any], **changes: Any) -> dict[str, Any]:
         try:
@@ -262,122 +290,6 @@ class MultiTemplateRenderDispatcher:
         except OSError:
             pass
         return record
-
-
-def _preflight_from_metadata(metadata: Mapping[str, Any]) -> MultiTemplatePreflightResult:
-    payload = metadata.get("preflight")
-    if not isinstance(payload, Mapping) or str(payload.get("status") or "") != "ready":
-        raise MultiTemplateDispatchError("父任务缺少可执行的预检结果。", code="multi_template_preflight_missing")
-    try:
-        batch = MultiTemplateOrderBatch.from_dict(dict(payload["order_batch"]))
-        snapshots = tuple(TemplateSnapshot.from_dict(item) for item in payload.get("template_snapshots") or [] if isinstance(item, Mapping))
-        groups = tuple(_summary_from_dict(item) for item in payload.get("groups") or [] if isinstance(item, Mapping))
-        issues = tuple(MultiTemplateIssue.from_dict(item) for item in payload.get("issues") or [] if isinstance(item, Mapping))
-    except (KeyError, TypeError, ValueError) as exc:
-        raise MultiTemplateDispatchError("父任务预检记录无法恢复。", code="multi_template_preflight_missing") from exc
-    return MultiTemplatePreflightResult("ready", str(payload.get("source_order_sha256") or ""), str(payload.get("sheet_name") or ""), batch, snapshots, groups, issues)
-
-
-def _summary_from_dict(payload: Mapping[str, Any]) -> MultiTemplateGroupPreflight:
-    return MultiTemplateGroupPreflight(
-        str(payload.get("template_id") or ""),
-        int(payload.get("order_count") or 0),
-        tuple(int(value) for value in payload.get("excel_rows") or []),
-        tuple(str(value) for value in payload.get("order_nos") or []),
-        str(payload.get("group_workbook") or ""),
-        str(payload.get("group_workbook_sha256") or ""),
-        bool(payload.get("can_render")),
-        dict(payload.get("normalized_request") or {}),
-        dict(payload.get("plan") or {}),
-        str(payload.get("error_code") or ""),
-        str(payload.get("error_message") or ""),
-    )
-
-
-def _checkpoint(record: Mapping[str, Any], template_id: str) -> Mapping[str, Any] | None:
-    for item in dict(record.get("multi_template") or {}).get("template_checkpoints") or []:
-        if isinstance(item, Mapping) and item.get("template_id") == template_id:
-            return item
-    return None
-
-
-def _child_dir(record: Mapping[str, Any], template_id: str, attempt: int) -> Path:
-    digest = hashlib.sha256(template_id.encode("utf-8")).hexdigest()[:12]
-    return Path(str(record["job_dir"])) / "children" / digest / f"attempt-{max(attempt, 1)}"
-
-
-def _pending_canary_preflight(
-    record: Mapping[str, Any],
-    preflight: MultiTemplatePreflightResult,
-) -> MultiTemplatePreflightResult | None:
-    pending = {
-        str(item.get("template_id") or "")
-        for item in dict(record.get("multi_template") or {}).get("template_checkpoints") or []
-        if isinstance(item, Mapping) and str(item.get("status") or "") == "pending"
-    }
-    if not pending:
-        return None
-    groups = tuple(group for group in preflight.groups if group.template_id in pending)
-    if not groups:
-        raise MultiTemplateDispatchError("待试渲染模板与预检快照不一致。", code="multi_template_canary_pending_invalid")
-    template_ids = {group.template_id for group in groups}
-    batch_groups = tuple(group for group in preflight.order_batch.groups if group.template_id in template_ids)
-    batch_rows = tuple(row for row in preflight.order_batch.rows if row.template_id in template_ids)
-    batch = MultiTemplateOrderBatch(
-        preflight.order_batch.sheet_name,
-        preflight.order_batch.headers,
-        batch_rows,
-        batch_groups,
-        (),
-    )
-    snapshots = tuple(snapshot for snapshot in preflight.snapshots if snapshot.template_id in template_ids)
-    return MultiTemplatePreflightResult(
-        "ready",
-        preflight.source_order_sha256,
-        preflight.sheet_name,
-        batch,
-        snapshots,
-        groups,
-        (),
-    )
-
-
-def _primary_output(child: Mapping[str, Any]) -> str:
-    outputs = child.get("outputs")
-    if not isinstance(outputs, Mapping):
-        return ""
-    return str(outputs.get("primary_output") or outputs.get("output_bundle") or "")
-
-
-def _owned_output(output: Path, child_dir: Path) -> bool:
-    try:
-        resolved_output = output.resolve()
-        resolved_child_dir = child_dir.resolve()
-    except OSError:
-        return False
-    return resolved_output.is_file() and resolved_child_dir in resolved_output.parents
-
-
-def _attempt(checkpoint: Mapping[str, Any]) -> int:
-    try:
-        return max(int(checkpoint.get("attempt") or 0), 0)
-    except (TypeError, ValueError):
-        return 0
-
-
-def _finished_count(metadata: Mapping[str, Any]) -> int:
-    return sum(item.get("status") in {"succeeded", "failed", "canary_failed"} for item in metadata.get("template_checkpoints") or [] if isinstance(item, Mapping))
-
-
-def _sha256_file(path: Path) -> str:
-    try:
-        digest = hashlib.sha256()
-        with path.open("rb") as source:
-            for chunk in iter(lambda: source.read(1024 * 1024), b""):
-                digest.update(chunk)
-    except OSError:
-        return ""
-    return digest.hexdigest()
 
 
 __all__ = ["MultiTemplateDispatchError", "MultiTemplateRenderDispatcher"]
