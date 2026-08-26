@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from src.service.job_store import JobStore
-from src.service.web_page import INDEX_HTML
+from src.service.web_page import INDEX_HTML, workbench_html
 
 
 def test_page_uses_drawflow_branding():
@@ -40,6 +40,27 @@ def test_render_page_exposes_single_render_action():
     assert 'payload.append("template_id", templateId);' in INDEX_HTML
     assert 'postForm("/local/render", payload)' in INDEX_HTML
     assert "template_ids" not in INDEX_HTML
+    assert 'data-multi-template-render-enabled="false"' in workbench_html()
+    assert 'id="renderModeField" hidden' in workbench_html()
+    assert 'postForm("/local/render/multi/preflight", payload)' in INDEX_HTML
+    assert "if (multiTemplateModeSelected())" in INDEX_HTML
+
+
+def test_multi_template_render_mode_is_enabled_only_by_server_feature_flag(monkeypatch):
+    monkeypatch.delenv("DRAWFLOW_MULTI_TEMPLATE_RENDER_ENABLED", raising=False)
+    assert 'data-multi-template-render-enabled="false"' in workbench_html()
+
+    monkeypatch.setenv("DRAWFLOW_MULTI_TEMPLATE_RENDER_ENABLED", "true")
+    page = workbench_html()
+
+    assert 'data-multi-template-render-enabled="true"' in page
+    assert 'id="renderMode"' in page
+    assert "按订单模板自动匹配（试用）" in page
+    assert "订单表必须包含“模板”列" in page
+    assert "payload.append(\"template_id\", templateId);" in page
+    assert "multiTemplateInputRevision" in page
+    assert "const requestRevision = state.multiTemplateInputRevision;" in page
+    assert "requestRevision !== state.multiTemplateInputRevision" in page
 
 
 def test_render_page_uses_business_error_dialog():

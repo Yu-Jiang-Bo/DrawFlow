@@ -357,7 +357,7 @@ def test_v2_workbench_routes_are_isolated_from_legacy_page():
     assert '"workbench-view-tables.js"' in SERVER
     assert '"workbench-validation-blockers.js"' in SERVER
     assert '"workbench-structure-tree.js"' in SERVER
-    assert "self._send_html(WORKBENCH_HTML)" in SERVER
+    assert "self._send_html(workbench_html())" in SERVER
 
 
 def test_v2_workbench_http_manifest_refreshes_without_module_cache(monkeypatch):

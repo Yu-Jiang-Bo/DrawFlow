@@ -20,7 +20,7 @@ from .local_gateway_support import (
 )
 from .multi_template_gateway_response import public_multi_template_job
 from .http_server import _v2_workbench_html
-from .web_page import INDEX_HTML as FALLBACK_HTML
+from .web_page import workbench_html
 
 
 class LocalGatewayHttpMixin:
@@ -132,13 +132,13 @@ class LocalGatewayHttpMixin:
         self,
         path: str,
         *,
-        fallback_html: str = FALLBACK_HTML,
+        fallback_html: str | None = None,
     ) -> None:
         try:
             status, headers, body = self.drawflow_client.central.proxy("GET", path)
             self._send_proxy_response(status, headers, body)
         except Exception:
-            self._send_html(fallback_html)
+            self._send_html(fallback_html or workbench_html())
 
     def _send_central_or_v2_workbench(self, path: str) -> None:
         """Serve the gateway's page together with its local V2 endpoints.
