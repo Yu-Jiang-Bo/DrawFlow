@@ -7,12 +7,14 @@ from src.service.web_page import INDEX_HTML
 def test_page_uses_drawflow_branding():
     assert "<title>DrawFlow</title>" in INDEX_HTML
     assert "<h1>DrawFlow</h1>" in INDEX_HTML
-    assert "订单效果图与模板管理" in INDEX_HTML
+    assert "订单效果图与 V2 工作台" in INDEX_HTML
     assert "制图渲染工作台" not in INDEX_HTML
 
 
 def test_main_tabs_link_to_v2_template_workbench():
     assert '<a class="tab" href="/v2/templates/workbench">V2 工作台</a>' in INDEX_HTML
+    assert 'data-page-tab="templates">模板管理</button>' not in INDEX_HTML
+    assert 'data-page-tab="rules">规则配置</button>' not in INDEX_HTML
 
 
 def test_render_page_exposes_single_render_action():
@@ -104,15 +106,15 @@ def test_render_page_downloads_the_department_primary_delivery():
     assert "下载 PNG 成品" in INDEX_HTML
 
 
-def test_render_page_lists_v2_workbench_templates_with_a_link_to_the_shared_configuration():
+def test_legacy_render_page_does_not_offer_the_removed_template_management_entry():
     assert 'v2_illustrator_template: "V2 工作台模板"' in INDEX_HTML
     assert "!isV2Template(template) && template.status" in INDEX_HTML
     assert "function isV2Template(template)" in INDEX_HTML
-    assert 'href="/v2/templates/workbench?template_id=${escapeHtml(encodeURIComponent(template.template_id))}"' in INDEX_HTML
-    assert "查看共享配置" in INDEX_HTML
+    assert 'href="/v2/templates/workbench?template_id=${escapeHtml(encodeURIComponent(template.template_id))}"' not in INDEX_HTML
+    assert "查看共享配置" not in INDEX_HTML
 
 
-def test_v2_workbench_selects_the_shared_template_requested_by_the_management_page():
+def test_v2_workbench_selects_the_shared_template_requested_by_direct_link():
     source = Path("src/service/static/v2-workbench/workbench.js").read_text(encoding="utf-8")
 
     assert "loadTemplates(requestedTemplateId)" in source

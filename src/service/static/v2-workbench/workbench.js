@@ -33,6 +33,7 @@
     templates: [],
     selectedTemplateId: "",
     draft: null,
+    isPublishedView: false,
     scan: {},
     validation: null,
     lastValidatedConfig: null,
@@ -105,6 +106,9 @@
 
   function bindEvents() {
     on("templateSearch", "input", renderTemplateList);
+    on("refreshTemplatesBtn", "click", () => {
+      refreshSharedTemplates().catch((error) => showScanFailure(friendlyError(error, "共享模板刷新失败，请稍后重试。")));
+    });
     on("templateId", "input", handleDraftFieldInput);
     on("templateName", "input", handleDraftFieldInput);
     on("shopName", "input", handleDraftFieldInput);
@@ -135,6 +139,9 @@
     on("newTemplateBtn", "click", () => {
       clearDraftView();
       globalThis.setWorkbenchStage("upload");
+    });
+    on("createDraftFromPublishedBtn", "click", () => {
+      createDraftFromPublished().catch((error) => showScanFailure(friendlyError(error, "创建草稿失败，请稍后重试。")));
     });
     document.querySelectorAll("#v2CheckRail .check-item").forEach((item) => {
       item.addEventListener("click", () => {

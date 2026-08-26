@@ -900,7 +900,7 @@ INDEX_HTML = """<!doctype html>
     <div class="header-inner">
       <div class="brand">
         <h1>DrawFlow</h1>
-        <p>订单效果图与模板管理</p>
+        <p>订单效果图与 V2 工作台</p>
       </div>
       <div class="health"><span class="health-dot"></span><span id="healthText">服务检查中</span></div>
     </div>
@@ -909,9 +909,7 @@ INDEX_HTML = """<!doctype html>
   <main class="shell">
     <nav class="tabs" aria-label="主导航">
       <button class="tab active" data-page-tab="render">出图任务</button>
-      <button class="tab" data-page-tab="templates">模板管理</button>
       <a class="tab" href="/v2/templates/workbench">V2 工作台</a>
-      <button class="tab" data-page-tab="rules">规则配置</button>
       <button class="tab" data-page-tab="jobs">任务记录</button>
     </nav>
 
@@ -1938,9 +1936,6 @@ INDEX_HTML = """<!doctype html>
           </button>
           ${!isV2Template(template) && template.status !== "active" && template.rule_check && template.rule_check.renderable
             ? `<button class="btn-subtle" data-template-activate="${escapeHtml(template.template_id)}">启用出图</button>`
-            : ""}
-          ${isV2Template(template)
-            ? `<a class="btn-secondary" href="/v2/templates/workbench?template_id=${escapeHtml(encodeURIComponent(template.template_id))}">查看共享配置</a>`
             : ""}
           ${!isV2Template(template)
             ? `<button class="btn-secondary" data-template-remove="${escapeHtml(template.template_id)}">移除</button>`

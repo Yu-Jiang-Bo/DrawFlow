@@ -129,8 +129,9 @@
     const busy = Boolean(state.isTrialRendering || state.isPublicationChecking || state.isPublishing);
     const hasRealTrial = typeof trialSucceeded === "function" && trialSucceeded();
     const versionsReady = state.versionsStatus !== "loading" && state.versionsStatus !== "error";
-    setDisabled("publishVersionBtn", !ready || !hasRealTrial || !versionsReady || busy);
-    setDisabled("trialRenderBtn", !state.draft || busy);
+    const readOnly = Boolean(state.isPublishedView);
+    setDisabled("publishVersionBtn", readOnly || !ready || !hasRealTrial || !versionsReady || busy);
+    setDisabled("trialRenderBtn", readOnly || !state.draft || busy);
     setText("publishBlockerText", ready ? "发布核验已完成，可以发布新版本。" : blockerSummary(blockers));
   }
 

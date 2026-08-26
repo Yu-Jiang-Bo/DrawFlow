@@ -4,6 +4,10 @@
   const { API_ROOT, state } = ctx;
 
   function uploadSelectedAiFile(rescan) {
+    if (state.isPublishedView) {
+      showScanFailure("已发布模板为只读配置；需要修改请先创建新草稿。");
+      return;
+    }
     const file = state.uploadFile || fileOf("aiFile");
     if (!file) {
       showScanFailure("请先选择 .ai 模板文件。");
@@ -73,6 +77,12 @@
 
   function retryScan() {
     closeScanFailure();
+    const selected = state.templates.find((item) => templateIdOf(item) === state.selectedTemplateId);
+    const publication = objectOf(selected && selected.publication);
+    if (publication.status === "active" && cleanText(publication.current_version)) {
+      refreshSharedTemplates().catch((error) => showScanFailure(friendlyError(error, "共享配置刷新失败，请稍后重试。")));
+      return;
+    }
     if (state.lastUploadFile) {
       uploadTemplateFile(state.lastUploadFile, true).catch((error) => showScanFailure(friendlyError(error, "扫描失败，请重试。")));
     } else {
@@ -123,12 +133,23 @@
 
 
   function updateDraftButtons() {
+    const readOnly = Boolean(state.isPublishedView);
     const hasBasics = Boolean(formBasics().template_id && formBasics().name);
-    setDisabled("saveDraftBtn", !hasBasics || state.isScanning || state.isSavingDraft);
-    setDisabled("confirmStageBtn", state.isScanning || state.isSavingDraft);
-    setDisabled("saveAndNextOptionBtn", state.isScanning || state.isSavingDraft);
-    setDisabled("scanTemplateBtn", !hasBasics || !state.uploadFile || state.isScanning);
-    setDisabled("rescanTemplateBtn", !hasBasics || state.isScanning);
+    setDisabled("templateId", readOnly || Boolean(state.selectedTemplateId));
+    setDisabled("templateName", readOnly);
+    setDisabled("shopName", readOnly);
+    setDisabled("aiFile", readOnly);
+    setDisabled("outlineTextToggle", readOnly);
+    setDisabled("pathfinderMergeToggle", readOnly);
+    setDisabled("optionContentPreset", readOnly);
+    setDisabled("saveDraftBtn", readOnly || !hasBasics || state.isScanning || state.isSavingDraft);
+    setDisabled("confirmStageBtn", readOnly || state.isScanning || state.isSavingDraft);
+    setDisabled("saveAndNextOptionBtn", readOnly || state.isScanning || state.isSavingDraft);
+    setDisabled("scanTemplateBtn", readOnly || !hasBasics || !state.uploadFile || state.isScanning);
+    setDisabled("rescanTemplateBtn", readOnly || !hasBasics || state.isScanning);
+    setDisabled("trialRenderBtn", readOnly || !state.draft || state.isScanning || state.isSavingDraft);
+    setDisabled("rerunTrialRenderBtn", readOnly || !state.draft || state.isScanning || state.isSavingDraft);
+    setDisabled("publishVersionBtn", readOnly || !state.draft || state.isScanning || state.isSavingDraft);
     const hasScan = scanSummary(state.scan || {}).total > 0 || Object.keys(state.scan || {}).length > 0;
     setDisabled("enterStructureBtn", !hasScan);
   }

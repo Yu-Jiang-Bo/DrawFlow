@@ -9,7 +9,7 @@ const fs = require("fs");
 
 const ids = [
   "v2CheckRail", "templateList", "templateSearch", "templateId", "templateName", "shopName",
-  "newTemplateBtn", "templateListStats", "currentTemplateContext", "backToUploadBtn", "draftStatusBadge", "draftVersion",
+  "newTemplateBtn", "refreshTemplatesBtn", "templateListStats", "currentTemplateContext", "backToUploadBtn", "draftStatusBadge", "draftVersion", "createDraftFromPublishedBtn",
   "uploadScanBadge", "scanSummaryMetrics", "scanSummaryWarning", "enterStructureBtn",
   "aiDropzone", "aiFile", "scanTemplateBtn", "rescanTemplateBtn", "scanProgress",
   "scanSummary", "scanEmptyState", "structureSearch", "structureTree", "toggleDesignsBtn",
@@ -135,7 +135,7 @@ function makeDocument() {
   ["aiFile", "outlineTextToggle", "pathfinderMergeToggle"].forEach((id) => { elements[id].tagName = "INPUT"; });
   ["templateSearch", "templateId", "templateName", "shopName", "structureSearch", "optionRuleSearch", "publishNotes"].forEach((id) => { elements[id].tagName = "INPUT"; });
   ["optionContentPreset"].forEach((id) => { elements[id].tagName = "SELECT"; });
-  ["scanTemplateBtn", "rescanTemplateBtn", "saveDraftBtn", "trialRenderBtn", "publishVersionBtn", "retryScanBtn", "closeScanFailedBtn", "toggleDesignsBtn", "toggleFontsBtn", "pendingOnlyBtn", "confirmStageBtn", "saveAndNextOptionBtn", "rerunTrialRenderBtn", "closePreflightFailedBtn", "returnToSampleDataBtn"].forEach((id) => { elements[id].tagName = "BUTTON"; });
+  ["scanTemplateBtn", "rescanTemplateBtn", "saveDraftBtn", "trialRenderBtn", "publishVersionBtn", "retryScanBtn", "closeScanFailedBtn", "toggleDesignsBtn", "toggleFontsBtn", "pendingOnlyBtn", "confirmStageBtn", "saveAndNextOptionBtn", "rerunTrialRenderBtn", "closePreflightFailedBtn", "returnToSampleDataBtn", "refreshTemplatesBtn", "createDraftFromPublishedBtn"].forEach((id) => { elements[id].tagName = "BUTTON"; });
   const checkKeys = ["output", "fields", "options", "slots", "content", "dimensions", "colors", "preview"];
   checkKeys.forEach((key) => {
     const item = new Element("button");
@@ -286,14 +286,14 @@ def test_v2_workbench_renders_scan_structure_groups_from_draft():
     )
 
 
-def test_v2_workbench_opens_the_shared_template_requested_by_the_management_page():
+def test_v2_workbench_opens_the_published_shared_template_requested_by_direct_link():
     run_node(
         r"""
         (async () => {
           const requests = [];
-          const sharedDraft = {
+          const sharedTemplate = {
             metadata: { template_id: "SHARED001", name: "同事共享模板", shop_name: "Demo Shop" },
-            manifest: { draft_revision: "d0007" },
+                manifest: { version: "v0003" },
             config: {
               template: { template_id: "SHARED001" },
               outputs: [{ key: "Output_main", display_name: "主效果图" }],
@@ -314,48 +314,79 @@ def test_v2_workbench_opens_the_shared_template_requested_by_the_management_page
             const textUrl = String(url);
             requests.push({ url: textUrl, method: options.method || "GET" });
             if (textUrl === "/api/v2/templates") {
-              return response({ templates: [{ template_id: "OTHER001", name: "其他模板" }, { template_id: "SHARED001", name: "同事共享模板" }] });
+              return response({ templates: [{ template_id: "OTHER001", name: "其他模板" }, { template_id: "SHARED001", name: "同事共享模板", publication: { status: "active", current_version: "v0003" } }] });
             }
-            if (textUrl === "/api/v2/templates/SHARED001/draft") return response({ draft: sharedDraft });
+            if (textUrl === "/api/v2/templates/SHARED001/published") return response({ published: sharedTemplate });
+            if (textUrl === "/api/v2/templates/SHARED001/draft-from-published" && options.method === "POST") {
+              return response({ draft: { ...sharedTemplate, manifest: { draft_revision: "d0008", source_version: "v0003" } } });
+            }
             if (textUrl.endsWith("/validate")) return response({ validation: { checks: {} } });
             throw new Error(`unexpected request ${textUrl}`);
           }
-          createApp(fakeFetch, undefined, "?template_id=SHARED001");
+          const app = createApp(fakeFetch, undefined, "?template_id=SHARED001");
           const state = global.DrawFlowV2WorkbenchContext.state;
           for (let index = 0; index < 4 && state.stage !== "structure"; index += 1) await flush();
           assert.strictEqual(state.selectedTemplateId, "SHARED001");
           assert.strictEqual(state.stage, "structure");
+          assert.strictEqual(state.isPublishedView, true);
           assert.strictEqual(state.draft.config.field_bindings.slot_name, "Personalization");
           assert.strictEqual(state.scan.outputs[0].design.options[0].key, "Design01");
-          assert(requests.some((item) => item.url === "/api/v2/templates/SHARED001/draft" && item.method === "GET"));
+          assert(requests.some((item) => item.url === "/api/v2/templates/SHARED001/published" && item.method === "GET"));
+          assert(!requests.some((item) => item.url === "/api/v2/templates/SHARED001/draft"));
+          assert.strictEqual(app.elements.templateName.disabled, true);
+          assert.strictEqual(app.elements.saveDraftBtn.disabled, true);
+          assert(app.elements.scanProgress.textContent.includes("共享配置已加载"));
+          assert(app.elements.scanSummaryWarning.textContent.includes("只读查看"));
+          assert.strictEqual(app.elements.createDraftFromPublishedBtn.hidden, false);
+          global.setWorkbenchStage("rules");
+          await flush();
+          assert.strictEqual(app.elements.optionContentPreset.disabled, true);
+          app.elements.createDraftFromPublishedBtn.dispatch("click");
+          await flush();
+          assert.strictEqual(state.isPublishedView, false);
+          assert.strictEqual(state.draft.manifest.source_version, "v0003");
+          assert.strictEqual(app.elements.templateName.disabled, false);
+          assert.strictEqual(app.elements.createDraftFromPublishedBtn.hidden, true);
         })().catch((error) => { console.error(error); process.exit(1); });
         """,
         cwd=Path(__file__).resolve().parents[1],
     )
 
 
-def test_v2_workbench_keeps_the_upload_stage_when_the_shared_draft_cannot_be_read():
+def test_v2_workbench_keeps_the_upload_stage_when_the_shared_configuration_cannot_be_read():
     run_node(
         r"""
         (async () => {
-          let draftRequested = false;
+          let publishedRequested = 0;
+          const publishedTemplate = {
+            metadata: { template_id: "SHARED001", name: "同事共享模板" },
+            manifest: { version: "v0003" },
+            config: { template: { template_id: "SHARED001" } },
+            scan: { outputs: [{ key: "Output_main" }] }
+          };
           async function fakeFetch(url) {
             const textUrl = String(url);
-            if (textUrl === "/api/v2/templates") return response({ templates: [{ template_id: "SHARED001", name: "同事共享模板" }] });
-            if (textUrl === "/api/v2/templates/SHARED001/draft") {
-              draftRequested = true;
-              return response({ error: { message: "草稿不存在" } }, false);
+            if (textUrl === "/api/v2/templates") return response({ templates: [{ template_id: "SHARED001", name: "同事共享模板", publication: { status: "active", current_version: "v0003" } }] });
+            if (textUrl === "/api/v2/templates/SHARED001/published") {
+              publishedRequested += 1;
+              if (publishedRequested === 1) return response({ error: { message: "共享配置不存在" } }, false);
+              return response({ published: publishedTemplate });
             }
             throw new Error(`unexpected request ${textUrl}`);
           }
           const app = createApp(fakeFetch, undefined, "?template_id=SHARED001");
           const state = global.DrawFlowV2WorkbenchContext.state;
-          for (let index = 0; index < 4 && !draftRequested; index += 1) await flush();
+          for (let index = 0; index < 4 && !publishedRequested; index += 1) await flush();
           await flush();
           assert.strictEqual(state.selectedTemplateId, "SHARED001");
           assert.strictEqual(state.draft, null);
           assert.strictEqual(state.stage, "upload");
-          assert(app.elements.scanFailedMessage.textContent.includes("草稿不存在"));
+          assert(app.elements.scanFailedMessage.textContent.includes("共享配置不存在"));
+          app.elements.retryScanBtn.dispatch("click");
+          await flush();
+          assert.strictEqual(publishedRequested, 2);
+          assert.strictEqual(state.isPublishedView, true);
+          assert.strictEqual(state.draft.scan.outputs[0].key, "Output_main");
         })().catch((error) => { console.error(error); process.exit(1); });
         """,
         cwd=Path(__file__).resolve().parents[1],

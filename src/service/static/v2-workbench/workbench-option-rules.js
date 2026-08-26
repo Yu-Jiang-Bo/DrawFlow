@@ -38,9 +38,10 @@
     const selected = fillSelect("optionContentPreset", options, item ? item.preset : "direct_text");
     const select = $("optionContentPreset");
     const automatic = options.length === 1 && options[0][0] === "mixed_slots";
+    const readOnly = automatic || Boolean(state.isPublishedView);
     if (select) {
-      select.disabled = automatic;
-      select.setAttribute("aria-readonly", automatic ? "true" : "false");
+      select.disabled = readOnly;
+      select.setAttribute("aria-readonly", readOnly ? "true" : "false");
     }
     setText("optionProcessingHelp", optionProcessingHelpText(selected));
   }

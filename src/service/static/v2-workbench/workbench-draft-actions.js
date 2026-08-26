@@ -22,12 +22,55 @@
   }
 
 
+  async function refreshSharedTemplates() {
+    const selectedTemplateId = state.selectedTemplateId;
+    await refreshTemplateList();
+    if (selectedTemplateId && state.templates.some((item) => templateIdOf(item) === selectedTemplateId)) {
+      return selectTemplate(selectedTemplateId);
+    }
+    return true;
+  }
+
+
+  async function createDraftFromPublished() {
+    const templateId = cleanText(state.selectedTemplateId);
+    if (!state.isPublishedView || !templateId) {
+      showScanFailure("请先选择一个已发布模板。");
+      return false;
+    }
+    setDraftStatus("正在创建草稿", "pending");
+    try {
+      const payload = await postJson(
+        `${API_ROOT}/${encodeURIComponent(templateId)}/draft-from-published`,
+        {},
+        "创建草稿失败，请确认该模板的正式版本仍可用。"
+      );
+      const draft = objectOf(payload.draft);
+      if (!isCurrentTemplateResponse(draft, templateId)) return false;
+      state.validation = null;
+      state.lastValidatedConfig = null;
+      state.validationRequestId += 1;
+      state.isPublishedView = false;
+      state.draft = draft;
+      state.scan = normalizeScanFromDraft(draft);
+      fillDraftFields(draft, templateId);
+      renderAll();
+      return true;
+    } catch (error) {
+      setDraftStatus("创建草稿失败", "blocked");
+      showScanFailure(friendlyError(error, "创建草稿失败，请确认该模板的正式版本仍可用。"));
+      return false;
+    }
+  }
+
+
   async function selectTemplate(templateId) {
     const draftLoadRequestId = ++state.draftLoadRequestId;
     state.validation = null;
     state.lastValidatedConfig = null;
     state.validationRequestId += 1;
     state.draft = null;
+    state.isPublishedView = false;
     state.scan = {};
     if (typeof resetPreviewState === "function") resetPreviewState();
     if (typeof clearValidationFeedback === "function") clearValidationFeedback("正在读取模板配置。");
@@ -37,11 +80,20 @@
     if (typeof updateCheckRail === "function" && typeof defaultChecks === "function") updateCheckRail(defaultChecks());
     if (!templateId) return false;
     renderTemplateList();
-    setDraftStatus("读取草稿中", "pending");
+    const template = state.templates.find((item) => templateIdOf(item) === templateId);
+    const publication = objectOf(template && template.publication);
+    const sharedVersion = publication.status === "active" ? cleanText(publication.current_version) : "";
+    const viewAction = sharedVersion ? "published" : "draft";
+    const viewLabel = sharedVersion ? "已发布配置" : "草稿";
+    setDraftStatus(`读取${viewLabel}中`, "pending");
     try {
-      const payload = await getJson(`${API_ROOT}/${encodeURIComponent(templateId)}/draft`, "草稿读取失败，请确认模板是否已创建。");
+      const payload = await getJson(
+        `${API_ROOT}/${encodeURIComponent(templateId)}/${viewAction}`,
+        sharedVersion ? "共享配置读取失败，请确认模板已发布后重试。" : "草稿读取失败，请确认模板是否已创建。"
+      );
       if (draftLoadRequestId !== state.draftLoadRequestId || state.selectedTemplateId !== templateId) return false;
-      state.draft = payload.draft || null;
+      state.isPublishedView = Boolean(sharedVersion);
+      state.draft = payload[viewAction] || null;
       state.scan = normalizeScanFromDraft(state.draft);
       fillDraftFields(state.draft, templateId);
       renderAll();
@@ -52,7 +104,7 @@
       state.scan = {};
       fillDraftFields(null, templateId);
       renderAll();
-      showScanFailure(friendlyError(error, "草稿读取失败，请确认模板是否已创建。"));
+      showScanFailure(friendlyError(error, sharedVersion ? "共享配置读取失败，请确认模板已发布后重试。" : "草稿读取失败，请确认模板是否已创建。"));
       return false;
     }
   }
@@ -65,6 +117,7 @@
     state.selectedTemplateId = "";
     state.draftLoadRequestId += 1;
     state.draft = null;
+    state.isPublishedView = false;
     state.scan = {};
     setDisabled("templateId", false);
     if (typeof resetPreviewState === "function") resetPreviewState();
@@ -96,6 +149,13 @@
 
 
   async function saveDraft(options) {
+    if (state.isPublishedView) {
+      const message = "已发布模板为只读配置；需要修改请先创建新草稿。";
+      setDraftStatus("已发布 · 只读", "confirmed");
+      setText("draftSaveStatusText", message);
+      showScanFailure(message);
+      return { saved: false, failure: "readonly" };
+    }
     const basics = formBasics();
     if (!basics.template_id || !basics.name) {
       showScanFailure("请先填写模板 ID 和模板名称。");
@@ -237,8 +297,10 @@
   async function safeRefreshDraft(id) {
     if (!id) return;
     try {
-      const payload = await getJson(`${API_ROOT}/${encodeURIComponent(id)}/draft`, "草稿读取失败，请稍后刷新。");
-      const responseDraft = objectOf(payload.draft);
+      const viewAction = state.isPublishedView ? "published" : "draft";
+      const fallback = state.isPublishedView ? "共享配置读取失败，请稍后刷新。" : "草稿读取失败，请稍后刷新。";
+      const payload = await getJson(`${API_ROOT}/${encodeURIComponent(id)}/${viewAction}`, fallback);
+      const responseDraft = objectOf(payload[viewAction]);
       if (!isCurrentTemplateResponse(responseDraft, id)) return;
       const previousScan = objectOf(state.scan);
       const responseScan = normalizeScanFromDraft(responseDraft);
@@ -246,7 +308,7 @@
         ? responseScan
         : canRetainPreviousScan(previousScan, id) ? previousScan : {};
       state.selectedTemplateId = id;
-      state.draft = payload.draft
+      state.draft = payload[viewAction]
         ? { ...responseDraft, ...(hasScanEvidence(retainedScan) ? { scan: retainedScan } : {}) }
         : state.draft;
       state.scan = hasScanEvidence(retainedScan) ? retainedScan : normalizeScanFromDraft(state.draft);
@@ -261,6 +323,8 @@
   Object.assign(globalThis, {
     loadTemplates,
     refreshTemplateList,
+    refreshSharedTemplates,
+    createDraftFromPublished,
     selectTemplate,
     clearDraftView,
     renderAll,

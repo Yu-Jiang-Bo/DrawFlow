@@ -74,9 +74,63 @@ def test_v2_api_creates_lists_and_reads_draft_with_optional_shop(tmp_path):
 
     assert created.status == HTTPStatus.CREATED
     assert created.payload["template"] == {"template_id": "V2API001", "name": "API Demo", "shop_name": ""}
-    assert listed["templates"][0]["template"]["name"] == "API Demo"
+    assert listed["templates"] == []
     assert draft["metadata"]["shop_name"] == ""
-    assert not any("path" in key.lower() for key in listed["templates"][0])
+    api.store.publish_draft("V2API001")
+    published_listed = api.handle("GET", ["api", "v2", "templates"]).payload
+
+    assert published_listed["templates"][0]["template"]["name"] == "API Demo"
+    assert not any("path" in key.lower() for key in published_listed["templates"][0])
+
+
+def test_v2_api_reads_published_template_configuration_without_reading_the_local_ai(tmp_path):
+    api = api_for(tmp_path)
+    api.create_template({"template_id": "V2SHARED001", "name": "Shared demo"})
+    api.store.save_draft(
+        "V2SHARED001",
+        metadata={"name": "Shared demo"},
+        config=saveable_config("V2SHARED001"),
+        scan={"outputs": [{"key": "Output_main", "path": "Template/Output_main"}]},
+        assets=[{"filename": "template.ai", "role": "template", "content": b"ai-bytes"}],
+    )
+    api.store.publish_draft("V2SHARED001")
+
+    response = api.handle("GET", ["api", "v2", "templates", "V2SHARED001", "published"])
+
+    assert response.payload["published"]["config"]["template"]["template_id"] == "V2SHARED001"
+    assert response.payload["published"]["scan"]["outputs"][0]["key"] == "Output_main"
+    assert response.payload["published"]["manifest"]["version"] == "v0001"
+    assert "published_template_read" in V2TemplateApi(api.store)._service_contract()["capabilities"]
+
+
+def test_v2_api_creates_an_editable_draft_from_a_published_version(tmp_path):
+    api = api_for(tmp_path)
+    api.create_template({"template_id": "V2SHARED001", "name": "Shared demo"})
+    api.store.save_draft(
+        "V2SHARED001",
+        metadata={"name": "Shared demo"},
+        config=saveable_config("V2SHARED001"),
+        scan={"outputs": [{"key": "Output_main", "path": "Template/Output_main"}]},
+        assets=[{"filename": "template.ai", "role": "template", "content": b"ai-bytes"}],
+    )
+    api.store.publish_draft("V2SHARED001")
+
+    response = api.handle("POST", ["api", "v2", "templates", "V2SHARED001", "draft-from-published"])
+
+    assert response.status == HTTPStatus.CREATED
+    assert response.payload["draft"]["manifest"]["source_version"] == "v0001"
+    assert response.payload["draft"]["config"]["template"]["template_id"] == "V2SHARED001"
+    assert response.payload["draft"]["manifest"]["assets"][0]["file_name"] == "template.ai"
+
+
+def test_v2_api_returns_a_public_error_when_shared_version_is_unavailable(tmp_path):
+    api = api_for(tmp_path)
+    api.create_template({"template_id": "V2DRAFT001", "name": "Draft only"})
+
+    with pytest.raises(V2TemplateApiError) as exc_info:
+        api.handle("GET", ["api", "v2", "templates", "V2DRAFT001", "published"])
+
+    assert exc_info.value.problem.code == "v2_published_template_unavailable"
 
 
 def test_v2_api_does_not_reset_existing_template_for_case_only_id_change(tmp_path):
@@ -218,10 +272,11 @@ def test_v2_api_validation_advertises_current_workbench_capabilities(tmp_path):
         {"config": saveable_config()},
     ).payload
 
-    assert result["service_contract"]["version"] == 4
+    assert result["service_contract"]["version"] == 5
     assert "mixed_slot_processing" in result["service_contract"]["capabilities"]
     assert "editable_validation_targets" in result["service_contract"]["capabilities"]
     assert "trusted_preview_worker" in result["service_contract"]["capabilities"]
+    assert "published_template_read" in result["service_contract"]["capabilities"]
 
 
 def test_v2_api_validates_and_saves_legacy_font_slots_as_clean_config(tmp_path):
@@ -733,7 +788,7 @@ def test_v2_maintenance_endpoint_does_not_pollute_template_list(tmp_path):
     listed = api.handle("GET", ["api", "v2", "templates"]).payload
     maintenance = api.handle("GET", ["api", "v2", "templates", "maintenance"]).payload["maintenance"]
 
-    assert "disk" not in listed["templates"][0]
+    assert listed["templates"] == []
     assert maintenance["summary"]["total"] == 1
     assert not any(
         marker in str(maintenance).lower()

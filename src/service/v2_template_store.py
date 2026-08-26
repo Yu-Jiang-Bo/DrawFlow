@@ -191,6 +191,49 @@ class V2TemplateStore:
             raise V2TemplateStoreError("正式模板版本不存在，无法读取。")
         return self._read_payload(version_dir)
 
+    def read_published(self, template_id: str) -> dict[str, Any]:
+        state = self.get_state(template_id)
+        publication = state.get("publication")
+        if not isinstance(publication, Mapping) or publication.get("status") != "active":
+            raise V2TemplateStoreError("该模板尚未发布可共享的正式版本。")
+        version = str(publication.get("current_version") or "").strip()
+        if not version:
+            raise V2TemplateStoreError("该模板没有当前正式版本，无法查看共享配置。")
+        payload = self.read_version(template_id, version)
+        if not isinstance(payload.get("scan"), Mapping) or not payload["scan"]:
+            raise V2TemplateStoreError("该模板的正式版本缺少扫描摘要，无法查看结构配置。")
+        if not isinstance(payload.get("config"), Mapping) or not payload["config"]:
+            raise V2TemplateStoreError("该模板的正式版本缺少配置内容，无法查看结构字段。")
+        if not self._has_published_template_ai(template_id, version, payload.get("manifest")):
+            raise V2TemplateStoreError("该模板的正式版本缺少可用的 .ai 源文件，无法查看共享配置。")
+        return payload
+
+    def _has_published_template_ai(self, template_id: str, version: str, manifest: Any) -> bool:
+        if not isinstance(manifest, Mapping):
+            return False
+        version_dir = self._version_dir(template_id, version).resolve()
+        for item in manifest.get("assets", []):
+            if not isinstance(item, Mapping):
+                continue
+            if str(item.get("role") or "").strip().lower() != "template":
+                continue
+            file_name = str(item.get("file_name") or "").strip()
+            relative_path = str(item.get("path") or "").strip()
+            if not file_name.lower().endswith(".ai") or not relative_path:
+                continue
+            candidate = (version_dir / Path(relative_path)).resolve()
+            try:
+                candidate.relative_to(version_dir)
+            except ValueError:
+                continue
+            if not candidate.is_file() or candidate.suffix.lower() != ".ai":
+                continue
+            expected_sha256 = str(item.get("sha256") or "").strip().lower()
+            if not expected_sha256 or sha256_file(candidate) != expected_sha256:
+                continue
+            return True
+        return False
+
     def get_state(self, template_id: str) -> dict[str, Any]:
         path = self._state_path(template_id)
         return read_json(path) if path.exists() else self._default_state(template_id)

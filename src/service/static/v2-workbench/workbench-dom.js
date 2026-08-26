@@ -23,6 +23,7 @@
     const input = document.createElement("input");
     input.dataset.field = name;
     input.value = value || "";
+    input.disabled = Boolean(ctx.state.isPublishedView);
     input.addEventListener("input", () => {
       if (typeof globalThis.invalidateTrialResult === "function") globalThis.invalidateTrialResult("配置已修改，请重新试渲染。");
       globalThis.validateCurrentConfig(false);
@@ -43,6 +44,7 @@
     });
     const selected = options.some(([optionValue]) => optionValue === value) ? value : options[0][0];
     select.value = selected;
+    select.disabled = Boolean(ctx.state.isPublishedView);
     select.addEventListener("change", () => {
       if (typeof globalThis.invalidateTrialResult === "function") globalThis.invalidateTrialResult("配置已修改，请重新试渲染。");
       globalThis.validateCurrentConfig(false);
@@ -56,6 +58,7 @@
     button.type = "button";
     button.className = "btn-subtle row-add-button";
     button.textContent = text;
+    button.disabled = Boolean(ctx.state.isPublishedView);
     button.addEventListener("click", (event) => {
       if (typeof globalThis.invalidateTrialResult === "function") globalThis.invalidateTrialResult("配置已修改，请重新试渲染。");
       handler(event);

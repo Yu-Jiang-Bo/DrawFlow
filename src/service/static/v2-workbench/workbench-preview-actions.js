@@ -52,6 +52,10 @@
   }
 
   async function trialRenderCurrentDraft() {
+    if (state.isPublishedView) {
+      showTransientStatus("已发布模板为只读配置；需要修改请先创建新草稿。");
+      return;
+    }
     if (state.isTrialRendering || state.isSavingDraft || state.isPublishing) return;
     if (!state.draft) {
       showTransientStatus("请先选择模板并保存草稿。");
@@ -180,6 +184,10 @@
   }
 
   async function publishCurrentDraft() {
+    if (state.isPublishedView) {
+      showTransientStatus("已发布模板为只读配置；需要修改请先创建新草稿。");
+      return;
+    }
     if (state.isPublishing || state.isTrialRendering || state.isSavingDraft) return;
     if (!trialSucceeded()) {
       showTransientStatus("请先使用当前样例完成真实试渲染。");

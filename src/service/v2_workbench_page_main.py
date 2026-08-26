@@ -4,15 +4,16 @@ PAGE_MAIN = """
   <main class="v2-shell" id="v2WorkbenchApp" data-workbench-stage="upload">
     <section class="v2-title-row" aria-labelledby="v2PageTitle">
       <div>
-        <p class="v2-section-kicker">模板管理 / 独立入口</p>
+        <p class="v2-section-kicker">V2 工作台 / 共享模板</p>
         <h2 id="v2PageTitle">V2 模板配置工作台</h2>
-        <p class="v2-title-copy">上传已按规范标注的 Illustrator 模板，完成扫描、核验、试渲染和版本发布。</p>
+        <p class="v2-title-copy">同步中央服务的已发布模板，查看扫描摘要和结构字段配置；需要修改时再创建草稿。</p>
       </div>
       <div class="v2-title-status" aria-label="当前模板状态">
         <button id="backToUploadBtn" class="stage-back-btn" type="button" hidden>上一步</button>
         <span id="currentTemplateContext" class="v2-title-context">未选择模板</span>
         <span id="draftStatusBadge" class="v2-badge">草稿</span>
         <span id="draftVersion" class="v2-badge v2-badge-muted">v0</span>
+        <button id="createDraftFromPublishedBtn" class="compact-btn" type="button" hidden>基于正式版创建草稿</button>
       </div>
     </section>
 
@@ -30,7 +31,7 @@ PAGE_MAIN = """
     <div class="workspace-grid">
       <aside class="left-pane template-list-pane" data-stage-panel="upload" aria-label="当前模板列表">
         <section class="pane">
-          <div class="pane-header"><h3>模板列表</h3><button id="newTemplateBtn" class="primary compact-btn" type="button">新增模板</button></div>
+          <div class="pane-header"><h3>共享模板</h3><div class="v2-action-row"><button id="refreshTemplatesBtn" class="compact-btn" type="button">刷新</button><button id="newTemplateBtn" class="primary compact-btn" type="button">新增模板</button></div></div>
           <div class="pane-body">
             <label for="templateSearch">搜索模板</label>
             <input id="templateSearch" type="search" placeholder="输入模板 ID 或名称" autocomplete="off" />

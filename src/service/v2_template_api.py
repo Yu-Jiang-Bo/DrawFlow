@@ -45,7 +45,7 @@ from .v2_template_validation import validate_v2_template_configuration
 
 SCAN_TIMESTAMP_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
 V2_WORKBENCH_SERVICE_CONTRACT = {
-    "version": 4,
+    "version": 5,
     "capabilities": [
         "mixed_slot_processing",
         "editable_validation_targets",
@@ -53,6 +53,7 @@ V2_WORKBENCH_SERVICE_CONTRACT = {
         "draft_asset_download",
         "publication_check",
         "draft_publication",
+        "published_template_read",
         "trusted_preview_worker",
     ],
 }
@@ -90,7 +91,7 @@ class V2TemplateApi:
     def handle(self, method: str, parts: list[str], payload: Mapping[str, Any] | None = None) -> V2ApiResult:
         if len(parts) == 3 and parts == ["api", "v2", "templates"]:
             if method == "GET":
-                return V2ApiResult({"templates": self.list_templates()})
+                return V2ApiResult({"templates": self.list_published_templates()})
             if method == "POST":
                 return V2ApiResult(self.create_template(payload or {}), HTTPStatus.CREATED)
         if len(parts) == 4 and parts == ["api", "v2", "templates", "maintenance"]:
@@ -101,6 +102,10 @@ class V2TemplateApi:
             action = parts[4]
             if method == "GET" and action == "draft":
                 return V2ApiResult({"draft": self.read_draft(template_id)})
+            if method == "GET" and action == "published":
+                return V2ApiResult({"published": self.read_published(template_id)})
+            if method == "POST" and action == "draft-from-published":
+                return V2ApiResult(self.create_draft_from_published(template_id), HTTPStatus.CREATED)
             if method == "POST" and action == "draft":
                 return V2ApiResult(self.save_draft(template_id, payload or {}))
             if method == "GET" and action == "scan":
@@ -133,6 +138,14 @@ class V2TemplateApi:
         for state_path in sorted(self.store.root.glob("*/state.json")):
             states.append(state_summary(read_json(state_path)))
         return states
+
+    def list_published_templates(self) -> list[dict[str, Any]]:
+        return [
+            state
+            for state in self.list_templates()
+            if dict(state.get("publication") or {}).get("status") == "active"
+            and str(dict(state.get("publication") or {}).get("current_version") or "").strip()
+        ]
 
     def create_template(self, payload: Mapping[str, Any]) -> dict[str, Any]:
         ensure_payload_fields(payload, {"template_id", "name", "shop_name"})
@@ -261,6 +274,31 @@ class V2TemplateApi:
             return self.store.read_draft(template_id)
         except V2TemplateStoreError as exc:
             raise not_found(str(exc)) from exc
+
+    def read_published(self, template_id: str) -> dict[str, Any]:
+        try:
+            return self.store.read_published(template_id)
+        except V2TemplateStoreError as exc:
+            raise V2TemplateApiError(
+                "v2_published_template_unavailable",
+                str(exc),
+                status=HTTPStatus.NOT_FOUND,
+                suggestion="请确认模板已完成发布，或刷新模板列表后重试。",
+            ) from exc
+
+    def create_draft_from_published(self, template_id: str) -> dict[str, Any]:
+        try:
+            state = self.store.create_draft_from_version(template_id)
+            draft = self.store.read_draft(template_id)
+        except V2TemplateStoreError as exc:
+            raise V2TemplateApiError(
+                "v2_published_template_unavailable",
+                str(exc),
+                status=HTTPStatus.NOT_FOUND,
+                suggestion="请确认模板已有已发布版本后重试。",
+            ) from exc
+        self._record_audit("draft_created_from_published", state, draft)
+        return {"state": state_summary(state), "draft": draft}
 
     def read_scan(self, template_id: str) -> dict[str, Any]:
         draft = self.read_draft(template_id)

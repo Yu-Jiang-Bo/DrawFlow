@@ -97,6 +97,71 @@ def test_publish_creates_immutable_version_and_edit_copies_to_new_draft(tmp_path
     assert store.rollback("V2DEMO001")["publication"]["current_version"] == "v0001"
 
 
+def test_read_published_returns_current_immutable_scan_and_configuration(tmp_path):
+    store = V2TemplateStore(tmp_path / "v2")
+    store.save_draft(
+        "V2SHARED001",
+        metadata={"name": "Shared demo"},
+        config={"template": {"template_id": "V2SHARED001"}, "field_bindings": {"name": "Name"}},
+        scan={"outputs": [{"key": "Output_main"}]},
+        assets=[{"filename": "template.ai", "role": "template", "content": b"ai-v1"}],
+    )
+    store.publish_draft("V2SHARED001")
+    store.save_draft(
+        "V2SHARED001",
+        metadata={"name": "Changed only in draft"},
+        config={"template": {"template_id": "V2SHARED001"}, "field_bindings": {"name": "Changed"}},
+        scan={"outputs": [{"key": "Output_changed"}]},
+    )
+
+    published = store.read_published("V2SHARED001")
+
+    assert published["manifest"]["version"] == "v0001"
+    assert published["config"]["field_bindings"] == {"name": "Name"}
+    assert published["scan"]["outputs"] == [{"key": "Output_main"}]
+
+
+def test_read_published_rejects_a_template_without_an_active_shared_version(tmp_path):
+    store = V2TemplateStore(tmp_path / "v2")
+    store.save_draft("V2DRAFT001", metadata={"name": "Draft only"}, config={"template": {}}, scan={"outputs": []})
+
+    with pytest.raises(V2TemplateStoreError, match="尚未发布"):
+        store.read_published("V2DRAFT001")
+
+
+def test_read_published_rejects_a_version_without_a_template_ai_asset(tmp_path):
+    store = V2TemplateStore(tmp_path / "v2")
+    store.save_draft(
+        "V2MISSINGAI",
+        metadata={"name": "Missing source"},
+        config={"template": {"template_id": "V2MISSINGAI"}},
+        scan={"outputs": [{"key": "Output_main"}]},
+    )
+    store.publish_draft("V2MISSINGAI")
+
+    with pytest.raises(V2TemplateStoreError, match="缺少可用的 .ai 源文件"):
+        store.read_published("V2MISSINGAI")
+
+
+def test_read_published_rejects_a_template_ai_asset_without_sha256(tmp_path):
+    store = V2TemplateStore(tmp_path / "v2")
+    store.save_draft(
+        "V2MISSINGSHA",
+        metadata={"name": "Missing checksum"},
+        config={"template": {"template_id": "V2MISSINGSHA"}},
+        scan={"outputs": [{"key": "Output_main"}]},
+        assets=[{"filename": "template.ai", "role": "template", "content": b"ai-v1"}],
+    )
+    store.publish_draft("V2MISSINGSHA")
+    manifest_path = tmp_path / "v2/V2MISSINGSHA/versions/v0001/manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["assets"][0]["sha256"] = ""
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    with pytest.raises(V2TemplateStoreError, match="缺少可用的 .ai 源文件"):
+        store.read_published("V2MISSINGSHA")
+
+
 def test_version_bundle_contains_manifest_payload_and_assets(tmp_path):
     store = V2TemplateStore(tmp_path / "v2")
     store.save_draft(

@@ -250,8 +250,9 @@
 
   function updatePreviewActionButtons() {
     const busy = Boolean(state.isSavingDraft || state.isTrialRendering || state.isPublicationChecking || state.isPublishing);
-    setDisabled("trialRenderBtn", !state.draft || busy);
-    setDisabled("rerunTrialRenderBtn", !state.draft || busy);
+    const readOnly = Boolean(state.isPublishedView);
+    setDisabled("trialRenderBtn", readOnly || !state.draft || busy);
+    setDisabled("rerunTrialRenderBtn", readOnly || !state.draft || busy);
     setText("trialRenderBtn", state.isTrialRendering ? "正在试渲染" : "使用当前样例试渲染");
     setText("rerunTrialRenderBtn", state.isTrialRendering ? "正在试渲染" : (state.trial ? "重新试渲染" : "使用当前数据试渲染"));
   }
