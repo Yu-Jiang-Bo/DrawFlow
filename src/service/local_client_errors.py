@@ -15,10 +15,12 @@ class LocalClientError(RuntimeError):
         *,
         code: str = "local_client_error",
         technical_message: str = "",
+        failure_scope: str = "",
     ) -> None:
         super().__init__(message)
         self.code = code
         self.technical_message = technical_message
+        self.failure_scope = failure_scope if failure_scope in {"template", "system"} else ""
 
 
 def central_error_detail(value: str) -> str:

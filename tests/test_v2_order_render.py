@@ -447,6 +447,7 @@ def test_v2_order_render_logs_technical_message_without_exposing_it_to_jobs(tmp_
     assert job["error_code"] == "v2_order_render_failed"
     assert job["failure_scope"] == "system"
     assert "technical_message" not in job
+    assert "_technical_failure" not in job
     assert len(logged_messages) == 1
     assert "HRESULT -2146959355" in logged_messages[0]
 

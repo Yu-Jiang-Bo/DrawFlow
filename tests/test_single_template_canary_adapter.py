@@ -140,6 +140,26 @@ def test_v2_group_render_uses_fixed_snapshot_and_keeps_delivery_outputs(tmp_path
     assert result["outputs"]["primary_output"] == "production.zip"
 
 
+def test_canary_resave_keeps_v2_technical_failure_only_in_memory(tmp_path):
+    jobs = JobStore(tmp_path / "canary" / "jobs")
+    record = jobs.create({"template_id": "V2ORDER001"})
+    jobs.update(
+        record,
+        status="failed",
+        error="Illustrator 未能完成生产出图。",
+        error_code="v2_order_render_failed",
+        failure_scope="system",
+    )
+    record["_technical_failure"] = r"HRESULT -2147417851 C:\\local\\template.ai"
+
+    adapter_module._mark_diagnostic_canary(jobs, record)
+
+    saved = jobs.load(record["job_id"])
+    assert record["_technical_failure"].startswith("HRESULT")
+    assert "_technical_failure" not in saved
+    assert "HRESULT" not in saved["error"]
+
+
 def _adapter(tmp_path: Path) -> SingleTemplateRenderAdapter:
     return SingleTemplateRenderAdapter(
         central=object(), cache=object(), data_dir=tmp_path / "data", v2_renderer=object(), font_dirs=[],

@@ -7,6 +7,7 @@ import re
 from typing import Any, Mapping
 
 from .v2_order_render_support import V2OrderRenderError, central_v2_versions, sha256_file
+from .multi_template_failures import failure_scope as multi_template_failure_scope
 
 
 def resolve_published_version(central: Any, template_id: str, *, fixed_version: str = "") -> dict[str, str]:
@@ -77,43 +78,7 @@ def require_fixed_snapshot(
 
 
 def failure_scope(exc: Exception) -> str:
-    declared = str(getattr(exc, "failure_scope", "") or "")
-    if declared in {"template", "system"}:
-        return declared
-    if isinstance(exc, V2OrderRenderError) and exc.code in _TEMPLATE_FAILURE_CODES:
-        return "template"
-    return "system"
-
-
-_TEMPLATE_FAILURE_CODES = frozenset({
-    "missing_order_file",
-    "missing_required_fonts",
-    "missing_template_id",
-    "order_file_missing",
-    "v2_department_master_packing_missing",
-    "v2_order_batch_invalid",
-    "v2_order_color_compose_not_supported",
-    "v2_order_compose_not_supported",
-    "v2_order_file_unreadable",
-    "v2_order_not_supported",
-    "v2_order_plan_invalid",
-    "v2_order_png_master_not_supported",
-    "v2_order_preflight_failed",
-    "v2_order_render_not_supported",
-    "v2_order_style_dimensions_invalid",
-    "v2_order_style_dimensions_missing",
-    "v2_public_output_metadata_missing",
-    "v2_render_task_invalid",
-    "v2_template_asset_invalid",
-    "v2_template_asset_missing",
-    "v2_template_bundle_invalid",
-    "v2_template_config_invalid",
-    "v2_template_not_found",
-    "v2_template_not_published",
-    "v2_template_version_unavailable",
-    "v2_template_snapshot_invalid",
-    "v2_output_missing",
-})
+    return multi_template_failure_scope(exc)
 
 
 __all__ = ["check_snapshot_file_hash", "failure_scope", "require_fixed_snapshot", "resolve_published_version"]

@@ -180,6 +180,24 @@ def test_bridge_does_not_retry_jsx_business_error(tmp_path, monkeypatch):
     assert app.calls == 1
 
 
+def test_bridge_checks_and_closes_an_isolated_fresh_session(monkeypatch):
+    class App:
+        Visible = False
+        Version = "28.0"
+
+        def __init__(self):
+            self.quit_calls = 0
+
+        def Quit(self):
+            self.quit_calls += 1
+
+    app = App()
+    install_fake_com(monkeypatch, app)
+
+    assert IllustratorBridge(visible=False, fresh_instance=True, quit_after=True).check_fresh_session() is True
+    assert app.quit_calls == 1
+
+
 def test_reusable_bridge_closes_com_apartment_when_proxy_was_never_created(monkeypatch):
     events = []
 

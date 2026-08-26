@@ -25,6 +25,7 @@ from ..jjmb_config_grouped_main import build_grouped_task
 from ..renderer.illustrator_bridge import IllustratorBridge, IllustratorBridgeError, RETRYABLE_COM_HRESULTS, format_com_recovery_message
 from .canary_diagnostics import suppress_delivery_outputs as suppress_canary_delivery_outputs
 from .job_store import JobStore
+from .multi_template_failures import failure_scope as multi_template_failure_scope
 from .font_style_rules import font_style_by_option
 from .department_output import (
     DepartmentOutputRule,
@@ -68,9 +69,10 @@ _MANUFACTURER_ROW_ALIASES = (
 class RenderServiceError(RuntimeError):
     """Raised when a backend render request cannot be completed."""
 
-    def __init__(self, message: str, *, code: str = "render_failed") -> None:
+    def __init__(self, message: str, *, code: str = "render_failed", failure_scope: str = "") -> None:
         super().__init__(message)
         self.code = code
+        self.failure_scope = failure_scope if failure_scope in {"template", "system"} else ""
 
 class RenderService:
     def __init__(
@@ -1584,18 +1586,7 @@ def render_error_code(exc: Exception) -> str:
 
 
 def render_failure_scope(exc: Exception) -> str:
-    declared = str(getattr(exc, "failure_scope", "") or "")
-    if declared in {"template", "system"}:
-        return declared
-    if isinstance(exc, OSError):
-        return "system"
-    if isinstance(exc, IllustratorBridgeError):
-        if any(code in str(exc) for code in RETRYABLE_COM_HRESULTS):
-            return "system"
-        return "template"
-    if isinstance(exc, (RenderServiceError, KeyError, IndexError, UnicodeDecodeError, ValueError)):
-        return "template"
-    return "system"
+    return multi_template_failure_scope(exc)
 
 
 def _is_retryable_com_failure(exc: IllustratorBridgeError) -> bool:

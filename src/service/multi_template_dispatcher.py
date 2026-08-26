@@ -9,7 +9,9 @@ from pathlib import Path
 from typing import Any, Callable, Mapping
 
 from .job_store import JobStore, utc_now
-from .multi_template_order import FAILURE_SCOPES, MultiTemplateIssue, MultiTemplateOrderBatch
+from .multi_template_failures import FAILURE_SCOPES, is_recoverable_com_failure, normalize_failure
+from .multi_template_illustrator_recovery import FreshIllustratorSessionRecovery
+from .multi_template_order import MultiTemplateIssue, MultiTemplateOrderBatch
 from .multi_template_preflight import MultiTemplateGroupPreflight, MultiTemplatePreflightResult
 from .multi_template_snapshot import TemplateSnapshot
 
@@ -37,12 +39,14 @@ class MultiTemplateRenderDispatcher:
         canary_renderer: Any,
         render_lock: threading.Lock,
         failure_scope: Callable[[Mapping[str, Any]], str] | None = None,
+        illustrator_recovery: Any | None = None,
     ) -> None:
         self.jobs = jobs
         self.group_renderer = group_renderer
         self.canary_renderer = canary_renderer
         self.render_lock = render_lock
-        self.failure_scope = failure_scope or _failure_scope
+        self.failure_scope = failure_scope
+        self.illustrator_recovery = illustrator_recovery or FreshIllustratorSessionRecovery()
 
     def dispatch(
         self,
@@ -103,8 +107,15 @@ class MultiTemplateRenderDispatcher:
                     group_workbook=checkpoint["group_workbook"],
                     work_dir=child_dir,
                 )
-            except Exception:
-                child = {"status": "failed", "error_code": "multi_template_child_unavailable", "error": "模板组渲染运行环境不可用。", "failure_scope": "system"}
+            except Exception as exc:
+                failure = normalize_failure(exc, default_code="multi_template_child_unavailable")
+                child = {
+                    "status": "failed",
+                    "error_code": failure.code,
+                    "error": failure.message,
+                    "failure_scope": failure.failure_scope,
+                    "technical_message": failure.technical_message,
+                }
             finished = utc_now()
             elapsed = round(time.monotonic() - started, 3)
             if str(child.get("status") or "") == "completed":
@@ -142,15 +153,21 @@ class MultiTemplateRenderDispatcher:
                     }
                 else:
                     child = {"status": "failed", "error_code": "child_output_missing", "error": "模板组未生成可交付成品。", "failure_scope": "template"}
-            scope = self.failure_scope(child)
+            failure = normalize_failure(child)
+            declared_scope = self.failure_scope(child) if self.failure_scope else ""
+            scope = declared_scope if declared_scope in FAILURE_SCOPES else failure.failure_scope
+            recovered_illustrator = scope == "system" and is_recoverable_com_failure(child) and self.illustrator_recovery.check()
+            if recovered_illustrator:
+                scope = "template"
             record = self._save_checkpoint(
                 record,
                 summary.template_id,
                 status="failed",
                 child_job_id=str(child.get("job_id") or ""),
-                error_code=str(child.get("error_code") or "template_render_failed"),
-                error=str(child.get("error") or "模板组渲染失败。"),
+                error_code=failure.code,
+                error=failure.message,
                 failure_scope=scope,
+                illustrator_recovery="fresh_session_ready" if recovered_illustrator else "",
                 finished_at=finished,
                 elapsed_seconds=elapsed,
             )
@@ -158,8 +175,8 @@ class MultiTemplateRenderDispatcher:
                 return self._stop_system(
                     record,
                     summary.template_id,
-                    str(child.get("error_code") or "multi_template_child_unavailable"),
-                    str(child.get("error") or "模板组渲染运行环境不可用。"),
+                    failure.code,
+                    failure.message,
                 )
         return self._finish(record)
 
@@ -292,11 +309,6 @@ def _owned_output(output: Path, child_dir: Path) -> bool:
     except OSError:
         return False
     return resolved_output.is_file() and resolved_child_dir in resolved_output.parents
-
-
-def _failure_scope(child: Mapping[str, Any]) -> str:
-    scope = str(child.get("failure_scope") or "")
-    return scope if scope in FAILURE_SCOPES else "system"
 
 
 def _attempt(checkpoint: Mapping[str, Any]) -> int:

@@ -14,7 +14,10 @@ from .canary_workbook import (
     write_canary_workbook,
 )
 from .multi_template_canary import CanaryRepresentative, CanarySelectionError, RepresentativeOrderSelector
-from .multi_template_order import FAILURE_SCOPES, TemplateOrderGroup
+from .multi_template_failures import is_recoverable_com_failure, normalize_failure
+from .multi_template_illustrator_recovery import FreshIllustratorSessionRecovery
+from .multi_template_failures import failure_scope as multi_template_failure_scope
+from .multi_template_order import TemplateOrderGroup
 from .multi_template_preflight import MultiTemplateGroupPreflight, MultiTemplatePreflightResult
 from .multi_template_snapshot import TemplateSnapshot
 
@@ -92,10 +95,12 @@ class PerTemplateCanaryRenderer:
         adapter: CanaryRenderAdapter,
         selector: RepresentativeOrderSelector | None = None,
         failure_scope: Callable[[Mapping[str, Any]], str] | None = None,
+        illustrator_recovery: Any | None = None,
     ) -> None:
         self.adapter = adapter
         self.selector = selector or RepresentativeOrderSelector()
         self.failure_scope = failure_scope or _failure_scope
+        self.illustrator_recovery = illustrator_recovery or FreshIllustratorSessionRecovery()
 
     def run(
         self,
@@ -145,12 +150,22 @@ class PerTemplateCanaryRenderer:
                     representative_row.raw_values,
                 )
                 canary_group = TemplateOrderGroup(group.template_id, (representative_row,))
-                record = self.adapter.render_canary(
-                    canary_group,
-                    snapshot,
-                    group_workbook=canary_workbook,
-                    work_dir=canary_workbook.parent,
-                )
+                try:
+                    record = self.adapter.render_canary(
+                        canary_group,
+                        snapshot,
+                        group_workbook=canary_workbook,
+                        work_dir=canary_workbook.parent,
+                    )
+                except Exception as exc:
+                    failure = normalize_failure(exc, default_code="canary_runtime_unavailable")
+                    record = {
+                        "status": "failed",
+                        "error_code": failure.code,
+                        "error": failure.message,
+                        "failure_scope": failure.failure_scope,
+                        "technical_message": failure.technical_message,
+                    }
                 require_canary_workbook_snapshot(
                     canary_workbook,
                     canary_workbook_sha256,
@@ -180,6 +195,8 @@ class PerTemplateCanaryRenderer:
                 )
                 continue
             scope = self.failure_scope(record)
+            if scope == "system" and is_recoverable_com_failure(record) and self.illustrator_recovery.check():
+                scope = "template"
             failed = CanaryGroupResult(
                 group.template_id,
                 "canary_failed" if scope == "template" else "interrupted",
@@ -216,29 +233,7 @@ def _require_group_sha256(summary: MultiTemplateGroupPreflight, representative: 
 
 
 def _failure_scope(record: Mapping[str, Any]) -> str:
-    declared = str(record.get("failure_scope") or "")
-    if declared in FAILURE_SCOPES:
-        return declared
-    code = str(record.get("error_code") or "")
-    if code in _TEMPLATE_FAILURE_CODES:
-        return "template"
-    return "system"
-
-
-_TEMPLATE_FAILURE_CODES = frozenset({
-    "missing_required_fonts",
-    "render_failed",
-    "illustrator_render_failed",
-    "template_config_missing",
-    "template_font_config_missing",
-    "template_rules_invalid",
-    "template_snapshot_mismatch",
-    "v2_order_preflight_failed",
-    "v2_order_render_failed",
-    "v2_template_asset_invalid",
-    "v2_template_config_invalid",
-    "v2_template_version_unavailable",
-})
+    return multi_template_failure_scope(record)
 
 
 def _business_error_message(scope: str) -> str:

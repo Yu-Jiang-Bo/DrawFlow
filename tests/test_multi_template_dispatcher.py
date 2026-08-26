@@ -7,14 +7,18 @@ from pathlib import Path
 from openpyxl import Workbook
 import pytest
 
+from src.renderer.illustrator_bridge import IllustratorBridgeError
 from src.service.job_store import JobStore
 from src.service import multi_template_dispatcher as dispatcher_module
+from src.service.local_client_errors import LocalClientError
 from src.service.multi_template_dispatcher import MultiTemplateDispatchError, MultiTemplateRenderDispatcher
 from src.service.multi_template_group_workbooks import GroupWorkbookWriter
 from src.service.multi_template_order import MultiTemplateOrderParser
 from src.service.multi_template_preflight import MultiTemplateGroupPreflight, MultiTemplatePreflightResult
 from src.service.multi_template_render import MultiTemplateRenderService
 from src.service.multi_template_snapshot import TemplateSnapshot
+from src.service.render_service import RenderServiceError
+from src.service.v2_order_render_support import V2OrderRenderError
 
 
 def _write_orders(path: Path, template_ids: tuple[str, ...]) -> None:
@@ -76,7 +80,7 @@ class PassingCanary:
 
 
 class GroupRenderer:
-    def __init__(self, outcomes: dict[str, str]) -> None:
+    def __init__(self, outcomes: dict[str, object]) -> None:
         self.outcomes = outcomes
         self.calls: list[tuple[str, Path, Path]] = []
 
@@ -84,6 +88,27 @@ class GroupRenderer:
         target = Path(work_dir)
         self.calls.append((group.template_id, Path(group_workbook), target))
         outcome = self.outcomes.get(group.template_id, "completed")
+        if isinstance(outcome, Exception):
+            raise outcome
+        if outcome == "classified_template":
+            return {"status": "failed", "error_code": "template_rules_invalid", "error": "模板规则不完整"}
+        if outcome == "unknown_failure":
+            return {"status": "failed", "error_code": "future_renderer_error", "error": "中文文案可以变化"}
+        if outcome == "recoverable_com":
+            return {
+                "status": "failed",
+                "error_code": "illustrator_render_failed",
+                "error": "Illustrator HRESULT -2147417851",
+                "failure_scope": "system",
+            }
+        if outcome == "recoverable_v2_com":
+            return {
+                "status": "failed",
+                "error_code": "v2_order_render_failed",
+                "error": "Illustrator 未能完成生产出图。",
+                "failure_scope": "system",
+                "_technical_failure": "COM HRESULT -2147417851",
+            }
         if outcome not in {"completed", "missing_job_id"}:
             if outcome == "outside":
                 output = target.parents[1] / f"{group.template_id}.zip"
@@ -115,12 +140,23 @@ class FailSuccessfulCheckpointStore(JobStore):
         super().save(record)
 
 
+class RecoveryGate:
+    def __init__(self, available: bool) -> None:
+        self.available = available
+        self.calls = 0
+
+    def check(self) -> bool:
+        self.calls += 1
+        return self.available
+
+
 def _service(
     tmp_path: Path,
-    outcomes: dict[str, str] | None = None,
+    outcomes: dict[str, object] | None = None,
     canary_outcomes: dict[str, str] | None = None,
     render_lock: threading.Lock | None = None,
     store: JobStore | None = None,
+    illustrator_recovery: RecoveryGate | None = None,
 ):
     store = store or JobStore(tmp_path / "jobs")
     canary = PassingCanary(canary_outcomes)
@@ -130,6 +166,7 @@ def _service(
         group_renderer=renderer,
         canary_renderer=canary,
         render_lock=render_lock or threading.Lock(),
+        illustrator_recovery=illustrator_recovery,
     )
     return MultiTemplateRenderService(preflight_runner=BatchPreflight(), jobs=store, dispatcher=dispatcher), canary, renderer
 
@@ -162,6 +199,106 @@ def test_template_failure_keeps_later_template_rendering(tmp_path):
     assert result["status"] == "completed_with_errors"
     assert [template_id for template_id, _, _ in renderer.calls] == ["A", "B", "C"]
     assert [item["status"] for item in result["multi_template"]["template_checkpoints"]] == ["succeeded", "failed", "succeeded"]
+
+
+def test_known_template_error_code_keeps_later_template_rendering_without_message_matching(tmp_path):
+    source = tmp_path / "orders.xlsx"
+    _write_orders(source, ("A", "B", "C"))
+    service, _, renderer = _service(tmp_path, {"B": "classified_template"})
+    parent = service.preflight({"order_file": str(source), "sheet_name": "订单"})
+
+    result = service.execute(parent["job_id"])
+
+    assert result["status"] == "completed_with_errors"
+    assert [template_id for template_id, _, _ in renderer.calls] == ["A", "B", "C"]
+    assert result["multi_template"]["template_checkpoints"][1]["failure_scope"] == "template"
+
+
+def test_unknown_error_code_stops_later_template_groups_safely(tmp_path):
+    source = tmp_path / "orders.xlsx"
+    _write_orders(source, ("A", "B", "C"))
+    service, _, renderer = _service(tmp_path, {"B": "unknown_failure"})
+    parent = service.preflight({"order_file": str(source), "sheet_name": "订单"})
+
+    result = service.execute(parent["job_id"])
+
+    assert result["status"] == "interrupted"
+    assert [template_id for template_id, _, _ in renderer.calls] == ["A", "B"]
+    assert result["multi_template"]["template_checkpoints"][1]["failure_scope"] == "system"
+
+
+@pytest.mark.parametrize("outcome", ("recoverable_com", "recoverable_v2_com"))
+def test_recovered_com_failure_marks_only_current_template_failed_and_continues(tmp_path, outcome):
+    source = tmp_path / "orders.xlsx"
+    _write_orders(source, ("A", "B", "C"))
+    recovery = RecoveryGate(True)
+    service, _, renderer = _service(tmp_path, {"B": outcome}, illustrator_recovery=recovery)
+    parent = service.preflight({"order_file": str(source), "sheet_name": "订单"})
+
+    result = service.execute(parent["job_id"])
+
+    checkpoints = result["multi_template"]["template_checkpoints"]
+    assert result["status"] == "completed_with_errors"
+    assert [template_id for template_id, _, _ in renderer.calls] == ["A", "B", "C"]
+    assert (checkpoints[1]["status"], checkpoints[1]["failure_scope"], checkpoints[1]["illustrator_recovery"]) == (
+        "failed", "template", "fresh_session_ready",
+    )
+    assert recovery.calls == 1
+
+
+def test_unrecovered_com_failure_interrupts_before_later_templates(tmp_path):
+    source = tmp_path / "orders.xlsx"
+    _write_orders(source, ("A", "B", "C"))
+    recovery = RecoveryGate(False)
+    service, _, renderer = _service(tmp_path, {"B": "recoverable_com"}, illustrator_recovery=recovery)
+    parent = service.preflight({"order_file": str(source), "sheet_name": "订单"})
+
+    result = service.execute(parent["job_id"])
+
+    assert result["status"] == "interrupted"
+    assert [template_id for template_id, _, _ in renderer.calls] == ["A", "B"]
+    assert result["multi_template"]["template_checkpoints"][1]["failure_scope"] == "system"
+    assert recovery.calls == 1
+
+
+def test_direct_recoverable_illustrator_exception_uses_fresh_session_gate(tmp_path):
+    source = tmp_path / "orders.xlsx"
+    _write_orders(source, ("A", "B", "C"))
+    recovery = RecoveryGate(True)
+    service, _, renderer = _service(
+        tmp_path,
+        {"B": IllustratorBridgeError("COM HRESULT -2147417851", failure_scope="system")},
+        illustrator_recovery=recovery,
+    )
+    parent = service.preflight({"order_file": str(source), "sheet_name": "订单"})
+
+    result = service.execute(parent["job_id"])
+
+    assert result["status"] == "completed_with_errors"
+    assert [template_id for template_id, _, _ in renderer.calls] == ["A", "B", "C"]
+    assert result["multi_template"]["template_checkpoints"][1]["failure_scope"] == "template"
+    assert recovery.calls == 1
+
+
+@pytest.mark.parametrize(
+    "error",
+    (
+        LocalClientError("模板尚未发布", code="template_not_published"),
+        RenderServiceError("模板规则不完整", code="template_rules_invalid"),
+        V2OrderRenderError("模板资源无效", code="v2_template_asset_invalid"),
+    ),
+)
+def test_direct_known_template_exceptions_keep_later_template_groups_running(tmp_path, error):
+    source = tmp_path / "orders.xlsx"
+    _write_orders(source, ("A", "B", "C"))
+    service, _, renderer = _service(tmp_path, {"B": error})
+    parent = service.preflight({"order_file": str(source), "sheet_name": "订单"})
+
+    result = service.execute(parent["job_id"])
+
+    assert result["status"] == "completed_with_errors"
+    assert [template_id for template_id, _, _ in renderer.calls] == ["A", "B", "C"]
+    assert result["multi_template"]["template_checkpoints"][1]["failure_scope"] == "template"
 
 
 def test_system_failure_stops_later_template_without_deleting_success(tmp_path):

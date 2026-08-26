@@ -121,11 +121,12 @@ class LocalDrawFlowClient:
                 "template_sha256": template_sha256(cached.manifest),
             })
         except RenderServiceError as exc:
-            raise LocalClientError(str(exc), code=exc.code) from exc
+            raise LocalClientError(str(exc), code=exc.code, failure_scope=exc.failure_scope) from exc
         if record.get("status") == "failed":
             raise LocalClientError(
                 str(record.get("error") or "渲染失败"),
                 code=str(record.get("error_code") or "render_failed"),
+                failure_scope=str(record.get("failure_scope") or ""),
             )
         record["template_cache"] = {
             "version": cached.version,
@@ -153,11 +154,13 @@ class LocalDrawFlowClient:
                 str(exc),
                 code=exc.code,
                 technical_message=exc.technical_message,
+                failure_scope=exc.failure_scope,
             ) from exc
         if record.get("status") == "failed":
             raise LocalClientError(
                 str(record.get("error") or "V2 模板出图失败"),
                 code=str(record.get("error_code") or "v2_order_render_failed"),
+                failure_scope=str(record.get("failure_scope") or ""),
             )
         request = dict(record.get("request") or {})
         record["template_cache"] = {

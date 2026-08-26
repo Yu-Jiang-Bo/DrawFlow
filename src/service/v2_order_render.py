@@ -139,6 +139,10 @@ class V2OrderRenderService:
                 error_code=code,
                 failure_scope=v2_failure_scope(exc),
             )
+            # Recovery orchestration may inspect this in-memory value, but a
+            # job query is public to the local UI and must never expose COM
+            # details or machine paths from the exception chain.
+            record["_technical_failure"] = technical_message
         return record
 
     def _published_version(self, template_id: str, *, fixed_version: str = "") -> dict[str, str]:

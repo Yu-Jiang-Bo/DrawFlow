@@ -117,6 +117,32 @@ class IllustratorBridge:
         self.close(self._app)
         self._app = None
 
+    def check_fresh_session(self) -> bool:
+        """Open and close an isolated COM session without running a JSX task."""
+        apartment = ComApartment()
+        app: Any = None
+        try:
+            apartment.__enter__()
+            import win32com.client
+
+            dispatch = getattr(win32com.client, "DispatchEx", win32com.client.Dispatch)
+            app = dispatch("Illustrator.Application")
+            try:
+                app.Visible = self.visible
+            except Exception:
+                pass
+            getattr(app, "Version", None)
+            return True
+        except Exception:
+            return False
+        finally:
+            if app is not None:
+                try:
+                    app.Quit()
+                except Exception:
+                    pass
+            apartment.__exit__(None, None, None)
+
     def close(self, app: Any = None) -> None:
         target = app if app is not None else self._app
         if target is not None:

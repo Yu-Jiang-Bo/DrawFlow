@@ -271,9 +271,12 @@ def _failed(template_id: str, code: str, message: str, *, request: dict[str, Any
 
 
 def _mark_diagnostic_canary(jobs: JobStore, record: dict[str, Any]) -> None:
+    technical_failure = str(record.pop("_technical_failure", "") or "")
     suppress_delivery_outputs(record)
     if record.get("job_id") and record.get("job_dir"):
         jobs.save(record)
+    if technical_failure:
+        record["_technical_failure"] = technical_failure
 
 
 __all__ = ["SingleTemplatePreflightResult", "SingleTemplateRenderAdapter"]

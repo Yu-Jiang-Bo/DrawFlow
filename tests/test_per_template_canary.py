@@ -87,6 +87,16 @@ class WorkbookMutatingAdapter(FakeAdapter):
         return super().render_canary(group, snapshot, group_workbook=group_workbook, work_dir=work_dir)
 
 
+class RecoveryGate:
+    def __init__(self, available: bool) -> None:
+        self.available = available
+        self.calls = 0
+
+    def check(self) -> bool:
+        self.calls += 1
+        return self.available
+
+
 def test_template_canary_failure_does_not_prevent_later_templates(tmp_path):
     adapter = FakeAdapter({
         "A": {"status": "failed", "failure_scope": "template", "error_code": "render_failed"},
@@ -136,6 +146,70 @@ def test_system_failure_stops_later_canaries(tmp_path):
     assert [(item.template_id, item.status, item.failure_scope) for item in result.groups] == [("A", "interrupted", "system")]
     assert [call[0] for call in adapter.calls] == ["A"]
     assert result.error_code == "canary_runtime_unavailable"
+
+
+def test_recovered_com_canary_failure_keeps_later_templates_running(tmp_path):
+    recovery = RecoveryGate(True)
+    adapter = FakeAdapter({
+        "A": {
+            "status": "failed",
+            "error_code": "illustrator_render_failed",
+            "error": "HRESULT -2147417851",
+            "failure_scope": "system",
+        },
+    })
+
+    result = PerTemplateCanaryRenderer(adapter=adapter, illustrator_recovery=recovery).run(
+        _preflight(tmp_path, ("A", "B")), work_dir=tmp_path / "parent",
+    )
+
+    assert result.status == "completed_with_errors"
+    assert [(item.template_id, item.status, item.failure_scope) for item in result.groups] == [
+        ("A", "canary_failed", "template"),
+        ("B", "ready", ""),
+    ]
+    assert [call[0] for call in adapter.calls] == ["A", "B"]
+    assert recovery.calls == 1
+
+
+def test_unrecovered_com_canary_failure_stops_later_templates(tmp_path):
+    recovery = RecoveryGate(False)
+    adapter = FakeAdapter({
+        "A": {
+            "status": "failed",
+            "error_code": "illustrator_render_failed",
+            "error": "HRESULT -2147417851",
+            "failure_scope": "system",
+        },
+    })
+
+    result = PerTemplateCanaryRenderer(adapter=adapter, illustrator_recovery=recovery).run(
+        _preflight(tmp_path, ("A", "B")), work_dir=tmp_path / "parent",
+    )
+
+    assert result.status == "interrupted"
+    assert [(item.template_id, item.status, item.failure_scope) for item in result.groups] == [("A", "interrupted", "system")]
+    assert [call[0] for call in adapter.calls] == ["A"]
+    assert recovery.calls == 1
+
+
+def test_direct_recoverable_com_canary_exception_uses_fresh_session_gate(tmp_path):
+    recovery = RecoveryGate(True)
+    adapter = FakeAdapter({
+        "A": IllustratorBridgeError("COM HRESULT -2147417851", failure_scope="system"),
+    })
+
+    result = PerTemplateCanaryRenderer(adapter=adapter, illustrator_recovery=recovery).run(
+        _preflight(tmp_path, ("A", "B")), work_dir=tmp_path / "parent",
+    )
+
+    assert result.status == "completed_with_errors"
+    assert [(item.template_id, item.status, item.failure_scope) for item in result.groups] == [
+        ("A", "canary_failed", "template"),
+        ("B", "ready", ""),
+    ]
+    assert [call[0] for call in adapter.calls] == ["A", "B"]
+    assert recovery.calls == 1
 
 
 def test_changed_group_workbook_stops_before_starting_a_canary(tmp_path):
