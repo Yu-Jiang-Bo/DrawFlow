@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from pathlib import Path
 import shutil
 from typing import Any, Iterable
@@ -162,6 +163,9 @@ class TemplateResolver:
             str(config_path),
             str(scan_path),
             tuple(required_fonts(config, scan)),
+            json.dumps({"name": template_id, "template_type": V2_PIPELINE}, ensure_ascii=True, sort_keys=True),
+            sha256_file(config_path),
+            sha256_file(scan_path),
         )
 
     def _download_v2_version(self, template_id: str, version: str, root: Path) -> Path:
@@ -216,6 +220,7 @@ def _legacy_snapshot(template: TemplateDefinition, cached: Any) -> TemplateSnaps
         str(template.template_config or ""),
         str(template.template_rules_config or ""),
         tuple(str(value) for value in cached.manifest.get("required_fonts", []) if str(value).strip()),
+        json.dumps(template.to_json_dict(), ensure_ascii=True, sort_keys=True),
     )
 
 

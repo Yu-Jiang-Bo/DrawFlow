@@ -144,13 +144,14 @@ def _bundle(
     *,
     with_styles: bool = False,
     config_updates: dict | None = None,
+    manifest_version: str = "v0001",
 ) -> None:
     digest = _sha256(template_bytes)
     payload = _v2_payload(template_id, digest, with_styles=with_styles)
     if config_updates:
         payload["config"].update(config_updates)
     manifest = {
-        "version": "v0001",
+        "version": manifest_version,
         "config_sha256": "a" * 64,
         "scan_sha256": "b" * 64,
         "assets": [
@@ -248,6 +249,75 @@ class CapturingRenderer:
 class FailingRenderer(CapturingRenderer):
     def render(self, render_task, **kwargs):
         raise IllustratorBridgeError("Illustrator 自动化服务暂时不可用（HRESULT -2146959355）")
+
+
+def test_v2_public_payload_cannot_override_version_snapshot_fields(tmp_path):
+    bundle_path = tmp_path / "published.zip"
+    _bundle(bundle_path, "V2ORDER001", b"template-ai")
+    order_path = tmp_path / "order.xlsx"
+    _write_order(order_path)
+    renderer = CapturingRenderer()
+    service = v2_order_render.V2OrderRenderService(V2PublishedCentral(bundle_path), tmp_path / "local", renderer, [])
+
+    record = service.render({
+        "template_id": "V2ORDER001",
+        "order_file": str(order_path),
+        "dry_run": True,
+        "_fixed_template_version": "v9999",
+        "_fixed_template_sha256": "0" * 64,
+    })
+
+    assert record["status"] == "completed"
+    assert record["request"]["template_version"] == "v0001"
+    assert set(record["request"]) == {"template_id", "template_version", "order_file", "sheet_name", "dry_run"}
+    assert renderer.calls == []
+
+
+def test_v2_fixed_snapshot_rejects_a_bundle_with_another_version(tmp_path):
+    bundle_path = tmp_path / "published.zip"
+    _bundle(bundle_path, "V2ORDER001", b"template-ai", manifest_version="v0002")
+    order_path = tmp_path / "order.xlsx"
+    _write_order(order_path)
+    service = v2_order_render.V2OrderRenderService(V2PublishedCentral(bundle_path), tmp_path / "local", CapturingRenderer(), [])
+
+    record = service.render_fixed_snapshot(
+        {"template_id": "V2ORDER001", "order_file": str(order_path), "dry_run": True},
+        version="v0001",
+        template_sha256=_sha256(b"template-ai"),
+    )
+
+    assert (record["status"], record["error_code"]) == ("failed", "v2_template_version_unavailable")
+
+
+def test_v2_fixed_snapshot_rejects_changed_config_or_scan(tmp_path):
+    bundle_path = tmp_path / "published.zip"
+    _bundle(bundle_path, "V2ORDER001", b"template-ai")
+    order_path = tmp_path / "order.xlsx"
+    _write_order(order_path)
+    with zipfile.ZipFile(bundle_path) as archive:
+        config_sha = _sha256(archive.read("config.json"))
+        scan_sha = _sha256(archive.read("scan.json"))
+    service = v2_order_render.V2OrderRenderService(V2PublishedCentral(bundle_path), tmp_path / "local", CapturingRenderer(), [])
+    payload = {"template_id": "V2ORDER001", "order_file": str(order_path), "dry_run": True}
+
+    changed_config = service.render_fixed_snapshot(
+        payload,
+        version="v0001",
+        template_sha256=_sha256(b"template-ai"),
+        config_sha256="0" * 64,
+        scan_sha256=scan_sha,
+    )
+    changed_scan = service.render_fixed_snapshot(
+        payload,
+        version="v0001",
+        template_sha256=_sha256(b"template-ai"),
+        config_sha256=config_sha,
+        scan_sha256="0" * 64,
+    )
+
+    assert (changed_config["status"], changed_config["error_code"]) == ("failed", "v2_template_config_invalid")
+    assert (changed_scan["status"], changed_scan["error_code"]) == ("failed", "v2_template_config_invalid")
+    assert {"_fixed_template_sha256", "_fixed_config_sha256", "_fixed_scan_sha256"} <= set(changed_config["request"])
 
 
 def _png_bytes() -> bytes:

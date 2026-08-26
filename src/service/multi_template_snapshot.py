@@ -24,6 +24,9 @@ class TemplateSnapshot:
     template_config: str
     template_rules_config: str
     required_fonts: tuple[str, ...]
+    template_metadata: str = "{}"
+    config_sha256: str = ""
+    scan_sha256: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -37,6 +40,9 @@ class TemplateSnapshot:
             "template_config": self.template_config,
             "template_rules_config": self.template_rules_config,
             "required_fonts": list(self.required_fonts),
+            "template_metadata": self.template_metadata,
+            "config_sha256": self.config_sha256,
+            "scan_sha256": self.scan_sha256,
         }
 
     @classmethod
@@ -52,6 +58,9 @@ class TemplateSnapshot:
             str(payload.get("template_config") or ""),
             str(payload.get("template_rules_config") or ""),
             tuple(str(item) for item in payload.get("required_fonts") or []),
+            str(payload.get("template_metadata") or "{}"),
+            str(payload.get("config_sha256") or ""),
+            str(payload.get("scan_sha256") or ""),
         )
 
 

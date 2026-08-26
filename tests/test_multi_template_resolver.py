@@ -144,6 +144,8 @@ def test_resolver_fixes_v2_version_and_sha_for_the_ready_snapshot(tmp_path):
     assert ready.snapshots[0].pipeline == V2_RENDER_PIPELINE
     assert ready.snapshots[0].version == "v0001"
     assert ready.snapshots[0].template_sha256 == sha256_bytes(b"v2-first")
+    assert len(ready.snapshots[0].config_sha256) == 64
+    assert len(ready.snapshots[0].scan_sha256) == 64
     assert ready.snapshots[0].required_fonts == ("V2 Font",)
     assert Path(ready.snapshots[0].template_ai).read_bytes() == b"v2-first"
     assert latest.snapshots[0].version == "v0002"
