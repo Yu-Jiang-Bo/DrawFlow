@@ -3,8 +3,9 @@ var V2TailText = (function () {
         var tailSpecs = action.tails || [];
         if (!tailSpecs.length) throw new Error("V2 tail text has no tail samples: " + String(action.slot_key || ""));
         var parsed = tailEndpointParts(String(value || ""), tailSpecs);
+        var textPlacement = env.captureTextPlacement(target);
         var textFrame = env.writeTextToItem(target, parsed.main_text);
-        env.fitItemWithinBounds(textFrame, fitBounds, action);
+        env.fitItemWithinBounds(textFrame, fitBounds, action, textPlacement);
         for (var index = 0; index < tailSpecs.length; index++) {
             var spec = tailSpecs[index] || {};
             var position = String(spec.position || "");
@@ -12,8 +13,9 @@ var V2TailText = (function () {
             var tail = env.findPageItemByRelativePath(root, env.relativePath(String(spec.path || ""), sourcePath));
             if (env.hasText(text)) {
                 var tailBounds = env.measuredBounds(tail);
+                var tailPlacement = env.captureTextPlacement(tail);
                 var tailFrame = env.writeTextToItem(tail, tailGlyphForSpec(text, spec));
-                env.fitItemWithinBounds(tailFrame, tailBounds, action);
+                env.fitItemWithinBounds(tailFrame, tailBounds, action, tailPlacement);
             } else {
                 env.removePageItem(tail);
             }

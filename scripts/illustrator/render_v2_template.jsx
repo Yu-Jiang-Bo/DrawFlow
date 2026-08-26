@@ -209,8 +209,9 @@
         var directTailParts = tailSpecs.length && preset === "direct_text"
             ? applyDirectTailSamples(holder.item, holder.source_path, tailSpecs, slotValue)
             : null;
+        var textPlacement = captureTextPlacement(target);
         var textFrame = writeTextToItem(target, directTailParts ? directTailParts.main_text : slotValue);
-        fitItemWithinBounds(textFrame, fitBounds, action, shouldPreserveSlotComposition(target, action));
+        fitItemWithinBounds(textFrame, fitBounds, action, textPlacement);
         if (directTailParts) {
             removeDirectTailSamples(holder.item, holder.source_path, tailSpecs);
             return;
@@ -220,8 +221,9 @@
             var tailText = preset === "split_by_pipe" ? parts[index + 1] || "" : "";
             if (hasText(tailText)) {
                 var tailBounds = measuredBounds(tail);
+                var tailPlacement = captureTextPlacement(tail);
                 var tailFrame = writeTextToItem(tail, tailText);
-                fitItemWithinBounds(tailFrame, tailBounds, action, shouldPreserveSlotComposition(tail, action));
+                fitItemWithinBounds(tailFrame, tailBounds, action, tailPlacement);
             } else {
                 removePageItem(tail);
             }
@@ -244,7 +246,7 @@
         if (!sourceAsset) throw new Error("V2 asset library has no item: " + targetKey);
         var parent = slot.parent || holder.item;
         var replacement = sourceAsset.duplicate(parent, ElementPlacement.PLACEATEND);
-        fitItemWithinBounds(replacement, measuredBounds(slot), action);
+        fitAssetWithinBounds(replacement, measuredBounds(slot), action);
         alignItemToItem(replacement, slot);
         removePageItem(slot);
         removePageItem(library);
@@ -282,6 +284,7 @@
         return {
             writeTextToItem: writeTextToItem,
             fitItemWithinBounds: fitItemWithinBounds,
+            captureTextPlacement: captureTextPlacement,
             measuredBounds: measuredBounds,
             findPageItemByRelativePath: findPageItemByRelativePath,
             relativePath: relativePath,
@@ -589,18 +592,11 @@
         } catch (alignError) {}
     }
 
-    function fitItemWithinBounds(item, bounds, action, preserveComposition) {
+    function fitAssetWithinBounds(item, bounds, action) {
         if (!bounds) return;
-        preserveComposition = preserveComposition === true || (action && action.preserve_composition === true);
         var targetWidth = Math.abs(Number(bounds[2]) - Number(bounds[0]));
         var targetHeight = Math.abs(Number(bounds[1]) - Number(bounds[3]));
         if (targetWidth <= 0 || targetHeight <= 0) return;
-        if (isPathTextFrame(item)) {
-            fitPathTextWithinBounds(item, bounds, action, targetWidth, targetHeight);
-            return;
-        }
-        var resizeCount = 0;
-        var smallestScale = 1;
         var fitMode = slotFitMode(action);
         for (var index = 0; index < 20; index++) {
             var current = measuredBounds(item);
@@ -609,12 +605,7 @@
             if (width <= 0 || height <= 0) break;
             var scaleX = targetWidth / width;
             var scaleY = targetHeight / height;
-            if (preserveComposition) {
-                if (width <= targetWidth && height <= targetHeight) break;
-                var proportionalScale = Math.min(scaleX, scaleY);
-                scaleX = proportionalScale;
-                scaleY = proportionalScale;
-            } else if (fitMode === "fill_width") {
+            if (fitMode === "fill_width") {
                 scaleY = 1;
                 if (height > targetHeight) {
                     var widthFitScale = targetHeight / height;
@@ -631,26 +622,100 @@
             }
             if (!isFinite(scaleX) || !isFinite(scaleY) || scaleX <= 0 || scaleY <= 0) break;
             if (Math.abs(scaleX - 1) <= 0.001 && Math.abs(scaleY - 1) <= 0.001) break;
-            resizeCount += 1;
-            smallestScale = Math.min(smallestScale, Math.min(scaleX, scaleY));
             try { item.resize(scaleX * 100, scaleY * 100, true, true, true, true, 100, Transformation.CENTER); }
             catch (resizeError1) {
                 try { item.resize(scaleX * 100, scaleY * 100); } catch (resizeError2) { break; }
             }
-            if (!preserveComposition && fitMode !== "fill_both") break;
+            if (fitMode !== "fill_both") break;
         }
-        centerItemInBounds(item, bounds);
+        centerAssetInBounds(item, bounds);
+    }
+
+    function slotFitMode(action) {
+        var mode = String(action && action.fit_mode || "fill_both");
+        return mode === "fill_width" || mode === "fill_height" ? mode : "fill_both";
+    }
+
+    function centerAssetInBounds(item, bounds) {
+        var current = measuredBounds(item);
+        var itemCenterX = (Number(current[0]) + Number(current[2])) / 2;
+        var itemCenterY = (Number(current[1]) + Number(current[3])) / 2;
+        var targetCenterX = (Number(bounds[0]) + Number(bounds[2])) / 2;
+        var targetCenterY = (Number(bounds[1]) + Number(bounds[3])) / 2;
+        item.translate(targetCenterX - itemCenterX, targetCenterY - itemCenterY);
+    }
+
+    function captureTextPlacement(item) {
+        var frame = firstTextFrame(item);
+        if (!frame) throw new Error("V2 slot has no text frame for placement capture");
+        var position = null;
+        try {
+            var sourcePosition = frame.position;
+            if (sourcePosition && sourcePosition.length >= 2
+                && isFinite(Number(sourcePosition[0])) && isFinite(Number(sourcePosition[1]))) {
+                position = [Number(sourcePosition[0]), Number(sourcePosition[1])];
+            }
+        } catch (positionError) {}
+        return { position: position };
+    }
+
+    function restoreTextPlacement(item, placement) {
+        if (!placement || !placement.position || placement.position.length < 2) return false;
+        try {
+            var targetX = Number(placement.position[0]);
+            var targetY = Number(placement.position[1]);
+            var current = item.position;
+            if (current && current.length >= 2
+                && Number(current[0]) === targetX && Number(current[1]) === targetY) return true;
+            item.position = [targetX, targetY];
+            return true;
+        } catch (restoreError) {}
+        return false;
+    }
+
+    function fitItemWithinBounds(item, bounds, action, placement) {
+        if (!bounds) return;
+        var targetWidth = Math.abs(Number(bounds[2]) - Number(bounds[0]));
+        var targetHeight = Math.abs(Number(bounds[1]) - Number(bounds[3]));
+        if (targetWidth <= 0 || targetHeight <= 0) return;
+        if (isPathTextFrame(item)) {
+            fitPathTextWithinBounds(item, bounds, action, targetWidth, targetHeight, placement);
+            return;
+        }
+        var resizeCount = 0;
+        var smallestScale = 1;
+        for (var index = 0; index < 20; index++) {
+            var current = measuredBounds(item);
+            var width = Math.abs(Number(current[2]) - Number(current[0]));
+            var height = Math.abs(Number(current[1]) - Number(current[3]));
+            if (width <= 0 || height <= 0) break;
+            if (width <= targetWidth && height <= targetHeight) break;
+            // A slot anchor is a containment fence, not a request to fill or
+            // re-center the text. Shrink only, proportionally, leaving a tiny
+            // inward margin for Illustrator's post-resize bounds quantization.
+            var proportionalScale = Math.min(targetWidth / width, targetHeight / height) * 0.999;
+            if (!isFinite(proportionalScale) || proportionalScale <= 0 || proportionalScale >= 1) break;
+            resizeCount += 1;
+            smallestScale = Math.min(smallestScale, proportionalScale);
+            try { item.resize(proportionalScale * 100, proportionalScale * 100, true, true, true, true, 100, Transformation.CENTER); }
+            catch (resizeError1) {
+                try { item.resize(proportionalScale * 100, proportionalScale * 100); } catch (resizeError2) { break; }
+            }
+        }
+        restoreTextPlacement(item, placement);
+        var correction = translateItemIntoBounds(item, bounds);
         var finalBounds = measuredBounds(item);
         var finalWidth = Math.abs(Number(finalBounds[2]) - Number(finalBounds[0]));
         var finalHeight = Math.abs(Number(finalBounds[1]) - Number(finalBounds[3]));
-        var boundsTolerance = mmToPt(0.007);
-        if (finalWidth > targetWidth + boundsTolerance || finalHeight > targetHeight + boundsTolerance) {
+        if (finalWidth > targetWidth || finalHeight > targetHeight || !boundsContain(finalBounds, bounds)) {
             throw new Error(
                 "V2 slot text exceeds anchor bounds: " + String(action && action.slot_key || "")
                 + ", actual=" + finalWidth + "x" + finalHeight
                 + ", target=" + targetWidth + "x" + targetHeight
             );
-        } else if (resizeCount > 0 && smallestScale < 0.35) {
+        }
+        writeSlotBoundsAudit(action, finalBounds, bounds, smallestScale, correction);
+        if (resizeCount > 0 && smallestScale < 0.35) {
             layoutWarnings.push({
                 code: "text_fit_extreme",
                 severity: "warning",
@@ -664,41 +729,11 @@
         }
     }
 
-    function shouldPreserveSlotComposition(slot, action) {
-        if (action && action.preserve_composition === true) return true;
-        return slotHasKeepRatioMarker(slot);
-    }
-
-    function slotFitMode(action) {
-        var mode = String(action && action.fit_mode || "fill_both");
-        return mode === "fill_width" || mode === "fill_height" ? mode : "fill_both";
-    }
-
-    function slotHasKeepRatioMarker(slot) {
-        if (!slot || !slot.pageItems || !slot.pageItems.length) return false;
-        var children = slot.pageItems || [];
-        for (var index = 0; index < children.length; index++) {
-            if (hasKeepRatioMarker(children[index])) return true;
-        }
-        return false;
-    }
-
-    function hasKeepRatioMarker(item) {
-        if (!item) return false;
-        var name = normalizedName(item.name);
-        if (name === "keep_ratio" || name.indexOf("keep_ratio_") === 0) return true;
-        var children = item.pageItems || [];
-        for (var index = 0; index < children.length; index++) {
-            if (hasKeepRatioMarker(children[index])) return true;
-        }
-        return false;
-    }
-
     function normalizedName(value) {
         return String(value || "").replace(/^\s+|\s+$/g, "").toLowerCase();
     }
 
-    function fitPathTextWithinBounds(item, bounds, action, targetWidth, targetHeight) {
+    function fitPathTextWithinBounds(item, bounds, action, targetWidth, targetHeight, placement) {
         var resizeCount = 0;
         var smallestScale = 1;
         for (var index = 0; index < 20; index++) {
@@ -706,19 +741,23 @@
             var width = Math.abs(Number(current[2]) - Number(current[0]));
             var height = Math.abs(Number(current[1]) - Number(current[3]));
             if (width <= 0 || height <= 0) break;
+            if (width <= targetWidth && height <= targetHeight) break;
             var scale = Math.min(targetWidth / width, targetHeight / height);
-            if (!isFinite(scale) || scale <= 0 || Math.abs(scale - 1) <= 0.001) break;
+            scale *= 0.999;
+            if (!isFinite(scale) || scale <= 0 || scale >= 1) break;
             if (!scaleTextSize(item, scale)) break;
             resizeCount += 1;
             if (scale < 1) smallestScale = Math.min(smallestScale, scale);
         }
+        restoreTextPlacement(item, placement);
+        var correction = translateItemIntoBounds(item, bounds);
         var finalBounds = measuredBounds(item);
         var finalWidth = Math.abs(Number(finalBounds[2]) - Number(finalBounds[0]));
         var finalHeight = Math.abs(Number(finalBounds[1]) - Number(finalBounds[3]));
-        var boundsTolerance = mmToPt(0.007);
-        if (finalWidth > targetWidth + boundsTolerance || finalHeight > targetHeight + boundsTolerance) {
+        if (finalWidth > targetWidth || finalHeight > targetHeight || !boundsContain(finalBounds, bounds)) {
             throw new Error("V2 path text exceeds anchor bounds: " + String(action && action.slot_key || ""));
         }
+        writeSlotBoundsAudit(action, finalBounds, bounds, smallestScale, correction);
         if (resizeCount > 0 && smallestScale < 0.35) {
             layoutWarnings.push({
                 code: "path_text_fit_extreme",
@@ -755,13 +794,37 @@
         return false;
     }
 
-    function centerItemInBounds(item, bounds) {
+    function translateItemIntoBounds(item, bounds) {
         var current = measuredBounds(item);
-        var itemCenterX = (Number(current[0]) + Number(current[2])) / 2;
-        var itemCenterY = (Number(current[1]) + Number(current[3])) / 2;
-        var targetCenterX = (Number(bounds[0]) + Number(bounds[2])) / 2;
-        var targetCenterY = (Number(bounds[1]) + Number(bounds[3])) / 2;
-        item.translate(targetCenterX - itemCenterX, targetCenterY - itemCenterY);
+        var dx = 0;
+        var dy = 0;
+        if (Number(current[0]) < Number(bounds[0])) dx = Number(bounds[0]) - Number(current[0]);
+        else if (Number(current[2]) > Number(bounds[2])) dx = Number(bounds[2]) - Number(current[2]);
+        if (Number(current[1]) > Number(bounds[1])) dy = Number(bounds[1]) - Number(current[1]);
+        else if (Number(current[3]) < Number(bounds[3])) dy = Number(bounds[3]) - Number(current[3]);
+        if (dx !== 0 || dy !== 0) item.translate(dx, dy);
+        return { x: dx, y: dy };
+    }
+
+    function boundsContain(inner, outer) {
+        return Number(inner[0]) >= Number(outer[0])
+            && Number(inner[1]) <= Number(outer[1])
+            && Number(inner[2]) <= Number(outer[2])
+            && Number(inner[3]) >= Number(outer[3]);
+    }
+
+    function writeSlotBoundsAudit(action, actualBounds, anchorBounds, scale, correction) {
+        layoutWarnings.push({
+            code: "slot_bounds_audit",
+            severity: "info",
+            slot_key: String(action && action.slot_key || ""),
+            object_path: String(action && action.object_path || ""),
+            actual_bounds: actualBounds,
+            anchor_bounds: anchorBounds,
+            scale: scale,
+            correction_x: Number(correction && correction.x || 0),
+            correction_y: Number(correction && correction.y || 0)
+        });
     }
 
     function measuredBounds(item) {

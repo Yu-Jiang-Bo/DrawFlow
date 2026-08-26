@@ -300,3 +300,7 @@ def test_v2_jsx_enforces_each_slot_or_anchor_visible_bounds_without_style_fallba
     assert "selectedStyleFitBoundsForFont" not in source
     assert "V2 slot text exceeds anchor bounds:" in source
     assert "V2 path text exceeds anchor bounds:" in source
+    assert "function translateItemIntoBounds" in source
+    assert "function writeSlotBoundsAudit" in source
+    assert "function centerItemInBounds" not in source
+    assert "proportionalScale >= 1" in source
