@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import http.client  # Re-exported for existing transport monkeypatches.
 import os
+import threading
 from pathlib import Path
 from typing import Any, Mapping
 from urllib.parse import quote
@@ -134,6 +135,36 @@ class LocalDrawFlowClient:
             "sha256": template_sha256(cached.manifest),
         }
         return record
+
+    def render_multi(
+        self,
+        payload: Mapping[str, Any] | None = None,
+        *,
+        action: str = "preflight",
+        parent_job_id: str = "",
+        render_lock: threading.Lock,
+        action_lock: threading.Lock,
+    ) -> dict[str, Any]:
+        """Run the additive multi-template workflow without changing ``render``.
+
+        The loopback gateway provides its shared Illustrator and parent-action
+        locks, so multi-template work remains mutually exclusive with legacy
+        single-template rendering while retaining a public client facade.
+        """
+        from .multi_template_gateway_service import build_multi_template_render_service
+
+        service = build_multi_template_render_service(self, render_lock, action_lock)
+        if action == "preflight":
+            return service.preflight(dict(payload or {}))
+        if not parent_job_id:
+            raise LocalClientError("缺少多模板父任务 ID。", code="multi_template_job_not_found")
+        if action == "execute":
+            return service.execute(parent_job_id)
+        if action == "retry-failed":
+            return service.retry_failed(parent_job_id)
+        if action == "resume":
+            return service.resume(parent_job_id)
+        raise LocalClientError("多模板渲染操作不支持。", code="multi_template_action_invalid")
 
     def _render_v2_if_published(
         self,

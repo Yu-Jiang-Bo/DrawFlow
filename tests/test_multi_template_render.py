@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import threading
 from pathlib import Path
 
 import pytest
@@ -161,6 +162,60 @@ def test_execute_rechecks_source_and_group_snapshot_without_dispatching(tmp_path
     assert (changed["status"], changed["error_code"]) == ("preflight_failed", "multi_template_repreflight_required")
     assert changed["multi_template"]["needs_repreflight"] is True
     assert store.load(record["job_id"])["status"] == "preflight_failed"
+
+
+def test_parent_action_lock_rejects_competing_execute_before_it_can_overwrite_running_state(tmp_path):
+    source = tmp_path / "orders.xlsx"
+    _write_orders(source)
+    store = JobStore(tmp_path / "jobs")
+    started = threading.Event()
+    release = threading.Event()
+
+    class BlockingDispatcher:
+        def dispatch(self, record, *, persist_canary):
+            store.update(record, status="running", progress={"current": 0, "total": 1, "stage": "rendering"})
+            started.set()
+            assert release.wait(timeout=3)
+            return store.load(record["job_id"])
+
+    service = MultiTemplateRenderService(
+        preflight_runner=FakePreflight(),
+        jobs=store,
+        dispatcher=BlockingDispatcher(),
+        action_lock=threading.Lock(),
+    )
+    record = service.preflight({"order_file": str(source), "sheet_name": "订单"})
+    thread = threading.Thread(target=lambda: service.execute(record["job_id"]), daemon=True)
+    thread.start()
+    assert started.wait(timeout=3)
+
+    with pytest.raises(MultiTemplateRenderError) as exc_info:
+        service.execute(record["job_id"])
+
+    assert exc_info.value.code == "multi_template_render_busy"
+    assert store.load(record["job_id"])["status"] == "running"
+    release.set()
+    thread.join(timeout=3)
+    assert not thread.is_alive()
+
+
+def test_parent_action_lock_rejects_execute_retry_and_resume_before_state_selection(tmp_path):
+    source = tmp_path / "orders.xlsx"
+    _write_orders(source)
+    lock = threading.Lock()
+    service = MultiTemplateRenderService(
+        preflight_runner=FakePreflight(),
+        jobs=JobStore(tmp_path / "jobs"),
+        action_lock=lock,
+    )
+    lock.acquire()
+    try:
+        for action in (service.execute, service.retry_failed, service.resume):
+            with pytest.raises(MultiTemplateRenderError) as exc_info:
+                action("any-parent-id")
+            assert exc_info.value.code == "multi_template_render_busy"
+    finally:
+        lock.release()
 
 
 @pytest.mark.parametrize(

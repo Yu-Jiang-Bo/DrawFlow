@@ -18,6 +18,7 @@ from .local_gateway_support import (
     V2_WORKBENCH_STATIC_DIR,
     safe_static_name,
 )
+from .multi_template_gateway_response import public_multi_template_job
 from .http_server import _v2_workbench_html
 from .web_page import INDEX_HTML as FALLBACK_HTML
 
@@ -50,13 +51,15 @@ class LocalGatewayHttpMixin:
             self._send_local_job(parts[2])
         elif len(parts) == 4 and parts[3] == "output":
             self._send_job_output(parts[2], "primary_output")
+        elif len(parts) == 5 and parts[3:5] == ["output", "partial"]:
+            self._send_job_output(parts[2], "partial_output")
         else:
             self._send_error(HTTPStatus.NOT_FOUND, "not found")
 
     def _handle_api_job(self, path: str) -> None:
         parts = path.strip("/").split("/")
         downloadable = {
-            "primary_output", "output_ai", "output_png",
+            "primary_output", "partial_output", "output_ai", "output_png",
             "output_bundle", "render_task",
         }
         if len(parts) == 3:
@@ -71,11 +74,12 @@ class LocalGatewayHttpMixin:
             self._send_error(HTTPStatus.NOT_FOUND, "not found")
 
     def _send_local_jobs(self) -> None:
-        self._send_json({"jobs": self.drawflow_client.jobs.list_recent(30)})
+        records = self.drawflow_client.jobs.list_recent(30)
+        self._send_json({"jobs": [_public_job(record) for record in records]})
 
     def _send_local_job(self, job_id: str) -> None:
         try:
-            self._send_json(self.drawflow_client.jobs.load(job_id))
+            self._send_json(_public_job(self.drawflow_client.jobs.load(job_id)))
         except KeyError:
             self._send_error(HTTPStatus.NOT_FOUND, "任务不存在")
 
@@ -198,3 +202,9 @@ class LocalGatewayHttpMixin:
         self._send_proxy_response(status, headers, body)
 
 __all__ = ["LocalGatewayHttpMixin"]
+
+
+def _public_job(record: dict[str, object]) -> dict[str, object]:
+    if record.get("job_type") == "multi_template_parent":
+        return public_multi_template_job(record)
+    return record

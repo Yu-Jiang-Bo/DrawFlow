@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import shutil
+import threading
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -25,10 +26,18 @@ from .multi_template_recovery_state import checkpoints, template_bindings
 class MultiTemplateRenderService:
     """Own the durable parent record; child dispatch remains separately testable."""
 
-    def __init__(self, *, preflight_runner: Any, jobs: JobStore, dispatcher: Any | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        preflight_runner: Any,
+        jobs: JobStore,
+        dispatcher: Any | None = None,
+        action_lock: threading.Lock | None = None,
+    ) -> None:
         self.preflight_runner = preflight_runner
         self.jobs = jobs
         self.dispatcher = dispatcher
+        self.action_lock = action_lock or threading.Lock()
         self._canary_persistence = MultiTemplateCanaryPersistence(
             jobs=jobs,
             load_parent=self._load_parent,
@@ -84,6 +93,10 @@ class MultiTemplateRenderService:
         )
 
     def execute(self, parent_job_id: str) -> dict[str, Any]:
+        with self._exclusive_action():
+            return self._execute(parent_job_id)
+
+    def _execute(self, parent_job_id: str) -> dict[str, Any]:
         record = self._load_parent(parent_job_id)
         if record.get("status") != "ready":
             raise MultiTemplateRenderError("该批次尚未通过预检，不能开始渲染。", code="multi_template_not_ready")
@@ -93,22 +106,26 @@ class MultiTemplateRenderService:
             raise MultiTemplateRenderError(str(exc), code="multi_template_checkpoint_busy") from exc
         if not preflight_snapshot_is_intact(record):
             return self._invalidate_preflight(record)
+        if self.dispatcher is not None:
+            return self.dispatcher.dispatch(record, persist_canary=self.record_canary_result)
         metadata = dict(record["multi_template"])
         metadata["execution_gate_checked"] = True
         record["multi_template"] = metadata
-        ready = self.jobs.update(
+        return self.jobs.update(
             record,
             progress={"current": 0, "total": len(metadata["template_checkpoints"]), "stage": "ready_for_dispatch"},
         )
-        if self.dispatcher is None:
-            return ready
-        return self.dispatcher.dispatch(ready, persist_canary=self.record_canary_result)
 
     def retry_failed(self, parent_job_id: str) -> dict[str, Any]:
-        return self._recovery.retry_failed(parent_job_id)
+        with self._exclusive_action():
+            return self._recovery.retry_failed(parent_job_id)
 
     def resume(self, parent_job_id: str) -> dict[str, Any]:
-        return self._recovery.resume(parent_job_id)
+        with self._exclusive_action():
+            return self._recovery.resume(parent_job_id)
+
+    def _exclusive_action(self):
+        return _MultiTemplateActionLease(self.action_lock)
 
     def record_canary_result(self, parent_job_id: str, result: Mapping[str, Any] | Any) -> dict[str, Any]:
         return self._canary_persistence.record(parent_job_id, result)
@@ -164,6 +181,20 @@ def _empty_metadata(sheet_name: str) -> dict[str, Any]:
         "child_jobs": {},
         "needs_repreflight": False,
     }
+
+
+class _MultiTemplateActionLease:
+    """Reject a competing parent mutation before it can overwrite state."""
+
+    def __init__(self, lock: threading.Lock) -> None:
+        self.lock = lock
+
+    def __enter__(self) -> None:
+        if not self.lock.acquire(blocking=False):
+            raise MultiTemplateRenderError("本机正在执行另一批多模板任务。", code="multi_template_render_busy")
+
+    def __exit__(self, exc_type, exc, traceback) -> None:
+        self.lock.release()
 
 
 def _copy_source_order(source: Path, job_dir: Path) -> Path:
