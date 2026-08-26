@@ -83,9 +83,24 @@
   document.addEventListener("DOMContentLoaded", initWorkbench);
 
   function initWorkbench() {
+    const requestedTemplateId = initialTemplateId();
     bindEvents();
     renderInitialState();
-    loadTemplates().catch((error) => showScanFailure(friendlyError(error, "模板列表加载失败，请稍后重试。")));
+    loadTemplates(requestedTemplateId)
+      .then((loaded) => {
+        if (loaded && requestedTemplateId && state.selectedTemplateId === requestedTemplateId) {
+          globalThis.setWorkbenchStage("structure");
+        }
+      })
+      .catch((error) => showScanFailure(friendlyError(error, "模板列表加载失败，请稍后重试。")));
+  }
+
+  function initialTemplateId() {
+    try {
+      return String(new URLSearchParams(window.location.search).get("template_id") || "").trim();
+    } catch (_) {
+      return "";
+    }
   }
 
   function bindEvents() {

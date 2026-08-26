@@ -104,10 +104,20 @@ def test_render_page_downloads_the_department_primary_delivery():
     assert "下载 PNG 成品" in INDEX_HTML
 
 
-def test_render_page_lists_v2_workbench_templates_without_legacy_actions():
+def test_render_page_lists_v2_workbench_templates_with_a_link_to_the_shared_configuration():
     assert 'v2_illustrator_template: "V2 工作台模板"' in INDEX_HTML
     assert "!isV2Template(template) && template.status" in INDEX_HTML
     assert "function isV2Template(template)" in INDEX_HTML
+    assert 'href="/v2/templates/workbench?template_id=${escapeHtml(encodeURIComponent(template.template_id))}"' in INDEX_HTML
+    assert "查看共享配置" in INDEX_HTML
+
+
+def test_v2_workbench_selects_the_shared_template_requested_by_the_management_page():
+    source = Path("src/service/static/v2-workbench/workbench.js").read_text(encoding="utf-8")
+
+    assert "loadTemplates(requestedTemplateId)" in source
+    assert 'new URLSearchParams(window.location.search).get("template_id")' in source
+    assert 'globalThis.setWorkbenchStage("structure")' in source
 
 
 def test_legacy_render_page_downloads_the_department_primary_delivery():

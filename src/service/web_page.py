@@ -1939,6 +1939,9 @@ INDEX_HTML = """<!doctype html>
           ${!isV2Template(template) && template.status !== "active" && template.rule_check && template.rule_check.renderable
             ? `<button class="btn-subtle" data-template-activate="${escapeHtml(template.template_id)}">启用出图</button>`
             : ""}
+          ${isV2Template(template)
+            ? `<a class="btn-secondary" href="/v2/templates/workbench?template_id=${escapeHtml(encodeURIComponent(template.template_id))}">查看共享配置</a>`
+            : ""}
           ${!isV2Template(template)
             ? `<button class="btn-secondary" data-template-remove="${escapeHtml(template.template_id)}">移除</button>`
             : ""}

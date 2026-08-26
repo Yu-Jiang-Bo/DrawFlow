@@ -7,10 +7,11 @@
     await refreshTemplateList();
     const id = preferredId || state.selectedTemplateId;
     if (id && state.templates.some((item) => templateIdOf(item) === id)) {
-      await selectTemplate(id);
+      return selectTemplate(id);
     } else if (!state.templates.length) {
       clearDraftView();
     }
+    return false;
   }
 
 
@@ -34,23 +35,25 @@
     setDisabled("templateId", Boolean(state.selectedTemplateId));
     fillDraftFields(null, templateId);
     if (typeof updateCheckRail === "function" && typeof defaultChecks === "function") updateCheckRail(defaultChecks());
-    if (!templateId) return;
+    if (!templateId) return false;
     renderTemplateList();
     setDraftStatus("读取草稿中", "pending");
     try {
       const payload = await getJson(`${API_ROOT}/${encodeURIComponent(templateId)}/draft`, "草稿读取失败，请确认模板是否已创建。");
-      if (draftLoadRequestId !== state.draftLoadRequestId || state.selectedTemplateId !== templateId) return;
+      if (draftLoadRequestId !== state.draftLoadRequestId || state.selectedTemplateId !== templateId) return false;
       state.draft = payload.draft || null;
       state.scan = normalizeScanFromDraft(state.draft);
       fillDraftFields(state.draft, templateId);
       renderAll();
+      return true;
     } catch (error) {
-      if (draftLoadRequestId !== state.draftLoadRequestId || state.selectedTemplateId !== templateId) return;
+      if (draftLoadRequestId !== state.draftLoadRequestId || state.selectedTemplateId !== templateId) return false;
       state.draft = null;
       state.scan = {};
       fillDraftFields(null, templateId);
       renderAll();
       showScanFailure(friendlyError(error, "草稿读取失败，请确认模板是否已创建。"));
+      return false;
     }
   }
 

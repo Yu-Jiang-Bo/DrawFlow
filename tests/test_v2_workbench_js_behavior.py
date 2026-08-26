@@ -1,5 +1,6 @@
 import subprocess
 import textwrap
+from pathlib import Path
 
 
 HARNESS = r"""
@@ -190,10 +191,11 @@ async function flush() {
   for (let index = 0; index < 8; index += 1) await Promise.resolve();
 }
 
-function createApp(fetchImpl, fileNames) {
+function createApp(fetchImpl, fileNames, locationSearch) {
   const { document, elements } = makeDocument();
   global.document = document;
   global.window = global;
+  global.window.location = { search: locationSearch || "" };
   global.FormData = FakeFormData;
   global.fetch = fetchImpl;
   (fileNames || [
@@ -230,10 +232,10 @@ function createApp(fetchImpl, fileNames) {
 """
 
 
-def run_node(script: str) -> None:
+def run_node(script: str, *, cwd: Path | None = None) -> None:
     completed = subprocess.run(
         ["node", "-e", HARNESS + "\n" + textwrap.dedent(script)],
-        cwd="C:/Users/Administrator/Desktop/image/custom-renderer-v2-template-workbench",
+        cwd=cwd or "C:/Users/Administrator/Desktop/image/custom-renderer-v2-template-workbench",
         text=True,
         encoding="utf-8",
         errors="replace",
@@ -281,6 +283,82 @@ def test_v2_workbench_renders_scan_structure_groups_from_draft():
           assert(app.elements.scanSummary.textContent.includes("固定对象 1"));
         })().catch((error) => { console.error(error); process.exit(1); });
         """
+    )
+
+
+def test_v2_workbench_opens_the_shared_template_requested_by_the_management_page():
+    run_node(
+        r"""
+        (async () => {
+          const requests = [];
+          const sharedDraft = {
+            metadata: { template_id: "SHARED001", name: "同事共享模板", shop_name: "Demo Shop" },
+            manifest: { draft_revision: "d0007" },
+            config: {
+              template: { template_id: "SHARED001" },
+              outputs: [{ key: "Output_main", display_name: "主效果图" }],
+              field_bindings: { slot_name: "Personalization" },
+              option_mappings: [],
+              checks: {}
+            },
+            scan: {
+              outputs: [{
+                key: "Output_main",
+                design: { options: [{ key: "Design01", slots: [{ key: "slot_name" }] }] },
+                font: { options: [] },
+                style: { options: [] }
+              }]
+            }
+          };
+          async function fakeFetch(url, options = {}) {
+            const textUrl = String(url);
+            requests.push({ url: textUrl, method: options.method || "GET" });
+            if (textUrl === "/api/v2/templates") {
+              return response({ templates: [{ template_id: "OTHER001", name: "其他模板" }, { template_id: "SHARED001", name: "同事共享模板" }] });
+            }
+            if (textUrl === "/api/v2/templates/SHARED001/draft") return response({ draft: sharedDraft });
+            if (textUrl.endsWith("/validate")) return response({ validation: { checks: {} } });
+            throw new Error(`unexpected request ${textUrl}`);
+          }
+          createApp(fakeFetch, undefined, "?template_id=SHARED001");
+          const state = global.DrawFlowV2WorkbenchContext.state;
+          for (let index = 0; index < 4 && state.stage !== "structure"; index += 1) await flush();
+          assert.strictEqual(state.selectedTemplateId, "SHARED001");
+          assert.strictEqual(state.stage, "structure");
+          assert.strictEqual(state.draft.config.field_bindings.slot_name, "Personalization");
+          assert.strictEqual(state.scan.outputs[0].design.options[0].key, "Design01");
+          assert(requests.some((item) => item.url === "/api/v2/templates/SHARED001/draft" && item.method === "GET"));
+        })().catch((error) => { console.error(error); process.exit(1); });
+        """,
+        cwd=Path(__file__).resolve().parents[1],
+    )
+
+
+def test_v2_workbench_keeps_the_upload_stage_when_the_shared_draft_cannot_be_read():
+    run_node(
+        r"""
+        (async () => {
+          let draftRequested = false;
+          async function fakeFetch(url) {
+            const textUrl = String(url);
+            if (textUrl === "/api/v2/templates") return response({ templates: [{ template_id: "SHARED001", name: "同事共享模板" }] });
+            if (textUrl === "/api/v2/templates/SHARED001/draft") {
+              draftRequested = true;
+              return response({ error: { message: "草稿不存在" } }, false);
+            }
+            throw new Error(`unexpected request ${textUrl}`);
+          }
+          const app = createApp(fakeFetch, undefined, "?template_id=SHARED001");
+          const state = global.DrawFlowV2WorkbenchContext.state;
+          for (let index = 0; index < 4 && !draftRequested; index += 1) await flush();
+          await flush();
+          assert.strictEqual(state.selectedTemplateId, "SHARED001");
+          assert.strictEqual(state.draft, null);
+          assert.strictEqual(state.stage, "upload");
+          assert(app.elements.scanFailedMessage.textContent.includes("草稿不存在"));
+        })().catch((error) => { console.error(error); process.exit(1); });
+        """,
+        cwd=Path(__file__).resolve().parents[1],
     )
 
 
