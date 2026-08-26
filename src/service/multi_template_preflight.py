@@ -7,7 +7,7 @@ from decimal import Decimal, InvalidOperation
 import hashlib
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any, Mapping
+from typing import Any, Collection, Mapping
 
 from .multi_template_group_workbooks import GroupWorkbookWriter
 from .multi_template_order import MultiTemplateIssue, MultiTemplateOrderBatch, MultiTemplateOrderParser, TemplateOrderGroup
@@ -98,9 +98,12 @@ class MultiTemplatePreflight:
         *,
         sheet_name: str = "",
         work_dir: Path | str,
+        template_ids: Collection[str] | None = None,
     ) -> MultiTemplatePreflightResult:
         source = Path(order_file)
         batch = self.parser.parse(source, sheet_name=sheet_name)
+        if template_ids is not None:
+            batch = _selected_batch(batch, template_ids)
         source_sha256 = _sha256_file(source)
         root = Path(work_dir).resolve()
         try:
@@ -360,6 +363,27 @@ def _sha256_file(path: Path | None) -> str:
 
 def _short_hash(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()[:12]
+
+
+def _selected_batch(batch: MultiTemplateOrderBatch, template_ids: Collection[str]) -> MultiTemplateOrderBatch:
+    """Keep the original parse result but preflight only a retry/resume subset."""
+    wanted = {str(template_id).strip() for template_id in template_ids if str(template_id).strip()}
+    groups = tuple(group for group in batch.groups if group.template_id in wanted)
+    rows = tuple(row for row in batch.rows if row.template_id in wanted)
+    issues = tuple(
+        issue
+        for issue in batch.issues
+        if not issue.template_id or issue.template_id in wanted
+    )
+    available = {group.template_id for group in groups}
+    for template_id in sorted(wanted - available):
+        issues += (MultiTemplateIssue(
+            "template_retry_group_missing",
+            "待恢复模板不再存在于订单表中，请重新创建批次。",
+            "请确认订单文件未变化后重新上传并预检。",
+            template_id,
+        ),)
+    return MultiTemplateOrderBatch(batch.sheet_name, batch.headers, rows, groups, issues)
 
 
 __all__ = ["MultiTemplateGroupPreflight", "MultiTemplatePreflight", "MultiTemplatePreflightResult"]

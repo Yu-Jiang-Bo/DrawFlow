@@ -94,6 +94,27 @@ def test_preflight_resolves_and_dry_runs_each_group_in_first_seen_order(tmp_path
         assert hashlib.sha256(Path(group.group_workbook).read_bytes()).hexdigest() == group.group_workbook_sha256
 
 
+def test_selected_preflight_only_resolves_and_writes_the_requested_recovery_group(tmp_path):
+    source = tmp_path / "orders.xlsx"
+    _write_orders(source, [("A-1", "TEMPLATE-A"), ("B-1", "TEMPLATE-B"), ("C-1", "TEMPLATE-C")])
+    resolver = FakeResolver(snapshots=(_snapshot("TEMPLATE-B"),))
+    adapter = FakeAdapter()
+
+    result = MultiTemplatePreflight(resolver=resolver, adapter=adapter).preflight(
+        source,
+        work_dir=tmp_path / "recovery",
+        template_ids=("TEMPLATE-B",),
+    )
+
+    assert result.status == "ready"
+    assert [group.template_id for group in result.groups] == ["TEMPLATE-B"]
+    assert resolver.calls[0][0] == ["TEMPLATE-B"]
+    assert [call[0] for call in adapter.calls] == ["TEMPLATE-B"]
+    group_dirs = [path for path in (tmp_path / "recovery" / "groups").iterdir() if path.is_dir()]
+    assert len(group_dirs) == 1
+    assert Path(result.groups[0].group_workbook).is_relative_to(group_dirs[0])
+
+
 def test_preflight_collects_parse_resolution_and_group_errors_without_rendering(tmp_path):
     source = tmp_path / "orders.xlsx"
     _write_orders(source, [

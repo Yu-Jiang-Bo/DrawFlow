@@ -16,8 +16,13 @@ def test_canary_results_are_persisted_into_template_checkpoints(tmp_path):
             "template_id": "TEMPLATE-A",
             "status": "canary_failed",
             "child_job_id": "canary-child-1",
+            "failure_scope": "template",
             "error_code": "template_config_invalid",
             "error_message": "模板配置异常",
+            "started_at": "2026-08-26T10:00:00+00:00",
+            "finished_at": "2026-08-26T10:01:00+00:00",
+            "representative": {"excel_row": 2, "order_no": "ORDER-A"},
+            "canary_workbook": "canary/TEMPLATE-A/orders.xlsx",
         }],
     }
 
@@ -28,6 +33,9 @@ def test_canary_results_are_persisted_into_template_checkpoints(tmp_path):
     assert updated["progress"]["stage"] == "canary_complete"
     assert checkpoint["status"] == "canary_failed"
     assert checkpoint["canary_child_job_id"] == "canary-child-1"
+    assert checkpoint["failure_scope"] == "template"
+    assert checkpoint["canary_error"] == {"code": "template_config_invalid", "message": "模板配置异常"}
+    assert checkpoint["canary_representative"] == {"excel_row": 2, "order_no": "ORDER-A"}
     assert store.load(record["job_id"])["multi_template"]["canary"]["groups"][0]["error_code"] == "template_config_invalid"
     persisted = store.load(record["job_id"])
     snapshot = persisted["multi_template"]["template_snapshots"][0]
@@ -52,10 +60,17 @@ def test_interrupted_canary_marks_parent_interrupted(tmp_path):
 
     updated = service.record_canary_result(record["job_id"], {
         "status": "interrupted",
-        "groups": [{"template_id": "TEMPLATE-A", "status": "interrupted"}],
+        "groups": [{
+            "template_id": "TEMPLATE-A",
+            "status": "interrupted",
+            "failure_scope": "system",
+            "error_code": "canary_runtime_unavailable",
+            "error_message": "Illustrator 不可用",
+        }],
         "error_code": "canary_runtime_unavailable",
         "error_message": "Illustrator 不可用",
     })
 
     assert (updated["status"], updated["error_code"]) == ("interrupted", "canary_runtime_unavailable")
     assert updated["multi_template"]["template_checkpoints"][0]["status"] == "interrupted"
+    assert updated["multi_template"]["template_checkpoints"][0]["canary_error"]["code"] == "canary_runtime_unavailable"

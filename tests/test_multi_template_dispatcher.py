@@ -15,7 +15,7 @@ from src.service.multi_template_dispatcher import MultiTemplateDispatchError, Mu
 from src.service.multi_template_group_workbooks import GroupWorkbookWriter
 from src.service.multi_template_order import MultiTemplateOrderParser
 from src.service.multi_template_preflight import MultiTemplateGroupPreflight, MultiTemplatePreflightResult
-from src.service.multi_template_render import MultiTemplateRenderService
+from src.service.multi_template_render import MultiTemplateRenderError, MultiTemplateRenderService
 from src.service.multi_template_snapshot import TemplateSnapshot
 from src.service.render_service import RenderServiceError
 from src.service.v2_order_render_support import V2OrderRenderError
@@ -67,10 +67,12 @@ class BatchPreflight:
 class PassingCanary:
     def __init__(self, outcomes: dict[str, str] | None = None) -> None:
         self.calls = 0
+        self.template_ids: list[tuple[str, ...]] = []
         self.outcomes = outcomes or {}
 
     def run(self, preflight, *, work_dir):
         self.calls += 1
+        self.template_ids.append(tuple(group.template_id for group in preflight.groups))
         groups = [{
             "template_id": group.template_id,
             "status": self.outcomes.get(group.template_id, "ready"),
@@ -327,6 +329,150 @@ def test_canary_failed_template_is_not_dispatched_but_later_templates_are(tmp_pa
     assert canary.calls == 1
     assert [template_id for template_id, _, _ in renderer.calls] == ["A", "C"]
     assert [item["status"] for item in result["multi_template"]["template_checkpoints"]] == ["succeeded", "canary_failed", "succeeded"]
+
+
+def test_retry_failed_renders_only_the_failed_template_with_a_new_canary(tmp_path):
+    source = tmp_path / "orders.xlsx"
+    _write_orders(source, ("A", "B", "C"))
+    service, canary, renderer = _service(tmp_path, {"B": "template"})
+    parent = service.preflight({"order_file": str(source), "sheet_name": "订单"})
+
+    first = service.execute(parent["job_id"])
+    renderer.outcomes["B"] = "completed"
+    recovered = service.retry_failed(parent["job_id"])
+
+    assert first["status"] == "completed_with_errors"
+    assert recovered["status"] == "completed"
+    assert canary.template_ids == [("A", "B", "C"), ("B",)]
+    assert [template_id for template_id, _, _ in renderer.calls] == ["A", "B", "C", "B"]
+    checkpoints = recovered["multi_template"]["template_checkpoints"]
+    assert [item["status"] for item in checkpoints] == ["succeeded", "succeeded", "succeeded"]
+    assert checkpoints[1]["attempt"] == 2
+    assert checkpoints[1]["retry_count"] == 1
+
+
+def test_resume_replays_the_interrupted_boundary_and_pending_ready_templates_only(tmp_path):
+    source = tmp_path / "orders.xlsx"
+    _write_orders(source, ("A", "B", "C"))
+    service, canary, renderer = _service(tmp_path, {"B": "system"})
+    parent = service.preflight({"order_file": str(source), "sheet_name": "订单"})
+
+    interrupted = service.execute(parent["job_id"])
+    renderer.outcomes["B"] = "completed"
+    resumed = service.resume(parent["job_id"])
+
+    assert interrupted["status"] == "interrupted"
+    assert resumed["status"] == "completed"
+    assert canary.template_ids == [("A", "B", "C"), ("B",)]
+    assert [template_id for template_id, _, _ in renderer.calls] == ["A", "B", "B", "C"]
+    assert [item["status"] for item in resumed["multi_template"]["template_checkpoints"]] == ["succeeded", "succeeded", "succeeded"]
+
+
+def test_resume_revalidates_ready_templates_before_formal_dispatch(tmp_path):
+    source = tmp_path / "orders.xlsx"
+    _write_orders(source, ("A", "B", "C"))
+    service, _, renderer = _service(tmp_path, {"B": "system"})
+    parent = service.preflight({"order_file": str(source), "sheet_name": "订单"})
+    service.execute(parent["job_id"])
+    renderer.outcomes["B"] = "completed"
+    persisted = service.jobs.load(parent["job_id"])
+    checkpoint_c = persisted["multi_template"]["template_checkpoints"][2]
+    Path(checkpoint_c["group_workbook"]).write_bytes(b"changed")
+
+    rejected = service.resume(parent["job_id"])
+
+    assert (rejected["status"], rejected["error_code"]) == ("preflight_failed", "multi_template_repreflight_required")
+    assert [template_id for template_id, _, _ in renderer.calls] == ["A", "B"]
+
+
+def test_resume_recovers_an_orphaned_running_checkpoint_after_process_restart(tmp_path):
+    source = tmp_path / "orders.xlsx"
+    _write_orders(source, ("A",))
+    service, _, renderer = _service(tmp_path)
+    parent = service.preflight({"order_file": str(source), "sheet_name": "订单"})
+    persisted = service.jobs.load(parent["job_id"])
+    persisted["status"] = "running"
+    persisted["multi_template"]["template_checkpoints"][0]["status"] = "running"
+    service.jobs.save(persisted)
+
+    resumed = service.resume(parent["job_id"])
+
+    assert resumed["status"] == "completed"
+    assert resumed["multi_template"]["recovered_orphaned_templates"] == ["A"]
+    assert [template_id for template_id, _, _ in renderer.calls] == ["A"]
+
+
+def test_resume_recovers_a_parent_interrupted_during_canary_after_process_restart(tmp_path):
+    source = tmp_path / "orders.xlsx"
+    _write_orders(source, ("A", "B"))
+    service, canary, renderer = _service(tmp_path)
+    parent = service.preflight({"order_file": str(source), "sheet_name": "订单"})
+    persisted = service.jobs.load(parent["job_id"])
+    persisted["status"] = "canary_running"
+    persisted["multi_template"]["template_checkpoints"][0]["status"] = "canary_running"
+    service.jobs.save(persisted)
+
+    resumed = service.resume(parent["job_id"])
+
+    assert resumed["status"] == "completed"
+    assert resumed["multi_template"]["recovered_orphaned_stage"] == "canary_running"
+    assert resumed["multi_template"]["recovered_orphaned_templates"] == ["A"]
+    assert canary.template_ids == [("A", "B")]
+    assert [template_id for template_id, _, _ in renderer.calls] == ["A", "B"]
+
+
+def test_resume_refuses_to_reselect_an_interrupted_parent_while_its_render_lock_is_held(tmp_path):
+    source = tmp_path / "orders.xlsx"
+    _write_orders(source, ("A", "B"))
+    lock = threading.Lock()
+    service, _, renderer = _service(tmp_path, {"A": "system"}, render_lock=lock)
+    parent = service.preflight({"order_file": str(source), "sheet_name": "订单"})
+    service.execute(parent["job_id"])
+    assert lock.acquire(blocking=False)
+
+    try:
+        with pytest.raises(MultiTemplateRenderError) as error:
+            service.resume(parent["job_id"])
+    finally:
+        lock.release()
+
+    persisted = service.jobs.load(parent["job_id"])
+    assert error.value.code == "multi_template_render_busy"
+    assert [item["status"] for item in persisted["multi_template"]["template_checkpoints"]] == ["failed", "ready"]
+    assert [template_id for template_id, _, _ in renderer.calls] == ["A"]
+
+
+def test_retry_and_resume_never_select_a_succeeded_checkpoint(tmp_path):
+    source = tmp_path / "orders.xlsx"
+    _write_orders(source, ("A",))
+    service, _, renderer = _service(tmp_path)
+    parent = service.preflight({"order_file": str(source), "sheet_name": "订单"})
+
+    completed = service.execute(parent["job_id"])
+    with pytest.raises(MultiTemplateRenderError) as retry_error:
+        service.retry_failed(parent["job_id"])
+    with pytest.raises(MultiTemplateRenderError) as resume_error:
+        service.resume(parent["job_id"])
+
+    assert completed["status"] == "completed"
+    assert retry_error.value.code == "multi_template_retry_not_available"
+    assert resume_error.value.code == "multi_template_resume_not_available"
+    assert [template_id for template_id, _, _ in renderer.calls] == ["A"]
+
+
+def test_retry_rejects_a_changed_parent_order_copy_before_reusing_successes(tmp_path):
+    source = tmp_path / "orders.xlsx"
+    _write_orders(source, ("A", "B"))
+    service, _, renderer = _service(tmp_path, {"B": "template"})
+    parent = service.preflight({"order_file": str(source), "sheet_name": "订单"})
+    service.execute(parent["job_id"])
+    calls_before_retry = list(renderer.calls)
+    (Path(parent["job_dir"]) / "input" / "orders.xlsx").write_bytes(b"changed")
+
+    rejected = service.retry_failed(parent["job_id"])
+
+    assert (rejected["status"], rejected["error_code"]) == ("preflight_failed", "multi_template_repreflight_required")
+    assert renderer.calls == calls_before_retry
 
 
 def test_dispatcher_rejects_a_child_output_outside_its_template_directory(tmp_path):

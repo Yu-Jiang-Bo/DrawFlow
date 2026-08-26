@@ -64,6 +64,11 @@ class MultiTemplateRenderDispatcher:
         finally:
             self.render_lock.release()
 
+    def is_busy(self) -> bool:
+        """Expose the shared Illustrator gate to recovery selection without acquiring it."""
+        locked = getattr(self.render_lock, "locked", None)
+        return bool(locked()) if callable(locked) else False
+
     def _dispatch_locked(
         self,
         record: dict[str, Any],
@@ -72,8 +77,14 @@ class MultiTemplateRenderDispatcher:
     ) -> dict[str, Any]:
         metadata = dict(record.get("multi_template") or {})
         preflight = _preflight_from_metadata(metadata)
-        if not metadata.get("canary"):
-            canary = self.canary_renderer.run(preflight, work_dir=Path(record["job_dir"]))
+        canary_preflight = _pending_canary_preflight(record, preflight)
+        if canary_preflight is not None:
+            record = self._update(
+                record,
+                status="canary_running",
+                progress={"current": _finished_count(metadata), "total": len(preflight.groups), "stage": "canary_running"},
+            )
+            canary = self.canary_renderer.run(canary_preflight, work_dir=Path(record["job_dir"]))
             try:
                 record = persist_canary(str(record["job_id"]), canary)
             except OSError as exc:
@@ -100,7 +111,7 @@ class MultiTemplateRenderDispatcher:
             started = time.monotonic()
             record = self._save_checkpoint(record, summary.template_id, status="running", attempt=_attempt(checkpoint) + 1, started_at=utc_now())
             try:
-                child_dir = _child_dir(record, summary.template_id)
+                child_dir = _child_dir(record, summary.template_id, _attempt(checkpoint) + 1)
                 child = self.group_renderer.render_group(
                     group,
                     snapshot,
@@ -290,9 +301,45 @@ def _checkpoint(record: Mapping[str, Any], template_id: str) -> Mapping[str, Any
     return None
 
 
-def _child_dir(record: Mapping[str, Any], template_id: str) -> Path:
+def _child_dir(record: Mapping[str, Any], template_id: str, attempt: int) -> Path:
     digest = hashlib.sha256(template_id.encode("utf-8")).hexdigest()[:12]
-    return Path(str(record["job_dir"])) / "children" / digest
+    return Path(str(record["job_dir"])) / "children" / digest / f"attempt-{max(attempt, 1)}"
+
+
+def _pending_canary_preflight(
+    record: Mapping[str, Any],
+    preflight: MultiTemplatePreflightResult,
+) -> MultiTemplatePreflightResult | None:
+    pending = {
+        str(item.get("template_id") or "")
+        for item in dict(record.get("multi_template") or {}).get("template_checkpoints") or []
+        if isinstance(item, Mapping) and str(item.get("status") or "") == "pending"
+    }
+    if not pending:
+        return None
+    groups = tuple(group for group in preflight.groups if group.template_id in pending)
+    if not groups:
+        raise MultiTemplateDispatchError("待试渲染模板与预检快照不一致。", code="multi_template_canary_pending_invalid")
+    template_ids = {group.template_id for group in groups}
+    batch_groups = tuple(group for group in preflight.order_batch.groups if group.template_id in template_ids)
+    batch_rows = tuple(row for row in preflight.order_batch.rows if row.template_id in template_ids)
+    batch = MultiTemplateOrderBatch(
+        preflight.order_batch.sheet_name,
+        preflight.order_batch.headers,
+        batch_rows,
+        batch_groups,
+        (),
+    )
+    snapshots = tuple(snapshot for snapshot in preflight.snapshots if snapshot.template_id in template_ids)
+    return MultiTemplatePreflightResult(
+        "ready",
+        preflight.source_order_sha256,
+        preflight.sheet_name,
+        batch,
+        snapshots,
+        groups,
+        (),
+    )
 
 
 def _primary_output(child: Mapping[str, Any]) -> str:

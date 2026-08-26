@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from pathlib import Path
 from typing import Any, Mapping
+import uuid
 
 from .multi_template_parent_binding import (
     binding_matches,
@@ -32,7 +34,18 @@ def write_preflight_baseline(job_dir: Path, preflight: Mapping[str, Any]) -> tup
     """Write an immutable-on-resume baseline separate from the parent record."""
     target = job_dir / "preflight" / "preflight.json"
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(json.dumps(preflight, ensure_ascii=False, sort_keys=True, indent=2), encoding="utf-8")
+    temporary = target.with_name(f".{target.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        with temporary.open("w", encoding="utf-8") as destination:
+            destination.write(json.dumps(preflight, ensure_ascii=False, sort_keys=True, indent=2))
+            destination.flush()
+            os.fsync(destination.fileno())
+        os.replace(temporary, target)
+    finally:
+        try:
+            temporary.unlink()
+        except FileNotFoundError:
+            pass
     return target.relative_to(job_dir).as_posix(), sha256_file(target)
 
 
@@ -41,9 +54,10 @@ def preflight_snapshot_is_intact(record: Mapping[str, Any]) -> bool:
     if not isinstance(metadata, Mapping) or metadata.get("needs_repreflight"):
         return False
     job_dir = Path(str(record.get("job_dir") or "")).resolve()
-    source = job_relative_file(job_dir, metadata.get("source_order_file"))
-    if source is None or sha256_file(source) != str(metadata.get("source_order_sha256") or ""):
+    if not source_order_is_intact(record):
         return False
+    source = job_relative_file(job_dir, metadata.get("source_order_file"))
+    assert source is not None
     preflight = metadata.get("preflight")
     baseline = _preflight_baseline(job_dir, metadata)
     if (
@@ -69,8 +83,7 @@ def preflight_snapshot_is_intact(record: Mapping[str, Any]) -> bool:
     if not isinstance(order_batch, Mapping):
         return False
     source_batch = source_order_batch(source, str(metadata.get("sheet_name") or ""))
-    if not isinstance(source_batch, Mapping) or source_batch != order_batch:
-        return False
+    assert isinstance(source_batch, Mapping)
     stored_order_groups = by_template_id(order_batch.get("groups"))
     source_groups = source_order_groups(source, str(metadata.get("sheet_name") or ""))
     if any(item is None for item in (
@@ -127,6 +140,22 @@ def preflight_snapshot_is_intact(record: Mapping[str, Any]) -> bool:
         if not snapshot_is_complete(snapshot):
             return False
     return True
+
+
+def source_order_is_intact(record: Mapping[str, Any]) -> bool:
+    """Validate the immutable uploaded order copy without requiring old snapshots."""
+    metadata = record.get("multi_template")
+    if not isinstance(metadata, Mapping):
+        return False
+    job_dir = Path(str(record.get("job_dir") or "")).resolve()
+    source = job_relative_file(job_dir, metadata.get("source_order_file"))
+    if source is None or sha256_file(source) != str(metadata.get("source_order_sha256") or ""):
+        return False
+    preflight = metadata.get("preflight")
+    if not isinstance(preflight, Mapping):
+        return False
+    source_batch = source_order_batch(source, str(metadata.get("sheet_name") or ""))
+    return isinstance(source_batch, Mapping) and source_batch == preflight.get("order_batch")
 
 
 def snapshot_is_complete(snapshot: Mapping[str, Any]) -> bool:
@@ -250,6 +279,7 @@ __all__ = [
     "is_sha256",
     "preflight_snapshot_is_intact",
     "sha256_file",
+    "source_order_is_intact",
     "snapshot_with_file_hashes",
     "write_preflight_baseline",
 ]
