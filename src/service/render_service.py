@@ -822,7 +822,7 @@ class RenderService:
             },
         )
         script = Path(__file__).resolve().parents[2] / "scripts" / "illustrator" / "export_template_config.jsx"
-        IllustratorBridge(visible=visible).render(script, task_file)
+        _render_standalone_illustrator_task(visible, script, task_file)
 
     def _complete_202508_template_config(
         self,

@@ -119,12 +119,11 @@ class IllustratorBridge:
 
     def close(self, app: Any = None) -> None:
         target = app if app is not None else self._app
-        if target is None:
-            return
-        try:
-            target.Quit()
-        except Exception:
-            pass
+        if target is not None:
+            try:
+                target.Quit()
+            except Exception:
+                pass
         self._app = None
         if self._apartment is not None:
             self._apartment.__exit__(None, None, None)

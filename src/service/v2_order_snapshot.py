@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 from typing import Any, Mapping
 
 from .v2_order_render_support import V2OrderRenderError, central_v2_versions, sha256_file
@@ -51,6 +52,30 @@ def check_snapshot_file_hash(path: Path, expected: Any, label: str) -> None:
         )
 
 
+def require_fixed_snapshot(
+    *,
+    version: Any,
+    template_sha256: Any,
+    config_sha256: Any,
+    scan_sha256: Any,
+) -> dict[str, str]:
+    """Validate the private fixed-snapshot contract before it can render."""
+
+    fixed_version = str(version or "").strip()
+    hashes = {
+        "template_sha256": str(template_sha256 or "").strip().lower(),
+        "config_sha256": str(config_sha256 or "").strip().lower(),
+        "scan_sha256": str(scan_sha256 or "").strip().lower(),
+    }
+    if not fixed_version or any(not re.fullmatch(r"[0-9a-f]{64}", value) for value in hashes.values()):
+        raise V2OrderRenderError(
+            "预检模板快照不完整，请重新预检后再试。",
+            code="v2_template_snapshot_invalid",
+            failure_scope="template",
+        )
+    return {"version": fixed_version, **hashes}
+
+
 def failure_scope(exc: Exception) -> str:
     declared = str(getattr(exc, "failure_scope", "") or "")
     if declared in {"template", "system"}:
@@ -86,8 +111,9 @@ _TEMPLATE_FAILURE_CODES = frozenset({
     "v2_template_not_found",
     "v2_template_not_published",
     "v2_template_version_unavailable",
+    "v2_template_snapshot_invalid",
     "v2_output_missing",
 })
 
 
-__all__ = ["check_snapshot_file_hash", "failure_scope", "resolve_published_version"]
+__all__ = ["check_snapshot_file_hash", "failure_scope", "require_fixed_snapshot", "resolve_published_version"]

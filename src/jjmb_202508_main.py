@@ -10,8 +10,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Sequence
 
+from .export_template_config import render_template_config_task
 from .jjmb_order_parser import read_xlsx_rows, split_personalization, strip_list_marker
-from .renderer.illustrator_bridge import IllustratorBridge, IllustratorBridgeError
+from .renderer.illustrator_bridge import IllustratorBridgeError
 from .service.department_output import (
     ANNOTATION_COLOR,
     ANNOTATION_PRODUCT_NAME,
@@ -510,7 +511,13 @@ def export_template_config(template_ai: Path, output_json: Path, visible: bool) 
         },
     )
     script = Path(__file__).resolve().parents[1] / "scripts" / "illustrator" / "export_202508_config.jsx"
-    IllustratorBridge(visible=visible, fresh_instance=True, quit_after=True).render(script, task_file)
+    _render_export_config_task(visible, script, task_file)
+
+
+def _render_export_config_task(visible: bool, script: Path, task_file: Path) -> None:
+    """Compatibility wrapper for the shared config-export recovery runner."""
+
+    render_template_config_task(visible, script, task_file)
 
 
 def render_task(task_file: Path, visible: bool) -> None:

@@ -4,17 +4,19 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
-import hashlib
 from pathlib import Path
 from typing import Any, Callable, Mapping, Protocol
 
-from openpyxl import Workbook, load_workbook
-
+from .canary_workbook import (
+    CanaryWorkbookIntegrityError,
+    require_canary_workbook_snapshot,
+    sha256_file,
+    write_canary_workbook,
+)
 from .multi_template_canary import CanaryRepresentative, CanarySelectionError, RepresentativeOrderSelector
-from .multi_template_order import FAILURE_SCOPES, TEMPLATE_COLUMN, TemplateOrderGroup
+from .multi_template_order import FAILURE_SCOPES, TemplateOrderGroup
 from .multi_template_preflight import MultiTemplateGroupPreflight, MultiTemplatePreflightResult
 from .multi_template_snapshot import TemplateSnapshot
-from .v2_template_store_utils import safe_segment
 
 
 class CanaryRenderAdapter(Protocol):
@@ -125,14 +127,40 @@ class PerTemplateCanaryRenderer:
             started_at = _utc_now()
             try:
                 _require_group_sha256(summary, representative)
-                canary_workbook = _write_canary_workbook(preflight, group, representative, work_dir)
-                canary_group = TemplateOrderGroup(group.template_id, (_representative_row(group, representative),))
+                representative_row = _representative_row(group, representative)
+                canary_workbook = write_canary_workbook(
+                    work_dir=work_dir,
+                    sheet_name=preflight.sheet_name,
+                    headers=preflight.order_batch.headers,
+                    template_id=group.template_id,
+                    row_values=representative_row.raw_values,
+                )
+                canary_workbook_sha256 = sha256_file(canary_workbook)
+                require_canary_workbook_snapshot(
+                    canary_workbook,
+                    canary_workbook_sha256,
+                    preflight.sheet_name,
+                    preflight.order_batch.headers,
+                    group.template_id,
+                    representative_row.raw_values,
+                )
+                canary_group = TemplateOrderGroup(group.template_id, (representative_row,))
                 record = self.adapter.render_canary(
                     canary_group,
                     snapshot,
                     group_workbook=canary_workbook,
                     work_dir=canary_workbook.parent,
                 )
+                require_canary_workbook_snapshot(
+                    canary_workbook,
+                    canary_workbook_sha256,
+                    preflight.sheet_name,
+                    preflight.order_batch.headers,
+                    group.template_id,
+                    representative_row.raw_values,
+                )
+            except CanaryWorkbookIntegrityError:
+                return _interrupted(results, representative, snapshot, "canary_workbook_changed", started_at)
             except Exception:
                 return _interrupted(results, representative, snapshot, "canary_runtime_unavailable", started_at)
             finished_at = _utc_now()
@@ -173,44 +201,6 @@ class PerTemplateCanaryRenderer:
         return CanaryRunResult(status, tuple(results))
 
 
-def _write_canary_workbook(
-    preflight: MultiTemplatePreflightResult,
-    group: TemplateOrderGroup,
-    representative: CanaryRepresentative,
-    work_dir: Path | str,
-) -> Path:
-    row = _representative_row(group, representative)
-    if len(row.raw_values) != len(preflight.order_batch.headers):
-        raise ValueError("canary row values are incomplete")
-    safe_id = safe_segment(group.template_id)
-    if safe_id != group.template_id:
-        raise ValueError("canary template id is unsafe")
-    output = Path(work_dir).resolve() / "canary" / safe_id / "orders.xlsx"
-    output.parent.mkdir(parents=True, exist_ok=True)
-    workbook = Workbook()
-    try:
-        sheet = workbook.active
-        sheet.title = preflight.sheet_name
-        sheet.append(list(preflight.order_batch.headers))
-        sheet.append(list(row.raw_values))
-        workbook.save(output)
-    finally:
-        workbook.close()
-    _verify_canary_workbook(output, preflight.sheet_name, preflight.order_batch.headers, group.template_id)
-    return output
-
-
-def _verify_canary_workbook(path: Path, sheet_name: str, headers: tuple[str, ...], template_id: str) -> None:
-    workbook = load_workbook(path, read_only=True, data_only=True)
-    try:
-        rows = list(workbook[sheet_name].iter_rows(values_only=True))
-    finally:
-        workbook.close()
-    template_index = headers.index(TEMPLATE_COLUMN)
-    if len(rows) != 2 or str(rows[1][template_index] or "").strip() != template_id:
-        raise RuntimeError("canary workbook verification failed")
-
-
 def _representative_row(group: TemplateOrderGroup, representative: CanaryRepresentative):
     for row in group.rows:
         if row.excel_row == representative.excel_row and row.order_no == representative.order_no:
@@ -220,17 +210,9 @@ def _representative_row(group: TemplateOrderGroup, representative: CanaryReprese
 
 def _require_group_sha256(summary: MultiTemplateGroupPreflight, representative: CanaryRepresentative) -> None:
     path = Path(summary.group_workbook)
-    digest = _sha256_file(path)
+    digest = sha256_file(path)
     if not digest or digest != representative.group_workbook_sha256:
         raise RuntimeError("group workbook changed after preflight")
-
-
-def _sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as source:
-        for chunk in iter(lambda: source.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 def _failure_scope(record: Mapping[str, Any]) -> str:

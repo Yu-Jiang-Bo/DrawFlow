@@ -4,9 +4,15 @@ from __future__ import annotations
 
 import argparse
 import json
+import time
 from pathlib import Path
 
-from .renderer.illustrator_bridge import IllustratorBridge
+from .renderer.illustrator_bridge import (
+    IllustratorBridge,
+    IllustratorBridgeError,
+    RETRYABLE_COM_HRESULTS,
+    format_com_recovery_message,
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -40,9 +46,33 @@ def main() -> int:
     )
 
     script = Path(__file__).resolve().parents[1] / "scripts" / "illustrator" / "export_template_config.jsx"
-    IllustratorBridge(visible=args.visible).render(script, task_file)
+    render_template_config_task(args.visible, script, task_file)
     print(output_json)
     return 0
+
+
+def render_template_config_task(visible: bool, script: Path, task_file: Path) -> None:
+    """Run a one-off config export under the formal COM recovery policy."""
+
+    bridge = IllustratorBridge(visible=visible, fresh_instance=True, reuse_instance=True)
+    try:
+        for attempt in range(3):
+            try:
+                bridge.render(script, task_file)
+                return
+            except IllustratorBridgeError as exc:
+                retryable = any(code in str(exc) for code in RETRYABLE_COM_HRESULTS)
+                if not retryable or attempt == 2:
+                    if retryable:
+                        raise IllustratorBridgeError(
+                            format_com_recovery_message(exc, retries=attempt),
+                            failure_scope="system",
+                        ) from exc
+                    raise
+                bridge.reset()
+                time.sleep(3.0)
+    finally:
+        bridge.close()
 
 
 if __name__ == "__main__":

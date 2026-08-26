@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from src import export_template_config, jjmb_202508_main
 from src.renderer.illustrator_bridge import IllustratorBridgeError, RETRYABLE_COM_HRESULTS
 from src.service import production_batch, render_service
 from src.service import single_template_render_adapter as adapter_module
@@ -88,6 +89,8 @@ def test_v2_canary_hides_delivery_outputs_before_completed_job_is_saved(tmp_path
         {"template_id": "V2ORDER001", "order_file": str(order_file)},
         version="v0001",
         template_sha256="a" * 64,
+        config_sha256="b" * 64,
+        scan_sha256="c" * 64,
         suppress_delivery_outputs=True,
     )
 
@@ -171,6 +174,66 @@ def test_standalone_formal_renderer_marks_exhausted_hresult_as_system(tmp_path, 
 
     assert caught.value.failure_scope == "system"
     assert (bridge.render_calls, bridge.reset_calls, bridge.close_calls) == (render_service.GENERIC_RULE_COM_RETRY_ATTEMPTS, 2, 1)
+
+
+@pytest.mark.parametrize("hresult", RETRYABLE_COM_HRESULTS)
+def test_202508_config_export_retries_every_declared_com_hresult(tmp_path, monkeypatch, hresult):
+    bridge = RetryOnceBridge(hresult)
+    created = {}
+
+    def build_bridge(**kwargs):
+        created.update(kwargs)
+        return bridge
+
+    monkeypatch.setattr(export_template_config, "IllustratorBridge", build_bridge)
+    monkeypatch.setattr(export_template_config.time, "sleep", lambda seconds: None)
+
+    export_template_config.render_template_config_task(False, tmp_path / "render.jsx", tmp_path / "task.json")
+
+    assert created == {"visible": False, "fresh_instance": True, "reuse_instance": True}
+    assert (bridge.render_calls, bridge.reset_calls, bridge.close_calls) == (2, 1, 1)
+
+
+@pytest.mark.parametrize("hresult", RETRYABLE_COM_HRESULTS)
+def test_202508_config_export_marks_exhausted_hresult_as_system(tmp_path, monkeypatch, hresult):
+    bridge = AlwaysFailBridge(hresult)
+    monkeypatch.setattr(export_template_config, "IllustratorBridge", lambda **kwargs: bridge)
+    monkeypatch.setattr(export_template_config.time, "sleep", lambda seconds: None)
+
+    with pytest.raises(IllustratorBridgeError) as caught:
+        export_template_config.render_template_config_task(False, tmp_path / "render.jsx", tmp_path / "task.json")
+
+    assert caught.value.failure_scope == "system"
+    assert (bridge.render_calls, bridge.reset_calls, bridge.close_calls) == (3, 2, 1)
+
+
+def test_202508_export_uses_the_shared_config_recovery_runner(tmp_path, monkeypatch):
+    captured = {}
+    monkeypatch.setattr(
+        jjmb_202508_main,
+        "render_template_config_task",
+        lambda visible, script, task_file: captured.update(visible=visible, script=script, task_file=task_file),
+    )
+
+    jjmb_202508_main._render_export_config_task(False, tmp_path / "render.jsx", tmp_path / "task.json")
+
+    assert captured["visible"] is False
+    assert captured["task_file"].name == "task.json"
+
+
+def test_generic_config_export_uses_standalone_com_recovery(tmp_path, monkeypatch):
+    captured = {}
+    service = RenderService()
+    monkeypatch.setattr(
+        render_service,
+        "_render_standalone_illustrator_task",
+        lambda visible, script, task_file: captured.update(visible=visible, script=script, task_file=task_file),
+    )
+
+    service._export_generic_template_config(tmp_path / "template.ai", "GENERIC001", tmp_path / "config.json", False)
+
+    assert captured["visible"] is False
+    assert captured["task_file"].name == "export-template-config-task.json"
 
 
 class RetryOnceBridge:

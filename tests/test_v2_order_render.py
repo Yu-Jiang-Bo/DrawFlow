@@ -286,9 +286,35 @@ def test_v2_fixed_snapshot_rejects_a_bundle_with_another_version(tmp_path):
         {"template_id": "V2ORDER001", "order_file": str(order_path), "dry_run": True},
         version="v0001",
         template_sha256=_sha256(b"template-ai"),
+        config_sha256="a" * 64,
+        scan_sha256="b" * 64,
     )
 
     assert (record["status"], record["error_code"]) == ("failed", "v2_template_version_unavailable")
+
+
+@pytest.mark.parametrize("field", ("version", "template_sha256", "config_sha256", "scan_sha256"))
+def test_v2_fixed_snapshot_rejects_missing_fixed_snapshot_fields(tmp_path, field):
+    bundle_path = tmp_path / "published.zip"
+    _bundle(bundle_path, "V2ORDER001", b"template-ai")
+    order_path = tmp_path / "order.xlsx"
+    _write_order(order_path)
+    snapshot = {
+        "version": "v0001",
+        "template_sha256": _sha256(b"template-ai"),
+        "config_sha256": "a" * 64,
+        "scan_sha256": "b" * 64,
+    }
+    snapshot[field] = ""
+    service = v2_order_render.V2OrderRenderService(V2PublishedCentral(bundle_path), tmp_path / "local", CapturingRenderer(), [])
+
+    with pytest.raises(v2_order_render.V2OrderRenderError) as caught:
+        service.render_fixed_snapshot(
+            {"template_id": "V2ORDER001", "order_file": str(order_path), "dry_run": True},
+            **snapshot,
+        )
+
+    assert caught.value.code == "v2_template_snapshot_invalid"
 
 
 def test_v2_fixed_snapshot_rejects_changed_config_or_scan(tmp_path):

@@ -27,7 +27,12 @@ from .v2_order_render_support import (
     to_bool,
     write_json,
 )
-from .v2_order_snapshot import check_snapshot_file_hash, failure_scope as v2_failure_scope, resolve_published_version
+from .v2_order_snapshot import (
+    check_snapshot_file_hash,
+    failure_scope as v2_failure_scope,
+    require_fixed_snapshot,
+    resolve_published_version,
+)
 from .v2_template_validation import validate_v2_template_configuration
 from .v2_trial_render_support import (
     current_template_asset,
@@ -66,12 +71,18 @@ class V2OrderRenderService:
         suppress_delivery_outputs: bool = False,
     ) -> dict[str, Any]:
         """Internal multi-template entry point; fixed fields are never HTTP payload data."""
+        fixed_snapshot = require_fixed_snapshot(
+            version=version,
+            template_sha256=template_sha256,
+            config_sha256=config_sha256,
+            scan_sha256=scan_sha256,
+        )
         return self._render(
             payload,
-            fixed_version=str(version or "").strip(),
-            fixed_template_sha256=str(template_sha256 or "").strip().lower(),
-            fixed_config_sha256=str(config_sha256 or "").strip().lower(),
-            fixed_scan_sha256=str(scan_sha256 or "").strip().lower(),
+            fixed_version=fixed_snapshot["version"],
+            fixed_template_sha256=fixed_snapshot["template_sha256"],
+            fixed_config_sha256=fixed_snapshot["config_sha256"],
+            fixed_scan_sha256=fixed_snapshot["scan_sha256"],
             include_preflight_metrics=True,
             suppress_delivery_outputs=suppress_delivery_outputs,
         )

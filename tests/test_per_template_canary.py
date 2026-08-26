@@ -76,6 +76,17 @@ class FakeAdapter:
         }
 
 
+class WorkbookMutatingAdapter(FakeAdapter):
+    def render_canary(self, group, snapshot, *, group_workbook, work_dir):
+        workbook = load_workbook(group_workbook)
+        try:
+            workbook["订单"].cell(row=2, column=2).value = "B"
+            workbook.save(group_workbook)
+        finally:
+            workbook.close()
+        return super().render_canary(group, snapshot, group_workbook=group_workbook, work_dir=work_dir)
+
+
 def test_template_canary_failure_does_not_prevent_later_templates(tmp_path):
     adapter = FakeAdapter({
         "A": {"status": "failed", "failure_scope": "template", "error_code": "render_failed"},
@@ -137,6 +148,18 @@ def test_changed_group_workbook_stops_before_starting_a_canary(tmp_path):
     assert result.status == "interrupted"
     assert adapter.calls == []
     assert result.groups[0].failure_scope == "system"
+
+
+def test_changed_canary_workbook_is_not_marked_ready(tmp_path):
+    adapter = WorkbookMutatingAdapter()
+
+    result = PerTemplateCanaryRenderer(adapter=adapter).run(_preflight(tmp_path, ("A", "B")), work_dir=tmp_path / "parent")
+
+    assert result.status == "interrupted"
+    assert [(group.template_id, group.status, group.error_code) for group in result.groups] == [
+        ("A", "interrupted", "canary_workbook_changed"),
+    ]
+    assert [call[0] for call in adapter.calls] == ["A"]
 
 
 def test_canary_refuses_to_run_from_a_failed_static_preflight(tmp_path):

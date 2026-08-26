@@ -178,3 +178,24 @@ def test_bridge_does_not_retry_jsx_business_error(tmp_path, monkeypatch):
         IllustratorBridge().render(script, task)
 
     assert app.calls == 1
+
+
+def test_reusable_bridge_closes_com_apartment_when_proxy_was_never_created(monkeypatch):
+    events = []
+
+    class TrackingApartment:
+        def __enter__(self):
+            events.append("enter")
+            return self
+
+        def __exit__(self, *_args):
+            events.append("exit")
+
+    monkeypatch.setattr(illustrator_bridge, "ComApartment", TrackingApartment)
+    bridge = IllustratorBridge(reuse_instance=True)
+
+    bridge._ensure_apartment()
+    bridge.close()
+
+    assert events == ["enter", "exit"]
+    assert bridge._apartment is None
