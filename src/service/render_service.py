@@ -22,7 +22,8 @@ from ..jjmb_202509_curved_main import (
     read_xlsx_rows as read_202509_curved_rows,
 )
 from ..jjmb_config_grouped_main import build_grouped_task
-from ..renderer.illustrator_bridge import IllustratorBridge, IllustratorBridgeError, format_com_recovery_message
+from ..renderer.illustrator_bridge import IllustratorBridge, IllustratorBridgeError, RETRYABLE_COM_HRESULTS, format_com_recovery_message
+from .canary_diagnostics import suppress_delivery_outputs as suppress_canary_delivery_outputs
 from .job_store import JobStore
 from .font_style_rules import font_style_by_option
 from .department_output import (
@@ -80,7 +81,12 @@ class RenderService:
         self.registry = registry or TemplateRegistry()
         self.jobs = jobs or JobStore()
 
-    def submit(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+    def submit(
+        self,
+        payload: Dict[str, Any],
+        *,
+        suppress_delivery_outputs: bool = False,
+    ) -> Dict[str, Any]:
         request = self._normalize_request(payload)
         record = self.jobs.create(request)
         try:
@@ -103,10 +109,18 @@ class RenderService:
                 raise RenderServiceError(f"不支持的渲染 pipeline: {template.pipeline}", code="template_pipeline_invalid")
             record["outputs"] = result["outputs"]
             record["stats"] = result["stats"]
+            if suppress_delivery_outputs:
+                suppress_canary_delivery_outputs(record)
             self.jobs.update(record, status="completed")
         except Exception as exc:
             self._merge_live_progress(record)
-            self.jobs.update(record, status="failed", error=str(exc), error_code=render_error_code(exc))
+            self.jobs.update(
+                record,
+                status="failed",
+                error=str(exc),
+                error_code=render_error_code(exc),
+                failure_scope=render_failure_scope(exc),
+            )
         return record
 
     def _normalize_request(self, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -649,7 +663,7 @@ class RenderService:
 
         if not request["dry_run"]:
             script = Path(__file__).resolve().parents[2] / "scripts" / "illustrator" / "render_config_grouped_text_sheet.jsx"
-            IllustratorBridge(visible=request["visible"]).render(script, task_file)
+            _render_standalone_illustrator_task(request["visible"], script, task_file)
         self._update_progress(record, total_items, total_items, "完成收尾")
 
         return {
@@ -767,7 +781,7 @@ class RenderService:
 
         if not request["dry_run"]:
             script = Path(__file__).resolve().parents[2] / "scripts" / "illustrator" / "render_202509_curved.jsx"
-            IllustratorBridge(visible=request["visible"]).render(script, task_file)
+            _render_standalone_illustrator_task(request["visible"], script, task_file)
         self._update_progress(record, total_items, total_items, "完成收尾")
 
         return {
@@ -1540,10 +1554,23 @@ def _render_generic_chunk(bridge: IllustratorBridge, script: Path, task_file: Pa
         except IllustratorBridgeError as exc:
             if attempt + 1 >= GENERIC_RULE_COM_RETRY_ATTEMPTS or not _is_retryable_com_failure(exc):
                 if _is_retryable_com_failure(exc):
-                    raise IllustratorBridgeError(format_com_recovery_message(exc, retries=attempt)) from exc
+                    raise IllustratorBridgeError(
+                        format_com_recovery_message(exc, retries=attempt),
+                        failure_scope="system",
+                    ) from exc
                 raise
             bridge.reset()
             time.sleep(GENERIC_RULE_COM_RETRY_DELAY_SECONDS)
+
+
+def _render_standalone_illustrator_task(visible: bool, script: Path, task_file: Path) -> None:
+    """Render a one-off formal task through the same reset/retry gate as chunks."""
+
+    bridge = IllustratorBridge(visible=visible, fresh_instance=True, reuse_instance=True)
+    try:
+        _render_generic_chunk(bridge, script, task_file)
+    finally:
+        bridge.close()
 
 
 def render_error_code(exc: Exception) -> str:
@@ -1556,8 +1583,23 @@ def render_error_code(exc: Exception) -> str:
     return "render_failed"
 
 
+def render_failure_scope(exc: Exception) -> str:
+    declared = str(getattr(exc, "failure_scope", "") or "")
+    if declared in {"template", "system"}:
+        return declared
+    if isinstance(exc, OSError):
+        return "system"
+    if isinstance(exc, IllustratorBridgeError):
+        if any(code in str(exc) for code in RETRYABLE_COM_HRESULTS):
+            return "system"
+        return "template"
+    if isinstance(exc, (RenderServiceError, KeyError, IndexError, UnicodeDecodeError, ValueError)):
+        return "template"
+    return "system"
+
+
 def _is_retryable_com_failure(exc: IllustratorBridgeError) -> bool:
-    return "-2147417851" in str(exc) or "-2147023170" in str(exc)
+    return any(code in str(exc) for code in RETRYABLE_COM_HRESULTS)
 
 
 def _read_progress(path: Path) -> Dict[str, Any]:

@@ -145,6 +145,7 @@ def test_v2_public_pipeline_maps_bridge_failures_to_safe_render_error(monkeypatc
         )
 
     assert exc_info.value.code == "v2_order_render_failed"
+    assert exc_info.value.failure_scope == "system"
     assert "HRESULT -2146959355" in exc_info.value.technical_message
 
 

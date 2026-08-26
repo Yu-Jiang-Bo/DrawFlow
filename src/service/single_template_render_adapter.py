@@ -8,12 +8,14 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from .job_store import JobStore
+from .canary_diagnostics import suppress_delivery_outputs
 from .multi_template_order import TemplateOrderGroup
 from .multi_template_plan_metrics import PlanMetricsError, planned_row_metrics
 from .multi_template_snapshot import TemplateSnapshot
 from .render_service import RenderService
 from .template_registry import TemplateDefinition
 from .v2_order_render import V2OrderRenderService
+from .v2_order_render_support import V2OrderRenderError
 from .v2_template_boundary import V2_RENDER_PIPELINE
 from .v2_trial_render_support import missing_required_fonts
 
@@ -128,6 +130,63 @@ class SingleTemplateRenderAdapter:
             },
         )
 
+    def render_canary(
+        self,
+        group: TemplateOrderGroup,
+        snapshot: TemplateSnapshot,
+        *,
+        group_workbook: Path | str,
+        work_dir: Path | str,
+    ) -> dict[str, Any]:
+        """Render one isolated representative order through the production path.
+
+        The returned child job is explicitly diagnostic: its original delivery
+        paths are retained under ``canary_outputs`` for local troubleshooting,
+        while the ordinary delivery fields are removed before the job is saved.
+        """
+        source = Path(group_workbook)
+        target = Path(work_dir).resolve()
+        payload = {
+            "template_id": snapshot.template_id,
+            "order_file": str(source.resolve()),
+            "sheet_name": group.rows[0].sheet_name if group.rows else "",
+            "dry_run": False,
+            "visible": False,
+        }
+        if group.template_id != snapshot.template_id:
+            return _failed_render(payload, "template_snapshot_mismatch", "模板分组与预检快照不一致，请重新预检。")
+        if not source.is_file():
+            return _failed_render(payload, "canary_workbook_missing", "代表订单文件不存在，请重新预检。")
+        missing_fonts = missing_required_fonts(list(snapshot.required_fonts), self.font_dirs)
+        if missing_fonts:
+            return _failed_render(payload, "missing_required_fonts", "本机缺少模板字体：" + "、".join(missing_fonts))
+        jobs = JobStore(target / "jobs")
+        if snapshot.pipeline == V2_RENDER_PIPELINE:
+            try:
+                record = V2OrderRenderService(
+                    self.central,
+                    target,
+                    self.v2_renderer,
+                    self.font_dirs,
+                    jobs,
+                ).render_fixed_snapshot(
+                    payload,
+                    version=snapshot.version,
+                    template_sha256=snapshot.template_sha256,
+                    config_sha256=snapshot.config_sha256,
+                    scan_sha256=snapshot.scan_sha256,
+                    suppress_delivery_outputs=True,
+                )
+            except V2OrderRenderError as exc:
+                return _failed_render(payload, exc.code, str(exc), failure_scope=exc.failure_scope)
+        else:
+            record = RenderService(
+                registry=_SnapshotRegistry(_legacy_template(snapshot)),
+                jobs=jobs,
+            ).submit(payload, suppress_delivery_outputs=True)
+        _mark_diagnostic_canary(jobs, record)
+        return record
+
 
 class _SnapshotRegistry:
     def __init__(self, template: TemplateDefinition) -> None:
@@ -164,6 +223,31 @@ def _legacy_template(snapshot: TemplateSnapshot) -> TemplateDefinition:
 
 def _failed(template_id: str, code: str, message: str, *, request: dict[str, Any] | None = None) -> SingleTemplatePreflightResult:
     return SingleTemplatePreflightResult(template_id, False, request or {}, {}, code, message)
+
+
+def _failed_render(
+    request: dict[str, Any],
+    code: str,
+    message: str,
+    *,
+    failure_scope: str = "",
+) -> dict[str, Any]:
+    return {
+        "status": "failed",
+        "request": request,
+        "outputs": {},
+        "stats": {},
+        "error_code": code,
+        "error": message,
+        "failure_scope": failure_scope,
+        "canary": True,
+    }
+
+
+def _mark_diagnostic_canary(jobs: JobStore, record: dict[str, Any]) -> None:
+    suppress_delivery_outputs(record)
+    if record.get("job_id") and record.get("job_dir"):
+        jobs.save(record)
 
 
 def _business_error_message(code: str) -> str:

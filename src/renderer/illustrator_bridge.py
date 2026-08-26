@@ -16,6 +16,10 @@ RETRYABLE_COM_HRESULTS = ("-2147417851", "-2147023170", "-2146959355", "-2147467
 class IllustratorBridgeError(RuntimeError):
     """Raised when Illustrator cannot execute a render script."""
 
+    def __init__(self, message: str, *, failure_scope: str = "") -> None:
+        super().__init__(message)
+        self.failure_scope = failure_scope if failure_scope in {"template", "system"} else ""
+
 
 class IllustratorBridge:
     def __init__(
@@ -67,7 +71,7 @@ class IllustratorBridge:
                     result = app.DoJavaScript(bootstrap)
                     return str(result) if result else ""
                 except ImportError as exc:
-                    raise IllustratorBridgeError("缺少 pywin32，无法调用 Illustrator") from exc
+                    raise IllustratorBridgeError("缺少 pywin32，无法调用 Illustrator", failure_scope="system") from exc
                 except Exception as exc:
                     detail = _read_text(error_report)
                     if (
@@ -82,10 +86,16 @@ class IllustratorBridge:
                         time.sleep(COM_RETRY_DELAY_SECONDS)
                         continue
                     if detail:
-                        raise IllustratorBridgeError(f"Illustrator JSX failed: {exc}: {detail}") from exc
+                        raise IllustratorBridgeError(
+                            f"Illustrator JSX failed: {exc}: {detail}",
+                            failure_scope="template",
+                        ) from exc
                     if _is_retryable_com_failure(exc):
-                        raise IllustratorBridgeError(format_com_recovery_message(exc, retries=attempt)) from exc
-                    raise IllustratorBridgeError(f"执行 Illustrator JSX 失败: {exc}") from exc
+                        raise IllustratorBridgeError(
+                            format_com_recovery_message(exc, retries=attempt),
+                            failure_scope="system",
+                        ) from exc
+                    raise IllustratorBridgeError(f"执行 Illustrator JSX 失败: {exc}", failure_scope="template") from exc
 
         finally:
             if self.quit_after and not self.reuse_instance:

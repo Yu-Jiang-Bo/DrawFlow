@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
-from src.renderer.illustrator_bridge import IllustratorBridgeError
+from src.renderer.illustrator_bridge import IllustratorBridgeError, RETRYABLE_COM_HRESULTS
 from src.renderer.v2_template_renderer import (
     V2TemplateRendererError,
     build_v2_png_master_pages_task,
@@ -60,6 +60,17 @@ from .v2_trial_render_support import output_labels, read_warnings
 
 
 V2_PRODUCTION_BATCH_CHUNK_SIZE = 8
+
+
+def _output_failure_scope(exc: BaseException) -> str:
+    declared = str(getattr(exc, "failure_scope", "") or "")
+    if declared in {"template", "system"}:
+        return declared
+    if isinstance(exc, OSError):
+        return "system"
+    if isinstance(exc, IllustratorBridgeError) and any(code in str(exc) for code in RETRYABLE_COM_HRESULTS):
+        return "system"
+    return "template"
 
 
 def _v2_cross_department_single_order(unit: Any) -> bool:
@@ -163,6 +174,7 @@ class V2OrderOutputRenderer:
                 "Illustrator 未能完成生产出图，请确认 Illustrator 可以正常打开后重试。",
                 code="v2_order_render_failed",
                 technical_message=str(exc),
+                failure_scope=_output_failure_scope(exc),
             ) from exc
         result["outputs"]["compiled_render_task"] = str(task_file)
         result["outputs"]["output_manifest"] = str(manifest_path)
@@ -795,6 +807,7 @@ class V2OrderOutputRenderer:
                 "Illustrator 未能完成分页汇总图，请确认模板可以正常打开后重试。",
                 code="v2_order_render_failed",
                 technical_message=str(exc),
+                failure_scope=_output_failure_scope(exc),
             ) from exc
         task_files.append(str(task_file))
         for page_path in _numbered_master_paths(output_ai, page_count):
@@ -887,6 +900,7 @@ class V2OrderOutputRenderer:
                 "Illustrator 未能完成汇总图排版，请确认模板可以正常打开后重试。",
                 code="v2_order_render_failed",
                 technical_message=str(exc),
+                failure_scope=_output_failure_scope(exc),
             ) from exc
         task_files.append(str(task_file))
         require_output(output_ai, "AI 汇总图")
@@ -975,6 +989,7 @@ class V2OrderOutputRenderer:
                 "Illustrator 未能合并同订单效果图，请确认模板可以正常打开后重试。",
                 code="v2_order_render_failed",
                 technical_message=str(exc),
+                failure_scope=_output_failure_scope(exc),
             ) from exc
         task_files.append(str(compose_task))
         require_output(output_ai, "AI 成品")
@@ -1019,6 +1034,7 @@ class V2OrderOutputRenderer:
                 "Illustrator 未能完成出图，请确认模板可以正常打开后重试。",
                 code="v2_order_render_failed",
                 technical_message=str(exc),
+                failure_scope=_output_failure_scope(exc),
             ) from exc
         require_output(output_ai, "AI 成品")
         if preview_png is not None:

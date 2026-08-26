@@ -6,7 +6,12 @@ import time
 from pathlib import Path
 from typing import Callable, Iterable, Sequence
 
-from ..renderer.illustrator_bridge import IllustratorBridge, IllustratorBridgeError, format_com_recovery_message
+from ..renderer.illustrator_bridge import (
+    IllustratorBridge,
+    IllustratorBridgeError,
+    RETRYABLE_COM_HRESULTS,
+    format_com_recovery_message,
+)
 
 
 PRODUCTION_BATCH_COM_RETRY_ATTEMPTS = 3
@@ -55,14 +60,17 @@ def _render_production_batch_chunk(bridge: IllustratorBridge, script: Path, task
         except IllustratorBridgeError as exc:
             if attempt + 1 >= PRODUCTION_BATCH_COM_RETRY_ATTEMPTS or not _is_retryable_com_failure(exc):
                 if _is_retryable_com_failure(exc):
-                    raise IllustratorBridgeError(format_com_recovery_message(exc, retries=attempt)) from exc
+                    raise IllustratorBridgeError(
+                        format_com_recovery_message(exc, retries=attempt),
+                        failure_scope="system",
+                    ) from exc
                 raise
             bridge.reset()
             time.sleep(PRODUCTION_BATCH_COM_RETRY_DELAY_SECONDS)
 
 
 def _is_retryable_com_failure(exc: IllustratorBridgeError) -> bool:
-    return "-2147417851" in str(exc) or "-2147023170" in str(exc)
+    return any(code in str(exc) for code in RETRYABLE_COM_HRESULTS)
 
 
 __all__ = [

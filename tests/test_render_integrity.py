@@ -79,8 +79,8 @@ def test_curved_service_renders_formal_ai_without_preview_png(tmp_path, monkeypa
     calls = []
 
     class Bridge:
-        def __init__(self, visible=False):
-            pass
+        def __init__(self, visible=False, **kwargs):
+            self.created_with = {"visible": visible, **kwargs}
 
         def render(self, script, task_path):
             task = __import__("json").loads(Path(task_path).read_text(encoding="utf-8"))
@@ -89,6 +89,12 @@ def test_curved_service_renders_formal_ai_without_preview_png(tmp_path, monkeypa
             assert task["output"]["preview_dpi"] == 0
             Path(task["output_ai"]).parent.mkdir(parents=True, exist_ok=True)
             Path(task["output_ai"]).write_text("formal-ai", encoding="utf-8")
+
+        def reset(self):
+            raise AssertionError("successful render must not reset Illustrator")
+
+        def close(self):
+            return None
 
     monkeypatch.setattr(render_service_module, "IllustratorBridge", Bridge)
     monkeypatch.setattr(render_service_module, "read_202509_curved_rows", lambda *args, **kwargs: rows)

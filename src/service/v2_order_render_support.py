@@ -8,8 +8,6 @@ import zipfile
 from pathlib import Path, PurePosixPath
 from typing import Any, Mapping
 
-from src.jjmb_order_parser import read_xlsx_rows
-
 from .runtime_templates import sha256_file
 from .v2_render_task import V2_RENDERER_VERSION, V2RenderTaskError, compile_v2_render_task
 from .v2_template_store_utils import safe_segment
@@ -17,10 +15,18 @@ from .v2_trial_render_support import current_template_asset
 
 
 class V2OrderRenderError(RuntimeError):
-    def __init__(self, message: str, *, code: str, technical_message: str = "") -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: str,
+        technical_message: str = "",
+        failure_scope: str = "",
+    ) -> None:
         super().__init__(message)
         self.code = code
         self.technical_message = technical_message
+        self.failure_scope = failure_scope if failure_scope in {"template", "system"} else ""
 
 
 def safe_template_id(value: Any) -> str:
@@ -45,17 +51,9 @@ def central_v2_versions(central: Any, template_id: str) -> dict[str, Any]:
 
 
 def read_order_rows(request: Mapping[str, Any]) -> list[Mapping[str, Any]]:
-    try:
-        return read_xlsx_rows(
-            Path(str(request["order_file"])),
-            sheet_name=str(request.get("sheet_name") or "") or None,
-        )
-    except Exception as exc:
-        raise V2OrderRenderError(
-            "订单表格无法读取，请确认文件和工作表名称后重试。",
-            code="v2_order_file_unreadable",
-            technical_message=str(exc),
-        ) from exc
+    from .v2_order_io import read_order_rows as read_v2_order_rows
+
+    return read_v2_order_rows(request)
 
 
 def compile_task(

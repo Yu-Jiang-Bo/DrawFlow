@@ -13,6 +13,8 @@ from openpyxl import Workbook
 
 from src.renderer.illustrator_bridge import IllustratorBridgeError
 from src.service import v2_order_render
+from src.service import v2_order_io
+from src.service import v2_order_render_support
 from src.service.http_server import RenderRequestHandler
 from src.service.local_client import LocalClientError, LocalDrawFlowClient
 from src.service.template_registry import TemplateRegistry
@@ -417,9 +419,38 @@ def test_v2_order_render_logs_technical_message_without_exposing_it_to_jobs(tmp_
     job = client.jobs.list_recent(1)[0]
     assert job["status"] == "failed"
     assert job["error_code"] == "v2_order_render_failed"
+    assert job["failure_scope"] == "system"
     assert "technical_message" not in job
     assert len(logged_messages) == 1
     assert "HRESULT -2146959355" in logged_messages[0]
+
+
+def test_v2_download_disk_failure_is_saved_as_a_system_scope(tmp_path):
+    class DiskFullCentral(V2PublishedCentral):
+        def download_v2_version_bundle_to_file(self, template_id, version, target_path):
+            raise OSError("disk full")
+
+    bundle_path = tmp_path / "published.zip"
+    _bundle(bundle_path, "V2ORDER001", b"template-ai")
+    order_path = tmp_path / "order.xlsx"
+    _write_order(order_path, department="K")
+    client = LocalDrawFlowClient(DiskFullCentral(bundle_path), tmp_path / "local", v2_renderer=CapturingRenderer(), font_dirs=[])
+
+    with pytest.raises(LocalClientError) as exc_info:
+        client.render({"template_id": "V2ORDER001", "order_file": str(order_path)})
+
+    assert exc_info.value.code == "v2_template_version_unavailable"
+    job = client.jobs.list_recent(1)[0]
+    assert (job["status"], job["failure_scope"]) == ("failed", "system")
+
+
+def test_v2_order_file_disk_failure_is_a_system_scope(monkeypatch):
+    monkeypatch.setattr(v2_order_io, "read_xlsx_rows", lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("disk full")))
+
+    with pytest.raises(v2_order_render_support.V2OrderRenderError) as exc_info:
+        v2_order_render_support.read_order_rows({"order_file": "orders.xlsx"})
+
+    assert (exc_info.value.code, exc_info.value.failure_scope) == ("v2_order_file_unreadable", "system")
 
 
 def test_v2_order_stats_counts_orders_times_outputs_once():
