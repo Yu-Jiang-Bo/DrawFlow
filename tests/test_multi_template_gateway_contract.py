@@ -92,7 +92,7 @@ def test_multi_template_public_job_exposes_resumable_group_summary_without_text_
                 {"template_id": "D", "order_count": 1, "excel_rows": [6], "can_render": True},
             ]},
             "template_checkpoints": [
-                {"template_id": "A", "status": "succeeded", "attempt": 1, "elapsed_seconds": 2.25, "child_job_id": "child-A"},
+                {"template_id": "A", "status": "succeeded", "attempt": 1, "elapsed_seconds": 2.25, "child_job_id": "child-A", "canary_representative": {"excel_row": 2, "order_no": "ORDER-A", "group_workbook_sha256": "private"}},
                 {"template_id": "B", "status": "failed", "attempt": 2, "elapsed_seconds": 3.5, "failure_scope": "template", "error_code": "template_rules_invalid", "canary_child_job_id": "canary-B"},
                 {"template_id": "C", "status": "ready"},
                 {"template_id": "D", "status": "interrupted", "failure_scope": "system"},
@@ -125,6 +125,7 @@ def test_multi_template_public_job_exposes_resumable_group_summary_without_text_
         "child_job_id": "canary-B",
         "excel_rows": [3, 4],
     }]
+    assert response["template_summaries"][0]["canary_representative"] == {"excel_row": 2, "order_no": "ORDER-A"}
     assert response["child_jobs"] == [
         {"template_id": "A", "job_id": "child-A", "status": "succeeded", "attempt": 1, "kind": "formal"},
         {"template_id": "B", "job_id": "canary-B", "status": "pending", "attempt": 0, "kind": "canary"},

@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 
 from .web_page_multi_template import MULTI_TEMPLATE_RENDER_SCRIPT
+from .web_page_multi_template_view import MULTI_TEMPLATE_RENDER_VIEW_SCRIPT
 
 INDEX_HTML = """<!doctype html>
 <html lang="zh-CN">
@@ -954,6 +955,19 @@ INDEX_HTML = """<!doctype html>
             <div class="actions">
               <button class="btn-primary" id="renderBtn" title="解析订单并调用 Illustrator 生成 AI 效果图">生成效果图</button>
             </div>
+            <section class="rule-section" id="multiTemplateResultPanel" hidden>
+              <h3 class="rule-section-title">订单模板预检与批量执行</h3>
+              <p class="rule-section-note" id="multiTemplateResultSummary"></p>
+              <div class="message" id="multiTemplateIssueList"></div>
+              <div class="template-list" id="multiTemplateGroupList"></div>
+              <div class="actions" id="multiTemplateActions">
+                <button class="btn-primary" id="multiTemplateExecuteBtn" hidden>开始批量渲染</button>
+                <button class="btn-secondary" id="multiTemplateRetryBtn" hidden>重试失败模板</button>
+                <button class="btn-secondary" id="multiTemplateResumeBtn" hidden>继续未执行模板</button>
+                <button class="btn-secondary" id="multiTemplatePrimaryDownloadBtn" hidden>下载完整 ZIP</button>
+                <button class="btn-secondary" id="multiTemplatePartialDownloadBtn" hidden>下载已成功模板（批次不完整）</button>
+              </div>
+            </section>
           </div>
         </section>
       </div>
@@ -1424,7 +1438,9 @@ INDEX_HTML = """<!doctype html>
       pendingTemplateRemovalId: "",
       multiTemplateParentJobId: "",
       multiTemplatePreflight: null,
-      multiTemplateInputRevision: 0
+      multiTemplateInputRevision: 0,
+      multiTemplatePollTimer: null,
+      multiTemplatePollGeneration: 0
     };
     let progressMode = "render";
 
@@ -1512,6 +1528,11 @@ INDEX_HTML = """<!doctype html>
         }
         submitRender(false);
       });
+      document.getElementById("multiTemplateExecuteBtn").addEventListener("click", () => submitMultiTemplateAction("execute"));
+      document.getElementById("multiTemplateRetryBtn").addEventListener("click", () => submitMultiTemplateAction("retry-failed"));
+      document.getElementById("multiTemplateResumeBtn").addEventListener("click", () => submitMultiTemplateAction("resume"));
+      document.getElementById("multiTemplatePrimaryDownloadBtn").addEventListener("click", () => downloadMultiTemplateOutput("primary"));
+      document.getElementById("multiTemplatePartialDownloadBtn").addEventListener("click", () => downloadMultiTemplateOutput("partial"));
       document.getElementById("refreshJobsPageBtn").addEventListener("click", loadJobs);
       document.getElementById("closeRenderErrorBtn").addEventListener("click", hideRenderError);
       document.getElementById("cancelTemplateRemoveBtn").addEventListener("click", closeTemplateRemoveConfirm);
@@ -3617,12 +3638,14 @@ INDEX_HTML = """<!doctype html>
     function progressTitle(mode) {
       if (mode === "dryRun") return "正在解析订单";
       if (mode === "multiPreflight") return "正在检查订单模板";
+      if (mode === "multiRender") return "正在按模板批量渲染";
       return "正在生成效果图";
     }
 
     function progressSubtitle(mode) {
       if (mode === "dryRun") return "正在检查字段、分组和渲染任务";
       if (mode === "multiPreflight") return "正在读取“模板”列并检查全部模板配置";
+      if (mode === "multiRender") return "模板组会依次试渲染并按各自生产部门规则生成成品";
       return "Illustrator 正在生成 AI 文件，请不要关闭软件";
     }
 
@@ -3632,6 +3655,9 @@ INDEX_HTML = """<!doctype html>
       }
       if (progressMode === "multiPreflight") {
         return ["上传订单表格", "解析“模板”列", "检查模板配置", "生成预检结果"];
+      }
+      if (progressMode === "multiRender") {
+        return ["读取预检结果", "代表订单试渲染", "按模板正式渲染", "汇总各模板成品", "完成收尾"];
       }
       return ["上传订单表格", "解析订单字段", "调用 Illustrator", "生成 AI 文件", "完成收尾"];
     }
@@ -4209,7 +4235,11 @@ INDEX_HTML = """<!doctype html>
 </html>
 """
 
-INDEX_HTML = INDEX_HTML.replace("/* MULTI_TEMPLATE_RENDER_SCRIPT */", MULTI_TEMPLATE_RENDER_SCRIPT, 1)
+INDEX_HTML = INDEX_HTML.replace(
+    "/* MULTI_TEMPLATE_RENDER_SCRIPT */",
+    f"{MULTI_TEMPLATE_RENDER_VIEW_SCRIPT}\n\n{MULTI_TEMPLATE_RENDER_SCRIPT}",
+    1,
+)
 
 
 def multi_template_render_enabled() -> bool:

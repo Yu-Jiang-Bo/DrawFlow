@@ -30,9 +30,11 @@ MULTI_TEMPLATE_RENDER_SCRIPT = r'''
     }
 
     function invalidateMultiTemplatePreflight() {
+      stopMultiTemplateJobPolling();
       state.multiTemplateInputRevision += 1;
       state.multiTemplateParentJobId = "";
       state.multiTemplatePreflight = null;
+      renderMultiTemplateResult(null);
     }
 
     async function submitMultiTemplatePreflight() {
@@ -57,8 +59,9 @@ MULTI_TEMPLATE_RENDER_SCRIPT = r'''
           return;
         }
         completeProgress(result.status === "ready");
-        state.multiTemplateParentJobId = result.status === "ready" ? String(result.job_id || "") : "";
-        state.multiTemplatePreflight = result.status === "ready" ? result : null;
+        state.multiTemplateParentJobId = String(result.job_id || "");
+        state.multiTemplatePreflight = result;
+        renderMultiTemplateResult(result);
         if (result.status !== "ready") showRenderError(result.error || "订单模板预检未通过。");
         await loadJobs();
       } catch (error) {
@@ -73,6 +76,88 @@ MULTI_TEMPLATE_RENDER_SCRIPT = r'''
       } finally {
         setRenderButtonsDisabled(false);
       }
+    }
+
+    async function submitMultiTemplateAction(action) {
+      const jobId = state.multiTemplateParentJobId;
+      if (!jobId) {
+        showRenderError("请先完成当前订单表格的模板预检。");
+        return;
+      }
+      hideRenderError();
+      setTaskRunning(false);
+      setMultiTemplateActionButtonsDisabled(true);
+      showProgress("multiRender");
+      const requestRevision = state.multiTemplateInputRevision;
+      startMultiTemplateJobPolling(jobId);
+      try {
+        const result = await postJson(`/local/render/multi/${encodeURIComponent(jobId)}/${action}`, {});
+        stopMultiTemplateJobPolling();
+        if (requestRevision !== state.multiTemplateInputRevision || !multiTemplateModeSelected()) {
+          hideRenderProgress();
+          await loadJobs();
+          return;
+        }
+        state.multiTemplateParentJobId = String(result.job_id || jobId);
+        state.multiTemplatePreflight = result;
+        renderMultiTemplateResult(result);
+        completeProgress(["completed", "completed_with_errors"].includes(result.status));
+        if (!["completed", "completed_with_errors"].includes(result.status)) {
+          showRenderError(result.error || "多模板批量渲染未完成。");
+        }
+        await loadJobs();
+      } catch (error) {
+        stopMultiTemplateJobPolling();
+        if (requestRevision !== state.multiTemplateInputRevision || !multiTemplateModeSelected()) {
+          hideRenderProgress();
+          await loadJobs().catch(() => {});
+          return;
+        }
+        failProgress();
+        showRenderError(error);
+        await loadJobs().catch(() => {});
+      } finally {
+        stopMultiTemplateJobPolling();
+        setRenderButtonsDisabled(false);
+        setMultiTemplateActionButtonsDisabled(false);
+      }
+    }
+
+    function setMultiTemplateActionButtonsDisabled(disabled) {
+      ["multiTemplateExecuteBtn", "multiTemplateRetryBtn", "multiTemplateResumeBtn"].forEach(id => {
+        document.getElementById(id).disabled = disabled;
+      });
+    }
+
+    function startMultiTemplateJobPolling(jobId) {
+      stopMultiTemplateJobPolling();
+      const generation = state.multiTemplatePollGeneration;
+      refreshMultiTemplateJob(jobId, generation);
+      state.multiTemplatePollTimer = setInterval(() => refreshMultiTemplateJob(jobId, generation), 1000);
+    }
+
+    function stopMultiTemplateJobPolling() {
+      if (state.multiTemplatePollTimer !== null) clearInterval(state.multiTemplatePollTimer);
+      state.multiTemplatePollTimer = null;
+      state.multiTemplatePollGeneration += 1;
+    }
+
+    async function refreshMultiTemplateJob(jobId, generation) {
+      try {
+        const result = await getJson(`/api/jobs/${encodeURIComponent(jobId)}`);
+        if (state.multiTemplateParentJobId !== jobId || state.multiTemplatePollGeneration !== generation) return;
+        state.multiTemplatePreflight = result;
+        renderMultiTemplateResult(result);
+      } catch (_) {
+        // A transient detail request must not replace the in-flight render result.
+      }
+    }
+
+    function downloadMultiTemplateOutput(kind) {
+      const jobId = state.multiTemplateParentJobId;
+      if (!jobId) return;
+      const suffix = kind === "partial" ? "/output/partial" : "/output";
+      window.location.href = `/local/jobs/${encodeURIComponent(jobId)}${suffix}`;
     }
 '''.strip()
 

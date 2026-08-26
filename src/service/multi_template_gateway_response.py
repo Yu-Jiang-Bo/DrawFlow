@@ -113,12 +113,21 @@ def _template_summary(
             checkpoint.get("formal_elapsed_seconds_total", checkpoint.get("elapsed_seconds")),
         ),
         "canary_elapsed_seconds": non_negative_float(canary_elapsed_by_template.get(template_id)),
+        "canary_representative": _public_canary_representative(checkpoint.get("canary_representative")),
         "template_version": str(checkpoint.get("template_version") or ""),
         "child_job_id": _public_child_job_id(checkpoint.get("child_job_id")),
         "canary_child_job_id": _public_child_job_id(checkpoint.get("canary_child_job_id")),
         "error_code": error_code,
         "error": _public_error(error_code, kind="checkpoint"),
         "failure_scope": failure_scope(checkpoint.get("failure_scope")),
+    }
+
+
+def _public_canary_representative(value: Any) -> dict[str, Any]:
+    representative = _mapping(value)
+    return {
+        "excel_row": _non_negative_int(representative.get("excel_row")),
+        "order_no": str(representative.get("order_no") or ""),
     }
 
 

@@ -52,6 +52,7 @@ def test_multi_template_gateway_preflight_accepts_multipart_and_returns_safe_par
         "canary_attempt": 0,
         "formal_elapsed_seconds": 0.0,
         "canary_elapsed_seconds": 0.0,
+        "canary_representative": {"excel_row": 0, "order_no": ""},
         "template_version": "v1",
         "child_job_id": "",
         "canary_child_job_id": "",
