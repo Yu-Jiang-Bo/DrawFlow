@@ -600,12 +600,8 @@ const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
 const slot = child(designCopy, 'slot_name');
 const width = slot.visibleBounds[2] - slot.visibleBounds[0];
 const height = slot.visibleBounds[1] - slot.visibleBounds[3];
-if (width > 100.01) throw new Error('long text escaped local slot width: ' + width);
-if (height > 30.01) throw new Error('long text escaped local slot height: ' + height);
+if (width > 100 || height > 30) throw new Error('long text escaped local slot bounds: ' + width + 'x' + height);
 if (slot.resizeCalls < 1) throw new Error('long text was not shrunk');
-const centerX = (slot.visibleBounds[0] + slot.visibleBounds[2]) / 2;
-const centerY = (slot.visibleBounds[1] + slot.visibleBounds[3]) / 2;
-if (Math.abs(centerX - 50) > 0.1 || Math.abs(centerY - 15) > 0.1) throw new Error('text not centered in slot');
 """)
 
     result = run_node(harness)
@@ -613,7 +609,7 @@ if (Math.abs(centerX - 50) > 0.1 || Math.abs(centerY - 15) > 0.1) throw new Erro
     assert result.returncode == 0, result.stderr
 
 
-def test_v2_renderer_short_text_fills_slot_bounds_and_centers():
+def test_v2_renderer_short_text_keeps_template_position_without_expanding():
     task = {
         "$schema": "custom-renderer/v2-render-execution",
         "template_ai": "template.ai",
@@ -649,13 +645,11 @@ def test_v2_renderer_short_text_fills_slot_bounds_and_centers():
     harness = node_mock_harness(task, """
 const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
 const slot = child(designCopy, 'slot_name');
-if (slot.resizeCalls < 1) throw new Error('short text should resize to fill slot bounds');
+if (slot.resizeCalls !== 0) throw new Error('short text must not expand to fill a slot');
 const width = slot.visibleBounds[2] - slot.visibleBounds[0];
 const height = slot.visibleBounds[1] - slot.visibleBounds[3];
-if (Math.abs(width - 100) > 0.1 || Math.abs(height - 30) > 0.1) throw new Error('short text did not fill slot bounds: ' + width + 'x' + height);
-const centerX = (slot.visibleBounds[0] + slot.visibleBounds[2]) / 2;
-const centerY = (slot.visibleBounds[1] + slot.visibleBounds[3]) / 2;
-if (Math.abs(centerX - 50) > 0.1 || Math.abs(centerY - 15) > 0.1) throw new Error('short text not centered');
+if (Math.abs(width - 24) > 0.1 || Math.abs(height - 30) > 0.1) throw new Error('short text changed template size: ' + width + 'x' + height);
+if (Math.abs(slot.visibleBounds[0]) > 0.1 || Math.abs(slot.visibleBounds[1] - 30) > 0.1) throw new Error('short text changed template position');
 """)
 
     result = run_node(harness)
@@ -663,7 +657,7 @@ if (Math.abs(centerX - 50) > 0.1 || Math.abs(centerY - 15) > 0.1) throw new Erro
     assert result.returncode == 0, result.stderr
 
 
-def test_v2_renderer_normal_text_fills_slot_bounds():
+def test_v2_renderer_normal_text_keeps_template_position_without_expanding():
     task = {
         "$schema": "custom-renderer/v2-render-execution",
         "template_ai": "template.ai",
@@ -699,10 +693,11 @@ def test_v2_renderer_normal_text_fills_slot_bounds():
     harness = node_mock_harness(task, """
 const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
 const slot = child(designCopy, 'slot_name');
-if (slot.resizeCalls < 1) throw new Error('normal text should resize to fill slot bounds');
+if (slot.resizeCalls !== 0) throw new Error('normal text must not expand to fill a slot');
 const width = slot.visibleBounds[2] - slot.visibleBounds[0];
 const height = slot.visibleBounds[1] - slot.visibleBounds[3];
-if (Math.abs(width - 100) > 0.1 || Math.abs(height - 30) > 0.1) throw new Error('normal text did not fill slot bounds: ' + width + 'x' + height);
+if (Math.abs(width - 48) > 0.1 || Math.abs(height - 30) > 0.1) throw new Error('normal text changed template size: ' + width + 'x' + height);
+if (Math.abs(slot.visibleBounds[0]) > 0.1 || Math.abs(slot.visibleBounds[1] - 30) > 0.1) throw new Error('normal text changed template position');
 """)
 
     result = run_node(harness)
@@ -754,7 +749,7 @@ if (width > 60.01) throw new Error('anchored text escaped anchor width: ' + widt
 if (height > 20.01) throw new Error('anchored text escaped anchor height: ' + height);
 const centerX = (slot.visibleBounds[0] + slot.visibleBounds[2]) / 2;
 const centerY = (slot.visibleBounds[1] + slot.visibleBounds[3]) / 2;
-if (Math.abs(centerX - 230) > 0.1 || Math.abs(centerY - 110) > 0.1) throw new Error('text not centered in anchor');
+if (Math.abs(slot.visibleBounds[0] - 200) > 0.1 || Math.abs(slot.visibleBounds[3] - 100) > 0.1) throw new Error('text was not minimally corrected into anchor');
 if (fixed.translateCalls !== 0 || fixed.resizeCalls !== 0) throw new Error('fixed art moved or resized');
 """)
 
@@ -806,7 +801,7 @@ if (width > 100.01) throw new Error('extreme text escaped slot width: ' + width)
 if (slot.resizeCalls < 1) throw new Error('extreme text was not shrunk');
 if (fixed.translateCalls !== 0 || fixed.resizeCalls !== 0) throw new Error('fixed art moved or resized for extreme text');
 const warning = JSON.parse(writtenFiles['warnings.json']);
-if (!warning.warnings || warning.warnings[0].code !== 'text_fit_extreme') throw new Error('extreme text warning missing');
+if (!warning.warnings || !warning.warnings.some(entry => entry.code === 'text_fit_extreme')) throw new Error('extreme text warning missing');
 """)
 
     result = run_node(harness)
@@ -814,7 +809,7 @@ if (!warning.warnings || warning.warnings[0].code !== 'text_fit_extreme') throw 
     assert result.returncode == 0, result.stderr
 
 
-def test_v2_renderer_ignores_sub_tolerance_text_fit_rounding_warning():
+def test_v2_renderer_keeps_text_inside_anchor_after_resize_rounding():
     task = {
         "$schema": "custom-renderer/v2-render-execution",
         "template_ai": "template.ai",
@@ -853,9 +848,9 @@ def test_v2_renderer_ignores_sub_tolerance_text_fit_rounding_warning():
 const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
 const slot = child(designCopy, 'slot_name');
 const width = slot.visibleBounds[2] - slot.visibleBounds[0];
-if (width <= 100 || width >= 100.02) throw new Error('test did not create sub-tolerance rounding: ' + width);
+if (width > 100) throw new Error('rounded text escaped its anchor: ' + width);
 const warning = JSON.parse(writtenFiles['warnings.json']);
-if (warning.warnings.length) throw new Error('sub-tolerance text fit warning should be ignored');
+if (!warning.warnings.some(entry => entry.code === 'slot_bounds_audit')) throw new Error('slot bounds audit missing');
 """)
 
     result = run_node(harness)
@@ -957,9 +952,7 @@ if (text.resizeCalls !== 0) throw new Error('decorated short slot text should ke
 if (deco.translateCalls !== 0 || deco.resizeCalls !== 0) throw new Error('slot decoration moved or resized');
 if (marker) throw new Error('pure keep_ratio marker should be removed from output');
 if (width > 150.01 || height > 40.01) throw new Error('decorated text escaped group slot bounds: ' + width + 'x' + height);
-const centerX = (bounds[0] + bounds[2]) / 2;
-const centerY = (bounds[1] + bounds[3]) / 2;
-if (Math.abs(centerX - 75) > 0.1 || Math.abs(centerY - 20) > 0.1) throw new Error('expanded text not centered in slot');
+if (Math.abs(bounds[0]) > 0.1 || Math.abs(bounds[1] - 20) > 0.1) throw new Error('decorated text changed template position');
 """)
 
     result = run_node(harness)
@@ -1203,12 +1196,11 @@ if (designCopy.pageItems.find(item => item.name === 'tail_name_last_a')) throw n
     assert result.returncode == 0, result.stderr
 
 
-def test_v2_renderer_fills_only_requested_axis_and_centers_slot_content():
+def test_v2_renderer_shrinks_only_when_needed_and_minimally_corrects_position():
     task = tail_text_task([], value="Custom")
     action = task["render_task"]["outputs"][0]["actions"][1]
     action["preset"] = "direct_text"
     action["anchor_path"] = "Template/Output_main/Design/Design03/anchor_name"
-    action["fit_mode"] = "fill_width"
     task["mock_anchor_name_bounds"] = [200, 140, 260, 100]
     harness = node_mock_harness(task, """
 const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
@@ -1216,11 +1208,11 @@ const slot = child(designCopy, 'slot_name');
 const bounds = slot.visibleBounds;
 const width = bounds[2] - bounds[0];
 const height = bounds[1] - bounds[3];
-if (Math.abs(width - 60) > 0.01 || Math.abs(height - 30) > 0.01) {
-  throw new Error('width-only fit did not preserve the non-overflowing height: ' + JSON.stringify(bounds));
+if (Math.abs(width - 48) > 0.01 || Math.abs(height - 30) > 0.01) {
+  throw new Error('short text must retain its template scale: ' + JSON.stringify(bounds));
 }
-if (Math.abs((bounds[0] + bounds[2]) / 2 - 230) > 0.01 || Math.abs((bounds[1] + bounds[3]) / 2 - 120) > 0.01) {
-  throw new Error('width-only fit did not center content: ' + JSON.stringify(bounds));
+if (Math.abs(bounds[0] - 200) > 0.01 || Math.abs(bounds[3] - 100) > 0.01) {
+  throw new Error('text was not minimally corrected into anchor: ' + JSON.stringify(bounds));
 }
 """)
 
@@ -1230,23 +1222,19 @@ if (Math.abs((bounds[0] + bounds[2]) / 2 - 230) > 0.01 || Math.abs((bounds[1] + 
 
 
 @pytest.mark.parametrize(
-    ("fit_mode", "value", "anchor_bounds", "expected_width", "expected_height", "expected_center"),
+    ("value", "anchor_bounds", "expected_width", "expected_height", "expected_left", "expected_top"),
     [
-        ("fill_width", "Custom", [200, 150, 400, 100], 100, 50, (300, 125)),
-        # The long value is deliberately wider than the 50pt slot. Height
-        # fill first reaches 200pt, then cross-axis overflow scales both axes
-        # down together rather than distorting the requested fit.
-        ("fill_height", "CustomCustomCustomCustom", [200, 300, 250, 100], 50, 52.0833, (225, 200)),
+        ("Custom", [200, 150, 400, 100], 23.976, 49.95, 200, 149.95),
+        ("CustomCustomCustomCustom", [200, 300, 250, 100], 49.95, 26.015625, 200, 126.015625),
     ],
 )
-def test_v2_renderer_single_axis_fit_shrinks_proportionally_on_cross_axis_overflow(
-    fit_mode, value, anchor_bounds, expected_width, expected_height, expected_center
+def test_v2_renderer_shrinks_proportionally_without_anchor_recentering(
+    value, anchor_bounds, expected_width, expected_height, expected_left, expected_top
 ):
     task = tail_text_task([], value=value)
     action = task["render_task"]["outputs"][0]["actions"][1]
     action["preset"] = "direct_text"
     action["anchor_path"] = "Template/Output_main/Design/Design03/anchor_name"
-    action["fit_mode"] = fit_mode
     task["mock_anchor_name_bounds"] = anchor_bounds
     task["mock_design_slot_bounds"] = [0, 100, 100, 0]
     harness = node_mock_harness(task, f"""
@@ -1258,8 +1246,8 @@ const height = bounds[1] - bounds[3];
 if (Math.abs(width - {expected_width}) > 0.01 || Math.abs(height - {expected_height}) > 0.01) {{
   throw new Error('single-axis overflow was not proportionally reduced: ' + JSON.stringify(bounds));
 }}
-if (Math.abs((bounds[0] + bounds[2]) / 2 - {expected_center[0]}) > 0.01 || Math.abs((bounds[1] + bounds[3]) / 2 - {expected_center[1]}) > 0.01) {{
-  throw new Error('single-axis overflow result was not centered: ' + JSON.stringify(bounds));
+if (Math.abs(bounds[0] - {expected_left}) > 0.01 || Math.abs(bounds[1] - {expected_top}) > 0.01) {{
+  throw new Error('overflow result was re-centered instead of minimally corrected: ' + JSON.stringify(bounds));
 }}
 """)
 
@@ -1949,15 +1937,126 @@ const fontCopy = outputLayer.pageItems.find(item => item.name === 'F1');
 const slot = child(fontCopy, 'slot_name');
 const textBounds = slot.visibleBounds;
 const anchorBounds = [200, 100, 300, 0];
-const textWidth = textBounds[2] - textBounds[0];
-const textHeight = textBounds[1] - textBounds[3];
-const anchorWidth = anchorBounds[2] - anchorBounds[0];
-const anchorHeight = anchorBounds[1] - anchorBounds[3];
 if (textBounds[0] < anchorBounds[0] - 0.05 || textBounds[2] > anchorBounds[2] + 0.05) throw new Error('font text escaped explicit anchor width');
 if (textBounds[1] > anchorBounds[1] + 0.05 || textBounds[3] < anchorBounds[3] - 0.05) throw new Error('font text escaped explicit anchor height');
-if (textWidth < anchorWidth - 0.08) throw new Error('font text did not fill anchor width: ' + textWidth + ' vs ' + anchorWidth);
-if (textHeight < anchorHeight - 0.08) throw new Error('font text did not fill anchor height: ' + textHeight + ' vs ' + anchorHeight);
+if (Math.abs(textBounds[0] - 200) > 0.05 || Math.abs(textBounds[1] - 30) > 0.05) throw new Error('font text was re-centered instead of preserving template position');
 if (slot.contents !== 'Amy') throw new Error('font slot not replaced: ' + slot.contents);
+""")
+
+    result = run_node(harness)
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_v2_renderer_asset_fit_retains_fill_behavior_separate_from_text_containment():
+    task = {
+        "$schema": "custom-renderer/v2-render-execution",
+        "template_ai": "template.ai",
+        "output_ai": "out.ai",
+        "mock_asset_slot_bounds": [0, 100, 100, 0],
+        "mock_asset_source_bounds": [0, 10, 10, 0],
+        "values": {"design": "03", "initial": "T"},
+        "selections": {"Output_main": {"design": "Design03"}},
+        "render_task": {
+            "$schema": "custom-renderer/v2-render-task",
+            "outputs": [
+                {
+                    "key": "Output_main",
+                    "actions": [
+                        {
+                            "type": "copy_option_group",
+                            "group": "design",
+                            "option_key": "Design03",
+                            "object_path": "Template/Output_main/Design/Design03",
+                        },
+                        {
+                            "type": "bind_asset_library",
+                            "group": "design",
+                            "option_key": "Design03",
+                            "asset_key": "initial_top",
+                            "slot_key": "slot_initial",
+                            "slot_path": "Template/Output_main/Design/Design03/slot_initial",
+                            "object_path": "Template/Output_main/Design/Design03/Assets/initial_top",
+                            "source_field": "initial",
+                            "supported_values": ["A", "T"],
+                            "fit_mode": "fill_both",
+                        },
+                    ],
+                }
+            ],
+        },
+    }
+    harness = node_mock_harness(task, """
+const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
+const replacement = designCopy.pageItems.find(item => item.name === 'T');
+if (!replacement) throw new Error('asset replacement missing');
+const bounds = replacement.visibleBounds;
+if (Math.abs(bounds[0]) > 0.01 || Math.abs(bounds[1] - 100) > 0.01 || Math.abs(bounds[2] - 100) > 0.01 || Math.abs(bounds[3]) > 0.01) throw new Error('asset no longer filled its slot: ' + JSON.stringify(bounds));
+""")
+
+    result = run_node(harness)
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_v2_renderer_keeps_second_slot_at_its_template_coordinate():
+    task = {
+        "$schema": "custom-renderer/v2-render-execution",
+        "template_ai": "template.ai",
+        "output_ai": "out.ai",
+        "mock_design_two_slots": True,
+        "mock_design_slot_bounds": [0, 70, 100, 40],
+        "mock_anchor_name_bounds": [0, 70, 100, 40],
+        "values": {"design": "03", "name": "Alexandria Catherine", "title": "Payment Quality Analyst"},
+        "selections": {"Output_main": {"design": "Design03"}},
+        "render_task": {
+            "$schema": "custom-renderer/v2-render-task",
+            "outputs": [
+                {
+                    "key": "Output_main",
+                    "actions": [
+                        {
+                            "type": "copy_option_group",
+                            "group": "design",
+                            "option_key": "Design03",
+                            "object_path": "Template/Output_main/Design/Design03",
+                        },
+                        {
+                            "type": "replace_slot_text",
+                            "group": "design",
+                            "option_key": "Design03",
+                            "slot_key": "slot_name",
+                            "object_path": "Template/Output_main/Design/Design03/slot_name",
+                            "anchor_path": "Template/Output_main/Design/Design03/anchor_name",
+                            "source_field": "name",
+                            "required": True,
+                            "tail_paths": [],
+                        },
+                        {
+                            "type": "replace_slot_text",
+                            "group": "design",
+                            "option_key": "Design03",
+                            "slot_key": "slot_title",
+                            "object_path": "Template/Output_main/Design/Design03/slot_title",
+                            "anchor_path": "Template/Output_main/Design/Design03/anchor_title",
+                            "source_field": "title",
+                            "required": True,
+                            "tail_paths": [],
+                        },
+                    ],
+                }
+            ],
+        },
+    }
+    harness = node_mock_harness(task, """
+const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
+const name = child(designCopy, 'slot_name');
+const title = child(designCopy, 'slot_title');
+const heart = child(designCopy, 'fixed_heart');
+if (name.visibleBounds[2] > 100 || name.visibleBounds[1] > 70 || name.visibleBounds[3] < 40) throw new Error('main slot escaped its own anchor');
+if (Math.abs(title.visibleBounds[0] - 10) > 0.01 || Math.abs(title.visibleBounds[1] - 30) > 0.01) throw new Error('title was re-centered instead of retaining template coordinate: ' + JSON.stringify(title.visibleBounds));
+if (title.resizeCalls < 1) throw new Error('long title was not reduced into its anchor');
+if (heart.translateCalls !== 0 || heart.resizeCalls !== 0) throw new Error('fixed art changed during dual-slot layout');
 """)
 
     result = run_node(harness)
@@ -2546,6 +2645,15 @@ function item(typename, name, contents, children, styleToken, bounds, options) {
     set: value => {{ box = value.slice(); }}
   }});
   Object.defineProperty(node, 'geometricBounds', {{ get: () => box.slice() }});
+  Object.defineProperty(node, 'position', {{
+    get: () => [box[0], box[1]],
+    set: value => {{
+      if (!value || value.length < 2) return;
+      const dx = Number(value[0]) - box[0];
+      const dy = Number(value[1]) - box[1];
+      if (Number.isFinite(dx) && Number.isFinite(dy)) node.translate(dx, dy);
+    }}
+  }});
   node.closed = opts.closed === true;
   node.pathPoints = (opts.pathPoints || []).map(point => {{
     const anchor = [box[0] + Number(point[0]) * (box[2] - box[0]), box[3] + Number(point[1]) * (box[1] - box[3])];
@@ -2601,6 +2709,8 @@ function child(parent, name) {{
   return found;
 }}
 const f1SlotBounds = task.mock_f1_slot_bounds || undefined;
+const assetSlotBounds = task.mock_asset_slot_bounds || undefined;
+const assetSourceBounds = task.mock_asset_source_bounds || undefined;
 const style1Bounds = task.mock_style1_bounds || [0, 100, 100, 0];
 const f1Children = [item('TextFrame', 'slot_name', 'F1 sample', [], 'F1-style', f1SlotBounds)];
 if (task.mock_f1_anchor === true) f1Children.push(item('PathItem', 'anchor_name', '', []));
@@ -2611,7 +2721,7 @@ const f10 = item('GroupItem', 'F10', '', [
   item('PathItem', '', '', [])
 ]);
 const design03 = item('GroupItem', 'Design03', '', [
-  item('GroupItem', 'slot_initial', '', [item('PathItem', 'placeholder_initial', '', [])]),
+  item('GroupItem', 'slot_initial', '', [item('PathItem', 'placeholder_initial', '', [], '', assetSlotBounds)]),
   item('TextFrame', 'slot_name', 'Design sample', [], 'Design-style'),
   item('TextFrame', 'slot_year_tail', 'Year sample', [], 'Year-style'),
   item('PathItem', 'anchor_name', '', []),
@@ -2635,12 +2745,16 @@ const design03 = item('GroupItem', 'Design03', '', [
   item('PathItem', 'fixed_heart', '', []),
   item('GroupItem', 'Assets', '', [
     item('GroupItem', 'initial_top', '', [
-      item('PathItem', 'A', '', []),
-      item('PathItem', 'T', '', [])
+      item('PathItem', 'A', '', [], '', assetSourceBounds),
+      item('PathItem', 'T', '', [], '', assetSourceBounds)
     ])
   ]),
   item('PathItem', '', '', [])
 ]);
+if (task.mock_design_two_slots) {{
+  attach(design03, item('TextFrame', 'slot_title', 'Title sample', [], 'Title-style', [10, 30, 50, 20]));
+  attach(design03, item('PathItem', 'anchor_title', '', [], '', [10, 30, 90, 20]));
+}}
 const style1 = item('GroupItem', 'style1', '', [item('PathItem', 'style1_shape', '', [], '', style1Bounds)]);
 const style2 = item('GroupItem', 'style2', '', [item('PathItem', 'style2_shape', '', [], '', [0, 200, 200, 0])]);
 const styleGroup = item('GroupItem', 'Style', '', [style1, style2]);
