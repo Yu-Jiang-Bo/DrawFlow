@@ -682,47 +682,19 @@
             fitPathTextWithinBounds(item, bounds, action, targetWidth, targetHeight, placement);
             return;
         }
-        var resizeCount = 0;
-        var smallestScale = 1;
-        for (var index = 0; index < 20; index++) {
-            var current = measuredBounds(item);
-            var width = Math.abs(Number(current[2]) - Number(current[0]));
-            var height = Math.abs(Number(current[1]) - Number(current[3]));
-            if (width <= 0 || height <= 0) break;
-            if (width <= targetWidth && height <= targetHeight) break;
-            // A slot anchor is a containment fence, not a request to fill or
-            // re-center the text. Shrink only, proportionally, leaving a tiny
-            // inward margin for Illustrator's post-resize bounds quantization.
-            var proportionalScale = Math.min(targetWidth / width, targetHeight / height) * 0.999;
-            if (!isFinite(proportionalScale) || proportionalScale <= 0 || proportionalScale >= 1) break;
-            resizeCount += 1;
-            smallestScale = Math.min(smallestScale, proportionalScale);
-            try { item.resize(proportionalScale * 100, proportionalScale * 100, true, true, true, true, 100, Transformation.CENTER); }
-            catch (resizeError1) {
-                try { item.resize(proportionalScale * 100, proportionalScale * 100); } catch (resizeError2) { break; }
-            }
-        }
-        restoreTextPlacement(item, placement);
-        var correction = translateItemIntoBounds(item, bounds);
-        var finalBounds = measuredBounds(item);
-        var finalWidth = Math.abs(Number(finalBounds[2]) - Number(finalBounds[0]));
-        var finalHeight = Math.abs(Number(finalBounds[1]) - Number(finalBounds[3]));
-        if (finalWidth > targetWidth || finalHeight > targetHeight || !boundsContain(finalBounds, bounds)) {
-            throw new Error(
-                "V2 slot text exceeds anchor bounds: " + String(action && action.slot_key || "")
-                + ", actual=" + finalWidth + "x" + finalHeight
-                + ", target=" + targetWidth + "x" + targetHeight
-            );
-        }
-        writeSlotBoundsAudit(action, finalBounds, bounds, smallestScale, correction);
-        if (resizeCount > 0 && smallestScale < 0.35) {
+        var settled = settleTextItemWithinBounds(
+            item, bounds, action, targetWidth, targetHeight, placement, shrinkPointText,
+            "V2 slot text exceeds anchor bounds: "
+        );
+        writeSlotBoundsAudit(action, settled.bounds, bounds, settled.smallestScale, settled.correction);
+        if (settled.resizeCount > 0 && settled.smallestScale < 0.35) {
             layoutWarnings.push({
                 code: "text_fit_extreme",
                 severity: "warning",
                 slot_key: String(action && action.slot_key || ""),
                 object_path: String(action && action.object_path || ""),
-                shrink_count: resizeCount,
-                min_scale: smallestScale,
+                shrink_count: settled.resizeCount,
+                min_scale: settled.smallestScale,
                 target_width: targetWidth,
                 target_height: targetHeight
             });
@@ -734,42 +706,87 @@
     }
 
     function fitPathTextWithinBounds(item, bounds, action, targetWidth, targetHeight, placement) {
-        var resizeCount = 0;
-        var smallestScale = 1;
-        for (var index = 0; index < 20; index++) {
-            var current = measuredBounds(item);
-            var width = Math.abs(Number(current[2]) - Number(current[0]));
-            var height = Math.abs(Number(current[1]) - Number(current[3]));
-            if (width <= 0 || height <= 0) break;
-            if (width <= targetWidth && height <= targetHeight) break;
-            var scale = Math.min(targetWidth / width, targetHeight / height);
-            scale *= 0.999;
-            if (!isFinite(scale) || scale <= 0 || scale >= 1) break;
-            if (!scaleTextSize(item, scale)) break;
-            resizeCount += 1;
-            if (scale < 1) smallestScale = Math.min(smallestScale, scale);
-        }
-        restoreTextPlacement(item, placement);
-        var correction = translateItemIntoBounds(item, bounds);
-        var finalBounds = measuredBounds(item);
-        var finalWidth = Math.abs(Number(finalBounds[2]) - Number(finalBounds[0]));
-        var finalHeight = Math.abs(Number(finalBounds[1]) - Number(finalBounds[3]));
-        if (finalWidth > targetWidth || finalHeight > targetHeight || !boundsContain(finalBounds, bounds)) {
-            throw new Error("V2 path text exceeds anchor bounds: " + String(action && action.slot_key || ""));
-        }
-        writeSlotBoundsAudit(action, finalBounds, bounds, smallestScale, correction);
-        if (resizeCount > 0 && smallestScale < 0.35) {
+        var settled = settleTextItemWithinBounds(
+            item, bounds, action, targetWidth, targetHeight, placement, shrinkPathText,
+            "V2 path text exceeds anchor bounds: ", hasText(action && action.anchor_path)
+        );
+        writeSlotBoundsAudit(action, settled.bounds, bounds, settled.smallestScale, settled.correction);
+        if (settled.resizeCount > 0 && settled.smallestScale < 0.35) {
             layoutWarnings.push({
                 code: "path_text_fit_extreme",
                 severity: "warning",
                 slot_key: String(action && action.slot_key || ""),
                 object_path: String(action && action.object_path || ""),
-                shrink_count: resizeCount,
-                min_scale: smallestScale,
+                shrink_count: settled.resizeCount,
+                min_scale: settled.smallestScale,
                 target_width: targetWidth,
                 target_height: targetHeight
             });
         }
+    }
+
+    function settleTextItemWithinBounds(item, bounds, action, targetWidth, targetHeight, placement, shrink, errorPrefix, allowCorrection) {
+        var correction = { x: 0, y: 0 };
+        var smallestScale = 1;
+        var resizeCount = 0;
+        var finalBounds = null;
+        var needsQuantizationNudge = false;
+        for (var attempt = 0; attempt < 20; attempt++) {
+            // Resizing around Illustrator's centre changes a TextFrame's origin.
+            // Reapply the template baseline before the one permitted containment
+            // correction so sibling slots retain their source relationship.
+            restoreTextPlacement(item, placement);
+            correction = allowCorrection === false
+                ? { x: 0, y: 0 }
+                : translateItemIntoBounds(item, bounds, needsQuantizationNudge ? 0.25 : 0);
+            finalBounds = measuredBounds(item);
+            var finalWidth = Math.abs(Number(finalBounds[2]) - Number(finalBounds[0]));
+            var finalHeight = Math.abs(Number(finalBounds[1]) - Number(finalBounds[3]));
+            if (finalWidth <= targetWidth && finalHeight <= targetHeight && boundsContain(finalBounds, bounds)) {
+                return {
+                    bounds: finalBounds,
+                    correction: correction,
+                    smallestScale: smallestScale,
+                    resizeCount: resizeCount
+                };
+            }
+            // A frame can be smaller than its anchor yet still land just outside
+            // it after Illustrator rounds the final translation.  In that case
+            // make a small additional proportional reduction, restore the
+            // template baseline, and converge again; never accept overflow.
+            if (finalWidth <= targetWidth && finalHeight <= targetHeight && !needsQuantizationNudge) {
+                // Preserve the exact minimal correction on the normal path. Only
+                // retry with an inward nudge after strict containment proves that
+                // Illustrator rounded the minimal translate onto the wrong side.
+                needsQuantizationNudge = true;
+                continue;
+            }
+            var proportionalScale = Math.min(targetWidth / finalWidth, targetHeight / finalHeight) * 0.999;
+            if (finalWidth <= targetWidth && finalHeight <= targetHeight) proportionalScale = 0.998;
+            if (!isFinite(proportionalScale) || proportionalScale <= 0 || proportionalScale >= 1 || !shrink(item, proportionalScale)) break;
+            resizeCount += 1;
+            smallestScale = Math.min(smallestScale, proportionalScale);
+        }
+        var width = finalBounds ? Math.abs(Number(finalBounds[2]) - Number(finalBounds[0])) : 0;
+        var height = finalBounds ? Math.abs(Number(finalBounds[1]) - Number(finalBounds[3])) : 0;
+        throw new Error(
+            errorPrefix + String(action && action.slot_key || "")
+            + ", actual=" + width + "x" + height
+            + ", target=" + targetWidth + "x" + targetHeight
+            + ", bounds=" + String(finalBounds)
+            + ", anchor=" + String(bounds)
+        );
+    }
+
+    function shrinkPointText(item, scale) {
+        try { item.resize(scale * 100, scale * 100, true, true, true, true, 100, Transformation.CENTER); return true; }
+        catch (resizeError1) {
+            try { item.resize(scale * 100, scale * 100); return true; } catch (resizeError2) { return false; }
+        }
+    }
+
+    function shrinkPathText(item, scale) {
+        return scaleTextSize(item, scale);
     }
 
     function isPathTextFrame(item) {
@@ -794,14 +811,19 @@
         return false;
     }
 
-    function translateItemIntoBounds(item, bounds) {
+    function translateItemIntoBounds(item, bounds, inwardNudge) {
         var current = measuredBounds(item);
         var dx = 0;
         var dy = 0;
-        if (Number(current[0]) < Number(bounds[0])) dx = Number(bounds[0]) - Number(current[0]);
-        else if (Number(current[2]) > Number(bounds[2])) dx = Number(bounds[2]) - Number(current[2]);
-        if (Number(current[1]) > Number(bounds[1])) dy = Number(bounds[1]) - Number(current[1]);
-        else if (Number(current[3]) < Number(bounds[3])) dy = Number(bounds[3]) - Number(current[3]);
+        var nudge = Math.max(0, Number(inwardNudge || 0));
+        var width = Math.abs(Number(current[2]) - Number(current[0]));
+        var height = Math.abs(Number(current[1]) - Number(current[3]));
+        var horizontalSlack = Math.max(0, (Math.abs(Number(bounds[2]) - Number(bounds[0])) - width) / 2);
+        var verticalSlack = Math.max(0, (Math.abs(Number(bounds[1]) - Number(bounds[3])) - height) / 2);
+        if (Number(current[0]) < Number(bounds[0])) dx = Number(bounds[0]) - Number(current[0]) + Math.min(nudge, horizontalSlack);
+        else if (Number(current[2]) > Number(bounds[2])) dx = Number(bounds[2]) - Number(current[2]) - Math.min(nudge, horizontalSlack);
+        if (Number(current[1]) > Number(bounds[1])) dy = Number(bounds[1]) - Number(current[1]) - Math.min(nudge, verticalSlack);
+        else if (Number(current[3]) < Number(bounds[3])) dy = Number(bounds[3]) - Number(current[3]) + Math.min(nudge, verticalSlack);
         if (dx !== 0 || dy !== 0) item.translate(dx, dy);
         return { x: dx, y: dy };
     }
