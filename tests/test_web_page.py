@@ -36,6 +36,10 @@ def test_render_page_exposes_single_render_action():
     assert "清空当前订单文件和任务结果" not in INDEX_HTML
     assert "当前模板状态" not in INDEX_HTML
     assert "最近任务" not in INDEX_HTML
+    assert '<select id="renderTemplate"></select>' in INDEX_HTML
+    assert 'payload.append("template_id", templateId);' in INDEX_HTML
+    assert 'postForm("/local/render", payload)' in INDEX_HTML
+    assert "template_ids" not in INDEX_HTML
 
 
 def test_render_page_uses_business_error_dialog():
