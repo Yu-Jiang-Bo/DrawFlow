@@ -811,12 +811,24 @@
         var targetHeight = mmToPt(Number(dimensions.height_mm || 0));
         if (targetWidth <= 0 || targetHeight <= 0) throw new Error("V2 output target dimensions are invalid");
         var bounds = unionBounds(items, true);
+        var sourceBounds = [Number(bounds[0]), Number(bounds[1]), Number(bounds[2]), Number(bounds[3])];
+        var fixedStates = fixedVisualStatesForItems(items);
         var fitSafety = outputFitSafetyPoints(dimensions);
         var fitTargetWidth = targetWidth - fitSafety;
         var fitTargetHeight = targetHeight - fitSafety;
         var targetLeft = Number(bounds[0]);
         var targetTop = Number(bounds[1]);
-        for (var attempt = 0; attempt < 4; attempt++) {
+        if (fixedStates.length) {
+            var fixedScaleX = fitTargetWidth / Math.abs(Number(bounds[2]) - Number(bounds[0])) * 100;
+            var fixedScaleY = fitTargetHeight / Math.abs(Number(bounds[1]) - Number(bounds[3])) * 100;
+            resizeItemsAroundBounds(items, bounds, fixedScaleX, fixedScaleY);
+            var fixedFitted = unionBounds(items, true);
+            translateItems(items, targetLeft - Number(fixedFitted[0]), targetTop - Number(fixedFitted[1]));
+            positionFixedVisualStatesForOutput(fixedStates, sourceBounds, unionBounds(items, true));
+            validateOutputBounds(items, dimensions, targetWidth, targetHeight);
+            return;
+        }
+        for (var attempt = 0; attempt < 12; attempt++) {
             var current = unionBounds(items, true);
             var width = Math.abs(Number(current[2]) - Number(current[0]));
             var height = Math.abs(Number(current[1]) - Number(current[3]));
@@ -839,6 +851,7 @@
         var centerX = (Number(bounds[0]) + Number(bounds[2])) / 2;
         var centerY = (Number(bounds[1]) + Number(bounds[3])) / 2;
         for (var index = 0; index < items.length; index++) {
+            var fixedStates = fixedVisualStates(items[index]);
             var itemBounds = visibleBoundsStrict(items[index]);
             var itemCenterX = (Number(itemBounds[0]) + Number(itemBounds[2])) / 2;
             var itemCenterY = (Number(itemBounds[1]) + Number(itemBounds[3])) / 2;
@@ -849,7 +862,88 @@
             var resizedCenterX = (Number(resized[0]) + Number(resized[2])) / 2;
             var resizedCenterY = (Number(resized[1]) + Number(resized[3])) / 2;
             items[index].translate(targetCenterX - resizedCenterX, targetCenterY - resizedCenterY);
+            restoreFixedVisualStates(fixedStates, centerX, centerY, scaleXRatio, scaleYRatio);
         }
+    }
+
+    function fixedVisualStates(root) {
+        var marked = [];
+        collectFixedVisualItems(root, marked);
+        var states = [];
+        for (var index = 0; index < marked.length; index++) {
+            var item = marked[index];
+            var bounds = visibleBoundsStrict(item);
+            states.push({
+                item: item,
+                centerX: (Number(bounds[0]) + Number(bounds[2])) / 2,
+                centerY: (Number(bounds[1]) + Number(bounds[3])) / 2
+            });
+        }
+        return states;
+    }
+
+    function fixedVisualStatesForItems(items) {
+        var states = [];
+        for (var index = 0; index < items.length; index++) {
+            var itemStates = fixedVisualStates(items[index]);
+            for (var stateIndex = 0; stateIndex < itemStates.length; stateIndex++) states.push(itemStates[stateIndex]);
+        }
+        return states;
+    }
+
+    function positionFixedVisualStatesForOutput(states, sourceBounds, outputBounds) {
+        var sourceWidth = Math.abs(Number(sourceBounds[2]) - Number(sourceBounds[0]));
+        var sourceHeight = Math.abs(Number(sourceBounds[1]) - Number(sourceBounds[3]));
+        var outputWidth = Math.abs(Number(outputBounds[2]) - Number(outputBounds[0]));
+        var outputHeight = Math.abs(Number(outputBounds[1]) - Number(outputBounds[3]));
+        if (sourceWidth <= 0 || sourceHeight <= 0 || outputWidth <= 0 || outputHeight <= 0) {
+            throw new Error("V2 fixed graphic layout bounds are invalid");
+        }
+        for (var index = 0; index < states.length; index++) {
+            var state = states[index];
+            var current = visibleBoundsStrict(state.item);
+            var currentCenterX = (Number(current[0]) + Number(current[2])) / 2;
+            var currentCenterY = (Number(current[1]) + Number(current[3])) / 2;
+            var targetCenterX = Number(outputBounds[0])
+                + (state.centerX - Number(sourceBounds[0])) / sourceWidth * outputWidth;
+            var targetCenterY = Number(outputBounds[1])
+                - (Number(sourceBounds[1]) - state.centerY) / sourceHeight * outputHeight;
+            state.item.translate(targetCenterX - currentCenterX, targetCenterY - currentCenterY);
+        }
+    }
+
+    function restoreFixedVisualStates(states, parentCenterX, parentCenterY, scaleXRatio, scaleYRatio) {
+        if (!isFinite(scaleXRatio) || !isFinite(scaleYRatio) || scaleXRatio <= 0 || scaleYRatio <= 0) {
+            throw new Error("V2 fixed graphic scale is invalid");
+        }
+        for (var index = 0; index < states.length; index++) {
+            var state = states[index];
+            resizePageItem(state.item, 100 / scaleXRatio, 100 / scaleYRatio);
+            var restored = visibleBoundsStrict(state.item);
+            var restoredCenterX = (Number(restored[0]) + Number(restored[2])) / 2;
+            var restoredCenterY = (Number(restored[1]) + Number(restored[3])) / 2;
+            var targetCenterX = parentCenterX + (state.centerX - parentCenterX) * scaleXRatio;
+            var targetCenterY = parentCenterY + (state.centerY - parentCenterY) * scaleYRatio;
+            state.item.translate(targetCenterX - restoredCenterX, targetCenterY - restoredCenterY);
+        }
+    }
+
+    function collectFixedVisualItems(root, result) {
+        if (!root || !root.pageItems) return;
+        for (var index = 0; index < root.pageItems.length; index++) {
+            var item = root.pageItems[index];
+            if (isFixedVisualName(String(item.name || ""))) {
+                result.push(item);
+            } else {
+                collectFixedVisualItems(item, result);
+            }
+        }
+    }
+
+    function isFixedVisualName(name) {
+        var normalized = normalizedName(name);
+        return normalized === "fixed" || normalized.indexOf("fixed_") === 0
+            || normalized === "fixd" || normalized.indexOf("fixd_") === 0;
     }
 
     function resizePageItem(item, scaleX, scaleY) {
