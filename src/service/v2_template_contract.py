@@ -84,7 +84,15 @@ _SLOT_FIELDS = {
     "fit_mode",
 }
 _ASSET_FIELDS = {"asset_key", "slot", "supported_values", "component_key", "scope", "component_scope_executable"}
-_TAIL_FIELDS = {"key", "position", "sample", "pua_base", "glyph_map"}
+_TAIL_FIELDS = {
+    "key",
+    "position",
+    "sample",
+    "pua_base",
+    "glyph_map",
+    "opentype_feature",
+    "opentype_alternate_index",
+}
 _DIMENSION_FIELDS = {"mode", "width_mm", "height_mm", "tolerance_mm"}
 _COLOR_FIELDS = {"key", "zh_name", "space", "value", "allow_recolor"}
 _OPTION_MAPPING_FIELDS = {"field", "source_value", "target", "output", "group"}
@@ -139,6 +147,7 @@ _FIELD_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
 _LATIN_LETTERS = "abcdefghijklmnopqrstuvwxyz"
 _PUA_MIN = 0xE000
 _PUA_MAX = 0xF8FF
+_OPENTYPE_FEATURE_RE = re.compile(r"^[A-Za-z0-9]{4}$")
 
 
 class V2ContractError(ValueError):
@@ -407,6 +416,28 @@ def _normalize_tail(value: Any, path: str, issues: list[Dict[str, str]]) -> Dict
         normalized["pua_base"] = _pua_codepoint(data.get("pua_base"), f"{path}.pua_base", issues, continuous_tail_base=True)
     if "glyph_map" in data and data.get("glyph_map") not in (None, ""):
         normalized["glyph_map"] = _normalize_tail_glyph_map(data.get("glyph_map"), f"{path}.glyph_map", issues)
+    feature = _optional_string(data, "opentype_feature", f"{path}.opentype_feature", issues).casefold()
+    alternate_index = data.get("opentype_alternate_index")
+    if feature or alternate_index not in (None, ""):
+        if not feature or not _OPENTYPE_FEATURE_RE.match(feature):
+            _issue(issues, f"{path}.opentype_feature", "OpenType feature must be a four-character tag such as aalt.")
+        if isinstance(alternate_index, bool) or not isinstance(alternate_index, int) or alternate_index < 1:
+            _issue(issues, f"{path}.opentype_alternate_index", "OpenType alternate index must be a positive integer.")
+        else:
+            normalized["opentype_alternate_index"] = alternate_index
+        if feature and _OPENTYPE_FEATURE_RE.match(feature):
+            normalized["opentype_feature"] = feature
+    glyph_proof_count = sum(
+        1
+        for present in (
+            "pua_base" in normalized,
+            "glyph_map" in normalized,
+            "opentype_feature" in normalized or "opentype_alternate_index" in normalized,
+        )
+        if present
+    )
+    if glyph_proof_count > 1:
+        _issue(issues, path, "A tail sample must use exactly one glyph proof mechanism.")
     return normalized
 
 

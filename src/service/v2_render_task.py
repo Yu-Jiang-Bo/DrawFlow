@@ -345,7 +345,8 @@ def _slot_actions(
             slot_scan,
             slot_key,
             f"$.{output_key}.{group}.{option_key}.{slot_key}.tails",
-            require_glyphs=preset == "tail_text",
+            require_glyphs=bool(slot_data.get("tails")),
+            font_dependencies=_tail_font_dependencies(slot_data, option),
         )
         if preset == "path_text" and "path" not in text_kind.lower():
             raise V2RenderTaskError(
@@ -543,7 +544,8 @@ def _font_tail_sources(
                 slot_scan,
                 slot_key,
                 f"$.{output_key}.font.{font_key}.{slot_key}.tails",
-                require_glyphs=preset == "tail_text",
+                require_glyphs=bool(slot_data.get("tails")),
+                font_dependencies=_tail_font_dependencies(slot_data, font_data),
             )
             if tails:
                 result.setdefault(slot_key, {})[font_key] = tails
@@ -619,6 +621,7 @@ def _tail_specs(
     path: str,
     *,
     require_glyphs: bool,
+    font_dependencies: Any = None,
 ) -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
     seen_positions: set[str] = set()
@@ -694,8 +697,14 @@ def _tail_specs(
             "sample": sample,
             "path": _path_by_key(scan_tails, key, f"{path}[{index}].key"),
         }
-        if require_glyphs or tail.get("pua_base") not in (None, "") or tail.get("glyph_map"):
-            record.update(_tail_glyph_proof(tail, f"{path}[{index}]"))
+        if (
+            require_glyphs
+            or tail.get("pua_base") not in (None, "")
+            or tail.get("glyph_map")
+            or tail.get("opentype_feature") not in (None, "")
+            or tail.get("opentype_alternate_index") not in (None, "")
+        ):
+            record.update(_tail_glyph_proof(tail, f"{path}[{index}]", font_dependencies=font_dependencies))
         else:
             record["glyph_mode"] = "plain_text"
         result.append(record)
@@ -712,7 +721,7 @@ def _scan_tail_keys_for_slot(slot_scan: Mapping[str, Any]) -> set[str]:
     return result
 
 
-def _tail_glyph_proof(tail: Mapping[str, Any], path: str) -> dict[str, Any]:
+def _tail_glyph_proof(tail: Mapping[str, Any], path: str, *, font_dependencies: Any = None) -> dict[str, Any]:
     if "pua_base" in tail and tail.get("pua_base") not in (None, ""):
         base = _codepoint(tail.get("pua_base"), f"{path}.pua_base")
         if base < _PUA_MIN or base + 25 > _PUA_MAX:
@@ -721,16 +730,68 @@ def _tail_glyph_proof(tail: Mapping[str, Any], path: str) -> dict[str, Any]:
                 "Tail PUA base must cover A-Z inside the Unicode private-use area.",
                 path=f"{path}.pua_base",
             )
-        return {"glyph_mode": "pua_contiguous", "pua_base": base, "coverage": "a-z"}
+        result = {"glyph_mode": "pua_contiguous", "pua_base": base, "coverage": "a-z"}
+        font = _single_tail_font_dependency(font_dependencies)
+        if font:
+            result["font_postscript_name"] = font
+        return result
     glyph_map = tail.get("glyph_map")
     if isinstance(glyph_map, Mapping):
         normalized = _tail_glyph_map(glyph_map, f"{path}.glyph_map")
-        return {"glyph_mode": "glyph_map", "glyph_map": normalized, "coverage": "a-z"}
+        result = {"glyph_mode": "glyph_map", "glyph_map": normalized, "coverage": "a-z"}
+        font = _single_tail_font_dependency(font_dependencies)
+        if font:
+            result["font_postscript_name"] = font
+        return result
+    feature = str(tail.get("opentype_feature") or "").strip().casefold()
+    alternate_index = tail.get("opentype_alternate_index")
+    if feature or alternate_index not in (None, ""):
+        if not feature or not isinstance(alternate_index, int) or isinstance(alternate_index, bool) or alternate_index < 1:
+            raise V2RenderTaskError(
+                "opentype_tail_profile_invalid",
+                "OpenType 尾巴字形档案必须同时指定四位特性标签和正整数替代序号。",
+                path=path,
+            )
+        fonts = _unique_font_dependencies(font_dependencies)
+        if len(fonts) != 1:
+            raise V2RenderTaskError(
+                "opentype_tail_font_ambiguous",
+                "OpenType 尾巴字形必须在槽位或选项中确认唯一的字体依赖。",
+                path=path,
+            )
+        return {
+            "glyph_mode": "opentype_alternate",
+            "opentype_feature": feature,
+            "opentype_alternate_index": alternate_index,
+            "font_postscript_name": fonts[0],
+            "coverage": "runtime-verified",
+        }
     raise V2RenderTaskError(
         "tail_glyph_coverage_missing",
-        "Tail text requires verified glyph coverage through pua_base or glyph_map.",
+        "Tail text requires verified glyph coverage through PUA, glyph map, or an OpenType alternate profile.",
         path=path,
     )
+
+
+def _tail_font_dependencies(slot: Mapping[str, Any], option: Mapping[str, Any]) -> list[str]:
+    return _unique_font_dependencies(slot.get("font_dependencies") or option.get("font_dependencies"))
+
+
+def _single_tail_font_dependency(value: Any) -> str:
+    fonts = _unique_font_dependencies(value)
+    return fonts[0] if len(fonts) == 1 else ""
+
+
+def _unique_font_dependencies(value: Any) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for raw in value if isinstance(value, list) else []:
+        name = str(raw or "").strip()
+        key = name.casefold()
+        if name and key not in seen:
+            seen.add(key)
+            result.append(name)
+    return result
 
 
 def _tail_glyph_map(value: Mapping[str, Any], path: str) -> dict[str, int]:

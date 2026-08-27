@@ -193,6 +193,12 @@
             target = replaceWithFontStyleSource(copied, outputKey, action, selected, slot);
         }
         var tailSpecs = action.tails || [];
+        var activeTailSpecs = tailSpecs.length ? tailSpecs : styleSourceTailSpecs(action, selected);
+        if (hasOpenTypeTailSpecs(activeTailSpecs)) {
+            replaceTextWithOpenTypeTailComposition(target, slotValue, activeTailSpecs, fitBounds, action);
+            if (tailSpecs.length) removeDirectTailSamples(holder.item, holder.source_path, tailSpecs);
+            return;
+        }
         if (preset === "tail_text" || (preset === "split_by_pipe" && tailSpecs.length)) {
             var tailSourceValue = preset === "split_by_pipe" ? slotValue : value;
             V2TailText.replaceTailText(
@@ -290,7 +296,8 @@
             findPageItemByRelativePath: findPageItemByRelativePath,
             relativePath: relativePath,
             hasText: hasText,
-            removePageItem: removePageItem
+            removePageItem: removePageItem,
+            replaceOpenTypeTailGlyph: replaceOpenTypeTailGlyph
         };
     }
 
@@ -349,6 +356,15 @@
         return applyDirectTailSamples(sourceHolder.item, sourceHolder.source_path, tailSpecs, value);
     }
 
+    function styleSourceTailSpecs(action, selected) {
+        var sourceInfo = (action || {}).style_source || {};
+        var group = String(sourceInfo.group || "");
+        var fontOption = String((selected || {})[group] || "");
+        var tailsByOption = sourceInfo.tails_by_option || {};
+        var tails = tailsByOption[fontOption] || [];
+        return tails instanceof Array ? tails : [];
+    }
+
     function removeSourceOnlyCopies(copied) {
         for (var key in copied) {
             if (copied.hasOwnProperty(key) && copied[key] && copied[key].source_only === true) {
@@ -367,6 +383,7 @@
     function applyDirectTailSamples(root, sourcePath, tailSpecs, value) {
         var parsed = V2TailText.tailEndpointParts(String(value || ""), tailSpecs);
         var replacements = [];
+        var openTypeTails = [];
         for (var index = 0; index < tailSpecs.length; index++) {
             var spec = tailSpecs[index] || {};
             var position = String(spec.position || "");
@@ -374,6 +391,11 @@
             var endpoint = position === "first" ? parsed.first_tail : (position === "last" ? parsed.last_tail : "");
             if (endpointIndex < 0 || !hasText(endpoint)) continue;
             var tail = findPageItemByRelativePath(root, relativePath(String(spec.path || ""), sourcePath));
+            if (V2TailText.usesOpenTypeGlyphAsset(spec)) {
+                replacements.push({ index: endpointIndex, text: "" });
+                openTypeTails.push({ tail: tail, spec: spec });
+                continue;
+            }
             var tailFrame = firstTextFrame(tail);
             if (!tailFrame) throw new Error("V2 tail sample has no text frame: " + String(spec.key || ""));
             var glyph = directTailGlyph(tailFrame, endpoint, spec, position);
@@ -390,18 +412,192 @@
             text = text.substring(0, replacement.index) + replacement.text + text.substring(replacement.index + 1);
         }
         parsed.main_text = text;
+        parsed.open_type_tails = openTypeTails;
         return parsed;
+    }
+
+    function hasOpenTypeTailSpecs(tailSpecs) {
+        for (var index = 0; index < tailSpecs.length; index++) {
+            if (String((tailSpecs[index] || {}).glyph_mode || "") === "opentype_alternate") return true;
+        }
+        return false;
+    }
+
+    function replaceTextWithOpenTypeTailComposition(target, value, tailSpecs, fitBounds, action) {
+        for (var checkIndex = 0; checkIndex < tailSpecs.length; checkIndex++) {
+            var vectorAsset = tailVectorGlyphAsset(tailSpecs[checkIndex] || {});
+            if (!String(vectorAsset.path || "")) {
+                throw new Error("V2 tail vector glyph asset is missing: " + String((tailSpecs[checkIndex] || {}).key || ""));
+            }
+        }
+        var parsed = V2TailText.tailEndpointParts(String(value || ""), tailSpecs);
+        var frame = writeTextToItem(target, value);
+        fitItemWithinBounds(frame, fitBounds, action, shouldPreserveSlotComposition(target, action));
+        var appearance = captureTailTextAppearance(frame);
+        var firstColor = tailMarkerColor(253, 1, 37);
+        var lastColor = tailMarkerColor(1, 107, 253);
+        if (parsed.first_index >= 0) colorTextCharacter(frame, parsed.first_index, firstColor);
+        if (parsed.last_index >= 0 && parsed.last_index !== parsed.first_index) colorTextCharacter(frame, parsed.last_index, lastColor);
+        var outline = frame.createOutline();
+        if (!outline) throw new Error("V2 OpenType tail text outline failed: " + String(action.slot_key || ""));
+        for (var index = 0; index < tailSpecs.length; index++) {
+            var spec = tailSpecs[index] || {};
+            var marker = String(spec.position || "") === "first" ? firstColor : lastColor;
+            var bounds = removeOutlinedMarkerGlyph(outline, marker);
+            if (!bounds) throw new Error("V2 OpenType endpoint outline was not found: " + String(spec.key || ""));
+            var asset = tailVectorGlyphAsset(spec);
+            var replacement = importOpenTypeGlyph(String(asset.path || ""), outline);
+            applyTailAppearance(replacement, appearance);
+            replacement.name = "TAIL_VECTOR_" + String(spec.key || "");
+            fitItemWithinBounds(replacement, bounds, action, true);
+        }
+    }
+
+    function tailVectorGlyphAsset(spec) {
+        return (spec || {}).tail_vector_asset || (spec || {}).opentype_glyph_asset || {};
+    }
+
+    function tailMarkerColor(red, green, blue) {
+        var color = new RGBColor();
+        color.red = red;
+        color.green = green;
+        color.blue = blue;
+        return color;
+    }
+
+    function colorTextCharacter(frame, index, color) {
+        try { frame.textRange.characters[index].characterAttributes.fillColor = color; }
+        catch (colorError) { throw new Error("V2 OpenType tail could not mark endpoint character"); }
+    }
+
+    function captureTailTextAppearance(frame) {
+        var attributes = frame.textRange.characterAttributes;
+        return {
+            fillColor: attributes.fillColor,
+            strokeColor: attributes.strokeColor,
+            strokeWeight: attributes.strokeWeight
+        };
+    }
+
+    function removeOutlinedMarkerGlyph(outline, color) {
+        var matches = [];
+        collectOutlinedMarkerGlyphs(outline, color, matches);
+        if (!matches.length) return null;
+        var bounds = null;
+        for (var index = 0; index < matches.length; index++) {
+            var itemBounds = measuredBounds(matches[index]);
+            bounds = mergeTailBounds(bounds, itemBounds);
+        }
+        for (var removeIndex = 0; removeIndex < matches.length; removeIndex++) removePageItem(matches[removeIndex]);
+        return bounds;
+    }
+
+    function collectOutlinedMarkerGlyphs(item, color, matches) {
+        if (!item) return;
+        if (item.typename === "CompoundPathItem") {
+            var compoundPaths = item.pathItems || [];
+            if (compoundPaths.length && sameRGBColor(compoundPaths[0].fillColor, color)) matches.push(item);
+            return;
+        }
+        if (item.typename === "PathItem") {
+            if (sameRGBColor(item.fillColor, color)) matches.push(item);
+            return;
+        }
+        var children = item.pageItems || [];
+        for (var index = 0; index < children.length; index++) collectOutlinedMarkerGlyphs(children[index], color, matches);
+    }
+
+    function sameRGBColor(left, right) {
+        try {
+            return Math.round(Number(left.red)) === Math.round(Number(right.red))
+                && Math.round(Number(left.green)) === Math.round(Number(right.green))
+                && Math.round(Number(left.blue)) === Math.round(Number(right.blue));
+        } catch (colorError) { return false; }
+    }
+
+    function mergeTailBounds(current, next) {
+        if (!current) return next;
+        return [
+            Math.min(Number(current[0]), Number(next[0])),
+            Math.max(Number(current[1]), Number(next[1])),
+            Math.max(Number(current[2]), Number(next[2])),
+            Math.min(Number(current[3]), Number(next[3]))
+        ];
+    }
+
+    function replaceOpenTypeTailGlyph(tail, spec, tailBounds, action) {
+        var asset = (spec || {}).opentype_glyph_asset || {};
+        var assetPath = String(asset.path || "");
+        if (!assetPath) throw new Error("V2 OpenType tail glyph asset is missing: " + String((spec || {}).key || ""));
+        var sampleFrame = firstTextFrame(tail);
+        if (!sampleFrame) throw new Error("V2 OpenType tail sample has no text frame: " + String((spec || {}).key || ""));
+        var replacement = importOpenTypeGlyph(assetPath, tail);
+        applyTailTextAppearance(replacement, sampleFrame);
+        replacement.name = String(tail.name || "");
+        fitItemWithinBounds(replacement, tailBounds, action, shouldPreserveSlotComposition(tail, action));
+        removePageItem(tail);
+        return replacement;
+    }
+
+    function importOpenTypeGlyph(assetPath, beforeItem) {
+        var file = File(assetPath);
+        if (!file.exists) throw new Error("V2 OpenType tail glyph asset was not found: " + assetPath);
+        var glyphDoc = null;
+        try {
+            glyphDoc = app.open(file);
+            var source = firstPageItemInDocument(glyphDoc);
+            if (!source) throw new Error("V2 OpenType tail glyph SVG has no page item: " + assetPath);
+            var replacement = source.duplicate(doc.layers[0], ElementPlacement.PLACEATEND);
+            try { replacement.move(beforeItem, ElementPlacement.PLACEBEFORE); } catch (moveError) {}
+            return replacement;
+        } finally {
+            try { if (glyphDoc) glyphDoc.close(SaveOptions.DONOTSAVECHANGES); } catch (closeError) {}
+        }
+    }
+
+    function firstPageItemInDocument(sourceDoc) {
+        var layers = sourceDoc && sourceDoc.layers ? sourceDoc.layers : [];
+        for (var layerIndex = 0; layerIndex < layers.length; layerIndex++) {
+            var items = layers[layerIndex].pageItems || [];
+            if (items.length) return items[0];
+        }
+        return null;
+    }
+
+    function applyTailTextAppearance(item, frame) {
+        var attributes = null;
+        try { attributes = frame.textRange.characterAttributes; } catch (attributesError) {}
+        if (!attributes) return;
+        applyTailAppearance(item, attributes);
+    }
+
+    function applyTailAppearance(item, attributes) {
+        if (!attributes) return;
+        applyTailAppearanceToPaths(item, attributes);
+    }
+
+    function applyTailAppearanceToPaths(item, attributes) {
+        if (!item) return;
+        if (item.typename === "PathItem") {
+            try { item.filled = true; item.fillColor = attributes.fillColor; } catch (fillError) {}
+            try { item.stroked = attributes.strokeColor && attributes.strokeWeight > 0; item.strokeColor = attributes.strokeColor; item.strokeWidth = attributes.strokeWeight; } catch (strokeError) {}
+            return;
+        }
+        var children = item.pageItems || [];
+        for (var index = 0; index < children.length; index++) applyTailAppearanceToPaths(children[index], attributes);
     }
 
     function directTailGlyph(tailFrame, endpoint, spec, position) {
         var letter = String(endpoint || "").toLowerCase();
-        var fallback = V2TailText.tailGlyphForSpec(letter, spec);
-        if (!isPlainTextTailSpec(spec)) return fallback;
+        if (!isPlainTextTailSpec(spec)) return V2TailText.tailGlyphForSpec(letter, spec);
         var sampleText = String(tailFrame.contents || "");
         var sampleIndex = tailSampleLatinIndex(sampleText, position);
-        if (sampleText.length !== 1 || sampleIndex !== 0) return fallback;
+        if (sampleText.length !== 1 || sampleIndex !== 0) {
+            throw new Error("V2 tail glyph coverage is missing: " + String((spec || {}).key || ""));
+        }
         var encoding = inferPuaTailEncodingFromSample(tailFrame, sampleText.charAt(0).toLowerCase());
-        return encoding ? puaTailGlyphOrFallback(tailFrame, encoding, letter, fallback) : fallback;
+        if (!encoding) throw new Error("V2 tail glyph coverage is missing: " + String((spec || {}).key || ""));
+        return puaTailGlyph(tailFrame, encoding, letter, spec);
     }
 
     function tailSampleLatinIndex(text, position) {
@@ -473,10 +669,7 @@
             signatures[evidence.signature] = true;
             usableCount += 1;
         }
-        // A font may intentionally leave one endpoint letter in normal Latin
-        // form. That one character falls back to its normal glyph; multiple
-        // missing or duplicated tail glyphs are rejected as unproven.
-        return missingCount <= 1 && usableCount + missingCount === 26;
+        return missingCount === 0 && usableCount === 26;
     }
 
     function tailPuaCodepoint(encoding, letter) {
@@ -484,13 +677,14 @@
         return encoding.decimal ? decimalPuaCodepoint(encoding.base, index) : encoding.base + index;
     }
 
-    function puaTailGlyphOrFallback(frame, encoding, letter, fallback) {
+    function puaTailGlyph(frame, encoding, letter, spec) {
         var code = tailPuaCodepoint(encoding, letter);
         var evidence = outlinedTailGlyphEvidence(frame, code);
         var missing = missingPuaGlyphSignature(frame);
-        return evidence && evidence.signature && (!missing || evidence.signature !== missing)
-            ? String.fromCharCode(code)
-            : fallback;
+        if (!evidence || !evidence.signature || (missing && evidence.signature === missing)) {
+            throw new Error("V2 tail glyph coverage is missing: " + String((spec || {}).key || ""));
+        }
+        return String.fromCharCode(code);
     }
 
     function missingPuaGlyphSignature(frame) {

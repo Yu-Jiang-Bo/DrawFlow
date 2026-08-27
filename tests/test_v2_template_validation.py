@@ -320,7 +320,7 @@ def test_content_preset_blockers_are_reported_by_path():
         assert _has_issue(result, code=code, reason=reason)
 
 
-def test_scan_tail_evidence_does_not_block_direct_or_split_text_presets():
+def test_unverified_tail_evidence_blocks_direct_or_split_text_presets():
     direct_payload = complete_contract()
     direct_option = direct_payload["outputs"][0]["design"]["options"][0]
     direct_option["content_preset"] = "direct_text"
@@ -363,8 +363,9 @@ def test_scan_tail_evidence_does_not_block_direct_or_split_text_presets():
 
     for payload in (direct_payload, split_payload):
         result = validate_v2_template_configuration(payload)
-        assert result["can_publish"] is True
-        assert result["checks"]["content"]["status"] == V2_STATUS_PASSED
+        assert result["can_publish"] is False
+        assert result["checks"]["content"]["status"] == V2_STATUS_BLOCKED
+        assert _has_issue(result, code="tail_glyph_coverage_missing", reason="首字或尾字覆盖证据")
         assert not _has_issue(result, code="direct_text_slot_invalid")
         assert not _has_issue(result, code="split_by_pipe_slot_preset_invalid")
 

@@ -325,7 +325,9 @@ th { color: var(--v2-muted); background: #f7f9fc; font-size: 12px; font-weight: 
   color: var(--v2-muted); background: #fbfcfe; font-size: 12px; font-weight: 700;
 }
 .content-meta-cell { min-width: 0; padding: 8px 0; overflow-wrap: anywhere; }
-.tail-sample-cell { color: var(--v2-muted); font-size: 12px; }
+.tail-sample-cell { display: grid; gap: 5px; color: var(--v2-muted); font-size: 12px; }
+.tail-profile-line { display: grid; grid-template-columns: minmax(48px, auto) minmax(96px, 1fr) minmax(54px, 0.55fr) minmax(48px, 0.45fr); gap: 4px; align-items: center; }
+.tail-profile-line input, .tail-profile-line select { min-width: 0; font-size: 11px; }
 .option-rule-list, .asset-binding-list, .capability-evidence, .preview-validation-list {
   display: grid; gap: 8px; min-width: 0; margin-top: 12px;
 }

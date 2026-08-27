@@ -397,7 +397,7 @@
 
   function tailConfigsFromRow(row, slotKey) {
     if (Array.isArray(row.__tailConfigs) && row.__tailConfigs.length) {
-      return normalizedTailConfigs(row.__tailConfigs);
+      return normalizedTailConfigs(row.__tailConfigs).map((tail) => tailConfigWithProfile(row, tail));
     }
     return [
       tailConfig(slotKey, "first", rowValue(row, "slot-tail-first")),
@@ -424,6 +424,10 @@
       const result = { key, position, sample };
       if (data.pua_base !== undefined && data.pua_base !== null && cleanText(data.pua_base) !== "") result.pua_base = data.pua_base;
       if (data.glyph_map && typeof data.glyph_map === "object") result.glyph_map = data.glyph_map;
+      if (cleanText(data.opentype_feature || "")) result.opentype_feature = cleanText(data.opentype_feature).toLowerCase();
+      if (data.opentype_alternate_index !== undefined && data.opentype_alternate_index !== null && cleanText(data.opentype_alternate_index) !== "") {
+        result.opentype_alternate_index = Number(data.opentype_alternate_index);
+      }
       return result;
     }).filter(Boolean);
   }
@@ -456,10 +460,18 @@
 
   function tailHasGlyphProof(tail) {
     const data = objectOf(tail);
+    if (validOpenTypeTailProfile(data)) return true;
     if (data.pua_base !== undefined && data.pua_base !== null && cleanText(data.pua_base) !== "") {
       return validTailPuaBase(data.pua_base);
     }
     return validTailGlyphMap(data.glyph_map);
+  }
+
+  function validOpenTypeTailProfile(tail) {
+    const data = objectOf(tail);
+    return /^[a-z0-9]{4}$/i.test(cleanText(data.opentype_feature || ""))
+      && Number.isInteger(Number(data.opentype_alternate_index))
+      && Number(data.opentype_alternate_index) >= 1;
   }
 
   function validTailPuaBase(value) {
@@ -499,11 +511,86 @@
   }
 
   function tailEvidenceCell(tails) {
-    const cell = metaCell(tailSampleSummary(tails));
+    const cell = document.createElement("div");
     cell.classList.add("tail-sample-cell");
-    cell.setAttribute("aria-readonly", "true");
-    cell.title = "模板尾巴样本仅用于识别；订单文字会自动取对应的首字或尾字。";
+    cell.title = "每个模板样本独立选择尾巴字形机制。OpenType 的特性和替代序号不跨字体复用。";
+    normalizedTailConfigs(tails).forEach((tail) => {
+      const line = document.createElement("div");
+      line.className = "tail-profile-line";
+      const label = document.createElement("span");
+      label.textContent = `${tail.position === "first" ? "首字" : "尾字"} ${tail.sample}`;
+      line.appendChild(label);
+      const mode = document.createElement("select");
+      mode.dataset.tailKey = tail.key;
+      mode.dataset.tailField = "mode";
+      [["plain", "仅样本"], ["opentype", "OpenType 替代"], ["pua", "PUA 映射"]].forEach(([value, labelText]) => {
+        const option = document.createElement("option");
+        option.value = value;
+        option.textContent = labelText;
+        mode.appendChild(option);
+      });
+      mode.value = tailProfileMode(tail);
+      mode.disabled = Boolean(state.isPublishedView);
+      line.appendChild(mode);
+      const feature = tailProfileInput(tail.key, "opentype_feature", tail.opentype_feature || "aalt", "特性");
+      feature.maxLength = 4;
+      const alternate = tailProfileInput(tail.key, "opentype_alternate_index", tail.opentype_alternate_index || "", "序号");
+      alternate.type = "number";
+      alternate.min = "1";
+      line.append(feature, alternate);
+      [mode, feature, alternate].forEach(bindTailProfileChange);
+      cell.appendChild(line);
+    });
     return cell;
+  }
+
+  function tailProfileInput(key, field, value, placeholder) {
+    const input = document.createElement("input");
+    input.dataset.tailKey = key;
+    input.dataset.tailField = field;
+    input.value = value;
+    input.placeholder = placeholder;
+    input.disabled = Boolean(state.isPublishedView);
+    return input;
+  }
+
+  function bindTailProfileChange(element) {
+    element.addEventListener(element.tagName === "SELECT" ? "change" : "input", () => {
+      if (typeof globalThis.invalidateTrialResult === "function") globalThis.invalidateTrialResult("配置已修改，请重新试渲染。");
+      globalThis.validateCurrentConfig(false);
+    });
+  }
+
+  function tailConfigWithProfile(row, tail) {
+    const result = { ...tail };
+    const mode = tailProfileValue(row, tail.key, "mode");
+    if (mode !== "opentype") {
+      delete result.opentype_feature;
+      delete result.opentype_alternate_index;
+      if (mode === "plain") {
+        delete result.pua_base;
+        delete result.glyph_map;
+      }
+      return result;
+    }
+    const feature = cleanText(tailProfileValue(row, tail.key, "opentype_feature")).toLowerCase();
+    const alternate = Number(tailProfileValue(row, tail.key, "opentype_alternate_index"));
+    delete result.pua_base;
+    delete result.glyph_map;
+    result.opentype_feature = feature;
+    result.opentype_alternate_index = alternate;
+    return result;
+  }
+
+  function tailProfileValue(row, key, field) {
+    const element = row.querySelector(`[data-tail-key="${key}"][data-tail-field="${field}"]`);
+    return element ? element.value : "";
+  }
+
+  function tailProfileMode(tail) {
+    if (validOpenTypeTailProfile(tail)) return "opentype";
+    if (tail.pua_base !== undefined || (tail.glyph_map && typeof tail.glyph_map === "object")) return "pua";
+    return "plain";
   }
 
   function tailSampleSummary(tails) {
@@ -701,6 +788,7 @@
     splitOptionAvailable,
     tailPresentationForSlots,
     tailTreatmentDescription,
+    validOpenTypeTailProfile,
     hasActiveColorRules,
     displayDimension,
     slotKeyFor,

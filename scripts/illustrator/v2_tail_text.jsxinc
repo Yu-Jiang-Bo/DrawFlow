@@ -12,8 +12,12 @@ var V2TailText = (function () {
             var tail = env.findPageItemByRelativePath(root, env.relativePath(String(spec.path || ""), sourcePath));
             if (env.hasText(text)) {
                 var tailBounds = env.measuredBounds(tail);
-                var tailFrame = env.writeTextToItem(tail, tailGlyphForSpec(text, spec));
-                env.fitItemWithinBounds(tailFrame, tailBounds, action);
+                if (usesOpenTypeGlyphAsset(spec)) {
+                    env.replaceOpenTypeTailGlyph(tail, spec, tailBounds, action);
+                } else {
+                    var tailFrame = env.writeTextToItem(tail, tailGlyphForSpec(text, spec));
+                    env.fitItemWithinBounds(tailFrame, tailBounds, action);
+                }
             } else {
                 env.removePageItem(tail);
             }
@@ -77,8 +81,16 @@ var V2TailText = (function () {
             if (code > 0xF8FF) throw new Error("V2 tail glyph codepoint is outside PUA: pua_base");
             return String.fromCharCode(code);
         }
-        if (String(spec.glyph_mode || "") === "plain_text") return text;
         throw new Error("V2 tail glyph coverage is missing: " + String(spec.key || ""));
+    }
+
+    function usesOpenTypeGlyphAsset(spec) {
+        if (String((spec || {}).glyph_mode || "") !== "opentype_alternate") return false;
+        var asset = (spec || {}).opentype_glyph_asset || {};
+        if (!String(asset.path || "")) {
+            throw new Error("V2 OpenType tail glyph asset is missing: " + String((spec || {}).key || ""));
+        }
+        return true;
     }
 
     function tailSampleSegment(sampleText, glyph, position) {
@@ -109,6 +121,7 @@ var V2TailText = (function () {
         replaceTailText: replaceTailText,
         tailEndpointParts: tailEndpointParts,
         tailGlyphForSpec: tailGlyphForSpec,
+        usesOpenTypeGlyphAsset: usesOpenTypeGlyphAsset,
         tailSampleSegment: tailSampleSegment
     };
 }());

@@ -567,7 +567,8 @@ def test_v2_renderer_keeps_tail_glyphs_from_selected_font_style_source():
                                             "key": "tail_name_last_m",
                                             "position": "last",
                                             "sample": "m",
-                                            "glyph_mode": "plain_text",
+                                                "glyph_mode": "pua_contiguous",
+                                                "pua_base": tail_base,
                                             "path": "Template/Output_main/Font/F10/tail_name_last_m",
                                         }
                                     ]
@@ -1245,7 +1246,7 @@ if (width >= 99.9) throw new Error('preserved tail text unexpectedly filled full
     assert result.returncode == 0, result.stderr
 
 
-def test_v2_renderer_derives_direct_text_tail_samples_for_any_end_letters():
+def test_v2_renderer_rejects_unverified_direct_text_tail_samples():
     tails = [
         {
             "key": "tail_name_first_m",
@@ -1266,16 +1267,12 @@ def test_v2_renderer_derives_direct_text_tail_samples_for_any_end_letters():
     task["render_task"]["outputs"][0]["actions"][1]["preset"] = "direct_text"
     task["mock_first_tail_sample"] = "__m"
     task["mock_last_tail_sample"] = "a__"
-    harness = node_mock_harness(task, """
-const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
-if (child(designCopy, 'slot_name').contents !== '__custom__') throw new Error('direct text did not derive both tail samples for arbitrary end letters: ' + child(designCopy, 'slot_name').contents);
-if (designCopy.pageItems.find(item => item.name === 'tail_name_first_m')) throw new Error('direct text retained first tail sample helper');
-if (designCopy.pageItems.find(item => item.name === 'tail_name_last_a')) throw new Error('direct text retained last tail sample helper');
-""")
+    harness = node_mock_harness(task, "")
 
     result = run_node(harness)
 
-    assert result.returncode == 0, result.stderr
+    assert result.returncode != 0
+    assert "tail glyph coverage is missing" in result.stderr
 
 
 def test_v2_renderer_fills_only_requested_axis_and_centers_slot_content():
@@ -1343,7 +1340,7 @@ if (Math.abs((bounds[0] + bounds[2]) / 2 - {expected_center[0]}) > 0.01 || Math.
     assert result.returncode == 0, result.stderr
 
 
-def test_v2_renderer_derives_plain_tail_sample_pua_for_any_end_letter():
+def test_v2_renderer_rejects_unverified_plain_tail_even_when_a_probe_candidate_exists():
     tails = [
         {
             "key": "tail_name_last_m",
@@ -1356,16 +1353,12 @@ def test_v2_renderer_derives_plain_tail_sample_pua_for_any_end_letter():
     task = tail_text_task(tails, value="Mastka")
     task["render_task"]["outputs"][0]["actions"][1]["preset"] = "direct_text"
     task["mock_pua_tail_base"] = 0xE054
-    harness = node_mock_harness(task, """
-const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
-const expected = 'Mastk' + String.fromCharCode(0xE054);
-if (child(designCopy, 'slot_name').contents !== expected) throw new Error('direct text did not derive PUA tail glyph: ' + child(designCopy, 'slot_name').contents);
-if (designCopy.pageItems.find(item => item.name === 'tail_name_last_m')) throw new Error('direct text retained plain tail sample helper');
-""")
+    harness = node_mock_harness(task, "")
 
     result = run_node(harness)
 
-    assert result.returncode == 0, result.stderr
+    assert result.returncode != 0
+    assert "tail glyph coverage is missing" in result.stderr
 
 
 def test_v2_renderer_bounds_plain_tail_pua_probe_candidates():
@@ -1373,7 +1366,8 @@ def test_v2_renderer_bounds_plain_tail_pua_probe_candidates():
 
     assert "knownTailPuaBases" in source
     assert "for (var candidate = 0xE000; candidate <= 0xF8FF - 25; candidate++)" not in source
-    assert "puaTailGlyphOrFallback" in source
+    assert "puaTailGlyph" in source
+    assert "missingCount === 0" in source
 
 
 def test_v2_renderer_rejects_plain_tail_pua_when_alphabet_is_incomplete():
@@ -1390,18 +1384,15 @@ def test_v2_renderer_rejects_plain_tail_pua_when_alphabet_is_incomplete():
     task["render_task"]["outputs"][0]["actions"][1]["preset"] = "direct_text"
     task["mock_pua_tail_base"] = 0xE054
     task["mock_pua_incomplete_base"] = 0xE054
-    harness = node_mock_harness(task, """
-const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
-if (child(designCopy, 'slot_name').contents !== 'Mastka') throw new Error('incomplete PUA alphabet was adopted: ' + child(designCopy, 'slot_name').contents);
-if (designCopy.pageItems.find(item => item.name === 'tail_name_last_m')) throw new Error('direct text retained rejected tail sample helper');
-""")
+    harness = node_mock_harness(task, "")
 
     result = run_node(harness)
 
-    assert result.returncode == 0, result.stderr
+    assert result.returncode != 0
+    assert "tail glyph coverage is missing" in result.stderr
 
 
-def test_v2_renderer_falls_back_to_latin_when_the_requested_plain_tail_pua_is_missing():
+def test_v2_renderer_blocks_when_the_requested_plain_tail_pua_is_missing():
     tails = [
         {
             "key": "tail_name_last_m",
@@ -1416,25 +1407,22 @@ def test_v2_renderer_falls_back_to_latin_when_the_requested_plain_tail_pua_is_mi
     task["mock_pua_tail_base"] = 0xE054
     task["mock_pua_missing_base"] = 0xE054
     task["mock_pua_missing_index"] = 5
-    harness = node_mock_harness(task, """
-const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
-if (child(designCopy, 'slot_name').contents !== 'Mastkf') {
-  throw new Error('missing PUA endpoint did not fall back to the Latin letter: ' + child(designCopy, 'slot_name').contents);
-}
-""")
+    harness = node_mock_harness(task, "")
 
     result = run_node(harness)
 
-    assert result.returncode == 0, result.stderr
+    assert result.returncode != 0
+    assert "tail glyph coverage is missing" in result.stderr
 
 
-def test_v2_renderer_applies_plain_tail_evidence_to_split_part_only():
+def test_v2_renderer_applies_verified_pua_tail_to_split_part_only():
     tails = [
         {
             "key": "tail_year_tail_last_a",
             "position": "last",
             "sample": "a",
-            "glyph_mode": "plain_text",
+            "glyph_mode": "pua_contiguous",
+            "pua_base": TAIL_PUA_BASE,
             "path": "Template/Output_main/Design/Design03/tail_year_tail_last_a",
         }
     ]
@@ -1452,10 +1440,10 @@ def test_v2_renderer_applies_plain_tail_evidence_to_split_part_only():
             "tails": tails,
         }
     )
-    harness = node_mock_harness(task, """
+    harness = node_mock_harness(task, f"""
 const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
 if (child(designCopy, 'slot_year_tail').contents !== 'Omeg') throw new Error('plain split main mismatch: ' + child(designCopy, 'slot_year_tail').contents);
-if (child(designCopy, 'tail_year_tail_last_a').contents !== 'a') throw new Error('plain split tail mismatch: ' + child(designCopy, 'tail_year_tail_last_a').contents);
+if (child(designCopy, 'tail_year_tail_last_a').contents !== String.fromCharCode({TAIL_PUA_BASE})) throw new Error('PUA split tail mismatch: ' + child(designCopy, 'tail_year_tail_last_a').contents);
 """)
 
     result = run_node(harness)
@@ -1514,6 +1502,79 @@ const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
 const firstTail = designCopy.pageItems.find(item => item.name === 'tail_name_first_a');
 if (!firstTail || firstTail.contents !== {json.dumps(chr(0xE219))}) throw new Error('glyph map tail mismatch');
 if (child(designCopy, 'slot_name').contents !== 'elda') throw new Error('main tail removal mismatch');
+""")
+
+    result = run_node(harness)
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_v2_renderer_embeds_materialized_opentype_tail_glyphs_for_direct_text():
+    tails = [
+        {
+            "key": "tail_name_first_a",
+            "position": "first",
+            "sample": "a",
+            "glyph_mode": "opentype_alternate",
+            "opentype_glyph_asset": {"path": "first-a.svg"},
+            "path": "Template/Output_main/Design/Design03/tail_name_first_a",
+        },
+        {
+            "key": "tail_name_last_a",
+            "position": "last",
+            "sample": "a",
+            "glyph_mode": "opentype_alternate",
+            "opentype_glyph_asset": {"path": "last-a.svg"},
+            "path": "Template/Output_main/Design/Design03/tail_name_last_a",
+        },
+    ]
+    task = tail_text_task(tails, value="Alice")
+    task["render_task"]["outputs"][0]["actions"][1]["preset"] = "direct_text"
+    harness = node_mock_harness(task, f"""
+const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
+if (designCopy.pageItems.find(item => item.name === 'slot_name')) throw new Error('OpenType composition retained editable normal endpoint text');
+if (designCopy.pageItems.find(item => item.name === 'tail_name_first_a' || item.name === 'tail_name_last_a')) throw new Error('OpenType helper sample remained in output');
+if (!designCopy.pageItems.find(item => item.name === 'TAIL_VECTOR_tail_name_first_a' && item.typename === 'PathItem')) throw new Error('OpenType first glyph was not inserted');
+if (!designCopy.pageItems.find(item => item.name === 'TAIL_VECTOR_tail_name_last_a' && item.typename === 'PathItem')) throw new Error('OpenType last glyph was not inserted');
+const embedded = designCopy.pageItems.filter(item => item.typename === 'PathItem' && /^TAIL_VECTOR_/.test(item.name));
+if (embedded.length !== 2) throw new Error('OpenType glyph SVGs were not embedded');
+""")
+
+    result = run_node(harness)
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_v2_renderer_composes_mixed_opentype_and_pua_tail_vectors_for_one_slot():
+    tails = [
+        {
+            "key": "tail_name_first_a",
+            "position": "first",
+            "sample": "a",
+            "glyph_mode": "opentype_alternate",
+            "tail_vector_asset": {"path": "first-a.svg"},
+            "path": "Template/Output_main/Design/Design03/tail_name_first_a",
+        },
+        {
+            "key": "tail_name_last_a",
+            "position": "last",
+            "sample": "a",
+            "glyph_mode": "pua_contiguous",
+            "pua_base": TAIL_PUA_BASE,
+            "tail_vector_asset": {"path": "last-e.svg"},
+            "path": "Template/Output_main/Design/Design03/tail_name_last_a",
+        },
+    ]
+    task = tail_text_task(tails, value="Alice")
+    task["render_task"]["outputs"][0]["actions"][1]["preset"] = "direct_text"
+    harness = node_mock_harness(task, """
+const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
+if (designCopy.pageItems.find(item => item.name === 'slot_name')) throw new Error('mixed composition retained editable endpoint text');
+for (const key of ['tail_name_first_a', 'tail_name_last_a']) {
+  if (!designCopy.pageItems.find(item => item.name === 'TAIL_VECTOR_' + key && item.typename === 'PathItem')) {
+    throw new Error('mixed vector tail was not inserted: ' + key);
+  }
+}
 """)
 
     result = run_node(harness)
@@ -2314,7 +2375,7 @@ global.$ = {{ getenv: () => 'task.json' }};
 global.File = function(path) {{
   return {{
     fsName: path,
-    exists: path === 'task.json',
+    exists: path === 'task.json' || /\.svg$/i.test(path),
     parent: folder,
     open: () => true,
     read: () => taskText,
@@ -2325,15 +2386,17 @@ global.File = function(path) {{
 }};
 global.UserInteractionLevel = {{ DONTDISPLAYALERTS: 0 }};
 global.DocumentColorSpace = {{ RGB: 1 }};
-global.ElementPlacement = {{ PLACEATEND: 1 }};
+global.ElementPlacement = {{ PLACEATEND: 1, PLACEBEFORE: 2 }};
 global.SaveOptions = {{ DONOTSAVECHANGES: 0 }};
 global.Compatibility = {{ ILLUSTRATOR8: 8 }};
 global.IllustratorSaveOptions = function() {{}};
 global.ExportOptionsPNG24 = function() {{}};
 global.ExportType = {{ PNG24: 24 }};
 global.Transformation = {{ CENTER: 0 }};
+global.RGBColor = function() {{ this.red = 0; this.green = 0; this.blue = 0; }};
 function item(typename, name, contents, children, styleToken, bounds, options) {{
   let text = contents || '';
+  const characterColors = {{}};
   const opts = options || {{}};
   let textSize = Number(opts.textSize || 18);
   let box = (bounds || defaultBounds(typename, name, text)).slice();
@@ -2355,6 +2418,19 @@ function item(typename, name, contents, children, styleToken, bounds, options) {
       return copy;
     }},
     createOutline: function() {{
+      if (typename === 'TextFrame' && Object.keys(characterColors).length) {{
+        const glyphs = text.split('').map((character, index) => {{
+          const width = Math.max(1, (box[2] - box[0]) / Math.max(text.length, 1));
+          const glyph = item('PathItem', '', '', [], '', [box[0] + width * index, box[1], box[0] + width * (index + 1), box[3]]);
+          glyph.fillColor = characterColors[index] || {{ red: 0, green: 0, blue: 0 }};
+          return glyph;
+        }});
+        const outlined = item('GroupItem', '', '', glyphs, '', this.visibleBounds);
+        const parent = this.parent;
+        this.remove();
+        if (parent) attach(parent, outlined);
+        return outlined;
+      }}
       const code = text.length === 1 ? text.charCodeAt(0) : 0;
       const matchesTailSample = opts.puaTailBase && (text === 'm' || code === Number(opts.puaTailBase) + 12);
       const token = matchesTailSample ? 'tail-sample-m' : ('glyph-' + code);
@@ -2393,7 +2469,7 @@ function item(typename, name, contents, children, styleToken, bounds, options) {
         throw new Error('dom move failed: ' + this.name);
       }}
       this.remove();
-      attach(target, this);
+      attach(placement === ElementPlacement.PLACEBEFORE && target && target.parent ? target.parent : target, this);
     }},
     translate: function(dx, dy) {{
       this.translateCalls++;
@@ -2437,6 +2513,19 @@ function item(typename, name, contents, children, styleToken, bounds, options) {
   node.textRange = {{
     characterAttributes: {{}}
   }};
+  node.textRange.characterAttributes.fillColor = {{ red: 0, green: 0, blue: 0 }};
+  node.textRange.characterAttributes.strokeColor = {{ red: 0, green: 0, blue: 0 }};
+  node.textRange.characterAttributes.strokeWeight = 0;
+  Object.defineProperty(node.textRange, 'characters', {{
+    get: () => text.split('').map((character, index) => {{
+      const attributes = {{}};
+      Object.defineProperty(attributes, 'fillColor', {{
+        get: () => characterColors[index] || node.textRange.characterAttributes.fillColor,
+        set: value => {{ characterColors[index] = value; }}
+      }});
+      return {{ characterAttributes: attributes }};
+    }})
+  }});
   Object.defineProperty(node.textRange.characterAttributes, 'size', {{
     get: () => textSize,
     set: value => {{
@@ -2598,6 +2687,13 @@ const outputDoc = {{
   exportFile: (file, type, options) => {{ exportedAs = file.fsName + '.png'; exportOptions = options; }},
   close: () => undefined
 }};
+function glyphDocument() {{
+  const glyph = item('PathItem', '', '', [], '', [0, 20, 10, 0]);
+  glyph.openTypeTail = true;
+  const glyphLayer = {{ typename: 'Layer', name: 'SVG', pageItems: [glyph] }};
+  glyph.parent = glyphLayer;
+  return {{ layers: [glyphLayer], close: () => undefined }};
+}}
 function groupSelectedOutputItems() {{
   const selected = outputLayer.pageItems.filter(item => item.selected);
   const group = item('GroupItem', '', '', []);
@@ -2610,7 +2706,7 @@ function groupSelectedOutputItems() {{
 }}
 global.app = {{
   userInteractionLevel: 0,
-  open: () => templateDoc,
+  open: file => /\.svg$/i.test(String(file && file.fsName || '')) ? glyphDocument() : templateDoc,
   activeDocument: outputDoc,
   documents: {{ add: () => {{
     global.app.activeDocument = outputDoc;
