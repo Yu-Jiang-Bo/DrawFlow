@@ -518,6 +518,81 @@ if (slot.styleToken !== 'F10-style') throw new Error('combo slot did not inherit
     assert result.returncode == 0, result.stderr
 
 
+def test_v2_renderer_keeps_tail_glyphs_from_selected_font_style_source():
+    tail_base = 0xE054
+    task = {
+        "$schema": "custom-renderer/v2-render-execution",
+        "template_ai": "template.ai",
+        "output_ai": "out.ai",
+        "mock_font_tail": True,
+        "mock_pua_tail_base": tail_base,
+        "values": {"design": "03", "font": "F3", "name": "Carla"},
+        "selections": {"Output_main": {"design": "Design03", "font": "F3"}},
+        "render_task": {
+            "$schema": "custom-renderer/v2-render-task",
+            "outputs": [
+                {
+                    "key": "Output_main",
+                    "actions": [
+                        {
+                            "type": "copy_option_group",
+                            "group": "design",
+                            "option_key": "Design03",
+                            "object_path": "Template/Output_main/Design/Design03",
+                        },
+                        {
+                            "type": "copy_option_group",
+                            "group": "font",
+                            "option_key": "F3",
+                            "object_path": "Template/Output_main/Font/F10",
+                            "source_only": True,
+                        },
+                        {
+                            "type": "replace_slot_text",
+                            "group": "design",
+                            "option_key": "Design03",
+                            "object_path": "Template/Output_main/Design/Design03/slot_name",
+                            "source_field": "name",
+                            "required": True,
+                            "preset": "direct_text",
+                            "tail_paths": [],
+                            "tails": [],
+                            "style_source": {
+                                "group": "font",
+                                "slot_key": "slot_name",
+                                "paths_by_option": {"F3": "Template/Output_main/Font/F10/slot_name"},
+                                "tails_by_option": {
+                                    "F3": [
+                                        {
+                                            "key": "tail_name_last_m",
+                                            "position": "last",
+                                            "sample": "m",
+                                            "glyph_mode": "plain_text",
+                                            "path": "Template/Output_main/Font/F10/tail_name_last_m",
+                                        }
+                                    ]
+                                },
+                            },
+                        },
+                    ],
+                }
+            ],
+        },
+    }
+    harness = node_mock_harness(task, f"""
+const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
+if (!designCopy) throw new Error('Design03 was not copied');
+if (outputLayer.pageItems.find(item => item.name === 'F10')) throw new Error('source-only tail font copy was not removed');
+const slot = child(designCopy, 'slot_name');
+if (slot.contents !== 'Carl' + String.fromCharCode({tail_base})) throw new Error('font tail glyph was not carried to design: ' + slot.contents);
+if (slot.styleToken !== 'F10-style') throw new Error('tail font style was not inherited: ' + slot.styleToken);
+""")
+
+    result = run_node(harness)
+
+    assert result.returncode == 0, result.stderr
+
+
 def test_v2_renderer_removes_optional_blank_slot_inside_copied_group():
     task = {
         "$schema": "custom-renderer/v2-render-execution",
@@ -2461,6 +2536,7 @@ const f1 = item('GroupItem', 'F1', '', [item('TextFrame', 'slot_name', 'F1 sampl
 const f10 = item('GroupItem', 'F10', '', [
   item('TextFrame', 'slot_name', 'F10 sample', [], 'F10-style'),
   item('TextFrame', 'slot_title', 'Arc sample', [], 'Arc-style', [0, 40, 100, 20], {{ kind: 'PATHTEXT', pathToken: 'arc-main', textSize: 18 }}),
+  ...(task.mock_font_tail ? [item('TextFrame', 'tail_name_last_m', 'm', [], 'F10-style', undefined, {{ puaTailBase: task.mock_pua_tail_base || 0 }})] : []),
   item('PathItem', '', '', [])
 ]);
 const design03 = item('GroupItem', 'Design03', '', [

@@ -137,6 +137,7 @@ def _compile_output(
     output_key = str(output.get("key") or "")
     output_scan = _scan_ref(scan_index, ("output", output_key), f"$.outputs.{output_key}")
     font_style_sources = _font_style_sources(output_key, output, scan_index)
+    font_tail_sources = _font_tail_sources(output_key, output, scan_index)
     source_only_font = bool(font_style_sources)
     style_options = [
         dict(option)
@@ -182,7 +183,18 @@ def _compile_output(
                     **copy_action,
                 )
             )
-            actions.extend(_slot_actions(output_key, group, dict(option), option_scan, scan_index, font_style_sources, field_bindings))
+            actions.extend(
+                _slot_actions(
+                    output_key,
+                    group,
+                    dict(option),
+                    option_scan,
+                    scan_index,
+                    font_style_sources,
+                    font_tail_sources,
+                    field_bindings,
+                )
+            )
             actions.extend(_asset_actions(output_key, group, dict(option), scan_index))
             if group == "design" and not has_fixed_dimensions_for_every_style:
                 dimensions = _scanned_design_dimensions(dict(option), option_scan)
@@ -296,6 +308,7 @@ def _slot_actions(
     option_scan: Mapping[str, Any],
     scan_index: Mapping[tuple[str, ...], Mapping[str, Any]],
     font_style_sources: Mapping[str, Mapping[str, str]],
+    font_tail_sources: Mapping[str, Mapping[str, list[dict[str, Any]]]],
     field_bindings: Mapping[str, Any],
 ) -> list[dict[str, Any]]:
     actions = []
@@ -371,6 +384,9 @@ def _slot_actions(
                 "slot_key": slot_key,
                 "paths_by_option": dict(font_style_sources[slot_key]),
             }
+            selected_font_tails = font_tail_sources.get(slot_key)
+            if selected_font_tails:
+                action["style_source"]["tails_by_option"] = deepcopy(selected_font_tails)
         actions.append(_action("replace_slot_text", **action))
     return actions
 
@@ -472,6 +488,65 @@ def _font_style_sources(
                 f"$.outputs.{output_key}.font.{font_key}.{slot_key}",
             )
             result.setdefault(slot_key, {})[font_key] = font_slot_scan["path"]
+    return result
+
+
+def _font_tail_sources(
+    output_key: str,
+    output: Mapping[str, Any],
+    scan_index: Mapping[tuple[str, ...], Mapping[str, Any]],
+) -> dict[str, dict[str, list[dict[str, Any]]]]:
+    """Collect tail glyph samples from Font options used as Design style sources.
+
+    In a Design + Font output, Font groups are copied only as temporary style
+    sources and removed before export. Tail samples therefore have to travel with
+    the Design replacement action instead of being rendered in that temporary
+    group.
+    """
+    design = dict(output.get("design") or {})
+    font = dict(output.get("font") or {})
+    design_field = str(design.get("field") or "")
+    font_field = str(font.get("field") or "")
+    if not design_field or not font_field or design_field == font_field:
+        return {}
+    design_slot_keys = {
+        str(dict(slot).get("key") or "")
+        for option in design.get("options", [])
+        for slot in dict(option).get("slots", [])
+        if isinstance(slot, Mapping) and str(dict(slot).get("preset") or "") != "asset_replace"
+    }
+    result: dict[str, dict[str, list[dict[str, Any]]]] = {}
+    for font_option in font.get("options", []):
+        font_data = dict(font_option)
+        font_key = str(font_data.get("key") or "")
+        option_scan = _scan_ref(
+            scan_index,
+            ("option", output_key, "font", font_key),
+            f"$.outputs.{output_key}.font.{font_key}",
+        )
+        for font_slot in font_data.get("slots", []):
+            if not isinstance(font_slot, Mapping):
+                continue
+            slot_data = dict(font_slot)
+            slot_key = str(slot_data.get("key") or "")
+            if not slot_key or slot_key not in design_slot_keys:
+                continue
+            slot_scan = _scan_ref(
+                scan_index,
+                ("slot", output_key, "font", font_key, slot_key),
+                f"$.{output_key}.font.{font_key}.{slot_key}",
+            )
+            preset = str(slot_data.get("preset") or slot_scan.get("preset") or "direct_text")
+            tails = _tail_specs(
+                slot_data.get("tails", []),
+                option_scan.get("tails", []),
+                slot_scan,
+                slot_key,
+                f"$.{output_key}.font.{font_key}.{slot_key}.tails",
+                require_glyphs=preset == "tail_text",
+            )
+            if tails:
+                result.setdefault(slot_key, {})[font_key] = tails
     return result
 
 

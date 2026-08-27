@@ -1141,6 +1141,55 @@ def test_keeps_design_and_font_same_slot_keys_on_distinct_paths():
     assert font_copy["source_only"] is True
 
 
+def test_passes_tail_font_samples_to_the_design_style_source():
+    config = render_config()
+    scan = scan_evidence()
+    font_option = config["outputs"][0]["font"]["options"][0]
+    font_option["key"] = "F3"
+    font_option["content_preset"] = "tail_text"
+    font_option["slots"][0].update(
+        {
+            "preset": "tail_text",
+            "tails": [
+                {"key": "tail_name_last_m", "position": "last", "sample": "m", "pua_base": TAIL_PUA_BASE}
+            ],
+        }
+    )
+    config["option_mappings"][0].update({"source_value": "F3", "target": "F3"})
+    scan_font = scan["outputs"][0]["fonts"][0]
+    scan_font["key"] = "F3"
+    scan_font["path"] = "Template/Output_main/Font/F3"
+    scan_font["slots"][0]["path"] = "Template/Output_main/Font/F3/slot_name"
+    scan_font["slots"][0]["tails"] = [
+        {"key": "tail_name_last_m", "path": "Template/Output_main/Font/F3/tail_name_last_m"}
+    ]
+    scan_font["tails"] = [
+        {"key": "tail_name_last_m", "path": "Template/Output_main/Font/F3/tail_name_last_m"}
+    ]
+
+    task = compile_task(config, scan)
+
+    design_action = next(
+        action
+        for action in task["outputs"][0]["actions"]
+        if action["type"] == "replace_slot_text" and action["group"] == "design" and action["slot_key"] == "slot_name"
+    )
+    assert design_action["style_source"]["paths_by_option"] == {"F3": "Template/Output_main/Font/F3/slot_name"}
+    assert design_action["style_source"]["tails_by_option"] == {
+        "F3": [
+            {
+                "key": "tail_name_last_m",
+                "position": "last",
+                "sample": "m",
+                "path": "Template/Output_main/Font/F3/tail_name_last_m",
+                "glyph_mode": "pua_contiguous",
+                "pua_base": TAIL_PUA_BASE,
+                "coverage": "a-z",
+            }
+        ]
+    }
+
+
 def test_carries_preserve_composition_from_scanned_keep_ratio_slot():
     scan = scan_evidence()
     scan["outputs"][0]["designs"][0]["slots"][0]["preserve_composition"] = True

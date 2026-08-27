@@ -207,9 +207,12 @@
             return;
         }
         var tailPaths = action.tail_paths || [];
-        var directTailParts = tailSpecs.length && preset === "direct_text"
-            ? applyDirectTailSamples(holder.item, holder.source_path, tailSpecs, slotValue)
-            : null;
+        var directTailParts = null;
+        if (tailSpecs.length && preset === "direct_text") {
+            directTailParts = applyDirectTailSamples(holder.item, holder.source_path, tailSpecs, slotValue);
+        } else if (!tailSpecs.length && action.style_source) {
+            directTailParts = applyStyleSourceTailSamples(copied, outputKey, action, selected, slotValue);
+        }
         var textFrame = writeTextToItem(target, directTailParts ? directTailParts.main_text : slotValue);
         fitItemWithinBounds(textFrame, fitBounds, action, shouldPreserveSlotComposition(target, action));
         if (directTailParts) {
@@ -329,6 +332,21 @@
         alignItemToItem(replacement, targetFrame);
         removePageItem(targetFrame);
         return replacement;
+    }
+
+    function applyStyleSourceTailSamples(copied, outputKey, action, selected, value) {
+        var sourceInfo = action.style_source || {};
+        var group = String(sourceInfo.group || "");
+        var fontOption = String(selected[group] || "");
+        if (!group || !fontOption) return null;
+        var tailsByOption = sourceInfo.tails_by_option || {};
+        var tailSpecs = tailsByOption[fontOption] || [];
+        if (!tailSpecs.length) return null;
+        var sourceHolder = copied[outputKey + "|" + group + "|" + fontOption];
+        if (!sourceHolder || !sourceHolder.item) {
+            throw new Error("V2 font tail source was not copied: " + fontOption);
+        }
+        return applyDirectTailSamples(sourceHolder.item, sourceHolder.source_path, tailSpecs, value);
     }
 
     function removeSourceOnlyCopies(copied) {
