@@ -49,8 +49,6 @@
             renderedOutputItems = [groupRenderedOutputBlock(layer, renderedOutputItems, 0)];
         }
         applyOutputTransforms(doc, execution.output || task.output || {});
-        var finalFitAction = selectedFitAction(task, selectedOutputKey, selections);
-        if (finalFitAction) fitRenderedOutput(renderedOutputItems, finalFitAction);
         if (execution.preview_png) fitArtboardToVisibleContent(doc, renderedOutputItems, 0);
         var output = File(String(execution.output_ai));
         ensureFolder(output.parent);
@@ -90,6 +88,15 @@
                 bindAssetLibrary(copied, outputKey, assetAction, valuesByField);
             }
         }
+        // Establish the common design coordinate system before any slot content
+        // is written. A later group fit would rescale the replacement text,
+        // anchors and fixed artwork together and invalidate slot-level geometry.
+        for (var fitIndex = 0; fitIndex < actions.length; fitIndex++) {
+            var fitAction = actions[fitIndex] || {};
+            if (fitAction.type === "fit_output_bounds" && isSelected(fitAction, selected)) {
+                fitRenderedOutput(renderedItems, fitAction);
+            }
+        }
         for (var replaceIndex = 0; replaceIndex < actions.length; replaceIndex++) {
             var replaceAction = actions[replaceIndex] || {};
             if (replaceAction.type === "replace_slot_text" && isSelected(replaceAction, selected)) {
@@ -97,34 +104,8 @@
             }
         }
         cleanupAuxiliaryObjects(renderedItems);
-        for (var fitIndex = 0; fitIndex < actions.length; fitIndex++) {
-            var fitAction = actions[fitIndex] || {};
-            if (fitAction.type === "fit_output_bounds" && isSelected(fitAction, selected)) {
-                fitRenderedOutput(renderedItems, fitAction);
-            }
-        }
-        cleanupAuxiliaryObjects(renderedItems);
         removeSourceOnlyCopies(copied);
         return renderedItems;
-    }
-
-    function selectedFitAction(taskData, outputKey, selectedValues) {
-        var chosen = String(outputKey || "");
-        var fallback = null;
-        var outputs = taskData.outputs || [];
-        for (var outputIndex = 0; outputIndex < outputs.length; outputIndex++) {
-            var output = outputs[outputIndex] || {};
-            if (chosen && String(output.key || "") !== chosen) continue;
-            var selected = selectedValues[String(output.key || "")] || {};
-            var actions = output.actions || [];
-            for (var actionIndex = 0; actionIndex < actions.length; actionIndex++) {
-                var action = actions[actionIndex] || {};
-                if (action.type !== "fit_output_bounds" || !isSelected(action, selected)) continue;
-                if (String(action.group || "") === "style") return action;
-                if (!fallback) fallback = action;
-            }
-        }
-        return fallback;
     }
 
     function applyOutputTransforms(doc, policy) {
@@ -211,7 +192,7 @@
             : null;
         var textPlacement = captureTextPlacement(target);
         var textFrame = writeTextToItem(target, directTailParts ? directTailParts.main_text : slotValue);
-        fitItemWithinBounds(textFrame, fitBounds, action, textPlacement);
+        fitItemWithinBounds(textFrame, fitBounds, action, textPlacement, "slot");
         if (directTailParts) {
             removeDirectTailSamples(holder.item, holder.source_path, tailSpecs);
             return;
@@ -673,11 +654,15 @@
         return false;
     }
 
-    function fitItemWithinBounds(item, bounds, action, placement) {
+    function fitItemWithinBounds(item, bounds, action, placement, fitRole) {
         if (!bounds) return;
         var targetWidth = Math.abs(Number(bounds[2]) - Number(bounds[0]));
         var targetHeight = Math.abs(Number(bounds[1]) - Number(bounds[3]));
         if (targetWidth <= 0 || targetHeight <= 0) return;
+        if (fitRole === "slot" && !action.style_source && hasText(action && action.anchor_path) && !isPathTextFrame(item)) {
+            fitUnstyledSlotExactlyToAnchor(item, bounds, action);
+            return;
+        }
         if (isPathTextFrame(item)) {
             fitPathTextWithinBounds(item, bounds, action, targetWidth, targetHeight, placement);
             return;
@@ -699,6 +684,78 @@
                 target_height: targetHeight
             });
         }
+    }
+
+    function fitUnstyledSlotExactlyToAnchor(item, anchorBounds, action) {
+        var before = measuredBoundsWithSource(item);
+        var targetWidth = Math.abs(Number(anchorBounds[2]) - Number(anchorBounds[0]));
+        var targetHeight = Math.abs(Number(anchorBounds[1]) - Number(anchorBounds[3]));
+        var scaleX = 1;
+        var scaleY = 1;
+        var finalMeasurement = before;
+        for (var attempt = 0; attempt < 12; attempt++) {
+            finalMeasurement = measuredBoundsWithSource(item);
+            var currentBounds = finalMeasurement.bounds;
+            var currentWidth = Math.abs(Number(currentBounds[2]) - Number(currentBounds[0]));
+            var currentHeight = Math.abs(Number(currentBounds[1]) - Number(currentBounds[3]));
+            if (currentWidth <= 0 || currentHeight <= 0) throw new Error("V2 slot text bounds are invalid: " + String(action && action.slot_key || ""));
+            if (dimensionsMatchAnchor(currentWidth, currentHeight, targetWidth, targetHeight)) break;
+            var currentScaleX = targetWidth / currentWidth;
+            var currentScaleY = targetHeight / currentHeight;
+            if (!isFinite(currentScaleX) || !isFinite(currentScaleY) || currentScaleX <= 0 || currentScaleY <= 0) {
+                throw new Error("V2 slot text scale is invalid: " + String(action && action.slot_key || ""));
+            }
+            if (!resizeTextIndependently(item, currentScaleX, currentScaleY)) {
+                throw new Error("V2 slot text resize failed: " + String(action && action.slot_key || ""));
+            }
+            scaleX *= currentScaleX;
+            scaleY *= currentScaleY;
+        }
+        var correction = placeVisibleBoundsAtAnchor(item, anchorBounds);
+        finalMeasurement = measuredBoundsWithSource(item);
+        var finalBounds = finalMeasurement.bounds;
+        var finalWidth = Math.abs(Number(finalBounds[2]) - Number(finalBounds[0]));
+        var finalHeight = Math.abs(Number(finalBounds[1]) - Number(finalBounds[3]));
+        if (!dimensionsMatchAnchor(finalWidth, finalHeight, targetWidth, targetHeight)
+            || !boundsMatchAnchor(finalBounds, anchorBounds)) {
+            throw new Error(
+                "V2 slot text does not match anchor exactly: " + String(action && action.slot_key || "")
+                + ", actual=" + finalWidth + "x" + finalHeight
+                + ", target=" + targetWidth + "x" + targetHeight
+                + ", bounds=" + String(finalBounds)
+                + ", anchor=" + String(anchorBounds)
+            );
+        }
+        writeSlotExactFitAudit(action, before, finalMeasurement, anchorBounds, scaleX, scaleY, correction);
+    }
+
+    function resizeTextIndependently(item, scaleX, scaleY) {
+        try { item.resize(scaleX * 100, scaleY * 100, true, true, true, true, 100, Transformation.CENTER); return true; }
+        catch (resizeError1) {
+            try { item.resize(scaleX * 100, scaleY * 100); return true; } catch (resizeError2) { return false; }
+        }
+    }
+
+    function placeVisibleBoundsAtAnchor(item, anchorBounds) {
+        var current = measuredBounds(item);
+        var dx = Number(anchorBounds[0]) - Number(current[0]);
+        var dy = Number(anchorBounds[1]) - Number(current[1]);
+        if (dx !== 0 || dy !== 0) item.translate(dx, dy);
+        return { x: dx, y: dy };
+    }
+
+    function dimensionsMatchAnchor(width, height, targetWidth, targetHeight) {
+        var tolerance = dimensionComparisonEpsilon();
+        return Math.abs(Number(width) - Number(targetWidth)) <= tolerance
+            && Math.abs(Number(height) - Number(targetHeight)) <= tolerance;
+    }
+
+    function boundsMatchAnchor(bounds, anchorBounds) {
+        var tolerance = dimensionComparisonEpsilon();
+        for (var index = 0; index < 4; index++) {
+            if (Math.abs(Number(bounds[index]) - Number(anchorBounds[index])) > tolerance) return false;
+        }
+        return true;
     }
 
     function normalizedName(value) {
@@ -849,14 +906,47 @@
         });
     }
 
+    function writeSlotExactFitAudit(action, before, after, anchorBounds, scaleX, scaleY, correction) {
+        var beforeBounds = before.bounds;
+        var afterBounds = after.bounds;
+        layoutWarnings.push({
+            code: "slot_anchor_exact_fit",
+            severity: "info",
+            slot_key: String(action && action.slot_key || ""),
+            slot_path: String(action && action.object_path || ""),
+            anchor_path: String(action && action.anchor_path || ""),
+            anchor: anchorBounds,
+            anchor_width: Math.abs(Number(anchorBounds[2]) - Number(anchorBounds[0])),
+            anchor_height: Math.abs(Number(anchorBounds[1]) - Number(anchorBounds[3])),
+            text_bounds_before: beforeBounds,
+            text_width_before: Math.abs(Number(beforeBounds[2]) - Number(beforeBounds[0])),
+            text_height_before: Math.abs(Number(beforeBounds[1]) - Number(beforeBounds[3])),
+            scale_x: scaleX,
+            scale_y: scaleY,
+            resize_percent_x: scaleX * 100,
+            resize_percent_y: scaleY * 100,
+            text_bounds_after: afterBounds,
+            text_width_after: Math.abs(Number(afterBounds[2]) - Number(afterBounds[0])),
+            text_height_after: Math.abs(Number(afterBounds[1]) - Number(afterBounds[3])),
+            bounds_source_before: before.source,
+            bounds_source_after: after.source,
+            correction_x: Number(correction && correction.x || 0),
+            correction_y: Number(correction && correction.y || 0)
+        });
+    }
+
     function measuredBounds(item) {
+        return measuredBoundsWithSource(item).bounds;
+    }
+
+    function measuredBoundsWithSource(item) {
         try {
             var visible = item.visibleBounds;
-            if (validBounds(visible)) return visible;
+            if (validBounds(visible)) return { bounds: visible, source: "visibleBounds" };
         } catch (visibleError) {}
         try {
             var geometric = item.geometricBounds;
-            if (validBounds(geometric)) return geometric;
+            if (validBounds(geometric)) return { bounds: geometric, source: "geometricBounds" };
         } catch (geometricError) {}
         throw new Error("Cannot measure V2 item bounds");
     }
