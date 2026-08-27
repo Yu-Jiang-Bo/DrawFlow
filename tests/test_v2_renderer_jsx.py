@@ -717,7 +717,7 @@ def test_v2_renderer_uses_anchor_bounds_without_moving_fixed_art():
         "output_ai": "out.ai",
         "values": {"design": "03", "name": "Anchored-Long-Name"},
         "selections": {"Output_main": {"design": "Design03"}},
-        "mock_fixed_annotation_name": "fixed_heart",
+        "mock_fixed_annotation_name": "fixed",
         "render_task": {
             "$schema": "custom-renderer/v2-render-task",
             "outputs": [
@@ -748,7 +748,7 @@ def test_v2_renderer_uses_anchor_bounds_without_moving_fixed_art():
     harness = node_mock_harness(task, """
 const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
 const slot = child(designCopy, 'slot_name');
-const fixed = child(designCopy, 'fixed_heart');
+const fixed = child(designCopy, 'fixed');
 const width = slot.visibleBounds[2] - slot.visibleBounds[0];
 const height = slot.visibleBounds[1] - slot.visibleBounds[3];
 if (width > 60.01) throw new Error('anchored text escaped anchor width: ' + width);
@@ -772,7 +772,7 @@ def test_v2_renderer_extreme_text_keeps_shrinking_without_touching_fixed_art():
         "layout_warning_file": "warnings.json",
         "values": {"design": "03", "name": "X" * 160},
         "selections": {"Output_main": {"design": "Design03"}},
-        "mock_fixed_annotation_name": "fixed_heart",
+        "mock_fixed_annotation_name": "fixed",
         "render_task": {
             "$schema": "custom-renderer/v2-render-task",
             "outputs": [
@@ -802,7 +802,7 @@ def test_v2_renderer_extreme_text_keeps_shrinking_without_touching_fixed_art():
     harness = node_mock_harness(task, """
 const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
 const slot = child(designCopy, 'slot_name');
-const fixed = child(designCopy, 'fixed_heart');
+const fixed = child(designCopy, 'fixed');
 const width = slot.visibleBounds[2] - slot.visibleBounds[0];
 if (width > 100.01) throw new Error('extreme text escaped slot width: ' + width);
 if (slot.resizeCalls < 1) throw new Error('extreme text was not shrunk');
@@ -816,7 +816,7 @@ if (!warning.warnings || warning.warnings[0].code !== 'text_fit_extreme') throw 
     assert result.returncode == 0, result.stderr
 
 
-@pytest.mark.parametrize("fixed_marker", ["fixed_heart", "fixd_paw"])
+@pytest.mark.parametrize("fixed_marker", ["fixed", "fixd", "fixd_legacy"])
 def test_v2_renderer_preserves_fixed_art_size_during_non_uniform_output_fit(fixed_marker):
     task = {
         "$schema": "custom-renderer/v2-render-execution",
@@ -891,7 +891,7 @@ def test_v2_renderer_rejects_fixed_art_that_cannot_fit_output_bounds():
         "output_ai": "out.ai",
         "values": {"design": "03"},
         "selections": {"Output_main": {"design": "Design03"}},
-        "mock_fixed_annotation_name": "fixed_heart",
+        "mock_fixed_annotation_name": "fixed",
         "mock_fixed_bounds": [0, 120, 160, 0],
         "render_task": {
             "$schema": "custom-renderer/v2-render-task",

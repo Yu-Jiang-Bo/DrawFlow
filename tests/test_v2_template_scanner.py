@@ -744,14 +744,19 @@ def test_collects_explicit_fixed_annotations_without_guessing_the_artwork_type()
     items.extend(
         [
             path_item(
-                "Template/Output_main/Design/Design03/fixed_heart",
-                "fixed_heart",
+                "Template/Output_main/Design/Design03/fixed",
+                "fixed",
                 bounds=[120, 48, 140, 28],
             ),
             group(
-                "Template/Output_main/Design/Design03/fixd_paw",
-                "fixd_paw",
+                "Template/Output_main/Design/Design03/fixed_legacy",
+                "fixed_legacy",
                 bounds=[150, 52, 180, 22],
+            ),
+            group(
+                "Template/Output_main/Design/Design03/fixd_legacy",
+                "fixd_legacy",
+                bounds=[220, 50, 250, 20],
             ),
             path_item(
                 "Template/Output_main/Design/Design03/ordinary_star",
@@ -767,22 +772,29 @@ def test_collects_explicit_fixed_annotations_without_guessing_the_artwork_type()
     assert result["blocked"] is False
     assert design["fixed_annotations"] == [
         {
-            "key": "fixd_paw",
-            "path": "Template/Output_main/Design/Design03/fixd_paw",
+            "key": "fixd_legacy",
+            "path": "Template/Output_main/Design/Design03/fixd_legacy",
             "type": "GroupItem",
-            "visible_bounds": [150, 52, 180, 22],
+            "visible_bounds": [220, 50, 250, 20],
             "dimensions": {"width_mm": 10.583, "height_mm": 10.583},
         },
         {
-            "key": "fixed_heart",
-            "path": "Template/Output_main/Design/Design03/fixed_heart",
+            "key": "fixed",
+            "path": "Template/Output_main/Design/Design03/fixed",
             "type": "PathItem",
             "visible_bounds": [120, 48, 140, 28],
             "dimensions": {"width_mm": 7.056, "height_mm": 7.056},
         },
+        {
+            "key": "fixed_legacy",
+            "path": "Template/Output_main/Design/Design03/fixed_legacy",
+            "type": "GroupItem",
+            "visible_bounds": [150, 52, 180, 22],
+            "dimensions": {"width_mm": 10.583, "height_mm": 10.583},
+        },
     ]
     assert all(item["key"] != "ordinary_star" for item in design["fixed_annotations"])
-    assert result["outputs"][0]["summary"]["fixed_annotations"] == 2
+    assert result["outputs"][0]["summary"]["fixed_annotations"] == 3
 
 
 def test_blocks_fixed_annotation_nested_in_a_replaceable_slot_or_assets():
@@ -790,8 +802,8 @@ def test_blocks_fixed_annotation_nested_in_a_replaceable_slot_or_assets():
     items.extend(
         [
             path_item(
-                "Template/Output_main/Design/Design03/slot_name/fixed_heart",
-                "fixed_heart",
+                "Template/Output_main/Design/Design03/slot_name/fixed",
+                "fixed",
             ),
             group("Template/Output_main/Design/Design03/Assets", "Assets"),
             group(
@@ -799,8 +811,8 @@ def test_blocks_fixed_annotation_nested_in_a_replaceable_slot_or_assets():
                 "logo",
             ),
             path_item(
-                "Template/Output_main/Design/Design03/Assets/logo/fixed_paw",
-                "fixed_paw",
+                "Template/Output_main/Design/Design03/Assets/logo/fixed",
+                "fixed",
             ),
         ]
     )
@@ -897,7 +909,7 @@ function link(parent) {{
 }}
 const fixed = {{ typename: 'PathItem', name: '', filled: true, closed: true, pathPoints: [1], visibleBounds: [0, 10, 10, 0], opacity: 100 }};
 const design = group('Design03', [
-  group('slot_logo', [text('slot_logo_text', TextType.PATHTEXT), pathItem('keep_ratio_heart', {{ typename: 'RGBColor', red: 0, green: 0, blue: 0 }}), pathItem('fixed_heart', {{ typename: 'RGBColor', red: 0, green: 0, blue: 0 }})]),
+  group('slot_logo', [text('slot_logo_text', TextType.PATHTEXT), pathItem('keep_ratio_heart', {{ typename: 'RGBColor', red: 0, green: 0, blue: 0 }}), pathItem('fixed', {{ typename: 'RGBColor', red: 0, green: 0, blue: 0 }})]),
   text(' slot_LOGO ', TextType.POINTTEXT),
   group('Assets', [group('logo', [group('A', [])])]),
   fixed
@@ -936,10 +948,10 @@ if (option.fixed_object_count !== 1) throw new Error('fixed object count lost');
 if (scan.items.some(item => item.name === '' || item.layer_path.indexOf('/PathItem') >= 0)) throw new Error('fixed object leaked into items');
 if (!option.slots.some(slot => slot.text && slot.text.text_kind === 'path_text')) throw new Error('path text not detected');
 if (!option.slots.some(slot => slot.preserve_composition === true)) throw new Error('keep ratio marker not detected');
-if (!scan.items.some(item => item.name === 'fixed_heart')) throw new Error('nested fixed marker was omitted from evidence');
+if (!scan.items.some(item => item.name === 'fixed')) throw new Error('nested fixed marker was omitted from evidence');
 if (scan.colors[0].fill_color.space !== 'RGB') throw new Error('RGB color not scanned');
 if (!scan.issues.some(issue => issue.code === 'slot_duplicate')) throw new Error('duplicate slot issue missing');
-console.log(NativeJSON.stringify({{ status: scan.status, fixed: option.fixed_object_count, colors: scan.colors.length, fixed_emitted: scan.items.some(item => item.name === 'fixed_heart') }}));
+console.log(NativeJSON.stringify({{ status: scan.status, fixed: option.fixed_object_count, colors: scan.colors.length, fixed_emitted: scan.items.some(item => item.name === 'fixed') }}));
 """
 
     result = subprocess.run([node, "-e", harness], capture_output=True, text=True, check=False)
