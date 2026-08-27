@@ -8,6 +8,8 @@ import pytest
 
 SCRIPT = Path("scripts/illustrator/render_v2_template.jsx")
 TAIL_INCLUDE = Path("scripts/illustrator/v2_tail_text.jsxinc")
+ORDER_COMPOSER = Path("scripts/illustrator/compose_v2_order_column.jsx")
+COLOR_COMPOSER = Path("scripts/illustrator/compose_color_frames.jsx")
 TAIL_PUA_BASE = 0xF000
 
 
@@ -64,6 +66,34 @@ def test_v2_renderer_static_contract_uses_paths_and_safe_actions():
     assert "var V2TailText" in include
     assert "function tailGlyphForSpec" in include
     assert "String.fromCharCode" in include
+
+
+def test_v2_component_frame_contract_prevents_composer_resizes():
+    renderer = SCRIPT.read_text(encoding="utf-8")
+    order_composer = ORDER_COMPOSER.read_text(encoding="utf-8")
+    color_composer = COLOR_COMPOSER.read_text(encoding="utf-8")
+
+    assert "component_contract_version = 1" in renderer
+    assert "component_frames" in renderer
+    assert "artwork_bounds_after" in renderer
+    assert "trackedSlotsFromWarnings" in renderer
+    assert "readSingleComponentFrame" in order_composer
+    assert "writeComponentContract" in order_composer
+    assert "verifyTranslatedArtwork" in order_composer
+    assert "artwork_bounds_after" in order_composer
+    assert "copy_coordinate_translation" in order_composer
+    assert "tracked_slots: translateTrackedSlots" in order_composer
+    assert "source_bounds: copyBounds(tracked.bounds)" in order_composer
+    assert ".resize(" not in order_composer
+    assert "readComponentFrameMap" in color_composer
+    assert "component_frames: componentContracts" in color_composer
+    assert "verifyTranslatedArtwork" in color_composer
+    assert "copy_coordinate_translation" in color_composer
+    assert "tracked_slots: translateTrackedSlots" in color_composer
+    assert "source_bounds: copyBounds(tracked.bounds)" in color_composer
+    assert 'throw new Error("V2 color frame audit report path missing")' in color_composer
+    assert "ORDER_PACK_ITEM_" in color_composer
+    assert ".resize(" not in color_composer
 
 
 def test_v2_renderer_jsx_runs_without_native_json_parser():
@@ -659,6 +689,61 @@ const height = slot.visibleBounds[1] - slot.visibleBounds[3];
 if (slot.resizeCalls < 1) throw new Error('short unstyled text did not resize to anchor');
 if (Math.abs(width - 60) > 0.01 || Math.abs(height - 20) > 0.01) throw new Error('short text did not match anchor size: ' + width + 'x' + height);
 if (Math.abs(slot.visibleBounds[0] - 200) > 0.01 || Math.abs(slot.visibleBounds[1] - 120) > 0.01) throw new Error('short text did not match anchor coordinate');
+""")
+
+    result = run_node(harness)
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_v2_renderer_refits_final_outline_to_anchor_without_moving_fixed_art():
+    task = {
+        "$schema": "custom-renderer/v2-render-execution",
+        "template_ai": "template.ai",
+        "output_ai": "out.ai",
+        "output": {"outline_text": True, "pathfinder_merge": False},
+        "mock_outline_visible_bounds": [-40, 35, 20, -15],
+        "values": {"design": "03", "name": "Amy"},
+        "selections": {"Output_main": {"design": "Design03"}},
+        "render_task": {
+            "$schema": "custom-renderer/v2-render-task",
+            "outputs": [{
+                "key": "Output_main",
+                "actions": [
+                    {
+                        "type": "copy_option_group",
+                        "group": "design",
+                        "option_key": "Design03",
+                        "object_path": "Template/Output_main/Design/Design03",
+                    },
+                    {
+                        "type": "replace_slot_text",
+                        "group": "design",
+                        "option_key": "Design03",
+                        "slot_key": "slot_name",
+                        "object_path": "Template/Output_main/Design/Design03/slot_name",
+                        "anchor_path": "Template/Output_main/Design/Design03/anchor_name",
+                        "source_field": "name",
+                        "required": True,
+                        "tail_paths": [],
+                    },
+                ],
+            }],
+        },
+    }
+    harness = node_mock_harness(task, """
+const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
+const fixed = child(designCopy, 'fixed_heart');
+const expected = [200, 120, 260, 100];
+const outlined = designCopy.pageItems.find(item => item.typename === 'GroupItem'
+  && item.pageItems.length === 1
+  && item.pageItems[0].typename === 'PathItem'
+  && Math.abs(item.visibleBounds[0] - expected[0]) < 0.01
+  && Math.abs(item.visibleBounds[1] - expected[1]) < 0.01
+  && Math.abs(item.visibleBounds[2] - expected[2]) < 0.01
+  && Math.abs(item.visibleBounds[3] - expected[3]) < 0.01);
+if (!outlined) throw new Error('final outline was not refitted to exact anchor');
+if (fixed.translateCalls !== 0 || fixed.resizeCalls !== 0) throw new Error('fixed art changed during outline refit');
 """)
 
     result = run_node(harness)
@@ -2610,8 +2695,9 @@ function item(typename, name, contents, children, styleToken, bounds, options) {
           points.push([pointIndex / (3 + (geometryCode % 26)), pointIndex % 2]);
         }}
       }}
-      const path = item('PathItem', '', '', [], '', this.visibleBounds, {{ pathPoints: points, closed: true }});
-      const outlined = item('GroupItem', '', '', [path], '', this.visibleBounds);
+      const outlineBounds = task.mock_outline_visible_bounds || this.visibleBounds;
+      const path = item('PathItem', '', '', [], '', outlineBounds, {{ pathPoints: points, closed: true }});
+      const outlined = item('GroupItem', '', '', [path], '', outlineBounds);
       const parent = this.parent;
       this.remove();
       if (parent) attach(parent, outlined);

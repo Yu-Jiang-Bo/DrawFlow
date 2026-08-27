@@ -102,14 +102,15 @@
     var doc = app.documents.add(DocumentColorSpace.CMYK, docWidth, finalHeight);
     var layer = doc.layers[0];
     layer.name = "COLOR_FRAME_OUTPUT";
+    var composedComponentContracts = [];
 
     for (var planIndex = 0; planIndex < plans.length; planIndex++) {
-        composePlan(layer, plans[planIndex], finalHeight, frameWidth, outerMargin, headerHeight);
+        composePlan(layer, plans[planIndex], finalHeight, frameWidth, outerMargin, headerHeight, composedComponentContracts);
     }
 
     var outputPolicy = task.output || {};
     if (!task.output || outputPolicy.outline_text !== false) outlineAllTextFrames(doc, outputPolicy.pathfinder_merge === true);
-    writeDebug(task, plans, docWidth, finalHeight, frameWidth, usableWidth, algorithm, frameLayout);
+    writeDebug(task, plans, docWidth, finalHeight, frameWidth, usableWidth, algorithm, frameLayout, composedComponentContracts);
     var output = File(String(task.output_ai));
     ensureFolder(output.parent);
     if (output.exists) output.remove();
@@ -126,7 +127,7 @@
     doc.close(SaveOptions.DONOTSAVECHANGES);
     return output.fsName;
 
-    function composePlan(layer, plan, docHeight, width, margin, labelBandHeight) {
+    function composePlan(layer, plan, docHeight, width, margin, labelBandHeight, contracts) {
         var frameTop = docHeight - plan.frameY;
         var boundary = layer.pathItems.rectangle(frameTop, plan.frameLeft, width, plan.frameHeight);
         boundary.name = "COLOR_FRAME_" + safeName(plan.colorOption || "MASTER") + "_" + roundMm(width) + "mm_GRID";
@@ -151,6 +152,7 @@
         var source = app.open(File(String(plan.input.path)));
         try {
             var sourceOrders = collectOrderBlocks(source);
+            var componentFrames = readComponentFrameMap(plan.input);
             assertSourceOrderCount(plan.input, sourceOrders);
             for (var placementIndex = 0; placementIndex < plan.placements.length; placementIndex++) {
                 var placement = plan.placements[placementIndex];
@@ -171,14 +173,29 @@
                     var sourceItem = item.sourceChildIndex < 0 ? sourceOrder.item : sourceSubItems[item.sourceChildIndex];
                     if (!sourceItem) throw new Error("Missing source order sub-item " + item.sourceChildIndex);
                     var copy = sourceItem.item ? sourceItem.item.duplicate(layer, ElementPlacement.PLACEATEND) : sourceItem.duplicate(layer, ElementPlacement.PLACEATEND);
-                    fitCopiedArtwork(copy, item.target_dimensions || {});
-                    var copiedBounds = pageItemBounds(copy);
+                    var componentFrame = componentFrameForItem(sourceItem.item || sourceItem, componentFrames, sourceOrder.sourceIndex, item.sourceChildIndex);
+                    validateRequestedDimensions(componentFrame, item.target_dimensions || {});
+                    verifyTranslatedArtwork(sourceItem.item || sourceItem, componentFrame.artwork_bounds_after, 0, 0, "color frame source");
                     var destinationLeft = plan.frameLeft + margin + placement.x + item.x;
                     var destinationTop = frameTop - margin - labelBandHeight - placement.y - item.y;
                     if (destinationLeft < plan.frameLeft + margin - 0.01 || destinationLeft + item.width > plan.frameLeft + width - margin + 0.01) {
                         throw new Error("Packed order sub-item exceeds target width: " + plan.colorOption + " / " + placement.orderNo);
                     }
-                    copy.translate(destinationLeft - copiedBounds[0], destinationTop - copiedBounds[1]);
+                    var dx = destinationLeft - componentFrame.frame_bounds[0];
+                    var dy = destinationTop - componentFrame.frame_bounds[1];
+                    var copyCoordinateTranslation = placeArtworkAtExpected(copy, componentFrame.artwork_bounds_after, dx, dy, "color frame placement");
+                    var actualArtworkBounds = verifyTranslatedArtwork(copy, componentFrame.artwork_bounds_after, dx, dy, "color frame placement");
+                    contracts.push({
+                        key: String(componentFrame.key || ""),
+                        source_frame_bounds: copyBounds(componentFrame.frame_bounds),
+                        frame_bounds: translateBounds(componentFrame.frame_bounds, dx, dy),
+                        compose_translation: {x: dx, y: dy},
+                        copy_coordinate_translation: copyCoordinateTranslation,
+                        source_artwork_bounds: copyBounds(componentFrame.artwork_bounds_after),
+                        artwork_bounds_after: actualArtworkBounds,
+                        tracked_slots: translateTrackedSlots(componentFrame.tracked_slots || [], dx, dy),
+                        source: "compose_color_frames"
+                    });
                 }
             }
         } finally {
@@ -248,6 +265,7 @@
         var source = app.open(File(String(input.path)));
         try {
             var sourceOrders = collectOrderBlocks(source);
+            var componentFrames = readComponentFrameMap(input);
             assertSourceOrderCount(input, sourceOrders);
             var orderNos = input.order_nos || [];
             var targetDimensions = input.order_dimensions || [];
@@ -263,13 +281,14 @@
                 var orderItems = [];
                 for (var childIndex = 0; childIndex < sourceSubItems.length; childIndex++) {
                     var sourceItem = sourceSubItems[childIndex].item;
-                    var bounds = pageItemBounds(sourceItem);
+                    var componentFrame = componentFrameForItem(sourceItem, componentFrames, sourceOrder.sourceIndex, childIndex);
                     var requestedDimensions = targetDimensions[dimensionCursor + childIndex] || input.target_dimensions;
                     var target = requestedDimensions || {};
                     if (hasDimensionFields(requestedDimensions) && (!target.width_mm || !target.height_mm)) throw new Error("V2 color frame target dimensions missing");
-                    var itemWidth = Number(target.width_mm || 0) > 0 ? mmToPt(Number(target.width_mm)) : bounds[2] - bounds[0];
-                    var itemHeight = Number(target.height_mm || 0) > 0 ? mmToPt(Number(target.height_mm)) : bounds[1] - bounds[3];
-                    if (itemWidth <= 0 || itemHeight <= 0) throw new Error("Order sub-item has empty visible bounds");
+                    validateRequestedDimensions(componentFrame, target);
+                    var itemWidth = Number(componentFrame.frame_bounds[2]) - Number(componentFrame.frame_bounds[0]);
+                    var itemHeight = Number(componentFrame.frame_bounds[1]) - Number(componentFrame.frame_bounds[3]);
+                    if (itemWidth <= 0 || itemHeight <= 0) throw new Error("Order sub-item has empty component frame");
                     orderItems.push({
                         sourceChildIndex: sourceSubItems[childIndex].sourceChildIndex,
                         width: itemWidth,
@@ -655,6 +674,106 @@
         return named;
     }
 
+    function readComponentFrameMap(input) {
+        var path = String(input.component_contract_file || "");
+        if (!path) throw new Error("V2 color frame component contract path missing");
+        var contract = readJSON(File(path));
+        if (Number(contract.component_contract_version || 0) !== 1) throw new Error("Unsupported V2 color frame component contract");
+        var frames = contract.component_frames || [];
+        if (!frames.length) throw new Error("V2 color frame component contract has no frames");
+        var byKey = {};
+        for (var index = 0; index < frames.length; index++) {
+            var frame = frames[index] || {};
+            var key = String(frame.key || "");
+            if (!key || !validBounds(frame.frame_bounds)) throw new Error("V2 color frame component contract is invalid");
+            if (!validBounds(frame.artwork_bounds_after)) throw new Error("V2 color frame artwork audit bounds missing");
+            byKey[key] = {
+                key: key,
+                frame_bounds: copyBounds(frame.frame_bounds),
+                artwork_bounds_after: copyBounds(frame.artwork_bounds_after),
+                tracked_slots: frame.tracked_slots || []
+            };
+        }
+        return byKey;
+    }
+
+    function componentFrameForItem(item, frames, orderIndex, childIndex) {
+        var key = String(item && item.name || "");
+        var frame = frames[key];
+        // AI8 save/outline may erase a nested GroupItem name.  The order/item
+        // indexes are emitted by this composer contract and remain stable.
+        if (!frame && Number(orderIndex) >= 0 && Number(childIndex) >= 0) {
+            key = "ORDER_PACK_ITEM_" + Number(orderIndex) + "_" + Number(childIndex);
+            frame = frames[key];
+        }
+        if (!frame) throw new Error("V2 color frame component frame missing for " + key);
+        return frame;
+    }
+
+    function validateRequestedDimensions(frame, dimensions) {
+        var requestedWidth = mmToPt(Number(dimensions.width_mm || 0));
+        var requestedHeight = mmToPt(Number(dimensions.height_mm || 0));
+        if (requestedWidth <= 0 && requestedHeight <= 0) return;
+        if (requestedWidth <= 0 || requestedHeight <= 0) throw new Error("V2 color frame target dimensions missing");
+        var width = Number(frame.frame_bounds[2]) - Number(frame.frame_bounds[0]);
+        var height = Number(frame.frame_bounds[1]) - Number(frame.frame_bounds[3]);
+        var epsilon = mmToPt(0.01);
+        if (Math.abs(width - requestedWidth) > epsilon || Math.abs(height - requestedHeight) > epsilon) {
+            throw new Error("V2 component frame does not match requested dimensions; refusing resize");
+        }
+    }
+
+    function translateBounds(bounds, dx, dy) {
+        return [Number(bounds[0]) + Number(dx), Number(bounds[1]) + Number(dy), Number(bounds[2]) + Number(dx), Number(bounds[3]) + Number(dy)];
+    }
+
+    function copyBounds(bounds) {
+        return [Number(bounds[0]), Number(bounds[1]), Number(bounds[2]), Number(bounds[3])];
+    }
+
+    function verifyTranslatedArtwork(item, sourceBounds, dx, dy, stage) {
+        var expected = translateBounds(sourceBounds, dx, dy);
+        var actual = pageItemBounds(item);
+        var epsilon = 1 / 64;
+        for (var index = 0; index < 4; index++) {
+            if (Math.abs(Number(actual[index]) - Number(expected[index])) > epsilon) {
+                throw new Error("V2 component artwork bounds changed during " + stage + "; expected=" + expected + ", actual=" + actual);
+            }
+        }
+        return copyBounds(actual);
+    }
+
+    function placeArtworkAtExpected(item, sourceBounds, logicalDx, logicalDy, stage) {
+        var expected = translateBounds(sourceBounds, logicalDx, logicalDy);
+        var actual = pageItemBounds(item);
+        var copyDx = Number(expected[0]) - Number(actual[0]);
+        var copyDy = Number(expected[1]) - Number(actual[1]);
+        item.translate(copyDx, copyDy);
+        return {x: copyDx, y: copyDy, stage: stage};
+    }
+
+    function translateTrackedSlots(trackedSlots, dx, dy) {
+        var result = [];
+        for (var index = 0; index < trackedSlots.length; index++) {
+            var tracked = trackedSlots[index] || {};
+            if (!validBounds(tracked.bounds)) throw new Error("V2 tracked slot bounds missing for " + tracked.slot_key);
+            result.push({
+                slot_key: String(tracked.slot_key || ""),
+                track_name: String(tracked.track_name || ""),
+                source_bounds: copyBounds(tracked.bounds),
+                bounds: translateBounds(tracked.bounds, dx, dy),
+                compose_translation: {x: Number(dx), y: Number(dy)}
+            });
+        }
+        return result;
+    }
+
+    function validBounds(bounds) {
+        return bounds && bounds.length >= 4
+            && isFinite(Number(bounds[0])) && isFinite(Number(bounds[1]))
+            && isFinite(Number(bounds[2])) && isFinite(Number(bounds[3]));
+    }
+
     function pageItemBounds(item) {
         var bounds = null;
         try { bounds = item.visibleBounds; } catch (e0) {}
@@ -663,28 +782,6 @@
         }
         if (!bounds || bounds.length !== 4) throw new Error("Cannot read order sub-item bounds");
         return [Number(bounds[0]), Number(bounds[1]), Number(bounds[2]), Number(bounds[3])];
-    }
-
-    function fitCopiedArtwork(item, dimensions) {
-        var targetWidth = mmToPt(Number(dimensions.width_mm || 0));
-        var targetHeight = mmToPt(Number(dimensions.height_mm || 0));
-        if (targetWidth <= 0 || targetHeight <= 0) return;
-        var bounds = pageItemBounds(item);
-        var width = bounds[2] - bounds[0];
-        var height = bounds[1] - bounds[3];
-        if (width <= 0 || height <= 0) throw new Error("V2 color frame artwork bounds are empty");
-        item.resize(targetWidth / width * 100, targetHeight / height * 100, true, true, true, true, 100, Transformation.CENTER);
-        var fitted = pageItemBounds(item);
-        item.translate((bounds[0] + bounds[2] - fitted[0] - fitted[2]) / 2, (bounds[1] + bounds[3] - fitted[1] - fitted[3]) / 2);
-        validateCopiedArtwork(item, targetWidth, targetHeight);
-    }
-
-    function validateCopiedArtwork(item, targetWidth, targetHeight) {
-        var bounds = pageItemBounds(item);
-        var epsilon = mmToPt(0.007);
-        if (Math.abs((bounds[2] - bounds[0]) - targetWidth) > epsilon || Math.abs((bounds[1] - bounds[3]) - targetHeight) > epsilon) {
-            throw new Error("V2 color frame artwork does not match target dimensions");
-        }
     }
 
     function drawLabel(layer, text, left, top, right, bottom, size) {
@@ -747,9 +844,8 @@
         return Math.max(String(text || "").length * Number(size || 6) * 0.55, mmToPt(8));
     }
 
-    function writeDebug(task, plans, docWidth, docHeight, frameWidth, usableWidth, algorithm, frameLayout) {
-        try {
-            if (!task.debug || !task.debug.report_path) return;
+    function writeDebug(task, plans, docWidth, docHeight, frameWidth, usableWidth, algorithm, frameLayout, componentContracts) {
+        if (!task.debug || !task.debug.report_path) throw new Error("V2 color frame audit report path missing");
             var frames = [];
             for (var planIndex = 0; planIndex < plans.length; planIndex++) {
                 var plan = plans[planIndex];
@@ -779,7 +875,7 @@
             var file = File(String(task.debug.report_path));
             ensureFolder(file.parent);
             file.encoding = "UTF-8";
-            if (!file.open("w")) return;
+            if (!file.open("w")) throw new Error("Cannot write V2 color frame audit report: " + file.fsName);
             file.write(toJson({
                 algorithm: algorithm,
                 coordinate_unit: "mm",
@@ -788,10 +884,11 @@
                 artboard_width_mm: roundMm(docWidth),
                 artboard_height_mm: roundMm(docHeight),
                 color_frame_layout: auditColorFrameLayout(frameLayout),
-                frames: frames
+                frames: frames,
+                component_contract_version: 1,
+                component_frames: componentContracts || []
             }));
             file.close();
-        } catch (e) {}
     }
 
     function auditColorFrameLayout(frameLayout) {

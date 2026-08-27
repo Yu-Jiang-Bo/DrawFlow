@@ -284,7 +284,13 @@ def build_v2_order_column_task(
     order_nos = [str(item or "").strip() for item in (input_order_nos or [])]
     inputs: list[dict[str, str]] = []
     for index, path in enumerate(input_ai_files):
-        item = {"path": str(Path(path))}
+        input_path = Path(path)
+        item = {
+            "path": str(input_path),
+            # A composed V2 component must carry its fixed layout frame from
+            # the render stage.  The JSX refuses to infer it from glyph bounds.
+            "component_contract_file": str(input_path.with_suffix(".warnings.json")),
+        }
         if index < len(order_nos) and order_nos[index]:
             item["order_no"] = order_nos[index]
         if target_dimensions_by_input is not None and index < len(target_dimensions_by_input):
@@ -297,6 +303,8 @@ def build_v2_order_column_task(
     payload: dict[str, Any] = {
         "type": "compose_v2_order_column",
         "output_ai": str(Path(output_ai)),
+        "component_contract_version": 1,
+        "component_contract_file": str(Path(output_ai).with_suffix(".warnings.json")),
         "gap_mm": float(gap_mm),
         "label_height_mm": float(label_height_mm),
         "label_gap_mm": float(label_gap_mm),
@@ -331,6 +339,9 @@ def build_v2_color_frames_task(
     clean_inputs: list[dict[str, Any]] = []
     for raw_input in inputs:
         item = deepcopy(dict(raw_input))
+        input_path = Path(str(item.get("path") or ""))
+        if not str(item.get("component_contract_file") or "").strip() and str(input_path):
+            item["component_contract_file"] = str(input_path.with_suffix(".warnings.json"))
         raw_dimensions = item.get("order_dimensions")
         if isinstance(raw_dimensions, Sequence) and not isinstance(raw_dimensions, (str, bytes)):
             normalized_dimensions = [
@@ -346,6 +357,7 @@ def build_v2_color_frames_task(
     payload: dict[str, Any] = {
         "type": "compose_color_frames",
         "output_ai": str(Path(output_ai)),
+        "component_contract_version": 1,
         "master_packing": deepcopy(dict(master_packing)),
         "compatibility": str(compatibility or "Illustrator 8"),
         "show_color_header": bool(show_color_header),
@@ -357,8 +369,8 @@ def build_v2_color_frames_task(
             "outline_text": bool(dict(output_policy).get("outline_text", True)),
             "pathfinder_merge": bool(dict(output_policy).get("pathfinder_merge", True)),
         }
-    if debug_report_path is not None:
-        payload["debug"] = {"report_path": str(Path(debug_report_path))}
+    audit_path = Path(debug_report_path) if debug_report_path is not None else Path(output_ai).with_suffix(".debug.json")
+    payload["debug"] = {"report_path": str(audit_path)}
     return payload
 
 

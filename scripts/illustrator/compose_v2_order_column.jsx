@@ -21,33 +21,37 @@
     var labelFontSize = Number(task.label_font_size_pt || 6);
     var orderBuckets = [];
     var orderBucketByKey = {};
+    var composedItems = [];
 
     try {
         for (var inputIndex = 0; inputIndex < inputs.length; inputIndex++) {
             var input = inputs[inputIndex] || {};
             var sourcePath = String(input.path || "");
             if (!sourcePath) throw new Error("V2 compose input path missing");
+            var componentFrame = readSingleComponentFrame(input);
             var source = app.open(File(sourcePath));
             try {
                 var copied = duplicateVisibleArtwork(source, layer);
                 if (!copied.length) throw new Error("V2 compose input has no artwork");
                 for (var copiedIndex = 0; copiedIndex < copied.length; copiedIndex++) sanitizePackNames(copied[copiedIndex]);
                 if (input.target_dimensions && (!input.target_dimensions.width_mm || !input.target_dimensions.height_mm)) throw new Error("V2 order column target dimensions missing");
-                fitCopiedArtwork(copied, input.target_dimensions || {});
+                validateRequestedDimensions(componentFrame, input.target_dimensions || {});
                 var item = groupPageItems(layer, copied, "ORDER_PACK_ITEM_PENDING_" + inputIndex);
-                orderBucketFor(input, inputIndex).items.push(item);
+                orderBucketFor(input, inputIndex).items.push({item: item, frame: componentFrame, source_path: sourcePath});
             } finally {
                 try { source.close(SaveOptions.DONOTSAVECHANGES); } catch (closeSourceError) {}
             }
         }
-        var orderBlocks = layoutOrderBlocks(layer, orderBuckets, gap);
+        var orderBlocks = layoutOrderBlocks(layer, orderBuckets, gap, composedItems);
         var allItems = orderBlocks.slice(0);
         if (labelLines.length) {
-            var labelItems = addProductionLabels(layer, labelLines, orderBlocks, labelHeight, labelGap, labelFontSize);
-            allItems = labelItems.concat(orderBlocks);
+            var labelResult = addProductionLabels(layer, labelLines, orderBlocks, labelHeight, labelGap, labelFontSize);
+            translateComposedFrames(composedItems, labelResult.order_translation.x, labelResult.order_translation.y);
+            allItems = labelResult.items.concat(orderBlocks);
         }
         fitArtboard(doc, allItems);
         applyOutputTransforms(doc, task.output || {});
+        writeComponentContract(task, composedItems);
         var output = File(String(task.output_ai || ""));
         ensureFolder(output.parent);
         if (output.exists) output.remove();
@@ -70,32 +74,6 @@
             }
         }
         return copied;
-    }
-
-    function fitCopiedArtwork(items, dimensions) {
-        var targetWidth = mmToPt(Number(dimensions.width_mm || 0));
-        var targetHeight = mmToPt(Number(dimensions.height_mm || 0));
-        if (targetWidth <= 0 || targetHeight <= 0) return;
-        for (var index = 0; index < items.length; index++) fitPageItem(items[index], targetWidth, targetHeight);
-    }
-
-    function fitPageItem(item, targetWidth, targetHeight) {
-        var bounds = itemBounds(item);
-        var width = Number(bounds[2]) - Number(bounds[0]);
-        var height = Number(bounds[1]) - Number(bounds[3]);
-        if (width <= 0 || height <= 0) throw new Error("V2 compose artwork bounds are empty");
-        item.resize(targetWidth / width * 100, targetHeight / height * 100, true, true, true, true, 100, Transformation.CENTER);
-        var fitted = itemBounds(item);
-        item.translate((Number(bounds[0]) + Number(bounds[2]) - Number(fitted[0]) - Number(fitted[2])) / 2, (Number(bounds[1]) + Number(bounds[3]) - Number(fitted[1]) - Number(fitted[3])) / 2);
-        validatePageItem(item, targetWidth, targetHeight);
-    }
-
-    function validatePageItem(item, targetWidth, targetHeight) {
-        var bounds = itemBounds(item);
-        var epsilon = mmToPt(0.007);
-        if (Math.abs((Number(bounds[2]) - Number(bounds[0])) - targetWidth) > epsilon || Math.abs((Number(bounds[1]) - Number(bounds[3])) - targetHeight) > epsilon) {
-            throw new Error("V2 compose artwork does not match target dimensions");
-        }
     }
 
     function applyOutputTransforms(doc, policy) {
@@ -133,21 +111,29 @@
         return orderBucketByKey[key];
     }
 
-    function layoutOrderBlocks(layer, buckets, gap) {
+    function layoutOrderBlocks(layer, buckets, gap, contracts) {
         var currentTop = 0;
         var blocks = [];
         for (var orderIndex = 0; orderIndex < buckets.length; orderIndex++) {
             var bucket = buckets[orderIndex];
             for (var itemIndex = 0; itemIndex < bucket.items.length; itemIndex++) {
-                bucket.items[itemIndex].name = "ORDER_PACK_ITEM_" + orderIndex + "_" + itemIndex;
+                bucket.items[itemIndex].item.name = "ORDER_PACK_ITEM_" + orderIndex + "_" + itemIndex;
             }
-            var block = groupPageItems(layer, bucket.items, "ORDER_PACK_BLOCK_" + orderIndex);
+            var groupItems = [];
+            for (var groupedIndex = 0; groupedIndex < bucket.items.length; groupedIndex++) groupItems.push(bucket.items[groupedIndex].item);
+            var block = groupPageItems(layer, groupItems, "ORDER_PACK_BLOCK_" + orderIndex);
             for (var childIndex = 0; childIndex < bucket.items.length; childIndex++) {
-                var item = bucket.items[childIndex];
-                var bounds = unionBounds([item]);
-                translateItems([item], 0 - Number(bounds[0]), currentTop - Number(bounds[1]));
-                var placed = unionBounds([item]);
-                currentTop = Number(placed[3]) - gap;
+                var entry = bucket.items[childIndex];
+                var frame = entry.frame.frame_bounds;
+                var dx = 0 - Number(frame[0]);
+                var dy = currentTop - Number(frame[1]);
+                entry.copy_coordinate_translation = placeArtworkAtExpected(entry.item, entry.frame.artwork_bounds_after, dx, dy, "order column placement");
+                entry.translation = {x: dx, y: dy};
+                entry.final_frame_bounds = translateBounds(frame, dx, dy);
+                entry.actual_artwork_bounds = verifyTranslatedArtwork(entry.item, entry.frame.artwork_bounds_after, dx, dy, "order column placement");
+                entry.key = String(entry.item.name || "");
+                contracts.push(entry);
+                currentTop = Number(entry.final_frame_bounds[3]) - gap;
             }
             blocks.push(block);
         }
@@ -210,14 +196,16 @@
         var bounds = unionBounds(orderBlocks);
         var width = Math.max(Number(bounds[2]) - Number(bounds[0]), mmToPt(30));
         var totalLabelHeight = lines.length * labelHeight + Math.max(lines.length - 1, 0) * labelGap;
-        translateItems(orderBlocks, 0 - Number(bounds[0]), -(totalLabelHeight + labelGap) - Number(bounds[1]));
+        var dx = 0 - Number(bounds[0]);
+        var dy = -(totalLabelHeight + labelGap) - Number(bounds[1]);
+        translateItems(orderBlocks, dx, dy);
         var labels = [];
         for (var lineIndex = 0; lineIndex < lines.length; lineIndex++) {
             var top = -(lineIndex * (labelHeight + labelGap));
             var label = drawLabel(layer, lines[lineIndex], 0, top, width, top - labelHeight, fontSize);
             if (label) labels.push(label);
         }
-        return labels;
+        return {items: labels, order_translation: {x: dx, y: dy}};
     }
 
     function drawLabel(layer, text, left, top, right, bottom, size) {
@@ -259,6 +247,119 @@
             color.black = 100;
             frame.textRange.characterAttributes.fillColor = color;
         } catch (colorError) {}
+    }
+
+    function readSingleComponentFrame(input) {
+        var path = String(input.component_contract_file || "");
+        if (!path) throw new Error("V2 component frame contract path missing");
+        var contract = readJSON(path);
+        if (Number(contract.component_contract_version || 0) !== 1) throw new Error("Unsupported V2 component frame contract");
+        var frames = contract.component_frames || [];
+        if (frames.length !== 1) throw new Error("V2 component input must contain exactly one fixed frame");
+        var frame = frames[0] || {};
+        if (!validBounds(frame.frame_bounds)) throw new Error("V2 component frame bounds missing");
+        if (!validBounds(frame.artwork_bounds_after)) throw new Error("V2 component artwork audit bounds missing");
+        return {
+            frame_bounds: copyBounds(frame.frame_bounds),
+            artwork_bounds_after: copyBounds(frame.artwork_bounds_after),
+            tracked_slots: frame.tracked_slots || [],
+            source: String(frame.source || ""),
+            output_key: String(frame.output_key || "")
+        };
+    }
+
+    function validateRequestedDimensions(frame, dimensions) {
+        var requestedWidth = mmToPt(Number(dimensions.width_mm || 0));
+        var requestedHeight = mmToPt(Number(dimensions.height_mm || 0));
+        if (requestedWidth <= 0 && requestedHeight <= 0) return;
+        if (requestedWidth <= 0 || requestedHeight <= 0) throw new Error("V2 order column target dimensions missing");
+        var width = Number(frame.frame_bounds[2]) - Number(frame.frame_bounds[0]);
+        var height = Number(frame.frame_bounds[1]) - Number(frame.frame_bounds[3]);
+        var epsilon = mmToPt(0.01);
+        if (Math.abs(width - requestedWidth) > epsilon || Math.abs(height - requestedHeight) > epsilon) {
+            throw new Error("V2 component frame does not match requested dimensions; refusing resize");
+        }
+    }
+
+    function translateComposedFrames(entries, dx, dy) {
+        for (var index = 0; index < entries.length; index++) {
+            var entry = entries[index];
+            entry.final_frame_bounds = translateBounds(entry.final_frame_bounds, dx, dy);
+            entry.translation.x += dx;
+            entry.translation.y += dy;
+            entry.actual_artwork_bounds = verifyTranslatedArtwork(entry.item, entry.frame.artwork_bounds_after, entry.translation.x, entry.translation.y, "order column label placement");
+        }
+    }
+
+    function translateBounds(bounds, dx, dy) {
+        return [Number(bounds[0]) + Number(dx), Number(bounds[1]) + Number(dy), Number(bounds[2]) + Number(dx), Number(bounds[3]) + Number(dy)];
+    }
+
+    function copyBounds(bounds) {
+        return [Number(bounds[0]), Number(bounds[1]), Number(bounds[2]), Number(bounds[3])];
+    }
+
+    function verifyTranslatedArtwork(item, sourceBounds, dx, dy, stage) {
+        var expected = translateBounds(sourceBounds, dx, dy);
+        var actual = itemBounds(item);
+        var epsilon = 1 / 64;
+        for (var index = 0; index < 4; index++) {
+            if (Math.abs(Number(actual[index]) - Number(expected[index])) > epsilon) {
+                throw new Error("V2 component artwork bounds changed during " + stage + "; expected=" + expected + ", actual=" + actual);
+            }
+        }
+        return copyBounds(actual);
+    }
+
+    function placeArtworkAtExpected(item, sourceBounds, logicalDx, logicalDy, stage) {
+        var expected = translateBounds(sourceBounds, logicalDx, logicalDy);
+        var actual = itemBounds(item);
+        var copyDx = Number(expected[0]) - Number(actual[0]);
+        var copyDy = Number(expected[1]) - Number(actual[1]);
+        item.translate(copyDx, copyDy);
+        return {x: copyDx, y: copyDy, stage: stage};
+    }
+
+    function translateTrackedSlots(trackedSlots, dx, dy) {
+        var result = [];
+        for (var index = 0; index < trackedSlots.length; index++) {
+            var tracked = trackedSlots[index] || {};
+            if (!validBounds(tracked.bounds)) throw new Error("V2 tracked slot bounds missing for " + tracked.slot_key);
+            result.push({
+                slot_key: String(tracked.slot_key || ""),
+                track_name: String(tracked.track_name || ""),
+                source_bounds: copyBounds(tracked.bounds),
+                bounds: translateBounds(tracked.bounds, dx, dy),
+                compose_translation: {x: Number(dx), y: Number(dy)}
+            });
+        }
+        return result;
+    }
+
+    function writeComponentContract(task, entries) {
+        var path = String(task.component_contract_file || "");
+        if (!path) throw new Error("V2 composed output contract path missing");
+        var frames = [];
+        for (var index = 0; index < entries.length; index++) {
+            var entry = entries[index];
+            frames.push({
+                key: String(entry.key || ""),
+                frame_bounds: copyBounds(entry.final_frame_bounds),
+                source_frame_bounds: copyBounds(entry.frame.frame_bounds),
+                compose_translation: {x: Number(entry.translation.x), y: Number(entry.translation.y)},
+                copy_coordinate_translation: entry.copy_coordinate_translation || {x: 0, y: 0},
+                source_artwork_bounds: copyBounds(entry.frame.artwork_bounds_after),
+                artwork_bounds_after: copyBounds(entry.actual_artwork_bounds),
+                tracked_slots: translateTrackedSlots(entry.frame.tracked_slots || [], entry.translation.x, entry.translation.y),
+                source: "compose_v2_order_column"
+            });
+        }
+        var file = File(path);
+        ensureFolder(file.parent);
+        file.encoding = "UTF-8";
+        if (!file.open("w")) throw new Error("Cannot write V2 composed component contract: " + file.fsName);
+        file.write(stringifyJson({component_contract_version: 1, component_frames: frames}));
+        file.close();
     }
 
     function itemBounds(item) {
@@ -331,6 +432,24 @@
     function parseJson(text) {
         if (typeof JSON !== "undefined" && JSON.parse) return JSON.parse(text);
         return parseJsonFallback(String(text || ""));
+    }
+
+    function stringifyJson(value) {
+        if (typeof JSON !== "undefined" && JSON.stringify) return JSON.stringify(value);
+        if (value === null || value === undefined) return "null";
+        if (typeof value === "number") return isFinite(value) ? String(value) : "null";
+        if (typeof value === "boolean") return value ? "true" : "false";
+        if (typeof value === "string") return '"' + String(value).replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\r/g, "\\r").replace(/\n/g, "\\n") + '"';
+        if (Object.prototype.toString.call(value) === "[object Array]") {
+            var arrayParts = [];
+            for (var arrayIndex = 0; arrayIndex < value.length; arrayIndex++) arrayParts.push(stringifyJson(value[arrayIndex]));
+            return "[" + arrayParts.join(",") + "]";
+        }
+        var fields = [];
+        for (var key in value) {
+            if (Object.prototype.hasOwnProperty.call(value, key)) fields.push(stringifyJson(String(key)) + ":" + stringifyJson(value[key]));
+        }
+        return "{" + fields.join(",") + "}";
     }
 
     function parseJsonFallback(text) {

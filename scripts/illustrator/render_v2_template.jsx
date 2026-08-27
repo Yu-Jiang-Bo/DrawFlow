@@ -21,9 +21,16 @@
     var values = execution.values || {};
     var selections = execution.selections || {};
     var layoutWarnings = [];
+    var componentFrames = [];
+    var renderedComponents = [];
     var selectedOutputKey = String(execution.output_key || "");
     var renderedOutputItems = [];
     var renderedOutputCount = 0;
+    // Live Illustrator object references are deliberately kept outside the
+    // serialized component contract. They exist only until outline conversion
+    // has produced the final saved artwork.
+    var exactSlotTextItems = {};
+    var exactSlotTrackerEntries = {};
     var tailPuaBaseCache = {};
     // Bounded candidates cover the installed tail fonts while keeping one
     // preview from ever issuing thousands of Illustrator outline operations.
@@ -41,14 +48,26 @@
         for (var outputIndex = 0; outputIndex < (task.outputs || []).length; outputIndex++) {
             var taskOutput = task.outputs[outputIndex] || {};
             if (selectedOutputKey && String(taskOutput.key || "") !== selectedOutputKey) continue;
-            renderedOutputItems = renderedOutputItems.concat(renderOutput(templateDoc, layer, taskOutput, values, selections));
+            var renderedOutput = renderOutput(templateDoc, layer, taskOutput, values, selections);
+            renderedOutputItems = renderedOutputItems.concat(renderedOutput.items);
+            if (renderedOutput.component_frame) {
+                componentFrames.push(renderedOutput.component_frame);
+                renderedComponents.push(renderedOutput);
+            }
             renderedOutputCount += 1;
         }
         if (selectedOutputKey && renderedOutputCount !== 1) throw new Error("Selected V2 output was not rendered: " + selectedOutputKey);
         if (execution.pack_order_blocks === true) {
             renderedOutputItems = [groupRenderedOutputBlock(layer, renderedOutputItems, 0)];
         }
-        applyOutputTransforms(doc, execution.output || task.output || {});
+        // Text outlines can have different visible bounds from their live text
+        // frames. Refit tracked exact-anchor slots after outlining so the saved
+        // AI, not merely the pre-outline text frame, satisfies the anchor.
+        applyOutputTransforms(doc, execution.output || task.output || {}, buildExactSlotTracker(componentFrames));
+        for (var componentIndex = 0; componentIndex < renderedComponents.length; componentIndex++) {
+            var renderedComponent = renderedComponents[componentIndex];
+            renderedComponent.component_frame.artwork_bounds_after = copyBounds(unionBounds(renderedComponent.items, true));
+        }
         if (execution.preview_png) fitArtboardToVisibleContent(doc, renderedOutputItems, 0);
         var output = File(String(execution.output_ai));
         ensureFolder(output.parent);
@@ -58,7 +77,7 @@
             fitArtboardToVisibleContent(doc, renderedOutputItems, 12);
             exportPreviewPNG(doc, File(String(execution.preview_png)), execution.preview_dpi);
         }
-        writeLayoutWarnings(execution.layout_warning_file, layoutWarnings);
+        writeLayoutWarnings(execution.layout_warning_file, layoutWarnings, componentFrames);
         return output.fsName;
     } finally {
         try { templateDoc.close(SaveOptions.DONOTSAVECHANGES); } catch (closeTemplateError) {}
@@ -71,6 +90,8 @@
         var copied = {};
         var renderedItems = [];
         var actions = output.actions || [];
+        var componentFrame = null;
+        var warningStart = layoutWarnings.length;
         for (var index = 0; index < actions.length; index++) {
             var action = actions[index] || {};
             if (action.type === "select_style" && isSelected(action, selected)) {
@@ -94,7 +115,7 @@
         for (var fitIndex = 0; fitIndex < actions.length; fitIndex++) {
             var fitAction = actions[fitIndex] || {};
             if (fitAction.type === "fit_output_bounds" && isSelected(fitAction, selected)) {
-                fitRenderedOutput(renderedItems, fitAction);
+                componentFrame = fitRenderedOutput(renderedItems, fitAction);
             }
         }
         for (var replaceIndex = 0; replaceIndex < actions.length; replaceIndex++) {
@@ -105,21 +126,41 @@
         }
         cleanupAuxiliaryObjects(renderedItems);
         removeSourceOnlyCopies(copied);
-        return renderedItems;
+        if (componentFrame) {
+            componentFrame.output_key = outputKey;
+            componentFrame.tracked_slots = trackedSlotsFromWarnings(layoutWarnings, warningStart, outputKey);
+        }
+        return {items: renderedItems, component_frame: componentFrame};
     }
 
-    function applyOutputTransforms(doc, policy) {
+    function applyOutputTransforms(doc, policy, exactSlotTracker) {
         if (!policy || policy.outline_text !== true) return;
-        outlineAllTextFrames(doc, policy.pathfinder_merge === true);
+        tagExactSlotsForOutline(exactSlotTracker || {});
+        outlineAllTextFrames(doc, policy.pathfinder_merge === true, exactSlotTracker || {});
     }
 
-    function outlineAllTextFrames(doc, pathfinderMerge) {
+    function tagExactSlotsForOutline(exactSlotTracker) {
+        for (var trackName in exactSlotTracker) {
+            if (!exactSlotTracker.hasOwnProperty(trackName)) continue;
+            var item = exactSlotTextItems[trackName];
+            if (!item) throw new Error("V2 exact slot text missing before outline: " + trackName);
+            item.name = trackName;
+        }
+    }
+
+    function outlineAllTextFrames(doc, pathfinderMerge, exactSlotTracker) {
         var frames = [];
         for (var layerIndex = 0; layerIndex < doc.layers.length; layerIndex++) collectTextFrames(doc.layers[layerIndex], frames);
         for (var index = frames.length - 1; index >= 0; index--) {
+            var trackName = String(frames[index].name || "");
             var outline = frames[index].createOutline();
             if (!outline) throw new Error("V2 text outline failed");
             if (pathfinderMerge) cleanupOutline(outline);
+            var tracked = exactSlotTracker[trackName];
+            if (tracked) {
+                var finalBounds = fitOutlinedSlotExactlyToAnchor(outline, tracked.anchor, tracked.slot_key);
+                tracked.bounds = copyBounds(finalBounds);
+            }
         }
     }
 
@@ -193,6 +234,17 @@
         var textPlacement = captureTextPlacement(target);
         var textFrame = writeTextToItem(target, directTailParts ? directTailParts.main_text : slotValue);
         fitItemWithinBounds(textFrame, fitBounds, action, textPlacement, "slot");
+        if (isExactAnchorSlot(textFrame, action)) {
+            var trackName = trackedSlotName(outputKey, action.slot_key);
+            exactSlotTextItems[trackName] = textFrame;
+            exactSlotTrackerEntries[trackName] = {
+                slot_key: String(action.slot_key || ""),
+                track_name: trackName,
+                anchor: copyBounds(fitBounds),
+                exact_anchor_fit: true,
+                bounds: copyBounds(measuredBounds(textFrame))
+            };
+        }
         if (directTailParts) {
             removeDirectTailSamples(holder.item, holder.source_path, tailSpecs);
             return;
@@ -729,6 +781,10 @@
         writeSlotExactFitAudit(action, before, finalMeasurement, anchorBounds, scaleX, scaleY, correction);
     }
 
+    function isExactAnchorSlot(item, action) {
+        return !action.style_source && hasText(action && action.anchor_path) && !isPathTextFrame(item);
+    }
+
     function resizeTextIndependently(item, scaleX, scaleY) {
         try { item.resize(scaleX * 100, scaleY * 100, true, true, true, true, 100, Transformation.CENTER); return true; }
         catch (resizeError1) {
@@ -989,6 +1045,14 @@
             if (outputBoundsWithinTargetRange(fitted, targetWidth, targetHeight, dimensions)) break;
         }
         validateOutputBounds(items, dimensions, targetWidth, targetHeight);
+        return {
+            frame_bounds: [targetLeft, targetTop, targetLeft + targetWidth, targetTop - targetHeight],
+            width_pt: targetWidth,
+            height_pt: targetHeight,
+            width_mm: Number(dimensions.width_mm || 0),
+            height_mm: Number(dimensions.height_mm || 0),
+            source: "fit_output_bounds"
+        };
     }
 
     function resizeItemsAroundBounds(items, bounds, scaleX, scaleY) {
@@ -1479,13 +1543,85 @@
         folder.create();
     }
 
-    function writeLayoutWarnings(path, warnings) {
+    function copyBounds(bounds) {
+        return [Number(bounds[0]), Number(bounds[1]), Number(bounds[2]), Number(bounds[3])];
+    }
+
+    function trackedSlotsFromWarnings(warnings, startIndex, outputKey) {
+        var result = [];
+        for (var index = Number(startIndex || 0); index < warnings.length; index++) {
+            var warning = warnings[index] || {};
+            if (warning.code === "slot_anchor_exact_fit" && validBounds(warning.text_bounds_after)) {
+                var trackName = trackedSlotName(outputKey, warning.slot_key);
+                result.push(exactSlotTrackerEntries[trackName] || {slot_key: String(warning.slot_key || ""), track_name: trackName, anchor: copyBounds(warning.anchor), exact_anchor_fit: true, bounds: copyBounds(warning.text_bounds_after)});
+            } else if (warning.code === "slot_bounds_audit" && validBounds(warning.actual_bounds)) {
+                result.push({slot_key: String(warning.slot_key || ""), track_name: trackedSlotName(outputKey, warning.slot_key), bounds: copyBounds(warning.actual_bounds)});
+            }
+        }
+        return result;
+    }
+
+    function buildExactSlotTracker(componentFrames) {
+        var tracker = {};
+        for (var knownTrackName in exactSlotTrackerEntries) {
+            if (exactSlotTrackerEntries.hasOwnProperty(knownTrackName)) tracker[knownTrackName] = exactSlotTrackerEntries[knownTrackName];
+        }
+        for (var frameIndex = 0; frameIndex < componentFrames.length; frameIndex++) {
+            var trackedSlots = componentFrames[frameIndex].tracked_slots || [];
+            for (var slotIndex = 0; slotIndex < trackedSlots.length; slotIndex++) {
+                var tracked = trackedSlots[slotIndex] || {};
+                if (tracked.exact_anchor_fit === true && validBounds(tracked.anchor)) {
+                    tracker[String(tracked.track_name || "")] = tracked;
+                }
+            }
+        }
+        return tracker;
+    }
+
+    function fitOutlinedSlotExactlyToAnchor(item, anchorBounds, slotKey) {
+        if (!validBounds(anchorBounds)) throw new Error("V2 outlined slot anchor missing: " + String(slotKey || ""));
+        var current = visibleBoundsStrict(item);
+        var currentWidth = Math.abs(Number(current[2]) - Number(current[0]));
+        var currentHeight = Math.abs(Number(current[1]) - Number(current[3]));
+        var targetWidth = Math.abs(Number(anchorBounds[2]) - Number(anchorBounds[0]));
+        var targetHeight = Math.abs(Number(anchorBounds[1]) - Number(anchorBounds[3]));
+        if (currentWidth <= 0 || currentHeight <= 0 || targetWidth <= 0 || targetHeight <= 0) {
+            throw new Error("V2 outlined slot bounds invalid: " + String(slotKey || ""));
+        }
+        resizePageItem(item, targetWidth / currentWidth * 100, targetHeight / currentHeight * 100);
+        placeVisibleBoundsAtAnchor(item, anchorBounds);
+        var finalBounds = visibleBoundsStrict(item);
+        if (!dimensionsMatchAnchor(
+            Math.abs(Number(finalBounds[2]) - Number(finalBounds[0])),
+            Math.abs(Number(finalBounds[1]) - Number(finalBounds[3])),
+            targetWidth,
+            targetHeight
+        ) || !boundsMatchAnchor(finalBounds, anchorBounds)) {
+            throw new Error("V2 outlined slot does not match anchor: " + String(slotKey || ""));
+        }
+        return finalBounds;
+    }
+
+    function trackedSlotName(outputKey, slotKey) {
+        return "__V2_TRACK_SLOT__" + safeTrackName(outputKey) + "__" + safeTrackName(slotKey);
+    }
+
+    function safeTrackName(value) {
+        return String(value || "").replace(/[^A-Za-z0-9_]+/g, "_");
+    }
+
+    function writeLayoutWarnings(path, warnings, frames) {
         if (!path) return;
         var file = File(String(path));
         ensureFolder(file.parent);
         file.encoding = "UTF-8";
         if (!file.open("w")) throw new Error("Cannot write V2 layout warnings: " + file.fsName);
-        file.write(stringifyJson({warnings: warnings || []}));
+        var payload = {warnings: warnings || []};
+        if (frames && frames.length) {
+            payload.component_contract_version = 1;
+            payload.component_frames = frames;
+        }
+        file.write(stringifyJson(payload));
         file.close();
     }
 }());

@@ -33,9 +33,18 @@ def test_order_column_task_keeps_unannotated_components_distinct_from_final_labe
     assert component_task["type"] == "compose_v2_order_column"
     assert "label_lines" not in component_task
     assert component_task["inputs"] == [
-        {"path": str(tmp_path / "component-a.ai"), "order_no": "ORDER-1"},
-        {"path": str(tmp_path / "component-b.ai"), "order_no": "ORDER-1"},
+        {
+            "path": str(tmp_path / "component-a.ai"),
+            "component_contract_file": str(tmp_path / "component-a.warnings.json"),
+            "order_no": "ORDER-1",
+        },
+        {
+            "path": str(tmp_path / "component-b.ai"),
+            "component_contract_file": str(tmp_path / "component-b.warnings.json"),
+            "order_no": "ORDER-1",
+        },
     ]
+    assert component_task["component_contract_file"] == str(tmp_path / "component.warnings.json")
     assert final_task["label_lines"] == ["ORDER-1", "金色"]
 
 
@@ -57,7 +66,13 @@ def test_color_frame_task_preserves_public_packing_and_component_references(tmp_
         "compatibility": "Illustrator 8",
         "show_color_header": True,
         "show_color_frame_boundary": True,
-        "inputs": [{"path": str(tmp_path / "gold.ai"), "color_option": "金色", "order_nos": ["ORDER-1"]}],
+        "component_contract_version": 1,
+        "inputs": [{
+            "path": str(tmp_path / "gold.ai"),
+            "component_contract_file": str(tmp_path / "gold.warnings.json"),
+            "color_option": "金色",
+            "order_nos": ["ORDER-1"],
+        }],
         "debug": {"report_path": str(tmp_path / "summary.debug.json")},
     }
 

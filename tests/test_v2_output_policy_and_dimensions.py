@@ -98,8 +98,8 @@ def test_v2_jsx_contains_final_object_fit_and_policy_gates():
     render_source = Path("scripts/illustrator/render_v2_template.jsx").read_text(encoding="utf-8")
     order_source = Path("scripts/illustrator/compose_v2_order_column.jsx").read_text(encoding="utf-8")
     color_source = Path("scripts/illustrator/compose_color_frames.jsx").read_text(encoding="utf-8")
-    assert "applyOutputTransforms(doc, execution.output || task.output || {})" in render_source
-    assert "fitRenderedOutput(renderedOutputItems, finalFitAction)" in render_source
+    assert "applyOutputTransforms(doc, execution.output || task.output || {}, buildExactSlotTracker(componentFrames))" in render_source
+    assert "fitRenderedOutput(renderedItems, fitAction);" in render_source
     assert "outputBoundsWithinTargetRange(fitted, targetWidth, targetHeight, dimensions)" in render_source
     assert "var fitSafety = outputFitSafetyPoints(dimensions);" in render_source
     assert "return dimensionTolerancePoints(dimensions);" in render_source
@@ -107,11 +107,14 @@ def test_v2_jsx_contains_final_object_fit_and_policy_gates():
     assert "width > targetWidth || height > targetHeight" in render_source
     assert "width < targetWidth - epsilon - comparisonEpsilon || height < targetHeight - epsilon - comparisonEpsilon" in render_source
     assert "if (!policy || policy.outline_text !== true) return;" in render_source
-    assert "fitCopiedArtwork(copied, input.target_dimensions || {})" in order_source
+    assert "readSingleComponentFrame" in order_source
+    assert "refusing resize" in order_source
+    assert ".resize(" not in order_source
     assert "if (!policy || policy.outline_text !== true) return;" in order_source
-    assert "fitCopiedArtwork(copy, item.target_dimensions || {})" in color_source
+    assert "readComponentFrameMap" in color_source
+    assert "refusing resize" in color_source
+    assert ".resize(" not in color_source
     assert "hasDimensionFields(requestedDimensions)" in color_source
-    assert "if (targetWidth <= 0 || targetHeight <= 0) return;" in color_source
     assert "outputPolicy.outline_text !== false" in color_source
 
 
