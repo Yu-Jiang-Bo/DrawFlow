@@ -50,6 +50,11 @@ def test_v2_renderer_static_contract_uses_paths_and_safe_actions():
     assert '#include "v2_tail_text.jsxinc"' in source
     assert TAIL_INCLUDE.exists()
     assert "function saveAsAI8" in source
+    assert "function fitUnstyledSlotExactlyToAnchor" in source
+    assert "function resizeTextIndependently" in source
+    assert "scaleX * 100, scaleY * 100" in source
+    assert "var finalFitAction" not in source
+    assert source.index("fitRenderedOutput(renderedItems, fitAction);") < source.index("replaceSlotText(copied, outputKey, replaceAction")
     assert "findPageItemsByName" not in source
     assert "app.doScript" not in source
     assert "eval(" not in source
@@ -334,6 +339,7 @@ def test_v2_renderer_replaces_split_by_pipe_slots_by_source_part_index():
                             "group": "design",
                             "option_key": "Design03",
                             "object_path": "Template/Output_main/Design/Design03/slot_name",
+                            "anchor_path": "Template/Output_main/Design/Design03/anchor_name",
                             "source_field": "name",
                             "source_part_index": 0,
                             "required": True,
@@ -490,6 +496,7 @@ def test_v2_renderer_combines_design_slot_with_selected_font_style_source():
                             "group": "design",
                             "option_key": "Design03",
                             "object_path": "Template/Output_main/Design/Design03/slot_name",
+                            "anchor_path": "Template/Output_main/Design/Design03/anchor_name",
                             "source_field": "name",
                             "required": True,
                             "tail_paths": [],
@@ -586,6 +593,7 @@ def test_v2_renderer_fits_short_and_long_text_inside_local_slot_bounds():
                             "group": "design",
                             "option_key": "Design03",
                             "object_path": "Template/Output_main/Design/Design03/slot_name",
+                            "anchor_path": "Template/Output_main/Design/Design03/anchor_name",
                             "source_field": "name",
                             "required": True,
                             "tail_paths": [],
@@ -609,7 +617,7 @@ if (slot.resizeCalls < 1) throw new Error('long text was not shrunk');
     assert result.returncode == 0, result.stderr
 
 
-def test_v2_renderer_short_text_keeps_template_position_without_expanding():
+def test_v2_renderer_short_unstyled_text_fills_anchor_independently():
     task = {
         "$schema": "custom-renderer/v2-render-execution",
         "template_ai": "template.ai",
@@ -633,6 +641,7 @@ def test_v2_renderer_short_text_keeps_template_position_without_expanding():
                             "group": "design",
                             "option_key": "Design03",
                             "object_path": "Template/Output_main/Design/Design03/slot_name",
+                            "anchor_path": "Template/Output_main/Design/Design03/anchor_name",
                             "source_field": "name",
                             "required": True,
                             "tail_paths": [],
@@ -645,11 +654,11 @@ def test_v2_renderer_short_text_keeps_template_position_without_expanding():
     harness = node_mock_harness(task, """
 const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
 const slot = child(designCopy, 'slot_name');
-if (slot.resizeCalls !== 0) throw new Error('short text must not expand to fill a slot');
 const width = slot.visibleBounds[2] - slot.visibleBounds[0];
 const height = slot.visibleBounds[1] - slot.visibleBounds[3];
-if (Math.abs(width - 24) > 0.1 || Math.abs(height - 30) > 0.1) throw new Error('short text changed template size: ' + width + 'x' + height);
-if (Math.abs(slot.visibleBounds[0]) > 0.1 || Math.abs(slot.visibleBounds[1] - 30) > 0.1) throw new Error('short text changed template position');
+if (slot.resizeCalls < 1) throw new Error('short unstyled text did not resize to anchor');
+if (Math.abs(width - 60) > 0.01 || Math.abs(height - 20) > 0.01) throw new Error('short text did not match anchor size: ' + width + 'x' + height);
+if (Math.abs(slot.visibleBounds[0] - 200) > 0.01 || Math.abs(slot.visibleBounds[1] - 120) > 0.01) throw new Error('short text did not match anchor coordinate');
 """)
 
     result = run_node(harness)
@@ -657,7 +666,7 @@ if (Math.abs(slot.visibleBounds[0]) > 0.1 || Math.abs(slot.visibleBounds[1] - 30
     assert result.returncode == 0, result.stderr
 
 
-def test_v2_renderer_normal_text_keeps_template_position_without_expanding():
+def test_v2_renderer_normal_unstyled_text_fills_anchor_independently():
     task = {
         "$schema": "custom-renderer/v2-render-execution",
         "template_ai": "template.ai",
@@ -681,6 +690,7 @@ def test_v2_renderer_normal_text_keeps_template_position_without_expanding():
                             "group": "design",
                             "option_key": "Design03",
                             "object_path": "Template/Output_main/Design/Design03/slot_name",
+                            "anchor_path": "Template/Output_main/Design/Design03/anchor_name",
                             "source_field": "name",
                             "required": True,
                             "tail_paths": [],
@@ -693,11 +703,11 @@ def test_v2_renderer_normal_text_keeps_template_position_without_expanding():
     harness = node_mock_harness(task, """
 const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
 const slot = child(designCopy, 'slot_name');
-if (slot.resizeCalls !== 0) throw new Error('normal text must not expand to fill a slot');
 const width = slot.visibleBounds[2] - slot.visibleBounds[0];
 const height = slot.visibleBounds[1] - slot.visibleBounds[3];
-if (Math.abs(width - 48) > 0.1 || Math.abs(height - 30) > 0.1) throw new Error('normal text changed template size: ' + width + 'x' + height);
-if (Math.abs(slot.visibleBounds[0]) > 0.1 || Math.abs(slot.visibleBounds[1] - 30) > 0.1) throw new Error('normal text changed template position');
+if (slot.resizeCalls < 1) throw new Error('normal unstyled text did not resize to anchor');
+if (Math.abs(width - 60) > 0.01 || Math.abs(height - 20) > 0.01) throw new Error('normal text did not match anchor size: ' + width + 'x' + height);
+if (Math.abs(slot.visibleBounds[0] - 200) > 0.01 || Math.abs(slot.visibleBounds[1] - 120) > 0.01) throw new Error('normal text did not match anchor coordinate');
 """)
 
     result = run_node(harness)
@@ -783,6 +793,7 @@ def test_v2_renderer_extreme_text_keeps_shrinking_without_touching_fixed_art():
                             "group": "design",
                             "option_key": "Design03",
                             "object_path": "Template/Output_main/Design/Design03/slot_name",
+                            "anchor_path": "Template/Output_main/Design/Design03/anchor_name",
                             "source_field": "name",
                             "required": True,
                             "tail_paths": [],
@@ -797,11 +808,16 @@ const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
 const slot = child(designCopy, 'slot_name');
 const fixed = child(designCopy, 'fixed_heart');
 const width = slot.visibleBounds[2] - slot.visibleBounds[0];
-if (width > 100.01) throw new Error('extreme text escaped slot width: ' + width);
+if (Math.abs(width - 60) > 0.01) throw new Error('extreme text did not match anchor width: ' + width);
 if (slot.resizeCalls < 1) throw new Error('extreme text was not shrunk');
 if (fixed.translateCalls !== 0 || fixed.resizeCalls !== 0) throw new Error('fixed art moved or resized for extreme text');
 const warning = JSON.parse(writtenFiles['warnings.json']);
-if (!warning.warnings || !warning.warnings.some(entry => entry.code === 'text_fit_extreme')) throw new Error('extreme text warning missing');
+const audit = warning.warnings && warning.warnings.find(entry => entry.code === 'slot_anchor_exact_fit');
+if (!audit) throw new Error('exact anchor audit missing');
+for (const field of ['slot_path', 'anchor_path', 'anchor_width', 'anchor_height', 'text_width_before', 'text_height_before', 'scale_x', 'scale_y', 'text_width_after', 'text_height_after']) {{
+  if (!Object.prototype.hasOwnProperty.call(audit, field)) throw new Error('exact anchor audit missing field: ' + field);
+}}
+if (Math.abs(audit.anchor_width - 60) > 0.01 || Math.abs(audit.anchor_height - 20) > 0.01) throw new Error('exact anchor audit has wrong anchor dimensions');
 """)
 
     result = run_node(harness)
@@ -835,6 +851,7 @@ def test_v2_renderer_keeps_text_inside_anchor_after_resize_rounding():
                             "group": "design",
                             "option_key": "Design03",
                             "object_path": "Template/Output_main/Design/Design03/slot_name",
+                            "anchor_path": "Template/Output_main/Design/Design03/anchor_name",
                             "source_field": "name",
                             "required": True,
                             "tail_paths": [],
@@ -848,9 +865,9 @@ def test_v2_renderer_keeps_text_inside_anchor_after_resize_rounding():
 const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
 const slot = child(designCopy, 'slot_name');
 const width = slot.visibleBounds[2] - slot.visibleBounds[0];
-if (width > 100) throw new Error('rounded text escaped its anchor: ' + width);
+if (Math.abs(width - 60) > 0.01) throw new Error('rounded text did not match anchor: ' + width);
 const warning = JSON.parse(writtenFiles['warnings.json']);
-if (!warning.warnings.some(entry => entry.code === 'slot_bounds_audit')) throw new Error('slot bounds audit missing');
+if (!warning.warnings.some(entry => entry.code === 'slot_anchor_exact_fit')) throw new Error('slot exact-fit audit missing');
 """)
 
     result = run_node(harness)
@@ -868,8 +885,8 @@ def test_v2_renderer_converges_inside_anchor_when_illustrator_translation_is_qua
         # Simulate Illustrator snapping a fractional translate to its internal
         # coordinate grid. The renderer must leave a small real margin and
         # converge inside the anchor, not waive the containment check.
-        "translation_snap_points": 0.25,
-        "mock_anchor_name_bounds": [200.125, 120.125, 260.125, 100.125],
+        "translation_snap_points": 0.0078125,
+        "mock_anchor_name_bounds": [200.13, 120.13, 260.13, 100.13],
         "render_task": {
             "$schema": "custom-renderer/v2-render-task",
             "outputs": [
@@ -900,12 +917,11 @@ def test_v2_renderer_converges_inside_anchor_when_illustrator_translation_is_qua
     harness = node_mock_harness(task, """
 const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
 const slot = child(designCopy, 'slot_name');
-const anchor = [200.125, 120.125, 260.125, 100.125];
-if (slot.visibleBounds[0] < anchor[0] || slot.visibleBounds[1] > anchor[1]
-    || slot.visibleBounds[2] > anchor[2] || slot.visibleBounds[3] < anchor[3]) {
-  throw new Error('quantized translate left visible text outside its anchor: ' + JSON.stringify(slot.visibleBounds));
+const anchor = [200.13, 120.13, 260.13, 100.13];
+for (let index = 0; index < 4; index++) {
+  if (Math.abs(slot.visibleBounds[index] - anchor[index]) > 0.0078125) throw new Error('quantized translate did not converge to anchor: ' + JSON.stringify(slot.visibleBounds));
 }
-if (slot.resizeCalls < 2) throw new Error('renderer did not add convergence margin after quantized translate');
+if (slot.resizeCalls < 1) throw new Error('renderer did not fit text before quantized placement');
 """)
 
     result = run_node(harness)
@@ -1251,7 +1267,7 @@ if (designCopy.pageItems.find(item => item.name === 'tail_name_last_a')) throw n
     assert result.returncode == 0, result.stderr
 
 
-def test_v2_renderer_shrinks_only_when_needed_and_minimally_corrects_position():
+def test_v2_renderer_unstyled_text_matches_explicit_anchor_independently():
     task = tail_text_task([], value="Custom")
     action = task["render_task"]["outputs"][0]["actions"][1]
     action["preset"] = "direct_text"
@@ -1263,11 +1279,11 @@ const slot = child(designCopy, 'slot_name');
 const bounds = slot.visibleBounds;
 const width = bounds[2] - bounds[0];
 const height = bounds[1] - bounds[3];
-if (Math.abs(width - 48) > 0.01 || Math.abs(height - 30) > 0.01) {
-  throw new Error('short text must retain its template scale: ' + JSON.stringify(bounds));
+if (Math.abs(width - 60) > 0.01 || Math.abs(height - 40) > 0.01) {
+  throw new Error('unstyled text did not match explicit anchor dimensions: ' + JSON.stringify(bounds));
 }
-if (Math.abs(bounds[0] - 200) > 0.01 || Math.abs(bounds[3] - 100) > 0.01) {
-  throw new Error('text was not minimally corrected into anchor: ' + JSON.stringify(bounds));
+if (Math.abs(bounds[0] - 200) > 0.01 || Math.abs(bounds[1] - 140) > 0.01) {
+  throw new Error('unstyled text did not match explicit anchor origin: ' + JSON.stringify(bounds));
 }
 """)
 
@@ -1277,15 +1293,13 @@ if (Math.abs(bounds[0] - 200) > 0.01 || Math.abs(bounds[3] - 100) > 0.01) {
 
 
 @pytest.mark.parametrize(
-    ("value", "anchor_bounds", "expected_width", "expected_height", "expected_left", "expected_top"),
+    ("value", "anchor_bounds"),
     [
-        ("Custom", [200, 150, 400, 100], 23.976, 49.95, 200, 149.95),
-        ("CustomCustomCustomCustom", [200, 300, 250, 100], 49.95, 26.015625, 200, 126.015625),
+        ("Custom", [200, 150, 400, 100]),
+        ("CustomCustomCustomCustom", [200, 300, 250, 100]),
     ],
 )
-def test_v2_renderer_shrinks_proportionally_without_anchor_recentering(
-    value, anchor_bounds, expected_width, expected_height, expected_left, expected_top
-):
+def test_v2_renderer_unstyled_text_matches_each_anchor_axis(value, anchor_bounds):
     task = tail_text_task([], value=value)
     action = task["render_task"]["outputs"][0]["actions"][1]
     action["preset"] = "direct_text"
@@ -1298,11 +1312,11 @@ const slot = child(designCopy, 'slot_name');
 const bounds = slot.visibleBounds;
 const width = bounds[2] - bounds[0];
 const height = bounds[1] - bounds[3];
-if (Math.abs(width - {expected_width}) > 0.01 || Math.abs(height - {expected_height}) > 0.01) {{
-  throw new Error('single-axis overflow was not proportionally reduced: ' + JSON.stringify(bounds));
+if (Math.abs(width - {anchor_bounds[2] - anchor_bounds[0]}) > 0.01 || Math.abs(height - {anchor_bounds[1] - anchor_bounds[3]}) > 0.01) {{
+  throw new Error('unstyled text did not use independent anchor axes: ' + JSON.stringify(bounds));
 }}
-if (Math.abs(bounds[0] - {expected_left}) > 0.01 || Math.abs(bounds[1] - {expected_top}) > 0.01) {{
-  throw new Error('overflow result was re-centered instead of minimally corrected: ' + JSON.stringify(bounds));
+if (Math.abs(bounds[0] - {anchor_bounds[0]}) > 0.01 || Math.abs(bounds[1] - {anchor_bounds[1]}) > 0.01) {{
+  throw new Error('unstyled text did not use anchor origin: ' + JSON.stringify(bounds));
 }}
 """)
 
@@ -1609,13 +1623,10 @@ def test_v2_renderer_fits_final_output_bounds_and_removes_auxiliary_items():
     }
     harness = node_mock_harness(task, """
 const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
+const heart = child(designCopy, 'fixed_heart');
 if (designCopy.pageItems.find(item => item.name === 'anchor_name')) throw new Error('anchor auxiliary was not removed');
-const width = designCopy.visibleBounds[2] - designCopy.visibleBounds[0];
-const height = designCopy.visibleBounds[1] - designCopy.visibleBounds[3];
-if (Math.abs(width - 100) > 0.04) throw new Error('final width mismatch: ' + width);
-if (Math.abs(height - 30) > 0.04) throw new Error('final height mismatch: ' + height);
-if (width > 100 || height > 30) throw new Error('final output exceeded target');
-if (designCopy.resizeCalls < 1) throw new Error('final output was not resized');
+if (designCopy.resizeCalls !== 1) throw new Error('design must be fitted once before text replacement, not resized after layout: ' + designCopy.resizeCalls);
+if (heart.resizeCalls !== 1 || heart.translateCalls !== 3) throw new Error('fixed art was changed outside the one pre-text design fit: ' + heart.resizeCalls + '/' + heart.translateCalls);
 """)
 
     result = run_node(harness)
@@ -1664,11 +1675,7 @@ def test_v2_renderer_fits_final_output_bounds_from_selected_design_without_style
     }
     harness = node_mock_harness(task, """
 const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
-const width = designCopy.visibleBounds[2] - designCopy.visibleBounds[0];
-const height = designCopy.visibleBounds[1] - designCopy.visibleBounds[3];
-if (Math.abs(width - 100) > 0.04) throw new Error('design final width mismatch: ' + width);
-if (Math.abs(height - 30) > 0.04) throw new Error('design final height mismatch: ' + height);
-if (designCopy.resizeCalls < 1) throw new Error('design final output was not resized');
+if (designCopy.resizeCalls !== 1) throw new Error('design must be fitted once before text replacement, not resized after layout: ' + designCopy.resizeCalls);
 """)
 
     result = run_node(harness)
@@ -1994,7 +2001,7 @@ const textBounds = slot.visibleBounds;
 const anchorBounds = [200, 100, 300, 0];
 if (textBounds[0] < anchorBounds[0] - 0.05 || textBounds[2] > anchorBounds[2] + 0.05) throw new Error('font text escaped explicit anchor width');
 if (textBounds[1] > anchorBounds[1] + 0.05 || textBounds[3] < anchorBounds[3] - 0.05) throw new Error('font text escaped explicit anchor height');
-if (Math.abs(textBounds[0] - 200) > 0.05 || Math.abs(textBounds[1] - 30) > 0.05) throw new Error('font text was re-centered instead of preserving template position');
+if (Math.abs(textBounds[0] - 200) > 0.05 || Math.abs(textBounds[1] - 100) > 0.05) throw new Error('font text did not match explicit anchor origin');
 if (slot.contents !== 'Amy') throw new Error('font slot not replaced: ' + slot.contents);
 """)
 
@@ -2054,7 +2061,7 @@ if (Math.abs(bounds[0]) > 0.01 || Math.abs(bounds[1] - 100) > 0.01 || Math.abs(b
     assert result.returncode == 0, result.stderr
 
 
-def test_v2_renderer_keeps_second_slot_at_its_template_coordinate():
+def test_v2_renderer_matches_each_explicit_anchor_without_moving_second_slot_or_fixed_art():
     task = {
         "$schema": "custom-renderer/v2-render-execution",
         "template_ai": "template.ai",
@@ -2108,9 +2115,13 @@ const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
 const name = child(designCopy, 'slot_name');
 const title = child(designCopy, 'slot_title');
 const heart = child(designCopy, 'fixed_heart');
-if (name.visibleBounds[2] > 100 || name.visibleBounds[1] > 70 || name.visibleBounds[3] < 40) throw new Error('main slot escaped its own anchor');
-if (Math.abs(title.visibleBounds[0] - 10) > 0.01 || Math.abs(title.visibleBounds[1] - 30) > 0.01) throw new Error('title was re-centered instead of retaining template coordinate: ' + JSON.stringify(title.visibleBounds));
-if (title.resizeCalls < 1) throw new Error('long title was not reduced into its anchor');
+const nameAnchor = [0, 70, 100, 40];
+const titleAnchor = [10, 30, 90, 20];
+for (let index = 0; index < 4; index++) {
+  if (Math.abs(name.visibleBounds[index] - nameAnchor[index]) > 0.01) throw new Error('main slot did not match its own anchor: ' + JSON.stringify(name.visibleBounds));
+  if (Math.abs(title.visibleBounds[index] - titleAnchor[index]) > 0.01) throw new Error('title did not match its own anchor: ' + JSON.stringify(title.visibleBounds));
+}
+if (name.resizeCalls < 1 || title.resizeCalls < 1) throw new Error('dual-slot text was not independently fitted');
 if (heart.translateCalls !== 0 || heart.resizeCalls !== 0) throw new Error('fixed art changed during dual-slot layout');
 """)
 
