@@ -29,6 +29,7 @@ def test_gateway_service_composition_reuses_single_template_adapter_and_shared_l
 
     adapter = service.preflight_runner.adapter
     assert service.preflight_runner.resolver.cache is Client.cache
+    assert service.preflight_runner.resolver.v2_only is True
     assert service.dispatcher.group_renderer is adapter
     assert service.dispatcher.canary_renderer.adapter is adapter
     assert service.dispatcher.render_lock is render_lock
@@ -77,6 +78,45 @@ def test_multi_template_public_job_sanitizes_parent_checkpoint_and_issue_message
     assert response["issues"][0]["message"] == "模板不存在或尚未发布。"
     assert response["issues"][0]["suggestion"] == "请确认模板已发布且处于启用状态。"
     assert "C:\\Users" not in serialized
+
+
+def test_multi_template_public_job_exposes_v2_only_block_with_order_diagnostics():
+    record = {
+        "job_id": "parent-v2-only",
+        "status": "preflight_failed",
+        "error_code": "multi_template_v2_only",
+        "multi_template": {
+            "preflight": {
+                "groups": [{
+                    "template_id": "LEGACY001",
+                    "order_count": 1,
+                    "excel_rows": [2],
+                    "order_nos": ["ORDER-1"],
+                    "can_render": True,
+                }],
+            },
+            "template_checkpoints": [{"template_id": "LEGACY001", "status": "pending"}],
+            "issues": [{
+                "code": "multi_template_v2_only",
+                "template_id": "LEGACY001",
+                "excel_row": 2,
+                "order_no": "ORDER-1",
+            }],
+        },
+    }
+
+    response = public_multi_template_job(record)
+
+    assert response["error_code"] == "multi_template_v2_only"
+    assert response["error"] == "多模板批量渲染仅支持已发布的 V2 标注模板。"
+    assert response["issues"] == [{
+        "code": "multi_template_v2_only",
+        "message": "多模板批量渲染仅支持已发布的 V2 标注模板。",
+        "suggestion": "请改用已发布的 V2 标注模板，或在原单模板入口处理旧模板。",
+        "template_id": "LEGACY001",
+        "excel_row": 2,
+        "order_no": "ORDER-1",
+    }]
 
 
 def test_multi_template_public_job_exposes_resumable_group_summary_without_text_parsing():

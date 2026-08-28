@@ -233,6 +233,38 @@ def test_direct_recoverable_com_canary_exception_uses_fresh_session_gate(tmp_pat
     assert recovery.calls == 1
 
 
+def test_parent_session_retries_only_the_failed_canary_group(tmp_path):
+    recovery_calls = []
+
+    class RetryOnceAdapter(FakeAdapter):
+        def render_canary(self, group, snapshot, *, group_workbook, work_dir):
+            if group.template_id == "A" and sum(call[0] == "A" for call in self.calls) == 0:
+                return super().render_canary(
+                    group,
+                    snapshot,
+                    group_workbook=group_workbook,
+                    work_dir=work_dir,
+                ) | {
+                    "status": "failed",
+                    "error_code": "v2_order_render_failed",
+                    "error": "Illustrator unavailable",
+                    "failure_scope": "system",
+                    "_technical_failure": "HRESULT -2147023174",
+                }
+            return super().render_canary(group, snapshot, group_workbook=group_workbook, work_dir=work_dir)
+
+    adapter = RetryOnceAdapter()
+    result = PerTemplateCanaryRenderer(adapter=adapter).run(
+        _preflight(tmp_path, ("A", "B")),
+        work_dir=tmp_path / "parent",
+        recover_illustrator=lambda: recovery_calls.append("reset") or True,
+    )
+
+    assert result.status == "completed"
+    assert [call[0] for call in adapter.calls] == ["A", "A", "B"]
+    assert recovery_calls == ["reset"]
+
+
 def test_changed_group_workbook_stops_before_starting_a_canary(tmp_path):
     preflight = _preflight(tmp_path, ("A", "B"))
     Path(preflight.groups[0].group_workbook).write_bytes(b"changed")

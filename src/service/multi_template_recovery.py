@@ -44,6 +44,7 @@ class MultiTemplateRecoveryCoordinator:
         dispatcher: Any | None,
         load_parent: Callable[[str], dict[str, Any]],
         invalidate_preflight: Callable[[dict[str, Any]], dict[str, Any]],
+        reject_non_v2_snapshots: Callable[[dict[str, Any]], dict[str, Any] | None],
         persist_canary: Callable[[str, Any], dict[str, Any]],
     ) -> None:
         self.preflight_runner = preflight_runner
@@ -51,10 +52,14 @@ class MultiTemplateRecoveryCoordinator:
         self.dispatcher = dispatcher
         self.load_parent = load_parent
         self.invalidate_preflight = invalidate_preflight
+        self.reject_non_v2_snapshots = reject_non_v2_snapshots
         self.persist_canary = persist_canary
 
     def retry_failed(self, parent_job_id: str) -> dict[str, Any]:
         record = self.load_parent(parent_job_id)
+        blocked = self.reject_non_v2_snapshots(record)
+        if blocked is not None:
+            return blocked
         if record.get("status") not in {"ready", "completed_with_errors", "failed"}:
             raise MultiTemplateRenderError("当前批次不包含可重试的失败模板。", code="multi_template_retry_not_available")
         self._reject_active_dispatch(record)
@@ -68,6 +73,9 @@ class MultiTemplateRecoveryCoordinator:
 
     def resume(self, parent_job_id: str) -> dict[str, Any]:
         record = self.load_parent(parent_job_id)
+        blocked = self.reject_non_v2_snapshots(record)
+        if blocked is not None:
+            return blocked
         parent_status = str(record.get("status") or "")
         if parent_status not in {"interrupted", "canary_running", "running"}:
             raise MultiTemplateRenderError("当前批次不处于可继续的中断状态。", code="multi_template_resume_not_available")
@@ -112,6 +120,9 @@ class MultiTemplateRecoveryCoordinator:
             refreshed = self._merge_selected_preflight(record, result, selected, mode=mode)
         except OSError:
             return self._mark_preflight_failed(record, selected, "multi_template_preflight_storage_failed", "无法保存失败模板预检基线，请检查本机磁盘后重试。")
+        blocked = self.reject_non_v2_snapshots(refreshed)
+        if blocked is not None:
+            return blocked
         if not preflight_snapshot_is_intact(refreshed):
             return self.invalidate_preflight(refreshed)
         return self._dispatch_existing_ready(refreshed, stage=f"{mode}_ready")

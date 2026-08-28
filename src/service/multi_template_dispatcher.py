@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 import threading
 import time
 from pathlib import Path
@@ -52,6 +53,8 @@ class MultiTemplateRenderDispatcher:
         failure_scope: Callable[[Mapping[str, Any]], str] | None = None,
         illustrator_recovery: Any | None = None,
         output_collector: MultiTemplateResultCollector | None = None,
+        illustrator_session_factory: Callable[[], Any] | None = None,
+        illustrator_session_binding: Callable[[Any], Any] | None = None,
     ) -> None:
         self.jobs = jobs
         self.group_renderer = group_renderer
@@ -60,6 +63,8 @@ class MultiTemplateRenderDispatcher:
         self.failure_scope = failure_scope
         self.illustrator_recovery = illustrator_recovery or FreshIllustratorSessionRecovery()
         self.output_collector = output_collector or MultiTemplateResultCollector()
+        self.illustrator_session_factory = illustrator_session_factory
+        self.illustrator_session_binding = illustrator_session_binding
 
     def dispatch(
         self,
@@ -97,10 +102,9 @@ class MultiTemplateRenderDispatcher:
                 status="canary_running",
                 progress={"current": _finished_count(metadata), "total": len(preflight.groups), "stage": "canary_running"},
             )
-            canary = self.canary_renderer.run(
+            canary = self._run_canary(
                 canary_preflight,
-                work_dir=Path(record["job_dir"]),
-                on_group_started=lambda template_id: self._mark_canary_running(record, template_id),
+                record=record,
             )
             try:
                 record = persist_canary(str(record["job_id"]), canary)
@@ -110,6 +114,23 @@ class MultiTemplateRenderDispatcher:
                 return record
             metadata = dict(record["multi_template"])
 
+        # Canary renderers use their ordinary isolated session.  Only the
+        # formal phase shares a parent-owned COM process: real Illustrator
+        # documents created while probing a representative order must not
+        # leak into production composition, while formal A -> B remains on
+        # one live process and never reconnects to a prior group's Quit().
+        return self._dispatch_formal_locked(record, preflight)
+
+    def _dispatch_formal_locked(self, record: dict[str, Any], preflight: Any) -> dict[str, Any]:
+        with self._illustrator_session_context() as illustrator_session:
+            return self._render_formal_groups(record, preflight, illustrator_session)
+
+    def _render_formal_groups(
+        self,
+        record: dict[str, Any],
+        preflight: Any,
+        illustrator_session: Any | None,
+    ) -> dict[str, Any]:
         record = self._update(
             record,
             status="running",
@@ -127,23 +148,14 @@ class MultiTemplateRenderDispatcher:
                 return self._stop_system(record, summary.template_id, "template_snapshot_missing", "模板快照不完整。")
             started = time.monotonic()
             record = self._save_checkpoint(record, summary.template_id, status="running", attempt=_attempt(checkpoint) + 1, started_at=utc_now())
-            try:
-                child_dir = _child_dir(record, summary.template_id, _attempt(checkpoint) + 1)
-                child = self.group_renderer.render_group(
-                    group,
-                    snapshot,
-                    group_workbook=checkpoint["group_workbook"],
-                    work_dir=child_dir,
-                )
-            except Exception as exc:
-                failure = normalize_failure(exc, default_code="multi_template_child_unavailable")
-                child = {
-                    "status": "failed",
-                    "error_code": failure.code,
-                    "error": failure.message,
-                    "failure_scope": failure.failure_scope,
-                    "technical_message": failure.technical_message,
-                }
+            child_dir = _child_dir(record, summary.template_id, _attempt(checkpoint) + 1)
+            child, recovery_attempts, parent_recovery_attempted = self._render_group_with_recovery(
+                group,
+                snapshot,
+                group_workbook=checkpoint["group_workbook"],
+                work_dir=child_dir,
+                illustrator_session=illustrator_session,
+            )
             finished = utc_now()
             elapsed = round(time.monotonic() - started, 3)
             if str(child.get("status") or "") == "completed":
@@ -184,7 +196,12 @@ class MultiTemplateRenderDispatcher:
             failure = normalize_failure(child)
             declared_scope = self.failure_scope(child) if self.failure_scope else ""
             scope = declared_scope if declared_scope in FAILURE_SCOPES else failure.failure_scope
-            recovered_illustrator = scope == "system" and is_recoverable_com_failure(child) and self.illustrator_recovery.check()
+            recovered_illustrator = (
+                scope == "system"
+                and is_recoverable_com_failure(child)
+                and not parent_recovery_attempted
+                and self._recover_illustrator(illustrator_session)
+            )
             if recovered_illustrator:
                 scope = "template"
             record = self._save_checkpoint(
@@ -195,7 +212,12 @@ class MultiTemplateRenderDispatcher:
                 error_code=failure.code,
                 error=failure.message,
                 failure_scope=scope,
-                illustrator_recovery="fresh_session_ready" if recovered_illustrator else "",
+                illustrator_recovery=(
+                    "parent_session_retry_exhausted"
+                    if parent_recovery_attempted
+                    else ("fresh_session_ready" if recovered_illustrator else "")
+                ),
+                illustrator_recovery_attempts=recovery_attempts,
                 finished_at=finished,
                 elapsed_seconds=elapsed,
             )
@@ -207,6 +229,85 @@ class MultiTemplateRenderDispatcher:
                     failure.message,
                 )
         return self._finish(record)
+
+    def _run_canary(
+        self,
+        preflight: Any,
+        *,
+        record: dict[str, Any],
+    ) -> Any:
+        kwargs: dict[str, Any] = {
+            "work_dir": Path(record["job_dir"]),
+            "on_group_started": lambda template_id: self._mark_canary_running(record, template_id),
+        }
+        return self.canary_renderer.run(preflight, **kwargs)
+
+    def _render_group_with_recovery(
+        self,
+        group: Any,
+        snapshot: Any,
+        *,
+        group_workbook: str,
+        work_dir: Path,
+        illustrator_session: Any | None,
+    ) -> tuple[dict[str, Any], int, bool]:
+        """Retry only the current group after a parent-owned COM reset.
+
+        Successful checkpoints are committed before this method is called, so a
+        recovery retry can never rerender an earlier template group.
+        """
+
+        recovery_attempts = 0
+        parent_recovery_attempted = False
+        while True:
+            try:
+                child = self.group_renderer.render_group(
+                    group,
+                    snapshot,
+                    group_workbook=group_workbook,
+                    work_dir=work_dir,
+                )
+            except Exception as exc:
+                failure = normalize_failure(exc, default_code="multi_template_child_unavailable")
+                child = {
+                    "status": "failed",
+                    "error_code": failure.code,
+                    "error": failure.message,
+                    "failure_scope": failure.failure_scope,
+                    "technical_message": failure.technical_message,
+                }
+            if (
+                str(child.get("status") or "") == "completed"
+                or illustrator_session is None
+                or recovery_attempts >= 1
+                or not is_recoverable_com_failure(child)
+            ):
+                return child, recovery_attempts, parent_recovery_attempted
+            parent_recovery_attempted = True
+            if not self._recover_illustrator(illustrator_session):
+                return child, recovery_attempts, parent_recovery_attempted
+            recovery_attempts += 1
+
+    def _recover_illustrator(self, illustrator_session: Any | None) -> bool:
+        if illustrator_session is not None:
+            recover = getattr(illustrator_session, "recover", None)
+            if callable(recover):
+                try:
+                    return bool(recover())
+                except Exception:
+                    return False
+        return bool(self.illustrator_recovery.check())
+
+    def _illustrator_session_context(self):
+        if self.illustrator_session_factory is None:
+            return nullcontext(None)
+        session = self.illustrator_session_factory()
+        binding = (
+            self.illustrator_session_binding(session)
+            if self.illustrator_session_binding is not None
+            else nullcontext()
+        )
+        return _CombinedContext(session, binding)
 
     def _mark_canary_running(self, record: dict[str, Any], template_id: str) -> dict[str, Any]:
         checkpoint = _checkpoint(record, template_id)
@@ -294,4 +395,26 @@ class MultiTemplateRenderDispatcher:
 
     def _persistence_interrupted(self, record: dict[str, Any]) -> dict[str, Any]:
         return _persist_interrupted_record(record, self.jobs)
+
+
+class _CombinedContext:
+    def __init__(self, session: Any, binding: Any) -> None:
+        self.session = session
+        self.binding = binding
+
+    def __enter__(self) -> Any:
+        self.session.__enter__()
+        try:
+            self.binding.__enter__()
+        except Exception:
+            self.session.__exit__(None, None, None)
+            raise
+        return self.session
+
+    def __exit__(self, exc_type: Any, exc: Any, traceback: Any) -> None:
+        try:
+            self.binding.__exit__(exc_type, exc, traceback)
+        finally:
+            self.session.__exit__(exc_type, exc, traceback)
+
 __all__ = ["MultiTemplateDispatchError", "MultiTemplateRenderDispatcher"]

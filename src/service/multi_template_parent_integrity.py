@@ -142,6 +142,31 @@ def preflight_snapshot_is_intact(record: Mapping[str, Any]) -> bool:
     return True
 
 
+def non_v2_snapshot_template_ids(record: Mapping[str, Any]) -> tuple[str, ...]:
+    """Return persisted template IDs that must not re-enter the V2-only flow.
+
+    Parent records survive application upgrades. A legacy parent that reached
+    ``ready`` before the V2-only contract was introduced must therefore be
+    rejected at execute/retry/resume time instead of reaching a legacy renderer
+    through its already-persisted snapshot.
+    """
+
+    metadata = record.get("multi_template")
+    if not isinstance(metadata, Mapping):
+        return ()
+    raw_snapshots = metadata.get("template_snapshots")
+    if not isinstance(raw_snapshots, list):
+        return ()
+    result: list[str] = []
+    for snapshot in raw_snapshots:
+        if not isinstance(snapshot, Mapping) or str(snapshot.get("source") or "") == "v2":
+            continue
+        template_id = str(snapshot.get("template_id") or "").strip()
+        if template_id and template_id not in result:
+            result.append(template_id)
+    return tuple(result)
+
+
 def source_order_is_intact(record: Mapping[str, Any]) -> bool:
     """Validate the immutable uploaded order copy without requiring old snapshots."""
     metadata = record.get("multi_template")
@@ -277,6 +302,7 @@ def _preflight_baseline(job_dir: Path, metadata: Mapping[str, Any]) -> dict[str,
 
 __all__ = [
     "is_sha256",
+    "non_v2_snapshot_template_ids",
     "preflight_snapshot_is_intact",
     "sha256_file",
     "source_order_is_intact",

@@ -89,6 +89,56 @@ def test_v2_canary_uses_the_fixed_snapshot_version(tmp_path, monkeypatch):
     assert "primary_output" not in result["outputs"]
 
 
+def test_v2_canary_binds_one_isolated_session_before_using_v2_batch_output(tmp_path, monkeypatch):
+    events: list[str] = []
+
+    class IsolatedCanarySession:
+        def __enter__(self):
+            events.append("session-enter")
+            return self
+
+        def __exit__(self, *_args):
+            events.append("session-close")
+
+        def render_batch_files(self, *_args):
+            raise AssertionError("the fake V2 service should not render a real batch")
+
+        def render_batch_sequence(self, *_args):
+            raise AssertionError("the fake V2 service should not render a real batch")
+
+    class FakeV2OrderRenderService:
+        session = None
+
+        def __init__(self, *_args, production_batch_session=None, **_kwargs):
+            type(self).session = production_batch_session
+
+        def render_fixed_snapshot(self, *_args, **_kwargs):
+            assert type(self).session is session
+            events.append("render")
+            return {"status": "completed", "outputs": {}, "stats": {"orders": 1}}
+
+    session = IsolatedCanarySession()
+    order_file = _write_order_workbook(tmp_path / "orders.xlsx", "V2ORDER001")
+    monkeypatch.setattr(adapter_module, "V2OrderRenderService", FakeV2OrderRenderService)
+    adapter = SingleTemplateRenderAdapter(
+        central=object(),
+        cache=object(),
+        data_dir=tmp_path / "data",
+        v2_renderer=object(),
+        font_dirs=[],
+        canary_session_factory=lambda: session,
+    )
+
+    adapter.render_canary(
+        _group("V2ORDER001"),
+        _v2_snapshot(),
+        group_workbook=order_file,
+        work_dir=tmp_path / "canary-v2",
+    )
+
+    assert events == ["session-enter", "render", "session-close"]
+
+
 def test_v2_canary_returns_a_structured_pre_job_snapshot_failure(tmp_path, monkeypatch):
     class SnapshotUnavailableService:
         def __init__(self, *args, **kwargs):

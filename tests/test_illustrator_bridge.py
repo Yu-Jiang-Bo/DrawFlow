@@ -5,6 +5,7 @@ import pytest
 
 from src.renderer import illustrator_bridge
 from src.renderer.illustrator_bridge import IllustratorBridge, IllustratorBridgeError
+from src.service import multi_template_illustrator_recovery as recovery_module
 
 
 def install_fake_com(monkeypatch, app):
@@ -196,6 +197,46 @@ def test_bridge_checks_and_closes_an_isolated_fresh_session(monkeypatch):
 
     assert IllustratorBridge(visible=False, fresh_instance=True, quit_after=True).check_fresh_session() is True
     assert app.quit_calls == 1
+
+
+def test_required_fresh_instance_never_falls_back_to_shared_dispatch(tmp_path, monkeypatch):
+    client = types.ModuleType("win32com.client")
+    client.Dispatch = lambda _prog_id: pytest.fail("must not attach to a shared Illustrator instance")
+    package = types.ModuleType("win32com")
+    package.client = client
+    pythoncom = types.ModuleType("pythoncom")
+    pythoncom.CoInitialize = lambda: None
+    pythoncom.CoUninitialize = lambda: None
+    monkeypatch.setitem(sys.modules, "win32com", package)
+    monkeypatch.setitem(sys.modules, "win32com.client", client)
+    monkeypatch.setitem(sys.modules, "pythoncom", pythoncom)
+    script, task = make_inputs(tmp_path)
+
+    with pytest.raises(IllustratorBridgeError, match="缺少 DispatchEx") as exc_info:
+        IllustratorBridge(
+            fresh_instance=True,
+            reuse_instance=True,
+            require_fresh_instance=True,
+        ).render(script, task)
+
+    assert exc_info.value.failure_scope == "system"
+
+
+def test_multi_template_recovery_probe_never_falls_back_to_shared_dispatch(monkeypatch):
+    calls: list[str] = []
+    client = types.ModuleType("win32com.client")
+    client.Dispatch = lambda _prog_id: calls.append("Dispatch")
+    package = types.ModuleType("win32com")
+    package.client = client
+    pythoncom = types.ModuleType("pythoncom")
+    pythoncom.CoInitialize = lambda: None
+    pythoncom.CoUninitialize = lambda: None
+    monkeypatch.setitem(sys.modules, "win32com", package)
+    monkeypatch.setitem(sys.modules, "win32com.client", client)
+    monkeypatch.setitem(sys.modules, "pythoncom", pythoncom)
+
+    assert recovery_module._check_fresh_illustrator_session() is False
+    assert calls == []
 
 
 def test_reusable_bridge_closes_com_apartment_when_proxy_was_never_created(monkeypatch):

@@ -245,6 +245,7 @@ def _public_error(code: str, *, kind: str) -> str:
         "template_id_invalid": "模板 ID 格式不合法。",
         "template_not_found": "模板不存在或尚未发布。",
         "template_not_published": "模板尚未发布可用版本。",
+        "multi_template_v2_only": "多模板批量渲染仅支持已发布的 V2 标注模板。",
         "template_not_active": "模板已停用，不能参与本次渲染。",
         "template_config_unavailable": "模板运行配置不完整。",
         "template_config_missing": "模板配置不完整。",
@@ -277,6 +278,8 @@ def _public_suggestion(code: str) -> str:
         return "请在“模板”列填写已启用模板的完整 ID。"
     if code in {"template_not_found", "template_not_published", "template_not_active"}:
         return "请确认模板已发布且处于启用状态。"
+    if code == "multi_template_v2_only":
+        return "请改用已发布的 V2 标注模板，或在原单模板入口处理旧模板。"
     return "请修正订单或模板配置后重新预检。"
 
 

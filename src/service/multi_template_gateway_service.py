@@ -6,6 +6,7 @@ import threading
 from typing import Any
 
 from .multi_template_dispatcher import MultiTemplateRenderDispatcher
+from .multi_template_illustrator_session import MultiTemplateIllustratorSession
 from .multi_template_preflight import MultiTemplatePreflight
 from .multi_template_render import MultiTemplateRenderService
 from .multi_template_resolver import TemplateResolver
@@ -32,7 +33,7 @@ def build_multi_template_render_service(
         font_dirs=client.font_dirs,
     )
     preflight = MultiTemplatePreflight(
-        resolver=TemplateResolver(client.cache, client.central),
+        resolver=TemplateResolver(client.cache, client.central, v2_only=True),
         adapter=adapter,
     )
     dispatcher = MultiTemplateRenderDispatcher(
@@ -40,6 +41,8 @@ def build_multi_template_render_service(
         group_renderer=adapter,
         canary_renderer=PerTemplateCanaryRenderer(adapter=adapter),
         render_lock=render_lock,
+        illustrator_session_factory=MultiTemplateIllustratorSession,
+        illustrator_session_binding=adapter.use_illustrator_session,
     )
     return MultiTemplateRenderService(
         preflight_runner=preflight,

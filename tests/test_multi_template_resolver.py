@@ -127,6 +127,23 @@ def test_resolver_deduplicates_exact_legacy_ids_and_never_casefolds(tmp_path):
     assert TemplateSnapshot.from_dict(result.snapshots[0].to_dict()) == result.snapshots[0]
 
 
+def test_v2_only_resolver_blocks_registered_legacy_without_downloading_or_rendering(tmp_path):
+    cache = LegacyCache(legacy_template(tmp_path / "legacy.ai"))
+    central = V2Central({"v0001": _bundle(tmp_path, "V2X", "v0001", b"v2")})
+
+    result = TemplateResolver(cache, central, v2_only=True).resolve_many(
+        ["LEGACY001"],
+        snapshot_root=tmp_path / "snapshots",
+    )
+
+    assert result.snapshots == ()
+    assert [(issue.template_id, issue.code) for issue in result.issues] == [
+        ("LEGACY001", "multi_template_v2_only"),
+    ]
+    assert cache.calls == []
+    assert central.v2_version_calls == ["LEGACY001"]
+
+
 def test_resolver_fixes_v2_version_and_sha_for_the_ready_snapshot(tmp_path):
     first = _bundle(tmp_path, "V2ORDER001", "v0001", b"v2-first")
     second = _bundle(tmp_path, "V2ORDER001", "v0002", b"v2-second")

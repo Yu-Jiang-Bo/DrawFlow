@@ -13,6 +13,7 @@ from .multi_template_checkpoint_selection import CheckpointSelectionError, norma
 from .multi_template_parent_binding import preflight_payload_sha256
 from .multi_template_parent_errors import MultiTemplateRenderError
 from .multi_template_parent_integrity import (
+    non_v2_snapshot_template_ids,
     preflight_snapshot_is_intact,
     sha256_file,
     snapshot_with_file_hashes,
@@ -49,6 +50,7 @@ class MultiTemplateRenderService:
             dispatcher=dispatcher,
             load_parent=self._load_parent,
             invalidate_preflight=self._invalidate_preflight,
+            reject_non_v2_snapshots=self._reject_non_v2_snapshots,
             persist_canary=self.record_canary_result,
         )
 
@@ -100,6 +102,9 @@ class MultiTemplateRenderService:
         record = self._load_parent(parent_job_id)
         if record.get("status") != "ready":
             raise MultiTemplateRenderError("该批次尚未通过预检，不能开始渲染。", code="multi_template_not_ready")
+        blocked = self._reject_non_v2_snapshots(record)
+        if blocked is not None:
+            return blocked
         try:
             normal_execute_template_ids(checkpoints(record))
         except CheckpointSelectionError as exc:
@@ -161,6 +166,32 @@ class MultiTemplateRenderService:
             progress={"current": 0, "total": len(metadata.get("template_checkpoints") or []), "stage": "preflight_failed"},
             error="订单或模板预检快照已变化，请重新预检后再渲染。",
             error_code="multi_template_repreflight_required",
+        )
+
+    def _reject_non_v2_snapshots(self, record: dict[str, Any]) -> dict[str, Any] | None:
+        unsupported = non_v2_snapshot_template_ids(record)
+        if not unsupported:
+            return None
+        metadata = dict(record.get("multi_template") or {})
+        metadata["needs_repreflight"] = True
+        metadata["v2_only_blocked_template_ids"] = list(unsupported)
+        existing_issues = [
+            dict(item)
+            for item in metadata.get("issues") or []
+            if isinstance(item, Mapping) and str(item.get("code") or "") != "multi_template_v2_only"
+        ]
+        metadata["issues"] = existing_issues + _non_v2_snapshot_issues(metadata, unsupported)
+        record["multi_template"] = metadata
+        return self.jobs.update(
+            record,
+            status="preflight_failed",
+            progress={
+                "current": 0,
+                "total": len(metadata.get("template_checkpoints") or []),
+                "stage": "preflight_failed",
+            },
+            error="当前多模板批量渲染只支持已发布的 V2 标注模板，请重新预检后再渲染。",
+            error_code="multi_template_v2_only",
         )
 
 
@@ -259,6 +290,48 @@ def _immutable_checkpoints(checkpoints: list[dict[str, Any]]) -> list[dict[str, 
         "template_version": str(checkpoint.get("template_version") or ""),
         "template_sha256": str(checkpoint.get("template_sha256") or ""),
     } for checkpoint in checkpoints]
+
+
+def _non_v2_snapshot_issues(metadata: Mapping[str, Any], template_ids: tuple[str, ...]) -> list[dict[str, Any]]:
+    """Retain historical order diagnostics when an old parent is rejected."""
+
+    unsupported = set(template_ids)
+    preflight = metadata.get("preflight")
+    if not isinstance(preflight, Mapping):
+        preflight = {}
+    order_batch = preflight.get("order_batch")
+    groups = order_batch.get("groups") if isinstance(order_batch, Mapping) else []
+    if not isinstance(groups, list):
+        groups = []
+    rows_by_template: dict[str, list[Mapping[str, Any]]] = {}
+    for group in groups:
+        if not isinstance(group, Mapping):
+            continue
+        template_id = str(group.get("template_id") or "").strip()
+        rows = group.get("rows")
+        if template_id in unsupported and isinstance(rows, list):
+            rows_by_template[template_id] = [row for row in rows if isinstance(row, Mapping)]
+
+    result: list[dict[str, Any]] = []
+    for template_id in template_ids:
+        rows = rows_by_template.get(template_id) or [{}]
+        for row in rows:
+            result.append({
+                "code": "multi_template_v2_only",
+                "message": "当前多模板批量渲染只支持已发布的 V2 标注模板。",
+                "suggestion": "请改用已发布的 V2 标注模板，或在原单模板入口处理旧模板。",
+                "template_id": template_id,
+                "excel_row": _positive_int(row.get("excel_row")),
+                "order_no": str(row.get("order_no") or ""),
+            })
+    return result
+
+
+def _positive_int(value: Any) -> int:
+    try:
+        return max(int(value), 0)
+    except (TypeError, ValueError):
+        return 0
 
 
 __all__ = ["MultiTemplateRenderError", "MultiTemplateRenderService"]

@@ -22,12 +22,9 @@ PRODUCTION_BATCH_CHUNK_DELAY_SECONDS = 1.0
 def render_production_batch_files(batch_files: Iterable[Path], visible: bool) -> None:
     """Render production batch task files through one reusable Illustrator session."""
 
-    script = Path(__file__).resolve().parents[2] / "scripts" / "illustrator" / "render_batch.jsx"
     bridge = IllustratorBridge(visible=visible, fresh_instance=True, reuse_instance=True)
     try:
-        for batch_file in batch_files:
-            _render_production_batch_chunk(bridge, script, Path(batch_file))
-            time.sleep(PRODUCTION_BATCH_CHUNK_DELAY_SECONDS)
+        render_production_batch_files_with_bridge(bridge, batch_files, visible=visible)
     finally:
         bridge.close()
 
@@ -39,17 +36,52 @@ def render_production_batch_sequence(
 ) -> None:
     """Run ordered batch groups in one reusable Illustrator session."""
 
-    script = Path(__file__).resolve().parents[2] / "scripts" / "illustrator" / "render_batch.jsx"
     bridge = IllustratorBridge(visible=visible, fresh_instance=True, reuse_instance=True)
     try:
-        for index, batch_files in enumerate(batch_groups):
-            for batch_file in batch_files:
-                _render_production_batch_chunk(bridge, script, Path(batch_file))
-                time.sleep(PRODUCTION_BATCH_CHUNK_DELAY_SECONDS)
-            if after_group is not None:
-                after_group(index)
+        render_production_batch_sequence_with_bridge(
+            bridge,
+            batch_groups,
+            visible=visible,
+            after_group=after_group,
+        )
     finally:
         bridge.close()
+
+
+def render_production_batch_files_with_bridge(
+    bridge: IllustratorBridge,
+    batch_files: Iterable[Path],
+    *,
+    visible: bool,
+) -> None:
+    """Render one job's task files through a bridge owned by the caller.
+
+    The ordinary single-template entrypoint owns and closes its bridge.  A
+    multi-template parent instead passes one bridge for all child jobs, so this
+    helper deliberately never closes the caller's lifecycle.  A retryable
+    chunk may still reset only that caller-owned bridge before its local retry.
+    """
+
+    bridge.visible = visible
+    script = Path(__file__).resolve().parents[2] / "scripts" / "illustrator" / "render_batch.jsx"
+    for batch_file in batch_files:
+        _render_production_batch_chunk(bridge, script, Path(batch_file))
+        time.sleep(PRODUCTION_BATCH_CHUNK_DELAY_SECONDS)
+
+
+def render_production_batch_sequence_with_bridge(
+    bridge: IllustratorBridge,
+    batch_groups: Sequence[Iterable[Path]],
+    *,
+    visible: bool,
+    after_group: Callable[[int], None] | None = None,
+) -> None:
+    """Run ordered task-file groups without changing the owner's COM lifetime."""
+
+    for index, batch_files in enumerate(batch_groups):
+        render_production_batch_files_with_bridge(bridge, batch_files, visible=visible)
+        if after_group is not None:
+            after_group(index)
 
 
 def _render_production_batch_chunk(bridge: IllustratorBridge, script: Path, task_file: Path) -> None:
@@ -76,4 +108,6 @@ def _is_retryable_com_failure(exc: IllustratorBridgeError) -> bool:
 __all__ = [
     "render_production_batch_files",
     "render_production_batch_sequence",
+    "render_production_batch_files_with_bridge",
+    "render_production_batch_sequence_with_bridge",
 ]

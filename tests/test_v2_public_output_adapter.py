@@ -186,6 +186,25 @@ def test_v2_renderer_with_bridge_keeps_public_batch_executor(tmp_path):
     assert renderer._public_batch_renderer_overrides(tmp_path) == {}
 
 
+def test_v2_parent_session_overrides_public_batch_executor(tmp_path):
+    class ParentSession:
+        def render_batch_files(self, *_args):
+            pass
+
+        def render_batch_sequence(self, *_args):
+            pass
+
+    session = ParentSession()
+    renderer = V2OrderOutputRenderer(SimpleNamespace(bridge=object()), production_batch_session=session)
+
+    overrides = renderer._public_batch_renderer_overrides(tmp_path)
+
+    assert overrides == {
+        "render_batch_files": session.render_batch_files,
+        "render_batch_sequence": session.render_batch_sequence,
+    }
+
+
 def test_v2_injected_batch_rejects_task_paths_outside_current_job(tmp_path):
     renderer = V2OrderOutputRenderer(object())
     outside_task = tmp_path.parent / "outside-task.json"

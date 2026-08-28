@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from contextlib import contextmanager
 import json
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
 from .job_store import JobStore
 from .canary_diagnostics import suppress_delivery_outputs
 from .multi_template_order import TemplateOrderGroup
+from .multi_template_illustrator_session import MultiTemplateIllustratorSession
 from .multi_template_plan_metrics import PlanMetricsError, planned_row_metrics
 from .multi_template_snapshot import TemplateSnapshot
 from .single_template_render_messages import business_error_message as _business_error_message
@@ -53,12 +55,26 @@ class SingleTemplateRenderAdapter:
         data_dir: Path | str,
         v2_renderer: Any,
         font_dirs: list[Path] | None,
+        canary_session_factory: Callable[[], Any] = MultiTemplateIllustratorSession,
     ) -> None:
         self.central = central
         self.cache = cache
         self.data_dir = Path(data_dir)
         self.v2_renderer = v2_renderer
         self.font_dirs = font_dirs
+        self.canary_session_factory = canary_session_factory
+        self._production_batch_session: Any | None = None
+
+    @contextmanager
+    def use_illustrator_session(self, session: Any):
+        """Bind a parent-owned V2 production session for one dispatch only."""
+
+        previous = self._production_batch_session
+        self._production_batch_session = session
+        try:
+            yield
+        finally:
+            self._production_batch_session = previous
 
     def preflight(
         self,
@@ -92,6 +108,7 @@ class SingleTemplateRenderAdapter:
                 self.v2_renderer,
                 self.font_dirs,
                 jobs,
+                production_batch_session=self._production_batch_session,
             ).render_fixed_snapshot(
                 payload,
                 version=snapshot.version,
@@ -162,12 +179,20 @@ class SingleTemplateRenderAdapter:
         missing_fonts = missing_required_fonts(list(snapshot.required_fonts), self.font_dirs)
         if missing_fonts:
             return _failed_render(payload, "missing_required_fonts", "本机缺少模板字体：" + "、".join(missing_fonts))
-        return self._render_snapshot(
-            payload,
-            snapshot,
-            target,
-            suppress_delivery_outputs=True,
-        )
+        if snapshot.pipeline == V2_RENDER_PIPELINE and self._production_batch_session is None:
+            # A representative V2 order is a separate phase from formal
+            # rendering.  It still owns an isolated DispatchEx process so a
+            # missing DispatchEx can never fall back to a user's Illustrator
+            # and the diagnostic close remains safe.
+            with self.canary_session_factory() as session:
+                with self.use_illustrator_session(session):
+                    return self._render_snapshot(
+                        payload,
+                        snapshot,
+                        target,
+                        suppress_delivery_outputs=True,
+                    )
+        return self._render_snapshot(payload, snapshot, target, suppress_delivery_outputs=True)
 
     def render_group(
         self,
@@ -213,6 +238,7 @@ class SingleTemplateRenderAdapter:
                     self.v2_renderer,
                     self.font_dirs,
                     jobs,
+                    production_batch_session=self._production_batch_session,
                 ).render_fixed_snapshot(
                     payload,
                     version=snapshot.version,

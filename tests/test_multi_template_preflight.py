@@ -161,6 +161,36 @@ def test_preflight_collects_parse_resolution_and_group_errors_without_rendering(
     assert all("C:\\" not in issue.message for issue in result.issues)
 
 
+def test_preflight_blocks_legacy_template_rows_before_any_adapter_work(tmp_path):
+    source = tmp_path / "orders.xlsx"
+    _write_orders(source, [("LEGACY-1", "LEGACY001"), ("LEGACY-2", "LEGACY001")])
+    adapter = FakeAdapter()
+    resolver = FakeResolver(
+        issues=(
+            TemplateResolutionIssue(
+                "LEGACY001",
+                "multi_template_v2_only",
+                "当前多模板批量渲染只支持已发布的 V2 标注模板。",
+                "请改用已发布的 V2 标注模板。",
+            ),
+        ),
+    )
+
+    result = MultiTemplatePreflight(resolver=resolver, adapter=adapter).preflight(
+        source,
+        work_dir=tmp_path / "parent",
+    )
+
+    assert result.status == "preflight_failed"
+    assert result.can_render is False
+    assert adapter.calls == []
+    assert adapter.render_calls == 0
+    assert {(issue.template_id, issue.code, issue.excel_row, issue.order_no) for issue in result.issues} == {
+        ("LEGACY001", "multi_template_v2_only", 2, "LEGACY-1"),
+        ("LEGACY001", "multi_template_v2_only", 3, "LEGACY-2"),
+    }
+
+
 def test_preflight_rejects_an_order_sheet_without_valid_order_rows(tmp_path):
     source = tmp_path / "orders.xlsx"
     _write_orders(source, [])

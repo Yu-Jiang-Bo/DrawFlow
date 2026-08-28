@@ -81,8 +81,9 @@ def _v2_cross_department_single_order(unit: Any) -> bool:
 
 
 class V2OrderOutputRenderer:
-    def __init__(self, renderer: Any) -> None:
+    def __init__(self, renderer: Any, *, production_batch_session: Any | None = None) -> None:
         self.renderer = renderer
+        self.production_batch_session = production_batch_session
 
     def render_outputs(
         self,
@@ -189,6 +190,11 @@ class V2OrderOutputRenderer:
         real Illustrator process during those tests.
         """
 
+        if self.production_batch_session is not None:
+            return {
+                "render_batch_files": self.production_batch_session.render_batch_files,
+                "render_batch_sequence": self.production_batch_session.render_batch_sequence,
+            }
         if getattr(self.renderer, "bridge", None) is not None:
             return {}
         return {

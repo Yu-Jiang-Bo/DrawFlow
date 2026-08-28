@@ -108,6 +108,7 @@ class PerTemplateCanaryRenderer:
         *,
         work_dir: Path | str,
         on_group_started: Callable[[str], Any] | None = None,
+        recover_illustrator: Callable[[], bool] | None = None,
     ) -> CanaryRunResult:
         if not preflight.can_render:
             return CanaryRunResult("preflight_failed", ())
@@ -153,22 +154,24 @@ class PerTemplateCanaryRenderer:
                     representative_row.raw_values,
                 )
                 canary_group = TemplateOrderGroup(group.template_id, (representative_row,))
-                try:
-                    record = self.adapter.render_canary(
-                        canary_group,
-                        snapshot,
-                        group_workbook=canary_workbook,
-                        work_dir=canary_workbook.parent,
-                    )
-                except Exception as exc:
-                    failure = normalize_failure(exc, default_code="canary_runtime_unavailable")
-                    record = {
-                        "status": "failed",
-                        "error_code": failure.code,
-                        "error": failure.message,
-                        "failure_scope": failure.failure_scope,
-                        "technical_message": failure.technical_message,
-                    }
+                record = self._render_canary_group(
+                    canary_group,
+                    snapshot,
+                    canary_workbook,
+                )
+                parent_recovery_attempted = False
+                if (
+                    recover_illustrator is not None
+                    and str(record.get("status") or "") != "completed"
+                    and is_recoverable_com_failure(record)
+                ):
+                    parent_recovery_attempted = True
+                    if recover_illustrator():
+                        record = self._render_canary_group(
+                            canary_group,
+                            snapshot,
+                            canary_workbook,
+                        )
                 require_canary_workbook_snapshot(
                     canary_workbook,
                     canary_workbook_sha256,
@@ -198,7 +201,12 @@ class PerTemplateCanaryRenderer:
                 )
                 continue
             scope = self.failure_scope(record)
-            if scope == "system" and is_recoverable_com_failure(record) and self.illustrator_recovery.check():
+            if (
+                scope == "system"
+                and is_recoverable_com_failure(record)
+                and not parent_recovery_attempted
+                and self.illustrator_recovery.check()
+            ):
                 scope = "template"
             failed = CanaryGroupResult(
                 group.template_id,
@@ -219,6 +227,29 @@ class PerTemplateCanaryRenderer:
                 return CanaryRunResult("interrupted", tuple(results), failed.error_code, failed.error_message)
         status = "completed" if all(group.status == "ready" for group in results) else "completed_with_errors"
         return CanaryRunResult(status, tuple(results))
+
+    def _render_canary_group(
+        self,
+        group: TemplateOrderGroup,
+        snapshot: TemplateSnapshot,
+        workbook: Path,
+    ) -> Mapping[str, Any]:
+        try:
+            return self.adapter.render_canary(
+                group,
+                snapshot,
+                group_workbook=workbook,
+                work_dir=workbook.parent,
+            )
+        except Exception as exc:
+            failure = normalize_failure(exc, default_code="canary_runtime_unavailable")
+            return {
+                "status": "failed",
+                "error_code": failure.code,
+                "error": failure.message,
+                "failure_scope": failure.failure_scope,
+                "technical_message": failure.technical_message,
+            }
 
 
 def _representative_row(group: TemplateOrderGroup, representative: CanaryRepresentative):

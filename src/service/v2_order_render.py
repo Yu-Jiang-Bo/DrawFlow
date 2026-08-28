@@ -50,12 +50,18 @@ class V2OrderRenderService:
         renderer: Any,
         font_dirs: list[Path] | None,
         jobs: JobStore | None = None,
+        *,
+        production_batch_session: Any | None = None,
     ) -> None:
         self.central = central
         self.data_dir = Path(data_dir)
         self.renderer = renderer
         self.font_dirs = font_dirs
         self.jobs = jobs or JobStore(self.data_dir / "jobs")
+        # Internal-only dependency used by multi-template orchestration.  It
+        # leaves the public single-template request and constructor call shape
+        # intact for existing callers.
+        self.production_batch_session = production_batch_session
 
     def render(self, payload: Mapping[str, Any]) -> dict[str, Any]:
         return self._render(payload)
@@ -241,7 +247,10 @@ class V2OrderRenderService:
             if request.get("_include_preflight_metrics"):
                 result["_preflight_row_metrics"] = v2_preflight_row_metrics(render_task, planned_units)
             return result
-        return V2OrderOutputRenderer(self.renderer).render_outputs(
+        return V2OrderOutputRenderer(
+            self.renderer,
+            production_batch_session=self.production_batch_session,
+        ).render_outputs(
             record,
             config,
             render_task,

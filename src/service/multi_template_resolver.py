@@ -36,9 +36,10 @@ V2_PIPELINE = V2_RENDER_PIPELINE
 class TemplateResolver:
     """Resolve exact IDs once per batch, never by name, type, or case-folding."""
 
-    def __init__(self, cache: LocalTemplateCache | Any, central: Any) -> None:
+    def __init__(self, cache: LocalTemplateCache | Any, central: Any, *, v2_only: bool = False) -> None:
         self.cache = cache
         self.central = central
+        self.v2_only = v2_only
 
     def resolve_many(
         self,
@@ -82,12 +83,30 @@ class TemplateResolver:
 
     def resolve(self, template_id: str, *, snapshot_root: Path | str) -> TemplateSnapshot:
         candidate = _exact_template_id(template_id)
+        if self.v2_only:
+            try:
+                return self._resolve_v2(candidate, Path(snapshot_root).resolve())
+            except TemplateResolutionError as exc:
+                if exc.code == "template_not_found" and self._is_registered_legacy_template(candidate):
+                    raise TemplateResolutionError(
+                        "当前多模板批量渲染只支持已发布的 V2 标注模板。",
+                        code="multi_template_v2_only",
+                    ) from exc
+                raise
         try:
             return self._resolve_legacy(candidate)
         except TemplateResolutionError as exc:
             if exc.code != "legacy_template_not_found":
                 raise
         return self._resolve_v2(candidate, Path(snapshot_root).resolve())
+
+    def _is_registered_legacy_template(self, template_id: str) -> bool:
+        """Identify an installed legacy ID without downloading or rendering it."""
+
+        try:
+            return self.cache.registry().get_template(template_id) is not None
+        except Exception:
+            return False
 
     def _resolve_legacy(self, template_id: str) -> TemplateSnapshot:
         try:
@@ -247,6 +266,7 @@ def _resolution_suggestion(code: str) -> str:
         "template_pipeline_invalid": "请检查模板渲染流程和配置后重新发布。",
         "template_asset_unavailable": "请重新发布模板并确认 AI 资产完整。",
         "template_config_unavailable": "请补齐模板配置后重新发布。",
+        "multi_template_v2_only": "请改用已发布的 V2 标注模板，或在原单模板入口处理旧模板。",
     }
     return suggestions.get(code, "请检查模板状态和本机连接后重试。")
 

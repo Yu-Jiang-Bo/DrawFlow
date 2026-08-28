@@ -28,7 +28,7 @@ def _write_orders(path: Path) -> None:
 
 
 class FakePreflight:
-    def __init__(self, *, ready: bool = True, template_source: str = "legacy") -> None:
+    def __init__(self, *, ready: bool = True, template_source: str = "v2") -> None:
         self.ready = ready
         self.template_source = template_source
         self.calls: list[tuple[Path, str, Path]] = []
@@ -101,7 +101,7 @@ class TrackingJobStore(JobStore):
         return super().save(record)
 
 
-def _service(tmp_path: Path, *, ready: bool = True, template_source: str = "legacy"):
+def _service(tmp_path: Path, *, ready: bool = True, template_source: str = "v2"):
     store = JobStore(tmp_path / "jobs")
     runner = FakePreflight(ready=ready, template_source=template_source)
     return MultiTemplateRenderService(preflight_runner=runner, jobs=store), store, runner
@@ -123,8 +123,9 @@ def test_parent_preflight_copies_order_and_persists_recoverable_metadata(tmp_pat
         "template_id": "TEMPLATE-A", "status": "pending", "attempt": 0,
         "group_workbook": metadata["template_checkpoints"][0]["group_workbook"],
         "group_workbook_sha256": metadata["template_checkpoints"][0]["group_workbook_sha256"],
-        "template_version": "v1", "template_sha256": "a" * 64, "child_job_id": "",
+        "template_version": "v1", "template_sha256": metadata["template_snapshots"][0]["template_sha256"], "child_job_id": "",
     }]
+    assert len(metadata["template_checkpoints"][0]["template_sha256"]) == 64
     assert runner.calls[0][0] == Path(record["job_dir"]) / "input" / "orders.xlsx"
     assert store.load(record["job_id"])["multi_template"] == metadata
 
@@ -162,6 +163,60 @@ def test_execute_rechecks_source_and_group_snapshot_without_dispatching(tmp_path
     assert (changed["status"], changed["error_code"]) == ("preflight_failed", "multi_template_repreflight_required")
     assert changed["multi_template"]["needs_repreflight"] is True
     assert store.load(record["job_id"])["status"] == "preflight_failed"
+
+
+@pytest.mark.parametrize(
+    ("action_name", "parent_status", "checkpoint_status"),
+    (
+        ("execute", "ready", "pending"),
+        ("retry_failed", "failed", "failed"),
+        ("resume", "interrupted", "interrupted"),
+    ),
+)
+def test_historical_legacy_parent_is_blocked_before_dispatch_or_repreflight(
+    tmp_path,
+    action_name,
+    parent_status,
+    checkpoint_status,
+):
+    class UnexpectedDispatcher:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def dispatch(self, *_args, **_kwargs):
+            self.calls += 1
+            raise AssertionError("legacy parent must not reach canary or formal dispatch")
+
+    source = tmp_path / "orders.xlsx"
+    _write_orders(source)
+    store = JobStore(tmp_path / "jobs")
+    runner = FakePreflight(template_source="legacy")
+    dispatcher = UnexpectedDispatcher()
+    service = MultiTemplateRenderService(preflight_runner=runner, jobs=store, dispatcher=dispatcher)
+    record = service.preflight({"order_file": str(source), "sheet_name": "订单"})
+    persisted = store.load(record["job_id"])
+    persisted["multi_template"]["template_checkpoints"][0]["status"] = checkpoint_status
+    persisted = store.update(
+        persisted,
+        status=parent_status,
+        progress={"current": 0, "total": 1, "stage": parent_status},
+    )
+
+    result = getattr(service, action_name)(persisted["job_id"])
+
+    assert (result["status"], result["error_code"]) == ("preflight_failed", "multi_template_v2_only")
+    assert result["multi_template"]["needs_repreflight"] is True
+    assert result["multi_template"]["v2_only_blocked_template_ids"] == ["TEMPLATE-A"]
+    assert result["multi_template"]["issues"] == [{
+        "code": "multi_template_v2_only",
+        "message": "当前多模板批量渲染只支持已发布的 V2 标注模板。",
+        "suggestion": "请改用已发布的 V2 标注模板，或在原单模板入口处理旧模板。",
+        "template_id": "TEMPLATE-A",
+        "excel_row": 2,
+        "order_no": "ORDER-A",
+    }]
+    assert runner.calls and len(runner.calls) == 1
+    assert dispatcher.calls == 0
 
 
 def test_parent_action_lock_rejects_competing_execute_before_it_can_overwrite_running_state(tmp_path):

@@ -25,6 +25,7 @@ def _check_fresh_illustrator_session() -> bool:
         visible=False,
         fresh_instance=True,
         quit_after=True,
+        require_fresh_instance=True,
     ).check_fresh_session()
 
 

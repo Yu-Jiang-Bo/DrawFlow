@@ -49,11 +49,14 @@ class BatchPreflight:
             template_dir.mkdir(parents=True, exist_ok=True)
             ai = template_dir / "template.ai"
             rules = template_dir / "rules.json"
+            config = template_dir / "config.json"
             ai.write_bytes(group.template_id.encode("utf-8"))
             rules.write_text("{}", encoding="utf-8")
+            config.write_text("{}", encoding="utf-8")
             snapshots.append(TemplateSnapshot(
-                "legacy", group.template_id, "generic_rules_only", "v1", "a" * 64,
-                str(template_dir), str(ai), "", str(rules), (),
+                "v2", group.template_id, "v2_annotation", "v1", hashlib.sha256(ai.read_bytes()).hexdigest(),
+                str(template_dir), str(ai), str(config), str(rules), (), "{}",
+                hashlib.sha256(config.read_bytes()).hexdigest(), hashlib.sha256(rules.read_bytes()).hexdigest(),
             ))
             group_file = files[group.template_id]
             summaries.append(MultiTemplateGroupPreflight(
