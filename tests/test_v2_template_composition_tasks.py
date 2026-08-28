@@ -98,18 +98,53 @@ def test_png_master_composer_outlines_final_labels_only_after_layout():
     ) < source.index("saveAsAI(doc, aiFile, String(task.compatibility || \"CS5\"));")
 
 
-def test_v2_output_composers_outline_each_document_text_frame_once():
+def test_v2_terminal_output_composers_reacquire_text_frames_during_outline():
     scripts = (
         Path("scripts/illustrator/compose_v2_order_column.jsx"),
+        Path("scripts/illustrator/compose_color_frames.jsx"),
         Path("scripts/illustrator/compose_png_master_pages.jsx"),
-        Path("scripts/illustrator/render_v2_template.jsx"),
     )
 
     for script in scripts:
         source = script.read_text(encoding="utf-8")
         assert "doc.textFrames.length" in source
         assert "collectTextFrames(doc.layers" not in source
-        assert "frames[index].createOutline();" in source
+        assert "while (doc.textFrames.length > 0)" in source
+        assert "var frame = doc.textFrames[beforeCount - 1];" in source
+        assert "frames[index].createOutline();" not in source
+
+
+def test_v2_terminal_output_composers_only_merge_overlapping_compatible_text_outlines():
+    scripts = (
+        Path("scripts/illustrator/compose_v2_order_column.jsx"),
+        Path("scripts/illustrator/compose_color_frames.jsx"),
+        Path("scripts/illustrator/compose_png_master_pages.jsx"),
+    )
+
+    for script in scripts:
+        source = script.read_text(encoding="utf-8")
+        assert "function mergeOverlappingTextOutlines(outlines, context)" in source
+        assert "if (consumed[candidate] || !sameMergeStyle(current, outlines[candidate])) continue;" in source
+        assert "if (!boundsOverlap(current.bounds, outlines[candidate].bounds)) continue;" in source
+        assert "return left.styleKey !== null && right.styleKey !== null && left.styleKey === right.styleKey;" in source
+        assert "app.executeMenuCommand(\"Live Pathfinder Add\");" in source
+        assert "app.executeMenuCommand(\"expandStyle\");" in source
+        assert "outline.selected = true;" not in source
+
+
+def test_v2_terminal_cross_frame_dedupe_refuses_unverifiable_or_visually_different_styles():
+    scripts = (
+        Path("scripts/illustrator/compose_v2_order_column.jsx"),
+        Path("scripts/illustrator/compose_color_frames.jsx"),
+        Path("scripts/illustrator/compose_png_master_pages.jsx"),
+    )
+
+    for script in scripts:
+        source = script.read_text(encoding="utf-8")
+        assert "if (fill === null || stroke === null) return null;" in source
+        assert "if (type === \"NoColor\") return \"NoColor\";" in source
+        assert "Gradient and pattern transforms are object-level state." in source
+        assert 'return key + "|opacity=" + safeProperty(frame, "opacity") + "|blend=" + safeProperty(frame, "blendingMode");' in source
 
 
 def test_composition_task_builders_do_not_share_nested_input_values(tmp_path):

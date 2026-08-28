@@ -729,18 +729,119 @@
     }
 
     function outlineAllTextFrames(doc, pathfinderMerge) {
-        var frames = [];
-        for (var index = 0; index < doc.textFrames.length; index++) frames.push(doc.textFrames[index]);
-        for (var frameIndex = 0; frameIndex < frames.length; frameIndex++) {
-            var outline = frames[frameIndex].createOutline();
-            if (!outline) throw new Error("V2 color frame text outline failed");
-            if (pathfinderMerge) {
-                outline.selected = true;
-                app.executeMenuCommand("Live Pathfinder Add");
-                app.executeMenuCommand("expandStyle");
-                outline.selected = false;
-            }
+        var outlines = outlineCurrentTextFrames(doc, "V2 color frame");
+        if (pathfinderMerge) mergeOverlappingTextOutlines(outlines, "V2 color frame");
+    }
+
+    function outlineCurrentTextFrames(doc, context) {
+        var outlines = [];
+        var safety = Number(doc.textFrames.length) + 1;
+        while (doc.textFrames.length > 0) {
+            if (safety-- <= 0) throw new Error(context + " text outline collection did not converge");
+            var beforeCount = Number(doc.textFrames.length);
+            var frame = doc.textFrames[beforeCount - 1];
+            if (!frame || typeof frame.createOutline !== "function") throw new Error(context + " text outline source is invalid");
+            var styleKey = uniformTextStyleKey(frame);
+            var outline = frame.createOutline();
+            if (!outline) throw new Error(context + " text outline failed");
+            outlines.push({ item: outline, bounds: pageItemBounds(outline), styleKey: styleKey });
+            if (Number(doc.textFrames.length) >= beforeCount) throw new Error(context + " text outline did not remove its source");
         }
+        return outlines;
+    }
+
+    function mergeOverlappingTextOutlines(outlines, context) {
+        var consumed = [];
+        for (var index = 0; index < outlines.length; index++) consumed[index] = false;
+        for (var start = 0; start < outlines.length; start++) {
+            if (consumed[start]) continue;
+            var cluster = [start];
+            consumed[start] = true;
+            for (var cursor = 0; cursor < cluster.length; cursor++) {
+                var current = outlines[cluster[cursor]];
+                for (var candidate = 0; candidate < outlines.length; candidate++) {
+                    if (consumed[candidate] || !sameMergeStyle(current, outlines[candidate])) continue;
+                    if (!boundsOverlap(current.bounds, outlines[candidate].bounds)) continue;
+                    consumed[candidate] = true;
+                    cluster.push(candidate);
+                }
+            }
+            var items = [];
+            for (var itemIndex = 0; itemIndex < cluster.length; itemIndex++) items.push(outlines[cluster[itemIndex]].item);
+            mergeOutlineItems(items, context);
+        }
+    }
+
+    function sameMergeStyle(left, right) {
+        return left.styleKey !== null && right.styleKey !== null && left.styleKey === right.styleKey;
+    }
+
+    function boundsOverlap(left, right) {
+        return Number(left[0]) < Number(right[2]) && Number(left[2]) > Number(right[0]) && Number(left[1]) > Number(right[3]) && Number(left[3]) < Number(right[1]);
+    }
+
+    function mergeOutlineItems(items, context) {
+        if (!items.length) return;
+        try { app.executeMenuCommand("deselectall"); } catch (ignored) {}
+        try {
+            for (var index = 0; index < items.length; index++) items[index].selected = true;
+            app.executeMenuCommand("Live Pathfinder Add");
+            app.executeMenuCommand("expandStyle");
+        } catch (error) {
+            throw new Error(context + " Pathfinder merge failed: " + error);
+        } finally {
+            try { app.executeMenuCommand("deselectall"); } catch (ignored2) {}
+        }
+    }
+
+    function uniformTextStyleKey(frame) {
+        var characters = frame.textRange.characters;
+        if (!characters || !characters.length) return null;
+        var key = null;
+        for (var index = 0; index < characters.length; index++) {
+            var candidate = characterStyleKey(characters[index].characterAttributes);
+            if (candidate === null) return null;
+            if (key === null) key = candidate;
+            else if (key !== candidate) return null;
+        }
+        return key + "|opacity=" + safeProperty(frame, "opacity") + "|blend=" + safeProperty(frame, "blendingMode");
+    }
+
+    function characterStyleKey(attributes) {
+        var font = safeProperty(attributes, "textFont");
+        var fill = colorStyleKey(safeProperty(attributes, "fillColor"));
+        var stroke = colorStyleKey(safeProperty(attributes, "strokeColor"));
+        if (fill === null || stroke === null) return null;
+        return [
+            fill, stroke,
+            safeProperty(attributes, "filled"), safeProperty(attributes, "stroked"),
+            safeProperty(attributes, "strokeWeight"), safeProperty(attributes, "size"),
+            safeProperty(attributes, "horizontalScale"), safeProperty(attributes, "verticalScale"),
+            safeProperty(attributes, "baselineShift"), safeProperty(attributes, "tracking"),
+            safeProperty(attributes, "overprintFill"), safeProperty(attributes, "overprintStroke"),
+            font ? safeProperty(font, "name") : ""
+        ].join("|");
+    }
+
+    function safeProperty(object, name) {
+        try { return object ? object[name] : ""; } catch (ignored) { return ""; }
+    }
+
+    function colorStyleKey(color) {
+        if (!color) return "none";
+        var type = safeProperty(color, "typename");
+        if (type === "CMYKColor") return "CMYK:" + safeProperty(color, "cyan") + "," + safeProperty(color, "magenta") + "," + safeProperty(color, "yellow") + "," + safeProperty(color, "black");
+        if (type === "RGBColor") return "RGB:" + safeProperty(color, "red") + "," + safeProperty(color, "green") + "," + safeProperty(color, "blue");
+        if (type === "GrayColor") return "Gray:" + safeProperty(color, "gray");
+        if (type === "LabColor") return "Lab:" + safeProperty(color, "l") + "," + safeProperty(color, "a") + "," + safeProperty(color, "b");
+        if (type === "NoColor") return "NoColor";
+        if (type === "SpotColor") {
+            var spot = safeProperty(color, "spot");
+            return "Spot:" + safeProperty(spot, "name") + "," + safeProperty(color, "tint");
+        }
+        // Gradient and pattern transforms are object-level state.  Without a
+        // complete, stable signature they must never enter a cross-frame merge.
+        return null;
     }
 
     function estimateLabelWidth(text, size) {
