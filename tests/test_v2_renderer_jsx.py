@@ -1485,7 +1485,7 @@ if (width >= 99.9) throw new Error('preserved tail text unexpectedly filled full
     assert result.returncode == 0, result.stderr
 
 
-def test_v2_renderer_rejects_unverified_direct_text_tail_samples():
+def test_v2_renderer_preserves_plain_text_tail_decorations_around_latin_endpoints():
     tails = [
         {
             "key": "tail_name_first_m",
@@ -1506,6 +1506,31 @@ def test_v2_renderer_rejects_unverified_direct_text_tail_samples():
     task["render_task"]["outputs"][0]["actions"][1]["preset"] = "direct_text"
     task["mock_first_tail_sample"] = "__m"
     task["mock_last_tail_sample"] = "a__"
+    harness = node_mock_harness(task, """
+const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
+if (child(designCopy, 'slot_name').contents !== '__custom__') {
+  throw new Error('plain text tail decorations were not preserved: ' + child(designCopy, 'slot_name').contents);
+}
+""")
+
+    result = run_node(harness)
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_v2_renderer_rejects_plain_text_tail_without_latin_placeholder():
+    tails = [
+        {
+            "key": "tail_name_first_m",
+            "position": "first",
+            "sample": "m",
+            "glyph_mode": "plain_text",
+            "path": "Template/Output_main/Design/Design03/tail_name_first_m",
+        }
+    ]
+    task = tail_text_task(tails, value="Custom")
+    task["render_task"]["outputs"][0]["actions"][1]["preset"] = "direct_text"
+    task["mock_first_tail_sample"] = "___"
     harness = node_mock_harness(task, "")
 
     result = run_node(harness)
@@ -1579,7 +1604,7 @@ if (Math.abs((bounds[0] + bounds[2]) / 2 - {expected_center[0]}) > 0.01 || Math.
     assert result.returncode == 0, result.stderr
 
 
-def test_v2_renderer_rejects_unverified_plain_tail_even_when_a_probe_candidate_exists():
+def test_v2_renderer_uses_latin_endpoint_for_plain_text_tail():
     tails = [
         {
             "key": "tail_name_last_m",
@@ -1592,66 +1617,22 @@ def test_v2_renderer_rejects_unverified_plain_tail_even_when_a_probe_candidate_e
     task = tail_text_task(tails, value="Mastka")
     task["render_task"]["outputs"][0]["actions"][1]["preset"] = "direct_text"
     task["mock_pua_tail_base"] = 0xE054
-    harness = node_mock_harness(task, "")
+    harness = node_mock_harness(task, """
+const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
+if (child(designCopy, 'slot_name').contents !== 'Mastka') throw new Error('plain text tail did not retain the latin endpoint');
+""")
 
     result = run_node(harness)
 
-    assert result.returncode != 0
-    assert "tail glyph coverage is missing" in result.stderr
+    assert result.returncode == 0, result.stderr
 
 
-def test_v2_renderer_bounds_plain_tail_pua_probe_candidates():
+def test_v2_renderer_does_not_probe_plain_text_tails_as_pua():
     source = SCRIPT.read_text(encoding="utf-8")
 
-    assert "knownTailPuaBases" in source
-    assert "for (var candidate = 0xE000; candidate <= 0xF8FF - 25; candidate++)" not in source
-    assert "puaTailGlyph" in source
-    assert "missingCount === 0" in source
-
-
-def test_v2_renderer_rejects_plain_tail_pua_when_alphabet_is_incomplete():
-    tails = [
-        {
-            "key": "tail_name_last_m",
-            "position": "last",
-            "sample": "m",
-            "glyph_mode": "plain_text",
-            "path": "Template/Output_main/Design/Design03/tail_name_last_m",
-        }
-    ]
-    task = tail_text_task(tails, value="Mastka")
-    task["render_task"]["outputs"][0]["actions"][1]["preset"] = "direct_text"
-    task["mock_pua_tail_base"] = 0xE054
-    task["mock_pua_incomplete_base"] = 0xE054
-    harness = node_mock_harness(task, "")
-
-    result = run_node(harness)
-
-    assert result.returncode != 0
-    assert "tail glyph coverage is missing" in result.stderr
-
-
-def test_v2_renderer_blocks_when_the_requested_plain_tail_pua_is_missing():
-    tails = [
-        {
-            "key": "tail_name_last_m",
-            "position": "last",
-            "sample": "m",
-            "glyph_mode": "plain_text",
-            "path": "Template/Output_main/Design/Design03/tail_name_last_m",
-        }
-    ]
-    task = tail_text_task(tails, value="Mastkf")
-    task["render_task"]["outputs"][0]["actions"][1]["preset"] = "direct_text"
-    task["mock_pua_tail_base"] = 0xE054
-    task["mock_pua_missing_base"] = 0xE054
-    task["mock_pua_missing_index"] = 5
-    harness = node_mock_harness(task, "")
-
-    result = run_node(harness)
-
-    assert result.returncode != 0
-    assert "tail glyph coverage is missing" in result.stderr
+    assert "knownTailPuaBases" not in source
+    assert "inferPuaTailEncodingFromSample" not in source
+    assert "return letter;" in source
 
 
 def test_v2_renderer_applies_verified_pua_tail_to_split_part_only():

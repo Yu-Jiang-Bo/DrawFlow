@@ -24,19 +24,7 @@
     var selectedOutputKey = String(execution.output_key || "");
     var renderedOutputItems = [];
     var renderedOutputCount = 0;
-    var tailPuaBaseCache = {};
     var fixedVisualLayoutCache = [];
-    // Bounded candidates cover the installed tail fonts while keeping one
-    // preview from ever issuing thousands of Illustrator outline operations.
-    var knownTailPuaBases = [
-        0xE000, 0xE010, 0xE020, 0xE030, 0xE040, 0xE050, 0xE054, 0xE060, 0xE070,
-        0xE100, 0xE110, 0xE120, 0xE130, 0xE140, 0xE150, 0xE160,
-        0xE270, 0xE300, 0xE310, 0xE350, 0xE360, 0xE370, 0xE440, 0xE450,
-        0xE460, 0xE470, 0xE510, 0xE520, 0xE530, 0xE540, 0xE570, 0xE600,
-        0xE610, 0xE650, 0xE660, 0xE670, 0xE700, 0xE710, 0xE720, 0xE730,
-        0xE740, 0xE750, 0xE760, 0xE770, 0xE800, 0xE810, 0xE820, 0xE830,
-        0xE840, 0xE850, 0xE860, 0xE870
-    ];
 
     try {
         for (var outputIndex = 0; outputIndex < (task.outputs || []).length; outputIndex++) {
@@ -622,12 +610,10 @@
         if (!isPlainTextTailSpec(spec)) return V2TailText.tailGlyphForSpec(letter, spec);
         var sampleText = String(tailFrame.contents || "");
         var sampleIndex = tailSampleLatinIndex(sampleText, position);
-        if (sampleText.length !== 1 || sampleIndex !== 0) {
+        if (sampleIndex < 0) {
             throw new Error("V2 tail glyph coverage is missing: " + String((spec || {}).key || ""));
         }
-        var encoding = inferPuaTailEncodingFromSample(tailFrame, sampleText.charAt(0).toLowerCase());
-        if (!encoding) throw new Error("V2 tail glyph coverage is missing: " + String((spec || {}).key || ""));
-        return puaTailGlyph(tailFrame, encoding, letter, spec);
+        return letter;
     }
 
     function tailSampleLatinIndex(text, position) {
@@ -645,163 +631,6 @@
         var map = (spec || {}).glyph_map || {};
         for (var key in map) if (map.hasOwnProperty(key)) return false;
         return true;
-    }
-
-    function inferPuaTailEncodingFromSample(frame, sampleLetter) {
-        var sampleIndex = sampleLetter.charCodeAt(0) - 97;
-        if (sampleIndex < 0 || sampleIndex > 25) return 0;
-        var sourceEvidence = outlinedTextEvidence(frame);
-        if (!sourceEvidence) return 0;
-        var sourceWidth = Math.abs(Number(sourceEvidence.bounds[2]) - Number(sourceEvidence.bounds[0]));
-        var sourceHeight = Math.abs(Number(sourceEvidence.bounds[1]) - Number(sourceEvidence.bounds[3]));
-        if (sourceWidth <= 0 || sourceHeight <= 0 || !sourceEvidence.signature) return 0;
-        var cacheKey = tailPuaSampleCacheKey(frame, sampleLetter, sourceWidth, sourceHeight);
-        if (tailPuaBaseCache.hasOwnProperty(cacheKey)) return tailPuaBaseCache[cacheKey];
-        var encoding = null;
-        for (var index = 0; index < knownTailPuaBases.length; index++) {
-            var candidate = knownTailPuaBases[index];
-            var contiguousEvidence = outlinedTailGlyphEvidence(frame, candidate + sampleIndex);
-            if (contiguousEvidence && contiguousEvidence.signature === sourceEvidence.signature
-                && puaTailAlphabetHasCompleteCoverage(frame, candidate, false)) {
-                encoding = { base: candidate, decimal: false };
-                break;
-            }
-            var decimalEvidence = outlinedTailGlyphEvidence(frame, decimalPuaCodepoint(candidate, sampleIndex));
-            if (decimalEvidence && decimalEvidence.signature === sourceEvidence.signature
-                && puaTailAlphabetHasCompleteCoverage(frame, candidate, true)) {
-                encoding = { base: candidate, decimal: true };
-                break;
-            }
-        }
-        tailPuaBaseCache[cacheKey] = encoding;
-        return encoding;
-    }
-
-    function tailPuaSampleCacheKey(frame, sampleLetter, width, height) {
-        var fontName = "";
-        try { fontName = String(frame.textRange.characterAttributes.textFont.name || ""); } catch (error) {}
-        return fontName + "|" + sampleLetter + "|" + Math.round(width * 100) + "x" + Math.round(height * 100);
-    }
-
-    function puaTailAlphabetHasCompleteCoverage(frame, base, decimal) {
-        var signatures = {};
-        var missingSignature = missingPuaGlyphSignature(frame);
-        var missingCount = 0;
-        var usableCount = 0;
-        for (var index = 0; index < 26; index++) {
-            var evidence = outlinedTailGlyphEvidence(frame, decimal ? decimalPuaCodepoint(base, index) : base + index);
-            if (!evidence || !evidence.signature) return false;
-            if (missingSignature && evidence.signature === missingSignature) {
-                missingCount += 1;
-                continue;
-            }
-            if (signatures.hasOwnProperty(evidence.signature)) return false;
-            signatures[evidence.signature] = true;
-            usableCount += 1;
-        }
-        return missingCount === 0 && usableCount === 26;
-    }
-
-    function tailPuaCodepoint(encoding, letter) {
-        var index = String(letter || "").charCodeAt(0) - 97;
-        return encoding.decimal ? decimalPuaCodepoint(encoding.base, index) : encoding.base + index;
-    }
-
-    function puaTailGlyph(frame, encoding, letter, spec) {
-        var code = tailPuaCodepoint(encoding, letter);
-        var evidence = outlinedTailGlyphEvidence(frame, code);
-        var missing = missingPuaGlyphSignature(frame);
-        if (!evidence || !evidence.signature || (missing && evidence.signature === missing)) {
-            throw new Error("V2 tail glyph coverage is missing: " + String((spec || {}).key || ""));
-        }
-        return String.fromCharCode(code);
-    }
-
-    function missingPuaGlyphSignature(frame) {
-        var evidence = outlinedTailGlyphEvidence(frame, 0xF8FF);
-        return evidence && evidence.signature ? evidence.signature : "";
-    }
-
-    function decimalPuaCodepoint(base, index) {
-        return Number(base) + Math.floor(Number(index) / 10) * 16 + Number(index) % 10;
-    }
-
-    function outlinedTailGlyphEvidence(frame, code) {
-        var duplicate = null;
-        try {
-            duplicate = frame.duplicate();
-            duplicate.contents = String.fromCharCode(code);
-            return outlinedTextEvidence(duplicate);
-        } catch (error) {
-            return null;
-        } finally {
-            removePageItem(duplicate);
-        }
-    }
-
-    function outlinedTextEvidence(frame) {
-        var duplicate = null;
-        var outlined = null;
-        try {
-            duplicate = frame.duplicate();
-            outlined = duplicate.createOutline();
-            var bounds = measuredBounds(outlined);
-            var signature = outlineGeometrySignature(outlined, bounds);
-            return signature ? { bounds: bounds, signature: signature } : null;
-        } catch (error) {
-            return null;
-        } finally {
-            removePageItem(outlined || duplicate);
-        }
-    }
-
-    function outlineGeometrySignature(item, bounds) {
-        var paths = [];
-        collectOutlinePathSignatures(item, bounds, paths);
-        if (!paths.length) return "";
-        paths.sort();
-        return paths.join("|");
-    }
-
-    function collectOutlinePathSignatures(item, bounds, paths) {
-        if (!item) return;
-        if (item.typename === "PathItem") {
-            var signature = outlinePathSignature(item, bounds);
-            if (signature) paths.push(signature);
-            return;
-        }
-        if (item.typename === "CompoundPathItem" && item.pathItems) {
-            for (var pathIndex = 0; pathIndex < item.pathItems.length; pathIndex++) {
-                collectOutlinePathSignatures(item.pathItems[pathIndex], bounds, paths);
-            }
-            return;
-        }
-        var children = item.pageItems || [];
-        for (var childIndex = 0; childIndex < children.length; childIndex++) {
-            collectOutlinePathSignatures(children[childIndex], bounds, paths);
-        }
-    }
-
-    function outlinePathSignature(path, bounds) {
-        var points = path.pathPoints || [];
-        if (!points.length) return "";
-        var width = Math.abs(Number(bounds[2]) - Number(bounds[0]));
-        var height = Math.abs(Number(bounds[1]) - Number(bounds[3]));
-        if (width <= 0 || height <= 0) return "";
-        var result = String(path.closed === true ? "C" : "O") + ":" + points.length;
-        for (var index = 0; index < points.length; index++) {
-            var point = points[index];
-            result += ":" + outlinePointSignature(point.anchor, bounds, width, height);
-            result += ":" + outlinePointSignature(point.leftDirection, bounds, width, height);
-            result += ":" + outlinePointSignature(point.rightDirection, bounds, width, height);
-        }
-        return result;
-    }
-
-    function outlinePointSignature(point, bounds, width, height) {
-        if (!point || point.length < 2) return "?";
-        return Math.round((Number(point[0]) - Number(bounds[0])) * 1000 / width)
-            + "," + Math.round((Number(point[1]) - Number(bounds[3])) * 1000 / height);
     }
 
     function removeDirectTailSamples(root, sourcePath, tailSpecs) {
