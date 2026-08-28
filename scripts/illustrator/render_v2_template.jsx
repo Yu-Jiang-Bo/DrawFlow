@@ -25,6 +25,7 @@
     var renderedOutputItems = [];
     var renderedOutputCount = 0;
     var tailPuaBaseCache = {};
+    var fixedVisualLayoutCache = [];
     // Bounded candidates cover the installed tail fonts while keeping one
     // preview from ever issuing thousands of Illustrator outline operations.
     var knownTailPuaBases = [
@@ -45,12 +46,12 @@
             renderedOutputCount += 1;
         }
         if (selectedOutputKey && renderedOutputCount !== 1) throw new Error("Selected V2 output was not rendered: " + selectedOutputKey);
-        if (execution.pack_order_blocks === true) {
-            renderedOutputItems = [groupRenderedOutputBlock(layer, renderedOutputItems, 0)];
-        }
         applyOutputTransforms(doc, execution.output || task.output || {});
         var finalFitAction = selectedFitAction(task, selectedOutputKey, selections);
         if (finalFitAction) fitRenderedOutput(renderedOutputItems, finalFitAction);
+        if (execution.pack_order_blocks === true) {
+            renderedOutputItems = [groupRenderedOutputBlock(layer, renderedOutputItems, 0)];
+        }
         if (execution.preview_png) fitArtboardToVisibleContent(doc, renderedOutputItems, 0);
         var output = File(String(execution.output_ai));
         ensureFolder(output.parent);
@@ -77,13 +78,21 @@
             var action = actions[index] || {};
             if (action.type === "select_style" && isSelected(action, selected)) {
                 copied[copyKey(outputKey, action)] = copyOptionGroup(sourceDoc, targetLayer, action.object_path, action.source_only === true);
-                if (action.source_only !== true) renderedItems.push(copied[copyKey(outputKey, action)].item);
+                if (action.source_only !== true) {
+                    renderedItems.push(copied[copyKey(outputKey, action)].item);
+                }
             }
             if (action.type === "copy_option_group" && isSelected(action, selected)) {
                 copied[copyKey(outputKey, action)] = copyOptionGroup(sourceDoc, targetLayer, action.object_path, action.source_only === true);
-                if (action.source_only !== true) renderedItems.push(copied[copyKey(outputKey, action)].item);
+                if (action.source_only !== true) {
+                    renderedItems.push(copied[copyKey(outputKey, action)].item);
+                }
             }
         }
+        // Capture each selected output group's original visual coordinate system
+        // before asset binding or any text replacement can change its bounds.
+        // `fixed` art is later mapped only within its own immutable source group.
+        captureFixedVisualLayout(renderedItems);
         for (var assetIndex = 0; assetIndex < actions.length; assetIndex++) {
             var assetAction = actions[assetIndex] || {};
             if (assetAction.type === "bind_asset_library" && isSelected(assetAction, selected)) {
@@ -811,8 +820,9 @@
         var targetHeight = mmToPt(Number(dimensions.height_mm || 0));
         if (targetWidth <= 0 || targetHeight <= 0) throw new Error("V2 output target dimensions are invalid");
         var bounds = unionBounds(items, true);
-        var sourceBounds = [Number(bounds[0]), Number(bounds[1]), Number(bounds[2]), Number(bounds[3])];
-        var fixedStates = fixedVisualStatesForItems(items);
+        var fixedLayout = fixedVisualLayoutForItems(items);
+        var fixedLayouts = fixedLayout ? fixedLayout.layouts : [];
+        var fixedStates = fixedVisualStatesForLayouts(fixedLayouts);
         var fitSafety = outputFitSafetyPoints(dimensions);
         var fitTargetWidth = targetWidth - fitSafety;
         var fitTargetHeight = targetHeight - fitSafety;
@@ -824,7 +834,10 @@
             resizeItemsAroundBounds(items, bounds, fixedScaleX, fixedScaleY);
             var fixedFitted = unionBounds(items, true);
             translateItems(items, targetLeft - Number(fixedFitted[0]), targetTop - Number(fixedFitted[1]));
-            positionFixedVisualStatesForOutput(fixedStates, sourceBounds, unionBounds(items, true));
+            // Use the transformed ordinary artwork as the target coordinate
+            // system.  The fixed mark's own physical dimensions must not alter
+            // that coordinate system, otherwise a second fit can drift it.
+            positionFixedVisualLayouts(fixedLayouts);
             validateOutputBounds(items, dimensions, targetWidth, targetHeight);
             return;
         }
@@ -882,13 +895,117 @@
         return states;
     }
 
-    function fixedVisualStatesForItems(items) {
+    function fixedVisualStatesForLayouts(layouts) {
         var states = [];
-        for (var index = 0; index < items.length; index++) {
-            var itemStates = fixedVisualStates(items[index]);
+        for (var index = 0; index < layouts.length; index++) {
+            var itemStates = layouts[index].states || [];
             for (var stateIndex = 0; stateIndex < itemStates.length; stateIndex++) states.push(itemStates[stateIndex]);
         }
         return states;
+    }
+
+    function captureFixedVisualLayout(items) {
+        if (fixedVisualLayoutForItems(items)) return;
+        var layouts = [];
+        for (var index = 0; index < items.length; index++) {
+            var root = items[index];
+            var states = fixedVisualStates(root);
+            if (!states.length) continue;
+            layouts.push({
+                root: root,
+                sourceBounds: copyBounds(unionRenderableBounds([root])),
+                states: states
+            });
+        }
+        if (!layouts.length) return;
+        fixedVisualLayoutCache.push({
+            items: items.slice(0),
+            layouts: layouts
+        });
+    }
+
+    function fixedVisualLayoutForItems(items) {
+        for (var index = 0; index < fixedVisualLayoutCache.length; index++) {
+            var candidate = fixedVisualLayoutCache[index];
+            if (samePageItemList(candidate.items, items)) return candidate;
+        }
+        return null;
+    }
+
+    function samePageItemList(left, right) {
+        if (!left || !right || left.length !== right.length) return false;
+        for (var index = 0; index < left.length; index++) {
+            if (left[index] !== right[index]) return false;
+        }
+        return true;
+    }
+
+    function copyBounds(bounds) {
+        return [Number(bounds[0]), Number(bounds[1]), Number(bounds[2]), Number(bounds[3])];
+    }
+
+    function unionRenderableBounds(items) {
+        var bounds = [];
+        for (var index = 0; index < items.length; index++) collectRenderableBounds(items[index], bounds);
+        if (!bounds.length) throw new Error("Cannot measure V2 original output bounds");
+        return unionBoundsFromList(bounds);
+    }
+
+    function unionNonFixedRenderableBounds(items) {
+        var bounds = [];
+        for (var index = 0; index < items.length; index++) collectNonFixedRenderableBounds(items[index], bounds);
+        if (!bounds.length) throw new Error("Cannot measure V2 fixed-graphic reference bounds");
+        return unionBoundsFromList(bounds);
+    }
+
+    function collectRenderableBounds(item, bounds) {
+        if (!item || isAuxiliaryObject(item)) return;
+        var children = item.pageItems || [];
+        var directChildCount = 0;
+        for (var index = 0; index < children.length; index++) {
+            if (children[index].parent !== item) continue;
+            directChildCount++;
+            collectRenderableBounds(children[index], bounds);
+        }
+        if (!directChildCount) bounds.push(visibleBoundsStrict(item));
+    }
+
+    function collectNonFixedRenderableBounds(item, bounds) {
+        if (!item || isAuxiliaryObject(item) || isFixedVisualName(String(item.name || ""))) return;
+        var children = item.pageItems || [];
+        var directChildCount = 0;
+        for (var index = 0; index < children.length; index++) {
+            if (children[index].parent !== item) continue;
+            directChildCount++;
+            collectNonFixedRenderableBounds(children[index], bounds);
+        }
+        if (!directChildCount) bounds.push(visibleBoundsStrict(item));
+    }
+
+    function unionBoundsFromList(bounds) {
+        var left = Number(bounds[0][0]);
+        var top = Number(bounds[0][1]);
+        var right = Number(bounds[0][2]);
+        var bottom = Number(bounds[0][3]);
+        for (var index = 1; index < bounds.length; index++) {
+            var current = bounds[index];
+            left = Math.min(left, Number(current[0]));
+            top = Math.max(top, Number(current[1]));
+            right = Math.max(right, Number(current[2]));
+            bottom = Math.min(bottom, Number(current[3]));
+        }
+        return [left, top, right, bottom];
+    }
+
+    function positionFixedVisualLayouts(layouts) {
+        for (var index = 0; index < layouts.length; index++) {
+            var layout = layouts[index];
+            positionFixedVisualStatesForOutput(
+                layout.states,
+                layout.sourceBounds,
+                unionNonFixedRenderableBounds([layout.root])
+            );
+        }
     }
 
     function positionFixedVisualStatesForOutput(states, sourceBounds, outputBounds) {
