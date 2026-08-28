@@ -2,7 +2,7 @@
 
 需要执行完整安装、校验、启动和验收时，请先阅读 [`DEPLOY-SCHEME2-OPERATIONS.md`](./DEPLOY-SCHEME2-OPERATIONS.md)。本文保留方案二架构和客户端职责说明。
 
-方案二把 DrawFlow 拆成中央服务和用户电脑本地客户端。浏览器入口推荐为用户双击 `DrawFlowClient.exe`，由本地网关打开 `http://127.0.0.1:8766/`，代理中央最新页面和 API，同时在本地截获扫描、渲染和输出下载接口。这样不需要公网中央页面直接访问 `localhost`，避免 Chrome Local Network Access 和 CORS 限制。
+方案二把 DrawFlow 拆成中央服务和用户电脑本地客户端。用户双击 `DrawFlow.exe` 后看到独立 Electron 应用窗口；桌面壳在后台启动 loopback 本地网关、加载本机 `127.0.0.1:8766` 页面，并截获扫描、渲染和输出下载接口。用户不需要打开 Chrome、Edge 或输入任何地址。
 
 ## 1. 架构
 
@@ -13,8 +13,9 @@
 - 不可变模板版本、manifest、SHA256、bundle 下载和备份。
 - 不安装 Illustrator，不做真实渲染。
 
-用户电脑 DrawFlowClient：
+用户电脑 DrawFlow 桌面客户端：
 
+- Electron 桌面窗口是唯一用户入口；不自动打开系统浏览器。
 - 只监听 `127.0.0.1:8766`。
 - 代理中央页面和普通 API。
 - 本地截获 `/local/render`、`/api/render`、`/local/templates/scan`。
@@ -35,18 +36,19 @@ powershell -ExecutionPolicy Bypass -File .\deploy\package-release.ps1
 - `release\drawflow-central-YYYYMMDD-HHMM\`
 - `release\drawflow-central-YYYYMMDD-HHMM.zip`
 
-本地客户端包：
+Windows 桌面安装包：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\deploy\package-client.ps1
+powershell -ExecutionPolicy Bypass -File .\deploy\package-desktop.ps1 `
+  -ClientVersion 1.0.0 `
+  -CentralUrl http://<central-host>:8765
 ```
 
 产物：
 
-- `release\drawflow-client-YYYYMMDD-HHMM\`
-- `release\drawflow-client-YYYYMMDD-HHMM.zip`
+- `release\desktop-1.0.0\DrawFlow-Setup-1.0.0.exe`
 
-本地客户端包使用 PyInstaller onedir，包含 `DrawFlowClient.exe`、运行依赖、JSX 脚本、配置示例和说明。用户电脑不需要单独安装 Python，但必须安装并激活 Adobe Illustrator 和模板字体。
+安装包内含 Electron 应用窗口和 PyInstaller onedir 本地网关；用户电脑不需要单独安装 Python、Node.js 或浏览器扩展，但必须安装并激活 Adobe Illustrator 和模板字体。此阶段不做客户端自动更新；管理员更新客户端时重新发送新版 Setup 安装包。
 
 ## 3. 中央服务部署
 
@@ -71,33 +73,13 @@ C:\DrawFlowData\templates\<id>\active.json
 
 ## 4. 客户端部署
 
-把 `drawflow-client-*.zip` 解压到用户电脑，例如：
+同事只接收 `DrawFlow-Setup-<version>.exe`。双击安装后，从开始菜单或桌面快捷方式启动：
 
 ```text
-C:\DrawFlowClient
+DrawFlow
 ```
 
-正式客户端包已经在 exe 同级包含 `drawflow-client.json`，默认连接当前 Linux 中央服务：
-
-```json
-{
-  "central_url": "http://162.14.120.240:8765"
-}
-```
-
-解压后直接双击：
-
-```text
-DrawFlowClient.exe
-```
-
-客户端会打开：
-
-```text
-http://127.0.0.1:8766/
-```
-
-不要把 `8766` 绑定到公网或局域网地址。程序启动时会拒绝非 loopback host。中央地址变化时只编辑 exe 同级 `drawflow-client.json`，不需要重打 exe，也不要在该文件中保存 API Key 或密码。
+应用会在独立窗口中显示页面，不会打开系统浏览器。本地网关仍只监听 `127.0.0.1:8766`，不得开放到公网或局域网。中央地址由安装包内 `drawflow-client.json` 提供；管理员变更中央地址时重新构建并发送新版 Setup，不在该文件中保存 API Key、密码或私钥。
 
 本地数据默认位置：
 
@@ -114,7 +96,7 @@ http://127.0.0.1:8766/
 
 ## 5. 普通渲染流程
 
-1. 用户在 `http://127.0.0.1:8766/` 选择模板和订单。
+1. 用户在 DrawFlow 桌面窗口选择模板和订单。
 2. 本地网关查询中央 manifest。
 3. 本地仅在缺失或版本变化时下载所选模板 bundle。
 4. 本地校验 bundle 内文件 SHA256。
@@ -163,7 +145,7 @@ http://127.0.0.1:8766/
 - DeepSeek 留在中央。
 - 选中模板按需同步、版本校验和 SHA256 校验。
 - 字体缺失可读提示。
-- 中央 zip 包和 DrawFlowClient zip 包。
+- 中央 zip 包和 DrawFlow-Setup Windows 安装包。
 - 单机单渲染锁。
 
 暂不做：
@@ -189,6 +171,7 @@ http://127.0.0.1:8766/
 客户端：
 
 - `/health` 返回 `role=local-client`。
+- Electron 桌面窗口不打开系统浏览器，且只允许加载本机 loopback 网关。
 - 服务只监听 `127.0.0.1:8766`。
 - 首次渲染下载模板，缓存命中不重复下载。
 - 版本变化时重新下载。

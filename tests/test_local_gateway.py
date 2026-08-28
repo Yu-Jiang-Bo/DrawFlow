@@ -54,6 +54,34 @@ def test_packaged_client_prefers_config_next_to_executable(monkeypatch, tmp_path
     assert local_gateway._client_config_candidates()[0] == Path(executable_dir / "drawflow-client.json")
 
 
+def test_local_gateway_health_reports_when_an_illustrator_task_is_running(tmp_path):
+    class FakeClient:
+        def health(self):
+            return {"ok": True, "role": "local-client"}
+
+    render_lock = threading.Lock()
+    handler = type(
+        "TestHealthGatewayRequestHandler",
+        (local_gateway.LocalGatewayRequestHandler,),
+        {"client": FakeClient(), "render_lock": render_lock},
+    )
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    worker = threading.Thread(target=server.serve_forever, daemon=True)
+    worker.start()
+    try:
+        idle = _http_get_json(f"http://127.0.0.1:{server.server_address[1]}/health")
+        assert idle["render_in_progress"] is False
+        render_lock.acquire()
+        busy = _http_get_json(f"http://127.0.0.1:{server.server_address[1]}/health")
+        assert busy["render_in_progress"] is True
+    finally:
+        if render_lock.locked():
+            render_lock.release()
+        server.shutdown()
+        server.server_close()
+        worker.join(timeout=2)
+
+
 def test_local_gateway_reads_jobs_and_downloads_from_the_client_not_central(tmp_path):
     jobs = JobStore(tmp_path / "jobs")
     output_ai = tmp_path / "output.ai"
@@ -229,7 +257,7 @@ def test_local_gateway_hides_internal_scan_exception_details(tmp_path):
     rendered = json.dumps(payload, ensure_ascii=False)
     assert exc_info.value.code == 500
     assert payload["error"]["code"] == "local_scan_unexpected"
-    assert "DrawFlowClient.exe" in payload["error"]["message"]
+    assert "重新启动 DrawFlow" in payload["error"]["message"]
     assert "C:\\" not in rendered
     assert "Traceback" not in rendered
     assert "token=abc123" not in rendered

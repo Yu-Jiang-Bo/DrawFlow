@@ -55,7 +55,7 @@ class LocalGatewayTaskMixin:
             self._send_client_error(
                 HTTPStatus.INTERNAL_SERVER_ERROR,
                 LocalClientError(
-                    "本地客户端处理渲染请求时发生异常，请重新启动 DrawFlowClient.exe 后重试",
+                    "本地客户端处理渲染请求时发生异常，请重新启动 DrawFlow 后重试",
                     code="local_render_unexpected",
                 ),
             )
@@ -103,7 +103,7 @@ class LocalGatewayTaskMixin:
             self._send_client_error(
                 HTTPStatus.INTERNAL_SERVER_ERROR,
                 LocalClientError(
-                    "本地客户端扫描模板时发生异常，请重新启动 DrawFlowClient.exe 后重试。",
+                    "本地客户端扫描模板时发生异常，请重新启动 DrawFlow 后重试。",
                     code="local_scan_unexpected",
                 ),
             )

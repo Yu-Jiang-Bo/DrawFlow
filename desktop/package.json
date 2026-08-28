@@ -1,0 +1,54 @@
+{
+  "name": "drawflow-desktop",
+  "version": "1.0.0",
+  "description": "DrawFlow Windows desktop client",
+  "private": true,
+  "main": "main.cjs",
+  "scripts": {
+    "test": "node --test test/*.test.cjs",
+    "check": "node --check main.cjs && node --check desktop-runtime.cjs && node --check desktop-security.cjs && node --check desktop-config.cjs && node --check preload.cjs",
+    "build:win": "electron-builder --win nsis --publish never"
+  },
+  "devDependencies": {
+    "electron": "44.0.0",
+    "electron-builder": "26.15.3"
+  },
+  "build": {
+    "appId": "com.drawflow.desktop",
+    "productName": "DrawFlow",
+    "artifactName": "DrawFlow-Setup-${version}.${ext}",
+    "asar": true,
+    "files": [
+      "main.cjs",
+      "preload.cjs",
+      "desktop-runtime.cjs",
+      "desktop-security.cjs",
+      "desktop-config.cjs",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "build/client",
+        "to": "client",
+        "filter": [
+          "DrawFlowClient.exe",
+          "_internal/**",
+          "drawflow-client.json"
+        ]
+      }
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "nsis": {
+      "perMachine": false,
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "DrawFlow"
+    }
+  }
+}

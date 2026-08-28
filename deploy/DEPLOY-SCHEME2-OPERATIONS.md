@@ -7,20 +7,20 @@
 | 部署位置 | 文件 | SHA256 |
 |---|---|---|
 | Linux 中央服务器 | `drawflow-central-linux-20260720-scheme2-r10.zip` | `7E9E3A7239E15E94971D68C715E55FD82C079EF48AAF5D9D952B43916701EBEC` |
-| Windows 出图电脑 | `drawflow-client-20260720-scheme2-r8.zip` | `A8CDEC621B2EF9800E9BC9F339DD6AFFA77B1D88EEE7D16C5383CDF289198BBA` |
+| Windows 出图电脑 | `DrawFlow-Setup-<version>.exe` | 每次发布单独登记 |
 
 开发机上的完整路径：
 
 ```text
 C:\Users\Administrator\Desktop\image\custom-renderer\release\drawflow-central-linux-20260720-scheme2-r10.zip
-C:\Users\Administrator\Desktop\image\custom-renderer\release\drawflow-client-20260720-scheme2-r8.zip
+C:\Users\Administrator\Desktop\image\custom-renderer\release\desktop-<version>\DrawFlow-Setup-<version>.exe
 ```
 
 SHA256 用于确认 zip 没有传输损坏且没有拿错版本。它是校验摘要，不是密码或加密。Windows 校验命令：
 
 ```powershell
 Get-FileHash .\drawflow-central-linux-20260720-scheme2-r10.zip -Algorithm SHA256
-Get-FileHash .\drawflow-client-20260720-scheme2-r8.zip -Algorithm SHA256
+Get-FileHash .\DrawFlow-Setup-<version>.exe -Algorithm SHA256
 ```
 
 Linux 校验命令：
@@ -35,7 +35,7 @@ sha256sum drawflow-central-linux-20260720-scheme2-r10.zip
 
 - Linux 中央服务监听 `8765`，提供 Web/API、模板、规则、不可变版本和 bundle 下载，不安装或调用 Illustrator。
 - Windows 客户端只监听 `127.0.0.1:8766`，下载所选模板、校验 SHA256、检查字体并调用本机 Illustrator。
-- 浏览器始终访问 `http://127.0.0.1:8766/`。不要把公网中央网页当成正式渲染入口。
+- DrawFlow Electron 窗口始终加载 `http://127.0.0.1:8766/`，但用户不使用系统浏览器。不要把公网中央网页当成正式渲染入口。
 - 正式渲染不调用 LLM。DeepSeek 配置只留在中央服务器。
 
 ## 3. Linux 中央服务首次部署
@@ -165,74 +165,20 @@ cd /opt/drawflow-central-r10
 
 ## 5. Windows 客户端部署
 
-### 5.1 校验和解压
+### 5.1 安装与启动前检查
 
-把 `drawflow-client-20260720-scheme2-r8.zip` 发送到出图电脑，在 PowerShell 中执行：
+把 `DrawFlow-Setup-<version>.exe` 发送给出图同事。先比对发布时登记的 SHA256，再双击安装；不要发送或手工解压内部 `DrawFlowClient.exe` 与 `_internal`。电脑必须安装并激活 Adobe Illustrator 和模板所需字体，不需要安装 Python、Node.js 或 DeepSeek API Key。
 
-```powershell
-Get-FileHash .\drawflow-client-20260720-scheme2-r8.zip -Algorithm SHA256
-```
-
-预期：
-
-```text
-A8CDEC621B2EF9800E9BC9F339DD6AFFA77B1D88EEE7D16C5383CDF289198BBA
-```
-
-把整个 zip 解压到独立目录，例如 `E:\DrawFlow`：
+若网络策略要求预检，可执行：
 
 ```powershell
-New-Item -ItemType Directory -Force E:\DrawFlow | Out-Null
-Expand-Archive -LiteralPath .\drawflow-client-20260720-scheme2-r8.zip -DestinationPath E:\DrawFlow -Force
-Get-ChildItem E:\DrawFlow
-```
-
-至少应看到：
-
-```text
-DrawFlowClient.exe
-_internal
-drawflow-client.json
-drawflow-client.example.json
-README-CLIENT.md
-start-client.bat
-```
-
-不要只复制 exe；`_internal` 和 `drawflow-client.json` 必须与 exe 保持同级。
-
-### 5.2 启动前检查
-
-客户端已预置中央地址，不需要手工改配置：
-
-```powershell
-Get-Content E:\DrawFlow\drawflow-client.json
 Test-NetConnection 162.14.120.240 -Port 8765
 Invoke-RestMethod http://162.14.120.240:8765/api/health
 ```
 
-配置文件预期为：
+### 5.2 启动和验收
 
-```json
-{
-  "central_url": "http://162.14.120.240:8765"
-}
-```
-
-电脑还必须安装并激活 Adobe Illustrator，并安装模板需要的字体。客户端不需要安装 Python，也不需要 DeepSeek API Key。
-
-### 5.3 启动和验收
-
-双击：
-
-```text
-E:\DrawFlow\DrawFlowClient.exe
-```
-
-程序应自动打开：
-
-```text
-http://127.0.0.1:8766/
-```
+从开始菜单或桌面快捷方式打开 `DrawFlow`。应用必须显示独立桌面窗口而非系统浏览器；后台网关只在 `127.0.0.1:8766` 监听。
 
 PowerShell 验证：
 
@@ -241,42 +187,18 @@ Invoke-RestMethod http://127.0.0.1:8766/health | ConvertTo-Json
 Invoke-RestMethod http://127.0.0.1:8766/api/templates | ConvertTo-Json -Depth 5
 ```
 
-`/health` 中必须包含：
-
-```json
-{
-  "ok": true,
-  "role": "local-client",
-  "central": "http://162.14.120.240:8765"
-}
-```
-
-选择模板并渲染时，客户端会按 manifest 下载当前活动 bundle，校验所有 SHA256 后缓存到 `%LOCALAPPDATA%\DrawFlow\templates`。同一版本再次使用时直接命中缓存；版本变化时才下载新版本。
+`/health` 必须包含 `ok: true`、`role: local-client` 和构建时配置的 `central` 地址；并且包含 `render_in_progress`，用于桌面壳在任务执行期间不强制终止本地网关。选择模板并渲染时，客户端会按 manifest 下载当前活动 bundle，校验所有 SHA256 后缓存到 `%LOCALAPPDATA%\DrawFlow\templates`。
 
 ## 6. 在开发机做干净客户端测试
 
-可以先在当前开发机测试正式客户端 zip。开发机存在 `C:\Users\Administrator\Desktop\image` 不会影响正式包，因为 exe 使用包内 `_internal` 资源，并优先读取 exe 同目录的 `drawflow-client.json`，不会读取项目目录脚本。
-
-为了排除旧缓存和旧进程干扰，建议这样测试：
+在无源码的 Windows 用户目录安装 `DrawFlow-Setup-<version>.exe`，从 `DrawFlow` 快捷方式启动。为了排除旧缓存和旧进程干扰，可先执行：
 
 ```powershell
 Get-NetTCPConnection -LocalPort 8766 -State Listen -ErrorAction SilentlyContinue
 $env:DRAWFLOW_LOCAL_DATA_DIR = "$env:LOCALAPPDATA\DrawFlow-Package-Test"
-New-Item -ItemType Directory -Force C:\DrawFlowClient-Package-Test | Out-Null
-Expand-Archive -LiteralPath "C:\Users\Administrator\Desktop\image\custom-renderer\release\drawflow-client-20260720-scheme2-r8.zip" -DestinationPath C:\DrawFlowClient-Package-Test -Force
-Set-Location C:\DrawFlowClient-Package-Test
-.\DrawFlowClient.exe
 ```
 
-如果第一条命令显示已有 `8766` 监听进程，先正常关闭旧 DrawFlowClient 窗口，再启动新包。测试后关闭客户端；`DRAWFLOW_LOCAL_DATA_DIR` 只对当前 PowerShell 会话有效。
-
-干净测试的判断标准：
-
-- 浏览器打开 `http://127.0.0.1:8766/`；
-- `/health` 的 `central` 是 `http://162.14.120.240:8765`；
-- 页面能列出中央模板；
-- 首次渲染在 `DrawFlow-Package-Test\templates` 生成模板缓存；
-- Illustrator 生成 AI8 输出，第二次渲染同版本不重复下载。
+如果第一条命令显示已有监听进程，先关闭旧 DrawFlow 窗口再启动新包。干净测试标准：桌面窗口可列出中央模板；`/health` 指向构建时中央地址；首次渲染产生模板缓存与 AI8 输出，第二次同版本渲染不重复下载；覆盖安装新版 Setup 后测试数据目录保持完整。
 
 ## 7. 后续模板更新
 
@@ -311,10 +233,9 @@ Set-Location C:\DrawFlowClient-Package-Test
 ```powershell
 Invoke-RestMethod http://127.0.0.1:8766/health
 Invoke-RestMethod http://162.14.120.240:8765/api/health
-Get-Content E:\DrawFlow\drawflow-client.json
 ```
 
-`central` 不能是 `http://127.0.0.1:8765`。若是，说明启动的是旧客户端目录或旧进程。
+`central` 不能是 `http://127.0.0.1:8765`。若是，说明启动的是旧安装版本或旧进程；由管理员重新构建并分发 Setup，用户不应手工编辑安装资源。
 
 ## 9. 安全边界
 

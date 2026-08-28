@@ -4,7 +4,7 @@
 
 本文档只描述方案二的中央服务。中央服务负责 Web/API、模板与规则中心、DeepSeek 中转、不可变模板版本、SHA256 manifest、bundle 下载和备份；中央服务不安装 Adobe Illustrator，也不做真实 `.ai` 渲染。
 
-真实扫描和渲染由用户电脑上的 `DrawFlowClient.exe` 完成，见 `deploy/DEPLOY-DESKTOP-AGENT.md`。
+真实扫描和渲染由用户电脑上的 DrawFlow 桌面客户端完成，见 `deploy/DEPLOY-DESKTOP-AGENT.md`。
 
 ## 1. 构建中央发布包
 
@@ -155,4 +155,4 @@ http://<central-host>:8765/api/health
 - `/api/runtime/templates/{id}/bundle/{version}` 能下载 zip。
 - 日志和发布包不包含 DeepSeek API Key、密码或个人绝对路径。
 
-真实 `.ai` 渲染验收必须在安装 Illustrator 的用户电脑上通过 `DrawFlowClient.exe` 完成。
+真实 `.ai` 渲染验收必须在安装 Illustrator 的用户电脑上通过 DrawFlow 桌面客户端完成。

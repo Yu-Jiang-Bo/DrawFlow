@@ -3664,7 +3664,7 @@ INDEX_HTML = """<!doctype html>
       if (code === "central_unreachable" || code.startsWith("central_http_")) return cleanErrorText(raw);
       if (code === "local_render_unexpected") return cleanErrorText(raw);
       if (/failed to fetch|networkerror|load failed/.test(text)) {
-        return "无法连接本地 DrawFlow 客户端（127.0.0.1:8766）。请确认 DrawFlowClient.exe 仍在运行后再试。";
+        return "无法连接本地 DrawFlow 客户端（127.0.0.1:8766）。请确认 DrawFlow 已启动后再试。";
       }
       if (raw) return cleanErrorText(raw);
       if (!raw) {
