@@ -109,6 +109,34 @@ def test_build_execution_task_resolves_runtime_paths_for_illustrator(tmp_path, m
     assert Path(execution["layout_warning_file"]).is_absolute()
 
 
+def test_component_execution_defers_output_transforms_without_preview(tmp_path):
+    execution = build_v2_execution_task(
+        compiled_task(),
+        template_ai=tmp_path / "template.ai",
+        output_ai=tmp_path / "component.ai",
+        values={"font": "F10", "design": "03", "name": "Alice"},
+        defer_output_transforms=True,
+    )
+
+    assert execution["defer_output_transforms"] is True
+    assert "preview_png" not in execution
+
+
+def test_component_execution_rejects_deferred_transform_with_preview(tmp_path):
+    with pytest.raises(V2TemplateRendererError) as exc_info:
+        build_v2_execution_task(
+            compiled_task(),
+            template_ai=tmp_path / "template.ai",
+            output_ai=tmp_path / "component.ai",
+            values={"font": "F10", "design": "03", "name": "Alice"},
+            output_key="Output_main",
+            preview_png=tmp_path / "component.png",
+            defer_output_transforms=True,
+        )
+
+    assert exc_info.value.code == "deferred_transform_preview_unsupported"
+
+
 def test_explicit_option_selections_are_accepted_without_mapping_values(tmp_path):
     execution = build_v2_execution_task(
         compiled_task(),

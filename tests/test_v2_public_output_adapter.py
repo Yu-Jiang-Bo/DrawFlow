@@ -117,6 +117,7 @@ def test_v2_public_h_master_builder_returns_paged_composer_plan(monkeypatch, tmp
     task = json.loads(master.task_files[0].read_text(encoding="utf-8"))
     assert task["type"] == "compose_png_master_pages"
     assert task["page_count"] == 2
+    assert task["output"] == {"outline_text": True, "pathfinder_merge": True}
     assert master.summary_files[0]["artboard_height_mm"] == "250"
     assert master.summary_files[1]["artboard_height_mm"] == "300"
     assert master.bundle_members[1]["arcname"].endswith("-02.ai")
