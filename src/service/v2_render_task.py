@@ -345,7 +345,12 @@ def _slot_actions(
             slot_scan,
             slot_key,
             f"$.{output_key}.{group}.{option_key}.{slot_key}.tails",
-            require_glyphs=bool(slot_data.get("tails")),
+            require_confirmed_samples=bool(slot_data.get("tails")),
+            # Existing published direct_text templates may only contain a
+            # scanned sample letter.  Their JSX path proves full PUA coverage
+            # against that sample at render time.  Other tail presets replace
+            # text through a static glyph mapping and must remain explicit.
+            require_glyphs=bool(slot_data.get("tails")) and preset != "direct_text",
             font_dependencies=_tail_font_dependencies(slot_data, option),
         )
         if preset == "path_text" and "path" not in text_kind.lower():
@@ -544,7 +549,8 @@ def _font_tail_sources(
                 slot_scan,
                 slot_key,
                 f"$.{output_key}.font.{font_key}.{slot_key}.tails",
-                require_glyphs=bool(slot_data.get("tails")),
+                require_confirmed_samples=bool(slot_data.get("tails")),
+                require_glyphs=bool(slot_data.get("tails")) and preset != "direct_text",
                 font_dependencies=_tail_font_dependencies(slot_data, font_data),
             )
             if tails:
@@ -620,6 +626,7 @@ def _tail_specs(
     slot_key: str,
     path: str,
     *,
+    require_confirmed_samples: bool,
     require_glyphs: bool,
     font_dependencies: Any = None,
 ) -> list[dict[str, Any]]:
@@ -633,7 +640,7 @@ def _tail_specs(
         if isinstance(tail, Mapping) and str(tail.get("key") or "")
     }
     missing_confirmed = sorted(scan_slot_tail_keys - config_tail_keys, key=str.casefold)
-    if require_glyphs and missing_confirmed:
+    if require_confirmed_samples and missing_confirmed:
         raise V2RenderTaskError(
             "tail_sample_unconfirmed",
             "All scanned tail samples for a tail_text slot must be confirmed in config.",
