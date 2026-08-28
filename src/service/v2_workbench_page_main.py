@@ -43,11 +43,11 @@ PAGE_MAIN = """
 
       <section class="upload-pane" data-stage-panel="upload" aria-label="上传与扫描">
         <section class="pane">
-          <div class="pane-header"><h3>模板草稿</h3></div>
+          <div class="pane-header"><h3>新建模板</h3></div>
           <div class="pane-body field-grid draft-field-grid">
-            <label><span>模板 ID（创建后固定）</span><input id="templateId" name="template_id" type="text" placeholder="例如 JJMB202608060001" autocomplete="off" /></label>
-            <label><span>模板名称</span><input id="templateName" name="template_name" type="text" placeholder="输入中文模板名称" autocomplete="off" /></label>
-            <label><span>店铺</span><input id="shopName" name="shop_name" type="text" placeholder="选填" autocomplete="off" /></label>
+            <label><span>模板 ID *（创建后固定）</span><input id="templateId" name="template_id" type="text" placeholder="例如 JJMB202608060001" autocomplete="off" /></label>
+            <label><span>模板名称 *</span><input id="templateName" name="template_name" type="text" placeholder="输入中文模板名称" autocomplete="off" /></label>
+            <label><span>店铺（选填）</span><input id="shopName" name="shop_name" type="text" placeholder="选填" autocomplete="off" /></label>
           </div>
         </section>
         <section class="pane upload-scan-pane">

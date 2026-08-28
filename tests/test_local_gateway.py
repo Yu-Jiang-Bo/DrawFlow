@@ -384,6 +384,38 @@ def test_local_gateway_serves_v2_workbench_fallback_when_central_is_unavailable(
     assert "function renderStructureTree" in structure_tree_js
 
 
+def test_local_gateway_serves_the_packaged_desktop_root_when_central_html_is_stale(tmp_path):
+    class StaleCentral:
+        def proxy(self, *args, **kwargs):
+            return 200, {"Content-Type": "text/html"}, b"<html>central-old</html>"
+
+    class FakeClient:
+        def __init__(self):
+            self.jobs = JobStore(tmp_path / "jobs")
+            self.data_dir = tmp_path
+            self.central = StaleCentral()
+
+    handler = type(
+        "TestDesktopRootGatewayRequestHandler",
+        (local_gateway.LocalGatewayRequestHandler,),
+        {"client": FakeClient()},
+    )
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    worker = threading.Thread(target=server.serve_forever, daemon=True)
+    worker.start()
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{server.server_address[1]}/") as response:
+            html = response.read().decode("utf-8")
+    finally:
+        server.shutdown()
+        server.server_close()
+        worker.join(timeout=2)
+
+    assert 'class="app-sidebar"' in html
+    assert 'href="/?page=jobs"' in html
+    assert "central-old" not in html
+
+
 def test_local_gateway_falls_back_to_local_v2_static_when_central_returns_not_found(tmp_path):
     class StaleCentral:
         def proxy(self, *args, **kwargs):

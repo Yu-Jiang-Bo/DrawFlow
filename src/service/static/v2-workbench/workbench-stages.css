@@ -513,3 +513,208 @@
     flex-basis: auto;
   }
 }
+
+/* Desktop client shell: shared with the primary DrawFlow workbench. */
+html {
+  min-width: 1180px;
+  min-height: 100%;
+  background: #111c2c;
+}
+
+body {
+  display: flex;
+  min-width: 1180px;
+  min-height: 100vh;
+  overflow-x: auto;
+  background: #111c2c;
+  font-family: "Segoe UI", "Microsoft YaHei", Arial, sans-serif;
+}
+
+.v2-desktop-frame {
+  display: flex;
+  width: 100%;
+  min-width: 1180px;
+  min-height: 100vh;
+}
+
+.v2-desktop-sidebar {
+  position: sticky;
+  top: 0;
+  display: flex;
+  flex: 0 0 254px;
+  flex-direction: column;
+  width: 254px;
+  height: 100vh;
+  padding: 30px 18px 24px;
+  color: #d6e0ec;
+  background: #111c2c;
+}
+
+.v2-sidebar-brand {
+  display: grid;
+  gap: 5px;
+  padding: 0 12px 28px;
+  color: #ffffff;
+  text-decoration: none;
+}
+
+.v2-sidebar-brand strong {
+  font-size: 22px;
+  letter-spacing: -0.35px;
+}
+
+.v2-sidebar-brand span {
+  color: #9fb0c3;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.v2-sidebar-label {
+  margin: 0 12px 10px;
+  color: #72859a;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+}
+
+.v2-desktop-sidebar .v2-desktop-nav {
+  position: static;
+  display: grid;
+  width: 100%;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  transform: none;
+}
+
+.v2-desktop-sidebar .v2-desktop-nav a {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  min-height: 42px;
+  justify-content: flex-start;
+  padding: 0 12px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  color: #b6c4d3;
+  background: transparent;
+  font-size: 14px;
+  text-decoration: none;
+}
+
+.v2-desktop-sidebar .v2-desktop-nav a:hover,
+.v2-desktop-sidebar .v2-desktop-nav a[aria-current="page"] {
+  border-color: rgba(82, 142, 255, 0.38);
+  color: #ffffff;
+  background: #245db5;
+}
+
+.v2-sidebar-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: auto;
+  padding: 14px 12px 0;
+  border-top: 1px solid rgba(183, 199, 216, 0.16);
+  color: #94a8bd;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.v2-sidebar-note span {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #41bd82;
+}
+
+.v2-desktop-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 100vh;
+  background: #edf1f5;
+}
+
+.v2-desktop-main .v2-header {
+  position: sticky;
+  top: 0;
+  min-height: 76px;
+  color: #17212b;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 1px 0 rgba(24, 42, 66, 0.11);
+}
+
+.v2-desktop-main .v2-header-inner {
+  width: 100%;
+  max-width: none;
+  min-height: 76px;
+  padding: 0 32px;
+}
+
+.v2-desktop-main .v2-brand {
+  color: #17212b;
+}
+
+.v2-desktop-main .v2-brand h1 {
+  font-size: 20px;
+}
+
+.v2-desktop-main .v2-brand p {
+  color: #68788b;
+}
+
+.v2-desktop-main .v2-service-status {
+  display: inline-flex;
+  align-items: center;
+  border-color: #cde5d8;
+  color: #217a50;
+  background: #f0faf5;
+}
+
+.v2-health-group {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.v2-desktop-main .v2-service-status::before {
+  background: #41bd82;
+}
+
+.v2-desktop-main .v2-service-status.is-busy {
+  border-color: #c9daf7;
+  color: #235aa9;
+  background: #f1f6ff;
+}
+
+.v2-desktop-main .v2-service-status.is-busy::before {
+  background: #3976d7;
+}
+
+.v2-desktop-main .v2-service-status.is-error {
+  border-color: #edc4c0;
+  color: #a13d36;
+  background: #fff5f4;
+}
+
+.v2-desktop-main .v2-service-status.is-error::before {
+  background: #ce5148;
+}
+
+.v2-desktop-main .v2-shell {
+  width: 100%;
+  max-width: none;
+  min-height: calc(100vh - 76px);
+  padding: 28px 32px 38px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scan-running-progress span {
+    animation: none;
+  }
+}

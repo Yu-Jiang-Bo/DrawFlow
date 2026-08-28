@@ -23,6 +23,15 @@ from .web_page import INDEX_HTML as FALLBACK_HTML
 
 
 class LocalGatewayHttpMixin:
+    def _send_desktop_workbench(self) -> None:
+        """Serve the desktop page bundled with this local client.
+
+        The Electron shell must not depend on central HTML being upgraded at
+        exactly the same time: it still uses the existing API routes below for
+        central data, local rendering, and local job downloads.
+        """
+        self._send_html(FALLBACK_HTML)
+
     def _handle_v2_trial_preview(self, path: str) -> None:
         parts = path.strip("/").split("/")
         if (

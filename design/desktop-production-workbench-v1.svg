@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="1024" viewBox="0 0 1440 1024" role="img" aria-labelledby="title desc">
+  <title id="title">DrawFlow 出图任务 · 初版风格审核原型</title>
+  <desc id="desc">深色侧栏、白色顶栏、四步任务导轨、主任务表单、右侧任务卡和底部生成操作区。</desc>
+  <style>
+    .font{font-family:Segoe UI,Microsoft YaHei,Arial,sans-serif}.text{fill:#17212b}.muted{fill:#64748b}.faint{fill:#91a0b2}.side{fill:#b9c7d7}.white{fill:#fff}.blue{fill:#1456d9}.blueText{fill:#2363c6}.green{fill:#1e7a53}.red{fill:#b4433a}.amber{fill:#9a6509}.h1{font-size:23px;font-weight:700}.h2{font-size:20px;font-weight:700}.h3{font-size:16px;font-weight:700}.body{font-size:14px}.small{font-size:12px}.tiny{font-size:11px}.line{stroke:#d8e1eb}.dash{stroke:#a8b7c7;stroke-dasharray:7 6}
+  </style>
+  <rect width="1440" height="1024" fill="#edf1f5"/>
+  <rect width="254" height="1024" fill="#101c2c"/>
+  <rect x="254" width="1186" height="76" fill="#fff"/><line x1="254" y1="76" x2="1440" y2="76" stroke="#d8e1eb"/>
+  <rect x="28" y="30" width="34" height="34" rx="9" fill="#1456d9"/><path d="M39 41h12v12H39zM42 45h6M42 49h6" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round"/>
+  <text class="font white h1" x="76" y="49">DrawFlow</text><text class="font side small" x="28" y="93">订单效果图与 V2 工作台</text><text class="font faint tiny" x="29" y="147">工作台</text>
+  <rect x="18" y="164" width="218" height="42" rx="7" fill="#1f3e66" stroke="#2b5590"/><text class="font white body" x="49" y="190">出图任务</text>
+  <text class="font side body" x="49" y="242">V2 工作台</text><text class="font side body" x="49" y="294">任务记录</text>
+  <line x1="30" y1="919" x2="224" y2="919" stroke="#34485e"/><circle cx="43" cy="951" r="4" fill="#52c486"/><text class="font side small" x="55" y="955">本机生产环境</text><text class="font faint tiny" x="30" y="980">渲染与成品文件均在本机处理</text>
+
+  <text class="font text h2" x="286" y="35">出图任务</text><text class="font muted small" x="286" y="55">生产工作台 / 新建任务</text>
+  <rect x="1075" y="20" width="132" height="34" rx="17" fill="#e9f7ef" stroke="#c7e5d4"/><circle cx="1093" cy="37" r="4" fill="#35a86d"/><text class="font green small" x="1104" y="41">本机已就绪</text>
+  <rect x="1218" y="20" width="150" height="34" rx="17" fill="#edf4ff" stroke="#cbddfb"/><circle cx="1236" cy="37" r="4" fill="#1456d9"/><text class="font blueText small" x="1247" y="41">中央服务已连接</text>
+
+  <rect x="286" y="104" width="1082" height="118" rx="11" fill="#fff" stroke="#d8e1eb"/>
+  <text class="font muted tiny" x="312" y="133">当前流程</text>
+  <line x1="359" y1="165" x2="1245" y2="165" stroke="#d1dce8" stroke-width="2"/>
+  <circle cx="359" cy="165" r="14" fill="#1456d9"/><text class="font white small" x="355" y="170">1</text><text class="font text small" x="330" y="196">选择模板</text>
+  <circle cx="654" cy="165" r="14" fill="#eaf2ff" stroke="#8fb2ec"/><text class="font blueText small" x="650" y="170">2</text><text class="font muted small" x="621" y="196">上传订单</text>
+  <circle cx="950" cy="165" r="14" fill="#eaf2ff" stroke="#8fb2ec"/><text class="font blueText small" x="946" y="170">3</text><text class="font muted small" x="915" y="196">生成效果图</text>
+  <circle cx="1245" cy="165" r="14" fill="#f6f8fa" stroke="#c4cfdb"/><text class="font muted small" x="1241" y="170">4</text><text class="font muted small" x="1216" y="196">下载成品</text>
+
+  <rect x="286" y="246" width="744" height="612" rx="12" fill="#fff" stroke="#d8e1eb"/>
+  <text class="font text h2" x="318" y="289">新建出图任务</text><text class="font muted body" x="318" y="314">选择模板并上传订单表，系统将在本机生成效果图。</text>
+  <line x1="318" y1="340" x2="998" y2="340" stroke="#e0e7ef"/>
+  <text class="font text h3" x="318" y="381">01　选择模板</text><text class="font muted small" x="318" y="404">当前模板与同步状态在此确认</text>
+  <text class="font text small" x="318" y="445">出图模板</text><rect x="318" y="460" width="680" height="46" rx="6" fill="#fff" stroke="#bcc9d7"/><text class="font muted body" x="334" y="489">请选择模板</text><path d="M969 479l7 7 7-7" fill="none" stroke="#65758a" stroke-width="1.8" stroke-linecap="round"/>
+  <line x1="318" y1="540" x2="998" y2="540" stroke="#e0e7ef"/>
+  <text class="font text h3" x="318" y="581">02　上传订单表</text><text class="font muted small" x="318" y="604">支持 Excel、CSV；文件将在本机处理</text>
+  <rect x="318" y="626" width="680" height="132" rx="8" fill="#f8fbff" stroke="#9eb2c7" stroke-dasharray="7 6"/>
+  <path d="M645 652v25M637 662l8-10 8 10M632 692h26" fill="none" stroke="#1456d9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  <text class="font text body" x="684" y="670">选择订单表格</text><text class="font muted small" x="684" y="693">拖入文件或点击选择</text>
+  <text class="font faint tiny" x="318" y="814">视觉审核示例：页面只保留现有模板选择、订单上传与生成操作。</text>
+
+  <rect x="1054" y="246" width="314" height="246" rx="12" fill="#fff" stroke="#d8e1eb"/>
+  <text class="font text h3" x="1080" y="287">本次任务</text><rect x="1286" y="271" width="54" height="24" rx="12" fill="#eef4ff"/><text class="font blueText tiny" x="1298" y="287">准备中</text>
+  <line x1="1080" y1="314" x2="1340" y2="314" stroke="#e0e7ef"/>
+  <text class="font muted small" x="1080" y="348">模板</text><text class="font text small" x="1080" y="371">等待选择</text>
+  <text class="font muted small" x="1080" y="410">订单文件</text><text class="font text small" x="1080" y="433">等待上传</text>
+  <text class="font faint tiny" x="1080" y="467">完成准备后可生成效果图</text>
+
+  <rect x="1054" y="516" width="314" height="342" rx="12" fill="#fff" stroke="#d8e1eb"/>
+  <text class="font text h3" x="1080" y="557">最近任务</text><text class="font muted tiny" x="1287" y="557">视觉示例</text><line x1="1080" y1="580" x2="1340" y2="580" stroke="#e0e7ef"/>
+  <circle cx="1095" cy="620" r="5" fill="#37a96d"/><text class="font text small" x="1112" y="625">任务示例 · 已完成</text><text class="font muted tiny" x="1112" y="647">可下载成品文件</text><line x1="1080" y1="667" x2="1340" y2="667" stroke="#edf1f5"/>
+  <circle cx="1095" cy="707" r="5" fill="#1456d9"/><text class="font text small" x="1112" y="712">任务示例 · 渲染中</text><text class="font muted tiny" x="1112" y="734">正在调用 Illustrator</text><line x1="1080" y1="754" x2="1340" y2="754" stroke="#edf1f5"/>
+  <circle cx="1095" cy="794" r="5" fill="#d59625"/><text class="font text small" x="1112" y="799">任务示例 · 等待处理</text><text class="font muted tiny" x="1112" y="821">等待确认订单文件</text>
+
+  <rect x="286" y="884" width="1082" height="84" rx="10" fill="#fff" stroke="#d8e1eb"/>
+  <text class="font text h3" x="318" y="920">准备完成后生成效果图</text><text class="font muted small" x="318" y="945">渲染与成品下载继续沿用当前客户端行为</text>
+  <rect x="1164" y="904" width="174" height="46" rx="7" fill="#1456d9"/><text class="font white body" x="1211" y="933">生成效果图</text>
+</svg>

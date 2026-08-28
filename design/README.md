@@ -9,6 +9,12 @@
 - `web-prototype-render-task-v2.svg`：出图任务页 V2
 - `web-prototype-template-management-v2.svg`：模板管理页 V2
 - `web-prototype-rule-config-v1.svg`：规则配置页 V1
+- `desktop-production-workbench-v1.svg`：Electron 客户端专业生产工作台 V1（出图任务）
+- `desktop-v2-workbench-v1.svg`：Electron 客户端专业生产工作台 V1（新建模板与扫描）
+- `desktop-v2-structure-config-v1.svg`：Electron 客户端专业生产工作台 V1（扫描后的字段配置）
+- `desktop-v2-option-rules-v1.svg`：Electron 客户端专业生产工作台 V1（扫描后的预设处理）
+- `desktop-v2-preview-publish-v1.svg`：Electron 客户端专业生产工作台 V1（样例预览与发布）
+- `desktop-task-history-v1.svg`：Electron 客户端专业生产工作台 V1（轻量任务记录）
 
 ## 本版设计取向
 
@@ -30,3 +36,11 @@
 - 自然语言规则说明是否需要接入 LLM 生成配置草稿。
 - 结构化规则预览是否足够让同事审核。
 - 规则配置页是否还需要增加审批角色和发布记录。
+
+## 桌面客户端 V1
+
+- 采用深色固定侧栏、浅色工作区、紧凑信息密度和单一冷蓝强调色，避免看起来像直接嵌入浏览器的网页。
+- 不改变现有模板、订单上传、渲染、任务记录或下载功能；原型只重组现有功能的信息层级和状态呈现。
+- 原型文件可直接以浏览器或图片查看器打开，无需安装 Pencil。当前环境未连接 Pencil，因此不提供虚假的 Pencil 源文件。
+- 三张桌面原型以用户认可的首版完整工作台构图为准：包含右侧辅助信息卡、代表性状态与底部主操作区。示例任务文本仅用于审核信息层级，不代表新增接口、数据或业务动作。
+- V2 原型按现有工作流拆成“新建模板与扫描 → 字段配置 → 预设处理 → 样例预览与发布”；新建模板保留必填的模板 ID、模板名称与选填店铺，任务记录仅保留最近任务列表。

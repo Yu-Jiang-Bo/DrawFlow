@@ -44,6 +44,8 @@ PAGE_FINISH = """
       <div class="v2-bottom-actions"><button id="confirmStageBtn" type="button">确认本页核验</button><button id="saveAndNextOptionBtn" type="button">保存并配置下一个选项</button>
         <button id="saveDraftBtn" type="button">保存草稿</button><button id="trialRenderBtn" type="button">使用样例试渲染</button><button id="publishVersionBtn" type="button" disabled>发布新版本</button></div></footer>
   </main>
+    </div>
+  </div>
 
   <div class="modal-overlay scan-running-overlay" id="scanRunningOverlay" role="status" aria-live="polite" aria-modal="true" aria-labelledby="scanRunningTitle" aria-describedby="scanRunningMessage" hidden>
     <section class="modal-dialog scan-running-dialog"><header><h2 id="scanRunningTitle">正在扫描模板</h2></header><section class="modal-body">

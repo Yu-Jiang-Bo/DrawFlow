@@ -11,6 +11,11 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 CSS = (PROJECT_ROOT / "src/service/static/v2-workbench/workbench.css").read_text(encoding="utf-8")
 STAGE_CSS = (PROJECT_ROOT / "src/service/static/v2-workbench/workbench-stages.css").read_text(encoding="utf-8")
 ALL_CSS = CSS + "\n" + STAGE_CSS
+PREVIEW_PROTOTYPE = (PROJECT_ROOT / "design/desktop-v2-preview-publish-v1.svg").read_text(encoding="utf-8")
+DT4_PROTOTYPES = [
+    prototype.read_text(encoding="utf-8")
+    for prototype in sorted((PROJECT_ROOT / "design").glob("desktop-*-v1.svg"))
+]
 JS = "\n".join(
     (PROJECT_ROOT / f"src/service/static/v2-workbench/{name}").read_text(encoding="utf-8")
     for name in [
@@ -108,8 +113,16 @@ REQUIRED_IDS = [
 
 def test_v2_workbench_page_exposes_independent_entry_contract():
     assert "<title>DrawFlow · V2 模板配置工作台</title>" in INDEX_HTML
-    assert 'href="/templates" data-nav-target="templates"' in INDEX_HTML
-    assert 'href="/templates" data-nav-target="templates" aria-current="page"' not in INDEX_HTML
+    assert 'class="v2-desktop-frame"' in INDEX_HTML
+    assert 'class="v2-desktop-sidebar"' in INDEX_HTML
+    assert 'class="v2-desktop-main"' in INDEX_HTML
+    assert 'href="/?page=jobs" data-nav-target="jobs"' in INDEX_HTML
+    assert 'id="v2LocalHealthText"' in INDEX_HTML
+    assert 'id="v2CentralHealthText"' in INDEX_HTML
+    assert "模板 ID *（创建后固定）" in INDEX_HTML
+    assert "模板名称 *" in INDEX_HTML
+    assert "店铺（选填）" in INDEX_HTML
+    assert 'href="/templates" data-nav-target="templates"' not in INDEX_HTML
     assert 'href="/v2/templates/workbench" data-nav-target="v2-workbench" aria-current="page"' in INDEX_HTML
     assert 'href="/static/v2-workbench/workbench.css"' in INDEX_HTML
     assert 'href="/static/v2-workbench/workbench-stages.css"' in INDEX_HTML
@@ -148,7 +161,7 @@ def test_v2_workbench_upload_stage_hides_later_configuration():
     upload_markup = INDEX_HTML[upload_start:structure_start]
     for forbidden in ["structureTree", "outputConfigRows", "fieldBindingRows", "optionMappingRows", "contentOptionRows"]:
         assert forbidden not in upload_markup
-    assert "模板草稿" in upload_markup
+    assert "新建模板" in upload_markup
     assert "上传并扫描模板" in upload_markup
     assert "扫描摘要" in upload_markup
     assert "进入结构与字段核验" in upload_markup
@@ -251,6 +264,8 @@ def test_v2_workbench_preview_contains_no_fake_sample_or_publication_success():
     assert "previewFieldDescriptors" in JS
     assert "trial.outputs" in JS
     assert "input.dataset.sampleHeader" in JS
+    assert "查看原图" not in PREVIEW_PROTOTYPE
+    assert all("#3478e5" not in prototype for prototype in DT4_PROTOTYPES)
 
 
 def test_v2_workbench_uses_controlled_business_inputs():
@@ -358,6 +373,14 @@ def test_v2_workbench_routes_are_isolated_from_legacy_page():
     assert '"workbench-validation-blockers.js"' in SERVER
     assert '"workbench-structure-tree.js"' in SERVER
     assert "self._send_html(WORKBENCH_HTML)" in SERVER
+
+
+def test_v2_workbench_uses_the_shared_desktop_client_frame_styles():
+    assert ".v2-desktop-sidebar" in STAGE_CSS
+    assert ".v2-desktop-main .v2-header" in STAGE_CSS
+    assert ".v2-health-group" in STAGE_CSS
+    assert ".v2-service-status.is-error" in STAGE_CSS
+    assert "min-width: 1180px" in STAGE_CSS
 
 
 def test_v2_workbench_http_manifest_refreshes_without_module_cache(monkeypatch):

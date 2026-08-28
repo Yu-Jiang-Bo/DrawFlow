@@ -16,9 +16,17 @@
 
 
   async function refreshTemplateList() {
-    const payload = await getJson(API_ROOT, "模板列表加载失败，请稍后重试。");
-    state.templates = Array.isArray(payload.templates) ? payload.templates : [];
-    renderTemplateList();
+    globalThis.setV2RuntimeStatus("v2LocalHealthText", "本机已就绪");
+    globalThis.setV2RuntimeStatus("v2CentralHealthText", "中央服务连接中", "busy");
+    try {
+      const payload = await getJson(API_ROOT, "模板列表加载失败，请稍后重试。");
+      state.templates = Array.isArray(payload.templates) ? payload.templates : [];
+      renderTemplateList();
+      globalThis.setV2RuntimeStatus("v2CentralHealthText", "中央服务已连接");
+    } catch (error) {
+      globalThis.setV2RuntimeStatus("v2CentralHealthText", "中央服务不可达", "error");
+      throw error;
+    }
   }
 
 

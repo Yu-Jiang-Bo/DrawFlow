@@ -56,7 +56,7 @@ class LocalGatewayRequestHandler(
                 }
             )
         elif path == "/":
-            self._send_central_or_fallback("/")
+            self._send_desktop_workbench()
         elif path == "/v2/templates/workbench":
             self._send_central_or_v2_workbench(path)
         elif path.startswith("/static/v2-workbench/"):

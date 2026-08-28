@@ -3,12 +3,16 @@ import textwrap
 from pathlib import Path
 
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
 HARNESS = r"""
 const assert = require("assert");
 const fs = require("fs");
 
 const ids = [
   "v2CheckRail", "templateList", "templateSearch", "templateId", "templateName", "shopName",
+  "v2LocalHealthText", "v2CentralHealthText",
   "newTemplateBtn", "refreshTemplatesBtn", "templateListStats", "currentTemplateContext", "backToUploadBtn", "draftStatusBadge", "draftVersion", "createDraftFromPublishedBtn",
   "uploadScanBadge", "scanSummaryMetrics", "scanSummaryWarning", "enterStructureBtn",
   "aiDropzone", "aiFile", "scanTemplateBtn", "rescanTemplateBtn", "scanProgress",
@@ -283,6 +287,44 @@ def test_v2_workbench_renders_scan_structure_groups_from_draft():
           assert(app.elements.scanSummary.textContent.includes("固定对象 1"));
         })().catch((error) => { console.error(error); process.exit(1); });
         """
+    )
+
+
+def test_v2_workbench_header_marks_both_services_ready_after_existing_template_request():
+    run_node(
+        r"""
+        (async () => {
+          let requests = 0;
+          const app = createApp(async (url) => {
+            requests += 1;
+            assert.strictEqual(url, "/api/v2/templates");
+            return response({ templates: [] });
+          });
+          await flush();
+          assert.strictEqual(requests, 1);
+          assert.strictEqual(app.elements.v2LocalHealthText.textContent, "本机已就绪");
+          assert.strictEqual(app.elements.v2CentralHealthText.textContent, "中央服务已连接");
+          assert(!app.elements.v2CentralHealthText.classList.contains("is-error"));
+        })().catch((error) => { console.error(error); process.exit(1); });
+        """,
+        cwd=PROJECT_ROOT,
+    )
+
+
+def test_v2_workbench_header_marks_central_unreachable_when_existing_template_request_fails():
+    run_node(
+        r"""
+        (async () => {
+          const app = createApp(async () => {
+            throw new Error("Failed to fetch");
+          });
+          await flush();
+          assert.strictEqual(app.elements.v2LocalHealthText.textContent, "本机已就绪");
+          assert.strictEqual(app.elements.v2CentralHealthText.textContent, "中央服务不可达");
+          assert(app.elements.v2CentralHealthText.classList.contains("is-error"));
+        })().catch((error) => { console.error(error); process.exit(1); });
+        """,
+        cwd=PROJECT_ROOT,
     )
 
 
