@@ -234,6 +234,32 @@ def test_normalizes_tail_glyph_proof_fields():
     assert normalized[1]["glyph_map"]["z"] == 0xE119
 
 
+def test_normalizes_template_scoped_opentype_tail_profile():
+    payload = pure_design_contract()
+    tail = payload["outputs"][0]["design"]["options"][1]["slots"][0]["tails"][0]
+    tail["opentype_feature"] = "AALT"
+    tail["opentype_alternate_index"] = 2
+
+    contract = normalize_v2_template_contract(payload)
+
+    normalized = contract["outputs"][0]["design"]["options"][1]["slots"][0]["tails"][0]
+    assert normalized["opentype_feature"] == "aalt"
+    assert normalized["opentype_alternate_index"] == 2
+
+
+def test_rejects_multiple_tail_glyph_proof_mechanisms():
+    payload = pure_design_contract()
+    tail = payload["outputs"][0]["design"]["options"][1]["slots"][0]["tails"][0]
+    tail["pua_base"] = 0xE100
+    tail["opentype_feature"] = "aalt"
+    tail["opentype_alternate_index"] = 2
+
+    result = check_v2_template_contract(payload)
+
+    assert result["ok"] is False
+    assert any("exactly one glyph proof" in error["message"] for error in result["errors"])
+
+
 def test_rejects_incomplete_tail_glyph_map():
     payload = pure_design_contract()
     payload["outputs"][0]["design"]["options"][1]["slots"][0]["tails"][0]["glyph_map"] = {"a": 0xE100}

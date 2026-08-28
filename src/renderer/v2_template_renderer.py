@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from .illustrator_bridge import IllustratorBridge
+from .v2_opentype_tail import OpenTypeTailError, materialize_selected_opentype_tail_assets
 from .v2_template_execution_contract import (
     V2TemplateRendererError,
     normalize_preview_execution_fields,
@@ -240,13 +241,25 @@ def build_v2_execution_task(
     normalized_selections = _normalize_selections(task, normalized_values, selections)
     _preflight_renderable_options(task, normalized_selections, selected_output_key)
     _preflight_required_slots(task, normalized_values, normalized_selections, selected_output_key)
+    resolved_template_ai = Path(template_ai).resolve()
+    resolved_output_ai = Path(output_ai).resolve()
+    try:
+        task = materialize_selected_opentype_tail_assets(
+            task,
+            values=normalized_values,
+            selections=normalized_selections,
+            output_ai=resolved_output_ai,
+            output_key=selected_output_key,
+        )
+    except OpenTypeTailError as exc:
+        raise V2TemplateRendererError(exc.code, str(exc)) from exc
     execution = {
         "$schema": V2_RENDER_EXECUTION_SCHEMA,
         "execution_protocol_version": V2_RENDER_EXECUTION_VERSION,
         "render_task_sha256": str(task.get("task_sha256") or ""),
         "render_task": task,
-        "template_ai": str(Path(template_ai)),
-        "output_ai": str(Path(output_ai)),
+        "template_ai": str(resolved_template_ai),
+        "output_ai": str(resolved_output_ai),
         "values": normalized_values,
         "selections": normalized_selections,
         "output": deepcopy(dict(task.get("output") or {})),
@@ -254,11 +267,11 @@ def build_v2_execution_task(
     if selected_output_key:
         execution["output_key"] = selected_output_key
     if preview_path:
-        execution["preview_png"] = str(Path(preview_path))
+        execution["preview_png"] = str(Path(preview_path).resolve())
         if preview_dpi is not None:
             execution["preview_dpi"] = float(preview_dpi)
     if warning_path:
-        execution["layout_warning_file"] = str(Path(warning_path))
+        execution["layout_warning_file"] = str(Path(warning_path).resolve())
     if pack_order_blocks:
         execution["pack_order_blocks"] = True
     return execution
@@ -284,7 +297,10 @@ def build_v2_order_column_task(
     order_nos = [str(item or "").strip() for item in (input_order_nos or [])]
     inputs: list[dict[str, str]] = []
     for index, path in enumerate(input_ai_files):
-        item = {"path": str(Path(path))}
+        # Illustrator opens composition inputs from its own process directory,
+        # not from this Python process. Relative paths fail in the real
+        # order-table renderer even though they pass Python-side validation.
+        item = {"path": str(Path(path).resolve())}
         if index < len(order_nos) and order_nos[index]:
             item["order_no"] = order_nos[index]
         if target_dimensions_by_input is not None and index < len(target_dimensions_by_input):
@@ -296,7 +312,7 @@ def build_v2_order_column_task(
         inputs.append(item)
     payload: dict[str, Any] = {
         "type": "compose_v2_order_column",
-        "output_ai": str(Path(output_ai)),
+        "output_ai": str(Path(output_ai).resolve()),
         "gap_mm": float(gap_mm),
         "label_height_mm": float(label_height_mm),
         "label_gap_mm": float(label_gap_mm),

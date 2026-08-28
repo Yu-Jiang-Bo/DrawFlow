@@ -1,3 +1,4 @@
 pywin32>=306; sys_platform == "win32"
 pytest>=7.4.0
 openpyxl>=3.1.0
+fonttools>=4.50,<5

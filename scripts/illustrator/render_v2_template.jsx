@@ -25,6 +25,7 @@
     var renderedOutputItems = [];
     var renderedOutputCount = 0;
     var tailPuaBaseCache = {};
+    var fixedVisualLayoutCache = [];
     // Bounded candidates cover the installed tail fonts while keeping one
     // preview from ever issuing thousands of Illustrator outline operations.
     var knownTailPuaBases = [
@@ -45,12 +46,12 @@
             renderedOutputCount += 1;
         }
         if (selectedOutputKey && renderedOutputCount !== 1) throw new Error("Selected V2 output was not rendered: " + selectedOutputKey);
-        if (execution.pack_order_blocks === true) {
-            renderedOutputItems = [groupRenderedOutputBlock(layer, renderedOutputItems, 0)];
-        }
         applyOutputTransforms(doc, execution.output || task.output || {});
         var finalFitAction = selectedFitAction(task, selectedOutputKey, selections);
         if (finalFitAction) fitRenderedOutput(renderedOutputItems, finalFitAction);
+        if (execution.pack_order_blocks === true) {
+            renderedOutputItems = [groupRenderedOutputBlock(layer, renderedOutputItems, 0)];
+        }
         if (execution.preview_png) fitArtboardToVisibleContent(doc, renderedOutputItems, 0);
         var output = File(String(execution.output_ai));
         ensureFolder(output.parent);
@@ -77,13 +78,21 @@
             var action = actions[index] || {};
             if (action.type === "select_style" && isSelected(action, selected)) {
                 copied[copyKey(outputKey, action)] = copyOptionGroup(sourceDoc, targetLayer, action.object_path, action.source_only === true);
-                if (action.source_only !== true) renderedItems.push(copied[copyKey(outputKey, action)].item);
+                if (action.source_only !== true) {
+                    renderedItems.push(copied[copyKey(outputKey, action)].item);
+                }
             }
             if (action.type === "copy_option_group" && isSelected(action, selected)) {
                 copied[copyKey(outputKey, action)] = copyOptionGroup(sourceDoc, targetLayer, action.object_path, action.source_only === true);
-                if (action.source_only !== true) renderedItems.push(copied[copyKey(outputKey, action)].item);
+                if (action.source_only !== true) {
+                    renderedItems.push(copied[copyKey(outputKey, action)].item);
+                }
             }
         }
+        // Capture each selected output group's original visual coordinate system
+        // before asset binding or any text replacement can change its bounds.
+        // `fixed` art is later mapped only within its own immutable source group.
+        captureFixedVisualLayout(renderedItems);
         for (var assetIndex = 0; assetIndex < actions.length; assetIndex++) {
             var assetAction = actions[assetIndex] || {};
             if (assetAction.type === "bind_asset_library" && isSelected(assetAction, selected)) {
@@ -193,6 +202,12 @@
             target = replaceWithFontStyleSource(copied, outputKey, action, selected, slot);
         }
         var tailSpecs = action.tails || [];
+        var activeTailSpecs = tailSpecs.length ? tailSpecs : styleSourceTailSpecs(action, selected);
+        if (hasOpenTypeTailSpecs(activeTailSpecs)) {
+            replaceTextWithOpenTypeTailComposition(target, slotValue, activeTailSpecs, fitBounds, action);
+            if (tailSpecs.length) removeDirectTailSamples(holder.item, holder.source_path, tailSpecs);
+            return;
+        }
         if (preset === "tail_text" || (preset === "split_by_pipe" && tailSpecs.length)) {
             var tailSourceValue = preset === "split_by_pipe" ? slotValue : value;
             V2TailText.replaceTailText(
@@ -207,9 +222,12 @@
             return;
         }
         var tailPaths = action.tail_paths || [];
-        var directTailParts = tailSpecs.length && preset === "direct_text"
-            ? applyDirectTailSamples(holder.item, holder.source_path, tailSpecs, slotValue)
-            : null;
+        var directTailParts = null;
+        if (tailSpecs.length && preset === "direct_text") {
+            directTailParts = applyDirectTailSamples(holder.item, holder.source_path, tailSpecs, slotValue);
+        } else if (!tailSpecs.length && action.style_source) {
+            directTailParts = applyStyleSourceTailSamples(copied, outputKey, action, selected, slotValue);
+        }
         var textFrame = writeTextToItem(target, directTailParts ? directTailParts.main_text : slotValue);
         fitItemWithinBounds(textFrame, fitBounds, action, shouldPreserveSlotComposition(target, action));
         if (directTailParts) {
@@ -287,7 +305,8 @@
             findPageItemByRelativePath: findPageItemByRelativePath,
             relativePath: relativePath,
             hasText: hasText,
-            removePageItem: removePageItem
+            removePageItem: removePageItem,
+            replaceOpenTypeTailGlyph: replaceOpenTypeTailGlyph
         };
     }
 
@@ -331,6 +350,30 @@
         return replacement;
     }
 
+    function applyStyleSourceTailSamples(copied, outputKey, action, selected, value) {
+        var sourceInfo = action.style_source || {};
+        var group = String(sourceInfo.group || "");
+        var fontOption = String(selected[group] || "");
+        if (!group || !fontOption) return null;
+        var tailsByOption = sourceInfo.tails_by_option || {};
+        var tailSpecs = tailsByOption[fontOption] || [];
+        if (!tailSpecs.length) return null;
+        var sourceHolder = copied[outputKey + "|" + group + "|" + fontOption];
+        if (!sourceHolder || !sourceHolder.item) {
+            throw new Error("V2 font tail source was not copied: " + fontOption);
+        }
+        return applyDirectTailSamples(sourceHolder.item, sourceHolder.source_path, tailSpecs, value);
+    }
+
+    function styleSourceTailSpecs(action, selected) {
+        var sourceInfo = (action || {}).style_source || {};
+        var group = String(sourceInfo.group || "");
+        var fontOption = String((selected || {})[group] || "");
+        var tailsByOption = sourceInfo.tails_by_option || {};
+        var tails = tailsByOption[fontOption] || [];
+        return tails instanceof Array ? tails : [];
+    }
+
     function removeSourceOnlyCopies(copied) {
         for (var key in copied) {
             if (copied.hasOwnProperty(key) && copied[key] && copied[key].source_only === true) {
@@ -349,6 +392,7 @@
     function applyDirectTailSamples(root, sourcePath, tailSpecs, value) {
         var parsed = V2TailText.tailEndpointParts(String(value || ""), tailSpecs);
         var replacements = [];
+        var openTypeTails = [];
         for (var index = 0; index < tailSpecs.length; index++) {
             var spec = tailSpecs[index] || {};
             var position = String(spec.position || "");
@@ -356,6 +400,11 @@
             var endpoint = position === "first" ? parsed.first_tail : (position === "last" ? parsed.last_tail : "");
             if (endpointIndex < 0 || !hasText(endpoint)) continue;
             var tail = findPageItemByRelativePath(root, relativePath(String(spec.path || ""), sourcePath));
+            if (V2TailText.usesOpenTypeGlyphAsset(spec)) {
+                replacements.push({ index: endpointIndex, text: "" });
+                openTypeTails.push({ tail: tail, spec: spec });
+                continue;
+            }
             var tailFrame = firstTextFrame(tail);
             if (!tailFrame) throw new Error("V2 tail sample has no text frame: " + String(spec.key || ""));
             var glyph = directTailGlyph(tailFrame, endpoint, spec, position);
@@ -372,18 +421,213 @@
             text = text.substring(0, replacement.index) + replacement.text + text.substring(replacement.index + 1);
         }
         parsed.main_text = text;
+        parsed.open_type_tails = openTypeTails;
         return parsed;
+    }
+
+    function hasOpenTypeTailSpecs(tailSpecs) {
+        for (var index = 0; index < tailSpecs.length; index++) {
+            if (String((tailSpecs[index] || {}).glyph_mode || "") === "opentype_alternate") return true;
+        }
+        return false;
+    }
+
+    function replaceTextWithOpenTypeTailComposition(target, value, tailSpecs, fitBounds, action) {
+        var wordAsset = tailWordVectorAsset(tailSpecs);
+        if (!String(wordAsset.path || "")) {
+            throw new Error("V2 OpenType tail word asset is missing");
+        }
+        var frame = writeTextToItem(target, value);
+        var appearance = captureTailTextAppearance(frame);
+        var replacement = importOpenTypeGlyph(String(wordAsset.path || ""), frame);
+        applyTailAppearance(replacement, appearance);
+        replacement.name = "TAIL_VECTOR_WORD_" + String(action.slot_key || "");
+        fitItemWithinBounds(replacement, fitBounds, action, shouldPreserveSlotComposition(target, action));
+        removePageItem(frame);
+    }
+
+    function tailWordVectorAsset(tailSpecs) {
+        for (var index = 0; index < tailSpecs.length; index++) {
+            var asset = (tailSpecs[index] || {}).opentype_word_asset || {};
+            if (String(asset.path || "")) return asset;
+        }
+        return {};
+    }
+
+    function tailVectorGlyphAsset(spec) {
+        return (spec || {}).tail_vector_asset || (spec || {}).opentype_glyph_asset || {};
+    }
+
+    function tailMarkerColor(red, green, blue) {
+        var color = new RGBColor();
+        color.red = red;
+        color.green = green;
+        color.blue = blue;
+        return color;
+    }
+
+    function colorTextCharacter(frame, index, color) {
+        try { frame.textRange.characters[index].characterAttributes.fillColor = color; }
+        catch (colorError) { throw new Error("V2 OpenType tail could not mark endpoint character"); }
+    }
+
+    function captureTailTextAppearance(frame) {
+        var attributes = frame.textRange.characterAttributes;
+        return {
+            fillColor: attributes.fillColor,
+            strokeColor: attributes.strokeColor,
+            strokeWeight: attributes.strokeWeight
+        };
+    }
+
+    function removeOutlinedMarkerGlyph(outline, color) {
+        var matches = [];
+        collectOutlinedMarkerGlyphs(outline, color, matches);
+        if (!matches.length) return null;
+        var bounds = null;
+        for (var index = 0; index < matches.length; index++) {
+            var itemBounds = measuredBounds(matches[index]);
+            bounds = mergeTailBounds(bounds, itemBounds);
+        }
+        for (var removeIndex = 0; removeIndex < matches.length; removeIndex++) removePageItem(matches[removeIndex]);
+        return bounds;
+    }
+
+    function collectOutlinedMarkerGlyphs(item, color, matches) {
+        if (!item) return;
+        if (item.typename === "CompoundPathItem") {
+            var compoundPaths = item.pathItems || [];
+            if (compoundPaths.length && sameRGBColor(compoundPaths[0].fillColor, color)) matches.push(item);
+            return;
+        }
+        if (item.typename === "PathItem") {
+            if (sameRGBColor(item.fillColor, color)) matches.push(item);
+            return;
+        }
+        var children = item.pageItems || [];
+        for (var index = 0; index < children.length; index++) collectOutlinedMarkerGlyphs(children[index], color, matches);
+    }
+
+    function sameRGBColor(left, right) {
+        try {
+            return Math.round(Number(left.red)) === Math.round(Number(right.red))
+                && Math.round(Number(left.green)) === Math.round(Number(right.green))
+                && Math.round(Number(left.blue)) === Math.round(Number(right.blue));
+        } catch (colorError) { return false; }
+    }
+
+    function mergeTailBounds(current, next) {
+        if (!current) return next;
+        return [
+            Math.min(Number(current[0]), Number(next[0])),
+            Math.max(Number(current[1]), Number(next[1])),
+            Math.max(Number(current[2]), Number(next[2])),
+            Math.min(Number(current[3]), Number(next[3]))
+        ];
+    }
+
+    function replaceOpenTypeTailGlyph(tail, spec, tailBounds, action) {
+        var asset = (spec || {}).opentype_glyph_asset || {};
+        var assetPath = String(asset.path || "");
+        if (!assetPath) throw new Error("V2 OpenType tail glyph asset is missing: " + String((spec || {}).key || ""));
+        var sampleFrame = firstTextFrame(tail);
+        if (!sampleFrame) throw new Error("V2 OpenType tail sample has no text frame: " + String((spec || {}).key || ""));
+        var replacement = importOpenTypeGlyph(assetPath, tail);
+        applyTailTextAppearance(replacement, sampleFrame);
+        replacement.name = String(tail.name || "");
+        fitItemWithinBounds(replacement, tailBounds, action, shouldPreserveSlotComposition(tail, action));
+        removePageItem(tail);
+        return replacement;
+    }
+
+    function importOpenTypeGlyph(assetPath, beforeItem) {
+        var file = File(assetPath);
+        if (!file.exists) throw new Error("V2 OpenType tail glyph asset was not found: " + assetPath);
+        var glyphDoc = null;
+        try {
+            glyphDoc = app.open(file);
+            var replacement = duplicateSvgDocumentPageItems(glyphDoc);
+            if (!replacement) throw new Error("V2 OpenType tail glyph SVG has no page item: " + assetPath);
+            try { replacement.move(beforeItem, ElementPlacement.PLACEBEFORE); } catch (moveError) {}
+            return replacement;
+        } finally {
+            try { if (glyphDoc) glyphDoc.close(SaveOptions.DONOTSAVECHANGES); } catch (closeError) {}
+        }
+    }
+
+    function duplicateSvgDocumentPageItems(sourceDoc) {
+        var sources = [];
+        var layers = sourceDoc && sourceDoc.layers ? sourceDoc.layers : [];
+        for (var layerIndex = 0; layerIndex < layers.length; layerIndex++) {
+            var layer = layers[layerIndex];
+            var items = layer.pageItems || [];
+            for (var itemIndex = 0; itemIndex < items.length; itemIndex++) {
+                var item = items[itemIndex];
+                try {
+                    if (item.parent !== layer) continue;
+                } catch (parentError) {}
+                sources.push(item);
+            }
+        }
+        if (!sources.length) return null;
+        if (sources.length === 1) return sources[0].duplicate(doc.layers[0], ElementPlacement.PLACEATEND);
+        var group = doc.layers[0].groupItems.add();
+        for (var sourceIndex = 0; sourceIndex < sources.length; sourceIndex++) {
+            sources[sourceIndex].duplicate(group, ElementPlacement.PLACEATEND);
+        }
+        return group;
+    }
+
+    function firstPageItemInDocument(sourceDoc) {
+        var layers = sourceDoc && sourceDoc.layers ? sourceDoc.layers : [];
+        for (var layerIndex = 0; layerIndex < layers.length; layerIndex++) {
+            var items = layers[layerIndex].pageItems || [];
+            if (items.length) return items[0];
+        }
+        return null;
+    }
+
+    function applyTailTextAppearance(item, frame) {
+        var attributes = null;
+        try { attributes = frame.textRange.characterAttributes; } catch (attributesError) {}
+        if (!attributes) return;
+        applyTailAppearance(item, attributes);
+    }
+
+    function applyTailAppearance(item, attributes) {
+        if (!attributes) return;
+        applyTailAppearanceToPaths(item, attributes);
+    }
+
+    function applyTailAppearanceToPaths(item, attributes) {
+        if (!item) return;
+        if (item.typename === "PathItem") {
+            try { item.filled = true; item.fillColor = attributes.fillColor; } catch (fillError) {}
+            try { item.stroked = attributes.strokeColor && attributes.strokeWeight > 0; item.strokeColor = attributes.strokeColor; item.strokeWidth = attributes.strokeWeight; } catch (strokeError) {}
+            return;
+        }
+        if (item.typename === "CompoundPathItem") {
+            var compoundPaths = item.pathItems || [];
+            for (var compoundIndex = 0; compoundIndex < compoundPaths.length; compoundIndex++) {
+                applyTailAppearanceToPaths(compoundPaths[compoundIndex], attributes);
+            }
+            return;
+        }
+        var children = item.pageItems || [];
+        for (var index = 0; index < children.length; index++) applyTailAppearanceToPaths(children[index], attributes);
     }
 
     function directTailGlyph(tailFrame, endpoint, spec, position) {
         var letter = String(endpoint || "").toLowerCase();
-        var fallback = V2TailText.tailGlyphForSpec(letter, spec);
-        if (!isPlainTextTailSpec(spec)) return fallback;
+        if (!isPlainTextTailSpec(spec)) return V2TailText.tailGlyphForSpec(letter, spec);
         var sampleText = String(tailFrame.contents || "");
         var sampleIndex = tailSampleLatinIndex(sampleText, position);
-        if (sampleText.length !== 1 || sampleIndex !== 0) return fallback;
+        if (sampleText.length !== 1 || sampleIndex !== 0) {
+            throw new Error("V2 tail glyph coverage is missing: " + String((spec || {}).key || ""));
+        }
         var encoding = inferPuaTailEncodingFromSample(tailFrame, sampleText.charAt(0).toLowerCase());
-        return encoding ? puaTailGlyphOrFallback(tailFrame, encoding, letter, fallback) : fallback;
+        if (!encoding) throw new Error("V2 tail glyph coverage is missing: " + String((spec || {}).key || ""));
+        return puaTailGlyph(tailFrame, encoding, letter, spec);
     }
 
     function tailSampleLatinIndex(text, position) {
@@ -455,10 +699,7 @@
             signatures[evidence.signature] = true;
             usableCount += 1;
         }
-        // A font may intentionally leave one endpoint letter in normal Latin
-        // form. That one character falls back to its normal glyph; multiple
-        // missing or duplicated tail glyphs are rejected as unproven.
-        return missingCount <= 1 && usableCount + missingCount === 26;
+        return missingCount === 0 && usableCount === 26;
     }
 
     function tailPuaCodepoint(encoding, letter) {
@@ -466,13 +707,14 @@
         return encoding.decimal ? decimalPuaCodepoint(encoding.base, index) : encoding.base + index;
     }
 
-    function puaTailGlyphOrFallback(frame, encoding, letter, fallback) {
+    function puaTailGlyph(frame, encoding, letter, spec) {
         var code = tailPuaCodepoint(encoding, letter);
         var evidence = outlinedTailGlyphEvidence(frame, code);
         var missing = missingPuaGlyphSignature(frame);
-        return evidence && evidence.signature && (!missing || evidence.signature !== missing)
-            ? String.fromCharCode(code)
-            : fallback;
+        if (!evidence || !evidence.signature || (missing && evidence.signature === missing)) {
+            throw new Error("V2 tail glyph coverage is missing: " + String((spec || {}).key || ""));
+        }
+        return String.fromCharCode(code);
     }
 
     function missingPuaGlyphSignature(frame) {
@@ -811,12 +1053,28 @@
         var targetHeight = mmToPt(Number(dimensions.height_mm || 0));
         if (targetWidth <= 0 || targetHeight <= 0) throw new Error("V2 output target dimensions are invalid");
         var bounds = unionBounds(items, true);
+        var fixedLayout = fixedVisualLayoutForItems(items);
+        var fixedLayouts = fixedLayout ? fixedLayout.layouts : [];
+        var fixedStates = fixedVisualStatesForLayouts(fixedLayouts);
         var fitSafety = outputFitSafetyPoints(dimensions);
         var fitTargetWidth = targetWidth - fitSafety;
         var fitTargetHeight = targetHeight - fitSafety;
         var targetLeft = Number(bounds[0]);
         var targetTop = Number(bounds[1]);
-        for (var attempt = 0; attempt < 4; attempt++) {
+        if (fixedStates.length) {
+            var fixedScaleX = fitTargetWidth / Math.abs(Number(bounds[2]) - Number(bounds[0])) * 100;
+            var fixedScaleY = fitTargetHeight / Math.abs(Number(bounds[1]) - Number(bounds[3])) * 100;
+            resizeItemsAroundBounds(items, bounds, fixedScaleX, fixedScaleY);
+            var fixedFitted = unionBounds(items, true);
+            translateItems(items, targetLeft - Number(fixedFitted[0]), targetTop - Number(fixedFitted[1]));
+            // Use the transformed ordinary artwork as the target coordinate
+            // system.  The fixed mark's own physical dimensions must not alter
+            // that coordinate system, otherwise a second fit can drift it.
+            positionFixedVisualLayouts(fixedLayouts);
+            validateOutputBounds(items, dimensions, targetWidth, targetHeight);
+            return;
+        }
+        for (var attempt = 0; attempt < 12; attempt++) {
             var current = unionBounds(items, true);
             var width = Math.abs(Number(current[2]) - Number(current[0]));
             var height = Math.abs(Number(current[1]) - Number(current[3]));
@@ -839,6 +1097,7 @@
         var centerX = (Number(bounds[0]) + Number(bounds[2])) / 2;
         var centerY = (Number(bounds[1]) + Number(bounds[3])) / 2;
         for (var index = 0; index < items.length; index++) {
+            var fixedStates = fixedVisualStates(items[index]);
             var itemBounds = visibleBoundsStrict(items[index]);
             var itemCenterX = (Number(itemBounds[0]) + Number(itemBounds[2])) / 2;
             var itemCenterY = (Number(itemBounds[1]) + Number(itemBounds[3])) / 2;
@@ -849,7 +1108,192 @@
             var resizedCenterX = (Number(resized[0]) + Number(resized[2])) / 2;
             var resizedCenterY = (Number(resized[1]) + Number(resized[3])) / 2;
             items[index].translate(targetCenterX - resizedCenterX, targetCenterY - resizedCenterY);
+            restoreFixedVisualStates(fixedStates, centerX, centerY, scaleXRatio, scaleYRatio);
         }
+    }
+
+    function fixedVisualStates(root) {
+        var marked = [];
+        collectFixedVisualItems(root, marked);
+        var states = [];
+        for (var index = 0; index < marked.length; index++) {
+            var item = marked[index];
+            var bounds = visibleBoundsStrict(item);
+            states.push({
+                item: item,
+                centerX: (Number(bounds[0]) + Number(bounds[2])) / 2,
+                centerY: (Number(bounds[1]) + Number(bounds[3])) / 2
+            });
+        }
+        return states;
+    }
+
+    function fixedVisualStatesForLayouts(layouts) {
+        var states = [];
+        for (var index = 0; index < layouts.length; index++) {
+            var itemStates = layouts[index].states || [];
+            for (var stateIndex = 0; stateIndex < itemStates.length; stateIndex++) states.push(itemStates[stateIndex]);
+        }
+        return states;
+    }
+
+    function captureFixedVisualLayout(items) {
+        if (fixedVisualLayoutForItems(items)) return;
+        var layouts = [];
+        for (var index = 0; index < items.length; index++) {
+            var root = items[index];
+            var states = fixedVisualStates(root);
+            if (!states.length) continue;
+            layouts.push({
+                root: root,
+                sourceBounds: copyBounds(unionRenderableBounds([root])),
+                states: states
+            });
+        }
+        if (!layouts.length) return;
+        fixedVisualLayoutCache.push({
+            items: items.slice(0),
+            layouts: layouts
+        });
+    }
+
+    function fixedVisualLayoutForItems(items) {
+        for (var index = 0; index < fixedVisualLayoutCache.length; index++) {
+            var candidate = fixedVisualLayoutCache[index];
+            if (samePageItemList(candidate.items, items)) return candidate;
+        }
+        return null;
+    }
+
+    function samePageItemList(left, right) {
+        if (!left || !right || left.length !== right.length) return false;
+        for (var index = 0; index < left.length; index++) {
+            if (left[index] !== right[index]) return false;
+        }
+        return true;
+    }
+
+    function copyBounds(bounds) {
+        return [Number(bounds[0]), Number(bounds[1]), Number(bounds[2]), Number(bounds[3])];
+    }
+
+    function unionRenderableBounds(items) {
+        var bounds = [];
+        for (var index = 0; index < items.length; index++) collectRenderableBounds(items[index], bounds);
+        if (!bounds.length) throw new Error("Cannot measure V2 original output bounds");
+        return unionBoundsFromList(bounds);
+    }
+
+    function unionNonFixedRenderableBounds(items) {
+        var bounds = [];
+        for (var index = 0; index < items.length; index++) collectNonFixedRenderableBounds(items[index], bounds);
+        if (!bounds.length) throw new Error("Cannot measure V2 fixed-graphic reference bounds");
+        return unionBoundsFromList(bounds);
+    }
+
+    function collectRenderableBounds(item, bounds) {
+        if (!item || isAuxiliaryObject(item)) return;
+        var children = item.pageItems || [];
+        var directChildCount = 0;
+        for (var index = 0; index < children.length; index++) {
+            if (children[index].parent !== item) continue;
+            directChildCount++;
+            collectRenderableBounds(children[index], bounds);
+        }
+        if (!directChildCount) bounds.push(visibleBoundsStrict(item));
+    }
+
+    function collectNonFixedRenderableBounds(item, bounds) {
+        if (!item || isAuxiliaryObject(item) || isFixedVisualName(String(item.name || ""))) return;
+        var children = item.pageItems || [];
+        var directChildCount = 0;
+        for (var index = 0; index < children.length; index++) {
+            if (children[index].parent !== item) continue;
+            directChildCount++;
+            collectNonFixedRenderableBounds(children[index], bounds);
+        }
+        if (!directChildCount) bounds.push(visibleBoundsStrict(item));
+    }
+
+    function unionBoundsFromList(bounds) {
+        var left = Number(bounds[0][0]);
+        var top = Number(bounds[0][1]);
+        var right = Number(bounds[0][2]);
+        var bottom = Number(bounds[0][3]);
+        for (var index = 1; index < bounds.length; index++) {
+            var current = bounds[index];
+            left = Math.min(left, Number(current[0]));
+            top = Math.max(top, Number(current[1]));
+            right = Math.max(right, Number(current[2]));
+            bottom = Math.min(bottom, Number(current[3]));
+        }
+        return [left, top, right, bottom];
+    }
+
+    function positionFixedVisualLayouts(layouts) {
+        for (var index = 0; index < layouts.length; index++) {
+            var layout = layouts[index];
+            positionFixedVisualStatesForOutput(
+                layout.states,
+                layout.sourceBounds,
+                unionNonFixedRenderableBounds([layout.root])
+            );
+        }
+    }
+
+    function positionFixedVisualStatesForOutput(states, sourceBounds, outputBounds) {
+        var sourceWidth = Math.abs(Number(sourceBounds[2]) - Number(sourceBounds[0]));
+        var sourceHeight = Math.abs(Number(sourceBounds[1]) - Number(sourceBounds[3]));
+        var outputWidth = Math.abs(Number(outputBounds[2]) - Number(outputBounds[0]));
+        var outputHeight = Math.abs(Number(outputBounds[1]) - Number(outputBounds[3]));
+        if (sourceWidth <= 0 || sourceHeight <= 0 || outputWidth <= 0 || outputHeight <= 0) {
+            throw new Error("V2 fixed graphic layout bounds are invalid");
+        }
+        for (var index = 0; index < states.length; index++) {
+            var state = states[index];
+            var current = visibleBoundsStrict(state.item);
+            var currentCenterX = (Number(current[0]) + Number(current[2])) / 2;
+            var currentCenterY = (Number(current[1]) + Number(current[3])) / 2;
+            var targetCenterX = Number(outputBounds[0])
+                + (state.centerX - Number(sourceBounds[0])) / sourceWidth * outputWidth;
+            var targetCenterY = Number(outputBounds[1])
+                - (Number(sourceBounds[1]) - state.centerY) / sourceHeight * outputHeight;
+            state.item.translate(targetCenterX - currentCenterX, targetCenterY - currentCenterY);
+        }
+    }
+
+    function restoreFixedVisualStates(states, parentCenterX, parentCenterY, scaleXRatio, scaleYRatio) {
+        if (!isFinite(scaleXRatio) || !isFinite(scaleYRatio) || scaleXRatio <= 0 || scaleYRatio <= 0) {
+            throw new Error("V2 fixed graphic scale is invalid");
+        }
+        for (var index = 0; index < states.length; index++) {
+            var state = states[index];
+            resizePageItem(state.item, 100 / scaleXRatio, 100 / scaleYRatio);
+            var restored = visibleBoundsStrict(state.item);
+            var restoredCenterX = (Number(restored[0]) + Number(restored[2])) / 2;
+            var restoredCenterY = (Number(restored[1]) + Number(restored[3])) / 2;
+            var targetCenterX = parentCenterX + (state.centerX - parentCenterX) * scaleXRatio;
+            var targetCenterY = parentCenterY + (state.centerY - parentCenterY) * scaleYRatio;
+            state.item.translate(targetCenterX - restoredCenterX, targetCenterY - restoredCenterY);
+        }
+    }
+
+    function collectFixedVisualItems(root, result) {
+        if (!root || !root.pageItems) return;
+        for (var index = 0; index < root.pageItems.length; index++) {
+            var item = root.pageItems[index];
+            if (isFixedVisualName(String(item.name || ""))) {
+                result.push(item);
+            } else {
+                collectFixedVisualItems(item, result);
+            }
+        }
+    }
+
+    function isFixedVisualName(name) {
+        var normalized = normalizedName(name);
+        return normalized === "fixed" || normalized.indexOf("fixed_") === 0
+            || normalized === "fixd" || normalized.indexOf("fixd_") === 0;
     }
 
     function resizePageItem(item, scaleX, scaleY) {

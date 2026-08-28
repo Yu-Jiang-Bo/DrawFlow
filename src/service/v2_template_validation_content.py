@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any, Dict, Mapping
 
 from .v2_template_contract import V2_SELECTABLE_OPTION_CONTENT_PRESETS
@@ -61,6 +62,7 @@ def _validate_preset_requirements(
     has_font: bool,
     issues: list[Dict[str, str]],
 ) -> None:
+    _require_tail_glyph_proofs(slots, option_path, issues)
     if active_preset == "direct_text":
         _require_direct_text(slots, option_path, issues)
     if active_preset == "split_by_pipe":
@@ -120,6 +122,7 @@ def _require_tail_text(slots: list[Mapping[str, Any]], option_path: str, issues:
         add_issue(issues, option_path + ".slots", "content", V2_STATUS_BLOCKED, "tail_text_source_missing", "尾巴文字槽位必须绑定订单字段。")
 
 
+def _require_tail_glyph_proofs(slots: list[Mapping[str, Any]], option_path: str, issues: list[Dict[str, str]]) -> None:
     for slot_index, slot in enumerate(slots):
         for tail_index, tail in enumerate(list_value(slot.get("tails"))):
             if not _tail_has_glyph_proof(mapping(tail)):
@@ -134,6 +137,10 @@ def _require_tail_text(slots: list[Mapping[str, Any]], option_path: str, issues:
 
 
 def _tail_has_glyph_proof(tail: Mapping[str, Any]) -> bool:
+    feature = str(tail.get("opentype_feature") or "").strip()
+    alternate_index = tail.get("opentype_alternate_index")
+    if re.fullmatch(r"[A-Za-z0-9]{4}", feature) and isinstance(alternate_index, int) and not isinstance(alternate_index, bool) and alternate_index >= 1:
+        return True
     return tail.get("pua_base") not in (None, "") or bool(mapping(tail.get("glyph_map")))
 
 
@@ -158,21 +165,8 @@ def _require_mixed_slots(slots: list[Mapping[str, Any]], option_path: str, issue
     if any(str(slot.get("preset") or "") not in allowed or slot.get("asset_key") for slot in slots):
         add_issue(issues, option_path + ".slots", "content", V2_STATUS_BLOCKED, "mixed_slots_preset_invalid", "按槽位分别处理只能组合替换文本、尾巴文字、路径文字或按 | 顺序拆分，不得混用素材。")
     for slot_index, slot in enumerate(slots):
-        if str(slot.get("preset") or "") != "tail_text":
-            continue
-        tails = [mapping(tail) for tail in list_value(slot.get("tails"))]
-        if not tails:
+        if str(slot.get("preset") or "") == "tail_text" and not list_value(slot.get("tails")):
             add_issue(issues, f"{option_path}.slots[{slot_index}].tails", "content", V2_STATUS_BLOCKED, "tail_sample_missing", "尾巴文字槽位必须提供首字或尾字样本。")
-        for tail_index, tail in enumerate(tails):
-            if not _tail_has_glyph_proof(tail):
-                add_issue(
-                    issues,
-                    f"{option_path}.slots[{slot_index}].tails[{tail_index}]",
-                    "content",
-                    V2_STATUS_BLOCKED,
-                    "tail_glyph_coverage_missing",
-                    "尾巴文字样本必须具备可确认的首字或尾字覆盖证据；无法确认时不能发布。",
-                )
 
 
 def _require_split_by_pipe(contract: Mapping[str, Any], slots: list[Mapping[str, Any]], option_path: str, issues: list[Dict[str, str]]) -> None:

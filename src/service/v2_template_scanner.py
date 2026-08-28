@@ -173,8 +173,9 @@ def normalize_v2_template_scan(raw_scan: Any, ai_path: str | Path | None = None)
     """Return deterministic scan facts plus blocking/pending issues.
 
     The function is deliberately literal: names are compared only after
-    trimming outer whitespace and lower-casing. No legacy aliases or semantic
-    guesses are accepted.
+    trimming outer whitespace and lower-casing. No semantic guesses are
+    accepted; the documented ``fixd`` compatibility alias is the sole
+    legacy-name exception.
     """
 
     issues: list[Dict[str, Any]] = []
@@ -311,6 +312,7 @@ def _normalize_output(
         "tails": sum(len(option.get("tails", [])) for option in [*output["designs"], *output["fonts"]]),
         "assets": sum(len(option.get("assets", [])) for option in output["designs"]),
         "fixed_objects": sum(int(option.get("fixed_object_count") or 0) for option in [*output["designs"], *output["fonts"]]),
+        "fixed_annotations": sum(len(option.get("fixed_annotations", [])) for option in [*output["designs"], *output["fonts"]]),
     }
     return output
 
@@ -369,6 +371,7 @@ def _normalize_option(
     slots = [_slot_record(child) for child in marker_items if _marker_kind(child["name"]) == "slot"]
     anchors = [_marker_record(child) for child in marker_items if _marker_kind(child["name"]) == "anchor"]
     tails = [_marker_record(child) for child in marker_items if _marker_kind(child["name"]) == "tail"]
+    fixed_annotations = [_marker_record(child) for child in marker_items if _marker_kind(child["name"]) == "fixed"]
     _add_duplicate_issues([{"name": row["key"], "path": row["path"]} for row in slots], item["path"] + "/slots", "duplicate_name", issues)
     _add_duplicate_issues([{"name": row["key"], "path": row["path"]} for row in anchors], item["path"] + "/anchors", "duplicate_name", issues)
     _add_duplicate_issues([{"name": row["key"], "path": row["path"]} for row in tails], item["path"] + "/tails", "duplicate_name", issues)
@@ -399,6 +402,7 @@ def _normalize_option(
         "fixed_object_count": fixed_count,
         "fixed_object_type_counts": fixed_object_type_counts,
         "fixed_objects": [{"key": "unnamed_fixed_objects", "count": fixed_count, "path": item["path"]}] if fixed_count else [],
+        "fixed_annotations": fixed_annotations,
     }
     font_reference = _default_font_reference(subtree, kind, slots, tails)
     if font_reference:
@@ -642,7 +646,15 @@ def _validate_marker_hierarchy(items: list[Dict[str, Any]], root_path: str, issu
             _issue(issues, item["path"], "assets_wrong_hierarchy", "Assets 必须位于具体 Design 选项内。", layer_paths=[item["path"]])
         marker = _marker_kind(item["name"])
         if marker and not _inside_design_or_font_option(rel):
-            _issue(issues, item["path"], "marker_wrong_hierarchy", "slot/anchor/tail 必须位于具体 Design/F 选项内。", layer_paths=[item["path"]])
+            _issue(issues, item["path"], "marker_wrong_hierarchy", "slot/anchor/tail/fixed 必须位于具体 Design/F 选项内。", layer_paths=[item["path"]])
+        if marker == "fixed" and _inside_fixed_forbidden_scope(rel):
+            _issue(
+                issues,
+                item["path"],
+                "fixed_marker_forbidden_scope",
+                "fixed 标记不能放在 slot、anchor、tail 或 Assets 内。",
+                layer_paths=[item["path"]],
+            )
 
 
 def _valid_option_name(kind: str, name: str, issues: list[Dict[str, Any]], scope_path: str) -> bool:
@@ -744,7 +756,19 @@ def _marker_kind(name: str) -> str:
         return "anchor"
     if lower.startswith("tail_"):
         return "tail"
+    if lower == "fixed" or lower.startswith("fixed_") or lower == "fixd" or lower.startswith("fixd_"):
+        return "fixed"
     return ""
+
+
+def _inside_fixed_forbidden_scope(rel: list[str]) -> bool:
+    if not _inside_design_or_font_option(rel):
+        return False
+    for ancestor in rel[3:-1]:
+        name = _norm(ancestor)
+        if name == "assets" or name.startswith("slot_") or name.startswith("anchor_") or name.startswith("tail_"):
+            return True
+    return False
 
 
 def _default_font_reference(

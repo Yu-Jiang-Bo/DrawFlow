@@ -204,6 +204,7 @@
     optionChildRows(item, "slots", "slots", "槽位").forEach((row) => rows.push(row));
     optionChildRows(item, "anchors", "anchors", "定位").forEach((row) => rows.push(row));
     optionChildRows(item, "tails", "tails", "尾巴").forEach((row) => rows.push(row));
+    optionChildRows(item, "fixed_annotations", "fixed", "固定图案").forEach((row) => rows.push(row));
     optionChildRows(item, "assets", "assets", "Assets").forEach((row) => rows.push(row));
     return rows;
   }
@@ -211,11 +212,12 @@
 
   function optionChildRows(item, key, kind, label) {
     const children = Array.isArray(item[key]) ? item[key] : [];
-    return children.slice(0, 8).map((child) => {
+    const visibleChildren = key === "fixed_annotations" ? children : children.slice(0, 8);
+    return visibleChildren.map((child) => {
       const name = child.key || child.name || child.asset_key || label;
       return {
         title: key === "assets" ? `Assets / ${name}` : name,
-        meta: key === "assets" ? supportedValuesText(child) : label,
+        meta: key === "assets" ? supportedValuesText(child) : key === "fixed_annotations" ? "固定图案 · 自动保护" : label,
         kind,
         summary: nodeSummary(kind, child)
       };

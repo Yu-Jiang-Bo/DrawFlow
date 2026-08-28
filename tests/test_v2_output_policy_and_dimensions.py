@@ -114,6 +114,30 @@ def test_v2_jsx_contains_final_object_fit_and_policy_gates():
     assert "outputPolicy.outline_text !== false" in color_source
 
 
+def test_v2_jsx_fixed_visuals_keep_the_original_design_position_reference():
+    render_source = Path("scripts/illustrator/render_v2_template.jsx").read_text(encoding="utf-8")
+
+    assert "var fixedVisualLayoutCache = [];" in render_source
+    assert "captureFixedVisualLayout(renderedItems);" in render_source
+    assert render_source.index("captureFixedVisualLayout(renderedItems);") < render_source.index(
+        "for (var assetIndex = 0; assetIndex < actions.length; assetIndex++)"
+    )
+    assert render_source.index("captureFixedVisualLayout(renderedItems);") < render_source.index(
+        "for (var replaceIndex = 0; replaceIndex < actions.length; replaceIndex++)"
+    )
+    assert "root: root," in render_source
+    assert "sourceBounds: copyBounds(unionRenderableBounds([root]))" in render_source
+    assert "function unionRenderableBounds(items)" in render_source
+    assert "function unionNonFixedRenderableBounds(items)" in render_source
+    assert "function positionFixedVisualLayouts(layouts)" in render_source
+    assert "positionFixedVisualStatesForOutput(" in render_source
+    assert "unionNonFixedRenderableBounds([layout.root])" in render_source
+    assert "positionFixedVisualStatesForOutput(fixedStates, sourceBounds, unionBounds(items, true));" not in render_source
+    assert render_source.index("if (execution.pack_order_blocks === true)") > render_source.index(
+        "if (finalFitAction) fitRenderedOutput(renderedOutputItems, finalFitAction);"
+    )
+
+
 def test_public_component_strategy_uses_each_unit_style_and_department_fallback(tmp_path):
     rule = replace(resolve_department_output("K"), outline_text=False, pathfinder_merge=False)
     compiled = compile_task()

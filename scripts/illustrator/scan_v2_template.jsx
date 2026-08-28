@@ -206,6 +206,7 @@
             option.anchors = [];
             option.tails = [];
             option.assets = [];
+            option.fixed_annotations = [];
             option.fixed_object_count = 0;
             option.fixed_object_type_counts = {};
             option.font_dependencies = [];
@@ -214,6 +215,7 @@
             option.anchors = sortRecords(option.anchors);
             option.tails = sortRecords(option.tails);
             option.assets = sortRecords(option.assets);
+            option.fixed_annotations = sortRecords(option.fixed_annotations);
             option.font_dependencies = uniqueSorted(option.font_dependencies);
             validateOptionMarkers(option, output);
             options.push(option);
@@ -245,6 +247,10 @@
         }
         if (lowerStartsWith(normalized, "tail_")) {
             option.tails.push(tailRecord(item, rootPath));
+            return;
+        }
+        if (isFixedMarkerName(normalized)) {
+            option.fixed_annotations.push(markerRecord(item, "fixed", rootPath));
             return;
         }
         if (hasManagedDescendant(item)) {
@@ -651,7 +657,7 @@
         var name = trimName(safeString(item, "name", ""));
         var normalized = normalizeName(name);
         if (normalized === "template" || normalized === "style" || normalized === "design" || normalized === "font" || normalized === "colors" || normalized === "assets") return true;
-        if (outputKey(name) || lowerStartsWith(normalized, "slot_") || lowerStartsWith(normalized, "anchor_") || lowerStartsWith(normalized, "tail_")) return true;
+        if (outputKey(name) || lowerStartsWith(normalized, "slot_") || lowerStartsWith(normalized, "anchor_") || lowerStartsWith(normalized, "tail_") || isFixedMarkerName(normalized)) return true;
         var parentName = parentNormalizedName(item);
         return !!name && (parentName === "style" || parentName === "design" || parentName === "font" || parentName === "assets");
     }
@@ -726,7 +732,7 @@
         var children = directItems(item);
         for (var i = 0; i < children.length; i++) {
             var name = normalizeName(safeString(children[i], "name", ""));
-            if (name === "assets" || lowerStartsWith(name, "slot_") || lowerStartsWith(name, "anchor_") || lowerStartsWith(name, "tail_")) return true;
+            if (name === "assets" || lowerStartsWith(name, "slot_") || lowerStartsWith(name, "anchor_") || lowerStartsWith(name, "tail_") || isFixedMarkerName(name)) return true;
             if (hasManagedDescendant(children[i])) return true;
         }
         return false;
@@ -936,6 +942,11 @@
 
     function lowerStartsWith(value, prefix) {
         return String(value || "").indexOf(prefix) === 0;
+    }
+
+    function isFixedMarkerName(value) {
+        var name = normalizeName(value);
+        return name === "fixed" || lowerStartsWith(name, "fixed_") || name === "fixd" || lowerStartsWith(name, "fixd_");
     }
 
     function compareText(a, b) {

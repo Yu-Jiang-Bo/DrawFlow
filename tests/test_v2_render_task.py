@@ -816,7 +816,7 @@ def test_compiles_tail_text_metadata_from_current_option_scope():
     ]
 
 
-def test_compiles_plain_tail_evidence_for_direct_text_slot():
+def test_rejects_unverified_tail_evidence_for_direct_text_slot():
     config = render_config()
     design = config["outputs"][0]["design"]["options"][0]
     design["content_preset"] = "direct_text"
@@ -835,20 +835,11 @@ def test_compiles_plain_tail_evidence_for_direct_text_slot():
     scan_design["slots"][0]["tails"] = [{"key": "tail_name_last_m", "path": "Template/Output_main/Design/Design03/tail_name_last_m"}]
     scan_design["tails"] = [{"key": "tail_name_last_m", "path": "Template/Output_main/Design/Design03/tail_name_last_m"}]
 
-    task = compile_task(config=config, scan=scan)
+    with pytest.raises(V2RenderTaskError) as exc_info:
+        compile_task(config=config, scan=scan)
 
-    action = next(action for action in task["outputs"][0]["actions"] if action.get("slot_key") == "slot_name")
-    assert action["preset"] == "direct_text"
-    assert action["tail_paths"] == ["Template/Output_main/Design/Design03/tail_name_last_m"]
-    assert action["tails"] == [
-        {
-            "key": "tail_name_last_m",
-            "position": "last",
-            "sample": "m",
-            "path": "Template/Output_main/Design/Design03/tail_name_last_m",
-            "glyph_mode": "plain_text",
-        }
-    ]
+    assert exc_info.value.code == "tail_glyph_coverage_missing"
+    assert exc_info.value.path == "$.Output_main.design.Design03.slot_name.tails[0]"
 
 
 def test_compiles_mixed_slots_without_overwriting_independent_sources_or_tails():
@@ -862,7 +853,7 @@ def test_compiles_mixed_slots_without_overwriting_independent_sources_or_tails()
             "key": "slot_name1",
             "source_field": "name",
             "preset": "direct_text",
-            "tails": [{"key": "tail_name1_last_m", "position": "last", "sample": "m"}],
+            "tails": [{"key": "tail_name1_last_m", "position": "last", "sample": "m", "pua_base": TAIL_PUA_BASE}],
         },
         {
             "key": "slot_title",
@@ -968,6 +959,41 @@ def test_compiles_tail_text_glyph_map_coverage():
     assert action["tails"][0]["glyph_mode"] == "glyph_map"
     assert action["tails"][0]["glyph_map"]["a"] == 0xE200
     assert action["tails"][0]["glyph_map"]["z"] == 0xE219
+
+
+def test_compiles_template_scoped_opentype_tail_profile_with_its_font_dependency():
+    config = render_config()
+    design_slot = config["outputs"][0]["design"]["options"][0]["slots"][0]
+    design_slot["preset"] = "tail_text"
+    design_slot["font_dependencies"] = ["helloHoneyPS"]
+    design_slot["tails"] = [
+        {
+            "key": "tail_name_first_a",
+            "position": "first",
+            "sample": "a",
+            "opentype_feature": "aalt",
+            "opentype_alternate_index": 2,
+        }
+    ]
+    scan = scan_evidence()
+    scan["outputs"][0]["designs"][0]["tails"] = [
+        {"key": "tail_name_first_a", "path": "Template/Output_main/Design/Design03/tail_name_first_a"}
+    ]
+
+    task = compile_task(config=config, scan=scan)
+
+    action = next(action for action in task["outputs"][0]["actions"] if action.get("slot_key") == "slot_name")
+    assert action["tails"][0] == {
+        "key": "tail_name_first_a",
+        "position": "first",
+        "sample": "a",
+        "path": "Template/Output_main/Design/Design03/tail_name_first_a",
+        "glyph_mode": "opentype_alternate",
+        "opentype_feature": "aalt",
+        "opentype_alternate_index": 2,
+        "font_postscript_name": "helloHoneyPS",
+        "coverage": "runtime-verified",
+    }
 
 
 def test_rejects_tail_text_invalid_sample_letter():
@@ -1139,6 +1165,56 @@ def test_keeps_design_and_font_same_slot_keys_on_distinct_paths():
     assert font_slot["font_dependencies"] == ["Milkshake"]
     font_copy = next(action for action in task["outputs"][0]["actions"] if action["type"] == "copy_option_group" and action["group"] == "font")
     assert font_copy["source_only"] is True
+
+
+def test_passes_tail_font_samples_to_the_design_style_source():
+    config = render_config()
+    scan = scan_evidence()
+    font_option = config["outputs"][0]["font"]["options"][0]
+    font_option["key"] = "F3"
+    font_option["content_preset"] = "tail_text"
+    font_option["slots"][0].update(
+        {
+            "preset": "tail_text",
+            "tails": [
+                {"key": "tail_name_last_m", "position": "last", "sample": "m", "pua_base": TAIL_PUA_BASE}
+            ],
+        }
+    )
+    config["option_mappings"][0].update({"source_value": "F3", "target": "F3"})
+    scan_font = scan["outputs"][0]["fonts"][0]
+    scan_font["key"] = "F3"
+    scan_font["path"] = "Template/Output_main/Font/F3"
+    scan_font["slots"][0]["path"] = "Template/Output_main/Font/F3/slot_name"
+    scan_font["slots"][0]["tails"] = [
+        {"key": "tail_name_last_m", "path": "Template/Output_main/Font/F3/tail_name_last_m"}
+    ]
+    scan_font["tails"] = [
+        {"key": "tail_name_last_m", "path": "Template/Output_main/Font/F3/tail_name_last_m"}
+    ]
+
+    task = compile_task(config, scan)
+
+    design_action = next(
+        action
+        for action in task["outputs"][0]["actions"]
+        if action["type"] == "replace_slot_text" and action["group"] == "design" and action["slot_key"] == "slot_name"
+    )
+    assert design_action["style_source"]["paths_by_option"] == {"F3": "Template/Output_main/Font/F3/slot_name"}
+    assert design_action["style_source"]["tails_by_option"] == {
+        "F3": [
+            {
+                "key": "tail_name_last_m",
+                "position": "last",
+                "sample": "m",
+                "path": "Template/Output_main/Font/F3/tail_name_last_m",
+                "glyph_mode": "pua_contiguous",
+                "pua_base": TAIL_PUA_BASE,
+                "font_postscript_name": "Milkshake",
+                "coverage": "a-z",
+            }
+        ]
+    }
 
 
 def test_carries_preserve_composition_from_scanned_keep_ratio_slot():

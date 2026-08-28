@@ -8,6 +8,7 @@ from src.renderer.v2_template_renderer import (
     V2TemplateRenderer,
     V2TemplateRendererError,
     build_v2_execution_task,
+    build_v2_order_column_task,
 )
 from src.service.v2_render_task import V2_RENDER_TASK_SCHEMA
 
@@ -87,6 +88,25 @@ def test_builds_execution_task_with_derived_option_selections(tmp_path):
     assert execution["values"]["name"] == "Alice"
     assert "output_key" not in execution
     assert "preview_png" not in execution
+
+
+def test_build_execution_task_resolves_runtime_paths_for_illustrator(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+
+    execution = build_v2_execution_task(
+        compiled_task(),
+        template_ai="template.ai",
+        output_ai="out.ai",
+        values={"font": "F10", "design": "03", "name": "Alice"},
+        output_key="Output_main",
+        preview_png="out.png",
+        layout_warning_file="out.warnings.json",
+    )
+
+    assert Path(execution["template_ai"]).is_absolute()
+    assert Path(execution["output_ai"]).is_absolute()
+    assert Path(execution["preview_png"]).is_absolute()
+    assert Path(execution["layout_warning_file"]).is_absolute()
 
 
 def test_explicit_option_selections_are_accepted_without_mapping_values(tmp_path):
@@ -204,6 +224,18 @@ def test_compose_order_column_writes_order_metadata_and_labels(tmp_path):
     ]
     assert payload["label_lines"] == ["ORDER1", "\u767d\u8272"]
     assert bridge.calls[0]["script_path"].name == "compose_v2_order_column.jsx"
+
+
+def test_order_column_resolves_relative_paths_for_illustrator(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+
+    task = build_v2_order_column_task(
+        input_ai_files=["input.ai"],
+        output_ai="output.ai",
+    )
+
+    assert task["inputs"] == [{"path": str((tmp_path / "input.ai").resolve())}]
+    assert task["output_ai"] == str((tmp_path / "output.ai").resolve())
 
 
 def test_missing_style_selection_for_final_fit_does_not_enter_illustrator(tmp_path):

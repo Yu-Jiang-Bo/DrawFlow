@@ -88,7 +88,9 @@ def test_mixed_slots_requires_each_slot_source_and_tail_proof_when_selected():
     assert _has_issue(result, "mixed_slots_source_missing", "每个槽位")
 
     unverified_tail = _mixed_slots_payload()
-    unverified_tail["outputs"][0]["design"]["options"][0]["slots"][0]["preset"] = "tail_text"
+    unverified_slot = unverified_tail["outputs"][0]["design"]["options"][0]["slots"][0]
+    unverified_slot["preset"] = "tail_text"
+    unverified_slot["tails"][0].pop("pua_base")
 
     result = validate_v2_template_configuration(unverified_tail)
 
@@ -228,7 +230,7 @@ def _mixed_slots_payload():
                 "key": "slot_name1",
                 "source_field": "name",
                 "preset": "direct_text",
-                "tails": [{"key": "tail_name1_last_m", "position": "last", "sample": "m"}],
+                "tails": [{"key": "tail_name1_last_m", "position": "last", "sample": "m", "pua_base": 0xE000}],
                 "dimension_rule": {"mode": "slot", "tolerance_mm": 0.007},
                 "font_dependencies": ["Milkshake"],
             },

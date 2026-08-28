@@ -137,6 +137,7 @@ def _compile_output(
     output_key = str(output.get("key") or "")
     output_scan = _scan_ref(scan_index, ("output", output_key), f"$.outputs.{output_key}")
     font_style_sources = _font_style_sources(output_key, output, scan_index)
+    font_tail_sources = _font_tail_sources(output_key, output, scan_index)
     source_only_font = bool(font_style_sources)
     style_options = [
         dict(option)
@@ -182,7 +183,18 @@ def _compile_output(
                     **copy_action,
                 )
             )
-            actions.extend(_slot_actions(output_key, group, dict(option), option_scan, scan_index, font_style_sources, field_bindings))
+            actions.extend(
+                _slot_actions(
+                    output_key,
+                    group,
+                    dict(option),
+                    option_scan,
+                    scan_index,
+                    font_style_sources,
+                    font_tail_sources,
+                    field_bindings,
+                )
+            )
             actions.extend(_asset_actions(output_key, group, dict(option), scan_index))
             if group == "design" and not has_fixed_dimensions_for_every_style:
                 dimensions = _scanned_design_dimensions(dict(option), option_scan)
@@ -296,6 +308,7 @@ def _slot_actions(
     option_scan: Mapping[str, Any],
     scan_index: Mapping[tuple[str, ...], Mapping[str, Any]],
     font_style_sources: Mapping[str, Mapping[str, str]],
+    font_tail_sources: Mapping[str, Mapping[str, list[dict[str, Any]]]],
     field_bindings: Mapping[str, Any],
 ) -> list[dict[str, Any]]:
     actions = []
@@ -332,7 +345,8 @@ def _slot_actions(
             slot_scan,
             slot_key,
             f"$.{output_key}.{group}.{option_key}.{slot_key}.tails",
-            require_glyphs=preset == "tail_text",
+            require_glyphs=bool(slot_data.get("tails")),
+            font_dependencies=_tail_font_dependencies(slot_data, option),
         )
         if preset == "path_text" and "path" not in text_kind.lower():
             raise V2RenderTaskError(
@@ -371,6 +385,9 @@ def _slot_actions(
                 "slot_key": slot_key,
                 "paths_by_option": dict(font_style_sources[slot_key]),
             }
+            selected_font_tails = font_tail_sources.get(slot_key)
+            if selected_font_tails:
+                action["style_source"]["tails_by_option"] = deepcopy(selected_font_tails)
         actions.append(_action("replace_slot_text", **action))
     return actions
 
@@ -475,6 +492,66 @@ def _font_style_sources(
     return result
 
 
+def _font_tail_sources(
+    output_key: str,
+    output: Mapping[str, Any],
+    scan_index: Mapping[tuple[str, ...], Mapping[str, Any]],
+) -> dict[str, dict[str, list[dict[str, Any]]]]:
+    """Collect tail glyph samples from Font options used as Design style sources.
+
+    In a Design + Font output, Font groups are copied only as temporary style
+    sources and removed before export. Tail samples therefore have to travel with
+    the Design replacement action instead of being rendered in that temporary
+    group.
+    """
+    design = dict(output.get("design") or {})
+    font = dict(output.get("font") or {})
+    design_field = str(design.get("field") or "")
+    font_field = str(font.get("field") or "")
+    if not design_field or not font_field or design_field == font_field:
+        return {}
+    design_slot_keys = {
+        str(dict(slot).get("key") or "")
+        for option in design.get("options", [])
+        for slot in dict(option).get("slots", [])
+        if isinstance(slot, Mapping) and str(dict(slot).get("preset") or "") != "asset_replace"
+    }
+    result: dict[str, dict[str, list[dict[str, Any]]]] = {}
+    for font_option in font.get("options", []):
+        font_data = dict(font_option)
+        font_key = str(font_data.get("key") or "")
+        option_scan = _scan_ref(
+            scan_index,
+            ("option", output_key, "font", font_key),
+            f"$.outputs.{output_key}.font.{font_key}",
+        )
+        for font_slot in font_data.get("slots", []):
+            if not isinstance(font_slot, Mapping):
+                continue
+            slot_data = dict(font_slot)
+            slot_key = str(slot_data.get("key") or "")
+            if not slot_key or slot_key not in design_slot_keys:
+                continue
+            slot_scan = _scan_ref(
+                scan_index,
+                ("slot", output_key, "font", font_key, slot_key),
+                f"$.{output_key}.font.{font_key}.{slot_key}",
+            )
+            preset = str(slot_data.get("preset") or slot_scan.get("preset") or "direct_text")
+            tails = _tail_specs(
+                slot_data.get("tails", []),
+                option_scan.get("tails", []),
+                slot_scan,
+                slot_key,
+                f"$.{output_key}.font.{font_key}.{slot_key}.tails",
+                require_glyphs=bool(slot_data.get("tails")),
+                font_dependencies=_tail_font_dependencies(slot_data, font_data),
+            )
+            if tails:
+                result.setdefault(slot_key, {})[font_key] = tails
+    return result
+
+
 def _build_scan_index(scan: Mapping[str, Any]) -> dict[tuple[str, ...], Mapping[str, Any]]:
     result: dict[tuple[str, ...], Mapping[str, Any]] = {}
     for output in scan.get("outputs", []):
@@ -544,6 +621,7 @@ def _tail_specs(
     path: str,
     *,
     require_glyphs: bool,
+    font_dependencies: Any = None,
 ) -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
     seen_positions: set[str] = set()
@@ -619,8 +697,14 @@ def _tail_specs(
             "sample": sample,
             "path": _path_by_key(scan_tails, key, f"{path}[{index}].key"),
         }
-        if require_glyphs or tail.get("pua_base") not in (None, "") or tail.get("glyph_map"):
-            record.update(_tail_glyph_proof(tail, f"{path}[{index}]"))
+        if (
+            require_glyphs
+            or tail.get("pua_base") not in (None, "")
+            or tail.get("glyph_map")
+            or tail.get("opentype_feature") not in (None, "")
+            or tail.get("opentype_alternate_index") not in (None, "")
+        ):
+            record.update(_tail_glyph_proof(tail, f"{path}[{index}]", font_dependencies=font_dependencies))
         else:
             record["glyph_mode"] = "plain_text"
         result.append(record)
@@ -637,7 +721,7 @@ def _scan_tail_keys_for_slot(slot_scan: Mapping[str, Any]) -> set[str]:
     return result
 
 
-def _tail_glyph_proof(tail: Mapping[str, Any], path: str) -> dict[str, Any]:
+def _tail_glyph_proof(tail: Mapping[str, Any], path: str, *, font_dependencies: Any = None) -> dict[str, Any]:
     if "pua_base" in tail and tail.get("pua_base") not in (None, ""):
         base = _codepoint(tail.get("pua_base"), f"{path}.pua_base")
         if base < _PUA_MIN or base + 25 > _PUA_MAX:
@@ -646,16 +730,68 @@ def _tail_glyph_proof(tail: Mapping[str, Any], path: str) -> dict[str, Any]:
                 "Tail PUA base must cover A-Z inside the Unicode private-use area.",
                 path=f"{path}.pua_base",
             )
-        return {"glyph_mode": "pua_contiguous", "pua_base": base, "coverage": "a-z"}
+        result = {"glyph_mode": "pua_contiguous", "pua_base": base, "coverage": "a-z"}
+        font = _single_tail_font_dependency(font_dependencies)
+        if font:
+            result["font_postscript_name"] = font
+        return result
     glyph_map = tail.get("glyph_map")
     if isinstance(glyph_map, Mapping):
         normalized = _tail_glyph_map(glyph_map, f"{path}.glyph_map")
-        return {"glyph_mode": "glyph_map", "glyph_map": normalized, "coverage": "a-z"}
+        result = {"glyph_mode": "glyph_map", "glyph_map": normalized, "coverage": "a-z"}
+        font = _single_tail_font_dependency(font_dependencies)
+        if font:
+            result["font_postscript_name"] = font
+        return result
+    feature = str(tail.get("opentype_feature") or "").strip().casefold()
+    alternate_index = tail.get("opentype_alternate_index")
+    if feature or alternate_index not in (None, ""):
+        if not feature or not isinstance(alternate_index, int) or isinstance(alternate_index, bool) or alternate_index < 1:
+            raise V2RenderTaskError(
+                "opentype_tail_profile_invalid",
+                "OpenType 尾巴字形档案必须同时指定四位特性标签和正整数替代序号。",
+                path=path,
+            )
+        fonts = _unique_font_dependencies(font_dependencies)
+        if len(fonts) != 1:
+            raise V2RenderTaskError(
+                "opentype_tail_font_ambiguous",
+                "OpenType 尾巴字形必须在槽位或选项中确认唯一的字体依赖。",
+                path=path,
+            )
+        return {
+            "glyph_mode": "opentype_alternate",
+            "opentype_feature": feature,
+            "opentype_alternate_index": alternate_index,
+            "font_postscript_name": fonts[0],
+            "coverage": "runtime-verified",
+        }
     raise V2RenderTaskError(
         "tail_glyph_coverage_missing",
-        "Tail text requires verified glyph coverage through pua_base or glyph_map.",
+        "Tail text requires verified glyph coverage through PUA, glyph map, or an OpenType alternate profile.",
         path=path,
     )
+
+
+def _tail_font_dependencies(slot: Mapping[str, Any], option: Mapping[str, Any]) -> list[str]:
+    return _unique_font_dependencies(slot.get("font_dependencies") or option.get("font_dependencies"))
+
+
+def _single_tail_font_dependency(value: Any) -> str:
+    fonts = _unique_font_dependencies(value)
+    return fonts[0] if len(fonts) == 1 else ""
+
+
+def _unique_font_dependencies(value: Any) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for raw in value if isinstance(value, list) else []:
+        name = str(raw or "").strip()
+        key = name.casefold()
+        if name and key not in seen:
+            seen.add(key)
+            result.append(name)
+    return result
 
 
 def _tail_glyph_map(value: Mapping[str, Any], path: str) -> dict[str, int]:

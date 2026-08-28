@@ -518,6 +518,82 @@ if (slot.styleToken !== 'F10-style') throw new Error('combo slot did not inherit
     assert result.returncode == 0, result.stderr
 
 
+def test_v2_renderer_keeps_tail_glyphs_from_selected_font_style_source():
+    tail_base = 0xE054
+    task = {
+        "$schema": "custom-renderer/v2-render-execution",
+        "template_ai": "template.ai",
+        "output_ai": "out.ai",
+        "mock_font_tail": True,
+        "mock_pua_tail_base": tail_base,
+        "values": {"design": "03", "font": "F3", "name": "Carla"},
+        "selections": {"Output_main": {"design": "Design03", "font": "F3"}},
+        "render_task": {
+            "$schema": "custom-renderer/v2-render-task",
+            "outputs": [
+                {
+                    "key": "Output_main",
+                    "actions": [
+                        {
+                            "type": "copy_option_group",
+                            "group": "design",
+                            "option_key": "Design03",
+                            "object_path": "Template/Output_main/Design/Design03",
+                        },
+                        {
+                            "type": "copy_option_group",
+                            "group": "font",
+                            "option_key": "F3",
+                            "object_path": "Template/Output_main/Font/F10",
+                            "source_only": True,
+                        },
+                        {
+                            "type": "replace_slot_text",
+                            "group": "design",
+                            "option_key": "Design03",
+                            "object_path": "Template/Output_main/Design/Design03/slot_name",
+                            "source_field": "name",
+                            "required": True,
+                            "preset": "direct_text",
+                            "tail_paths": [],
+                            "tails": [],
+                            "style_source": {
+                                "group": "font",
+                                "slot_key": "slot_name",
+                                "paths_by_option": {"F3": "Template/Output_main/Font/F10/slot_name"},
+                                "tails_by_option": {
+                                    "F3": [
+                                        {
+                                            "key": "tail_name_last_m",
+                                            "position": "last",
+                                            "sample": "m",
+                                                "glyph_mode": "pua_contiguous",
+                                                "pua_base": tail_base,
+                                            "path": "Template/Output_main/Font/F10/tail_name_last_m",
+                                        }
+                                    ]
+                                },
+                            },
+                        },
+                    ],
+                }
+            ],
+        },
+    }
+    harness = node_mock_harness(task, f"""
+const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
+if (!designCopy) throw new Error('Design03 was not copied');
+if (outputLayer.pageItems.find(item => item.name === 'F10')) throw new Error('source-only tail font copy was not removed');
+const slot = child(designCopy, 'slot_name');
+if (slot.contents !== 'Carl' + String.fromCharCode({tail_base})) throw new Error('font tail glyph was not carried to design: ' + slot.contents);
+if (slot.styleToken !== 'F10-style') throw new Error('tail font style was not inherited: ' + slot.styleToken);
+""")
+
+    result = run_node(harness)
+
+    assert result.returncode == 0, result.stderr
+
+
 def test_v2_renderer_removes_optional_blank_slot_inside_copied_group():
     task = {
         "$schema": "custom-renderer/v2-render-execution",
@@ -717,6 +793,7 @@ def test_v2_renderer_uses_anchor_bounds_without_moving_fixed_art():
         "output_ai": "out.ai",
         "values": {"design": "03", "name": "Anchored-Long-Name"},
         "selections": {"Output_main": {"design": "Design03"}},
+        "mock_fixed_annotation_name": "fixed",
         "render_task": {
             "$schema": "custom-renderer/v2-render-task",
             "outputs": [
@@ -747,7 +824,7 @@ def test_v2_renderer_uses_anchor_bounds_without_moving_fixed_art():
     harness = node_mock_harness(task, """
 const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
 const slot = child(designCopy, 'slot_name');
-const fixed = child(designCopy, 'fixed_heart');
+const fixed = child(designCopy, 'fixed');
 const width = slot.visibleBounds[2] - slot.visibleBounds[0];
 const height = slot.visibleBounds[1] - slot.visibleBounds[3];
 if (width > 60.01) throw new Error('anchored text escaped anchor width: ' + width);
@@ -771,6 +848,7 @@ def test_v2_renderer_extreme_text_keeps_shrinking_without_touching_fixed_art():
         "layout_warning_file": "warnings.json",
         "values": {"design": "03", "name": "X" * 160},
         "selections": {"Output_main": {"design": "Design03"}},
+        "mock_fixed_annotation_name": "fixed",
         "render_task": {
             "$schema": "custom-renderer/v2-render-task",
             "outputs": [
@@ -800,7 +878,7 @@ def test_v2_renderer_extreme_text_keeps_shrinking_without_touching_fixed_art():
     harness = node_mock_harness(task, """
 const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
 const slot = child(designCopy, 'slot_name');
-const fixed = child(designCopy, 'fixed_heart');
+const fixed = child(designCopy, 'fixed');
 const width = slot.visibleBounds[2] - slot.visibleBounds[0];
 if (width > 100.01) throw new Error('extreme text escaped slot width: ' + width);
 if (slot.resizeCalls < 1) throw new Error('extreme text was not shrunk');
@@ -812,6 +890,243 @@ if (!warning.warnings || warning.warnings[0].code !== 'text_fit_extreme') throw 
     result = run_node(harness)
 
     assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize(
+    ("fixed_marker", "pack_order_blocks"),
+    [("fixed", False), ("fixd", False), ("fixd_legacy", False), ("fixed", True)],
+)
+def test_v2_renderer_preserves_fixed_art_size_during_non_uniform_output_fit(
+    fixed_marker, pack_order_blocks
+):
+    task = {
+        "$schema": "custom-renderer/v2-render-execution",
+        "template_ai": "template.ai",
+        "output_ai": "out.ai",
+        "pack_order_blocks": pack_order_blocks,
+        "values": {"design": "03", "name": "Design sample"},
+        "selections": {"Output_main": {"design": "Design03"}},
+        "mock_fixed_annotation_name": fixed_marker,
+        "mock_fixed_bounds": [65, 30, 85, 10],
+        "render_task": {
+            "$schema": "custom-renderer/v2-render-task",
+            "outputs": [
+                {
+                    "key": "Output_main",
+                    "actions": [
+                        {
+                            "type": "copy_option_group",
+                            "group": "design",
+                            "option_key": "Design03",
+                            "object_path": "Template/Output_main/Design/Design03",
+                        },
+                        {
+                            "type": "replace_slot_text",
+                            "group": "design",
+                            "option_key": "Design03",
+                            "object_path": "Template/Output_main/Design/Design03/slot_name",
+                            "source_field": "name",
+                            "required": True,
+                            "tail_paths": [],
+                        },
+                        {
+                            "type": "fit_output_bounds",
+                            "group": "design",
+                            "option_key": "Design03",
+                            "dimensions": {"width_mm": 35.278, "height_mm": 14.111},
+                        },
+                    ],
+                }
+            ],
+        },
+    }
+    harness = node_mock_harness(task, """
+const packedBlock = outputLayer.pageItems.find(item => item.name === 'ORDER_PACK_BLOCK_0');
+if (__PACK_ORDER_BLOCKS__ && !packedBlock) throw new Error('output fit did not preserve the packed order block');
+const designCopy = packedBlock || outputLayer.pageItems.find(item => item.name === 'Design03');
+const fixed = child(designCopy, __FIXED_MARKER__);
+const width = fixed.visibleBounds[2] - fixed.visibleBounds[0];
+const height = fixed.visibleBounds[1] - fixed.visibleBounds[3];
+if (Math.abs(width - 20) > 0.1 || Math.abs(height - 20) > 0.1) {
+  throw new Error('fixed art size changed during output fit: ' + width + 'x' + height);
+}
+const fixedCenterX = (fixed.visibleBounds[0] + fixed.visibleBounds[2]) / 2;
+const fixedCenterY = (fixed.visibleBounds[1] + fixed.visibleBounds[3]) / 2;
+if (Math.abs(fixedCenterX - 50) > 0.1 || Math.abs(fixedCenterY - 20) > 0.1) {
+  throw new Error('fixed art center was not mapped by output fit: actual=' + fixedCenterX + ',' + fixedCenterY
+    + ', expected=50,20');
+}
+if (fixed.resizeCalls < 2 || fixed.translateCalls < 1) {
+  throw new Error('fixed art was not restored and repositioned after output fit');
+}
+const slot = child(designCopy, 'slot_name');
+if (slot.resizeCalls < 1) throw new Error('ordinary slot content did not participate in output fit');
+""".replace("__FIXED_MARKER__", json.dumps(fixed_marker)).replace(
+        "__PACK_ORDER_BLOCKS__", json.dumps(pack_order_blocks)
+    ))
+
+    result = run_node(harness)
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_v2_renderer_preserves_fixed_art_inside_font_during_output_fit_and_packing():
+    task = {
+        "$schema": "custom-renderer/v2-render-execution",
+        "template_ai": "template.ai",
+        "output_ai": "out.ai",
+        "pack_order_blocks": True,
+        "values": {"font": "F1", "name": "Design sample"},
+        "selections": {"Output_main": {"font": "F1"}},
+        "mock_fixed_annotation_name": "fixed",
+        "mock_fixed_parent": "F1",
+        "mock_fixed_bounds": [65, 30, 85, 10],
+        "render_task": {
+            "$schema": "custom-renderer/v2-render-task",
+            "outputs": [
+                {
+                    "key": "Output_main",
+                    "actions": [
+                        {
+                            "type": "copy_option_group",
+                            "group": "font",
+                            "option_key": "F1",
+                            "object_path": "Template/Output_main/Font/F1",
+                        },
+                        {
+                            "type": "replace_slot_text",
+                            "group": "font",
+                            "option_key": "F1",
+                            "object_path": "Template/Output_main/Font/F1/slot_name",
+                            "source_field": "name",
+                            "required": True,
+                            "tail_paths": [],
+                        },
+                        {
+                            "type": "fit_output_bounds",
+                            "group": "font",
+                            "option_key": "F1",
+                            "dimensions": {"width_mm": 35.278, "height_mm": 14.111},
+                        },
+                    ],
+                }
+            ],
+        },
+    }
+    harness = node_mock_harness(task, """
+const packedBlock = outputLayer.pageItems.find(item => item.name === 'ORDER_PACK_BLOCK_0');
+if (!packedBlock) throw new Error('font output was not packed');
+const fixed = child(packedBlock, 'fixed');
+const width = fixed.visibleBounds[2] - fixed.visibleBounds[0];
+const height = fixed.visibleBounds[1] - fixed.visibleBounds[3];
+if (Math.abs(width - 20) > 0.1 || Math.abs(height - 20) > 0.1) {
+  throw new Error('fixed font art size changed during output fit: ' + width + 'x' + height);
+}
+if (fixed.resizeCalls < 2 || fixed.translateCalls < 1) {
+  throw new Error('fixed font art was not restored and repositioned after output fit');
+}
+""")
+
+    result = run_node(harness)
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_v2_renderer_maps_design_fixed_art_against_its_design_not_font_bounds():
+    task = {
+        "$schema": "custom-renderer/v2-render-execution",
+        "template_ai": "template.ai",
+        "output_ai": "out.ai",
+        "values": {"design": "03", "font": "F1", "name": "Design sample"},
+        "selections": {"Output_main": {"design": "Design03", "font": "F1"}},
+        "mock_fixed_annotation_name": "fixed",
+        "mock_fixed_bounds": [65, 30, 85, 10],
+        "mock_f1_slot_bounds": [1000, 1000, 2000, 0],
+        "render_task": {
+            "$schema": "custom-renderer/v2-render-task",
+            "outputs": [
+                {
+                    "key": "Output_main",
+                    "actions": [
+                        {
+                            "type": "copy_option_group",
+                            "group": "design",
+                            "option_key": "Design03",
+                            "object_path": "Template/Output_main/Design/Design03",
+                        },
+                        {
+                            "type": "copy_option_group",
+                            "group": "font",
+                            "option_key": "F1",
+                            "object_path": "Template/Output_main/Font/F1",
+                        },
+                        {
+                            "type": "fit_output_bounds",
+                            "group": "design",
+                            "option_key": "Design03",
+                            "dimensions": {"width_mm": 352.778, "height_mm": 352.778},
+                        },
+                    ],
+                }
+            ],
+        },
+    }
+    harness = node_mock_harness(task, """
+const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
+const fixed = child(designCopy, 'fixed');
+const width = fixed.visibleBounds[2] - fixed.visibleBounds[0];
+const height = fixed.visibleBounds[1] - fixed.visibleBounds[3];
+if (Math.abs(width - 20) > 0.1 || Math.abs(height - 20) > 0.1) {
+  throw new Error('design fixed art changed size when font bounds were present');
+}
+const fixedCenterX = (fixed.visibleBounds[0] + fixed.visibleBounds[2]) / 2;
+if (fixedCenterX >= 100) {
+  throw new Error('design fixed art was mapped against font/output bounds: ' + fixedCenterX);
+}
+""")
+
+    result = run_node(harness)
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_v2_renderer_rejects_fixed_art_that_cannot_fit_output_bounds():
+    task = {
+        "$schema": "custom-renderer/v2-render-execution",
+        "template_ai": "template.ai",
+        "output_ai": "out.ai",
+        "values": {"design": "03"},
+        "selections": {"Output_main": {"design": "Design03"}},
+        "mock_fixed_annotation_name": "fixed",
+        "mock_fixed_bounds": [0, 120, 160, 0],
+        "render_task": {
+            "$schema": "custom-renderer/v2-render-task",
+            "outputs": [
+                {
+                    "key": "Output_main",
+                    "actions": [
+                        {
+                            "type": "copy_option_group",
+                            "group": "design",
+                            "option_key": "Design03",
+                            "object_path": "Template/Output_main/Design/Design03",
+                        },
+                        {
+                            "type": "fit_output_bounds",
+                            "group": "design",
+                            "option_key": "Design03",
+                            "dimensions": {"width_mm": 35.278, "height_mm": 14.111},
+                        },
+                    ],
+                }
+            ],
+        },
+    }
+
+    result = run_node(node_mock_harness(task, ""))
+
+    assert result.returncode != 0
+    assert "V2 output exceeds target bounds or does not match target bounds" in result.stderr
 
 
 def test_v2_renderer_ignores_sub_tolerance_text_fit_rounding_warning():
@@ -1170,7 +1485,7 @@ if (width >= 99.9) throw new Error('preserved tail text unexpectedly filled full
     assert result.returncode == 0, result.stderr
 
 
-def test_v2_renderer_derives_direct_text_tail_samples_for_any_end_letters():
+def test_v2_renderer_rejects_unverified_direct_text_tail_samples():
     tails = [
         {
             "key": "tail_name_first_m",
@@ -1191,16 +1506,12 @@ def test_v2_renderer_derives_direct_text_tail_samples_for_any_end_letters():
     task["render_task"]["outputs"][0]["actions"][1]["preset"] = "direct_text"
     task["mock_first_tail_sample"] = "__m"
     task["mock_last_tail_sample"] = "a__"
-    harness = node_mock_harness(task, """
-const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
-if (child(designCopy, 'slot_name').contents !== '__custom__') throw new Error('direct text did not derive both tail samples for arbitrary end letters: ' + child(designCopy, 'slot_name').contents);
-if (designCopy.pageItems.find(item => item.name === 'tail_name_first_m')) throw new Error('direct text retained first tail sample helper');
-if (designCopy.pageItems.find(item => item.name === 'tail_name_last_a')) throw new Error('direct text retained last tail sample helper');
-""")
+    harness = node_mock_harness(task, "")
 
     result = run_node(harness)
 
-    assert result.returncode == 0, result.stderr
+    assert result.returncode != 0
+    assert "tail glyph coverage is missing" in result.stderr
 
 
 def test_v2_renderer_fills_only_requested_axis_and_centers_slot_content():
@@ -1268,7 +1579,7 @@ if (Math.abs((bounds[0] + bounds[2]) / 2 - {expected_center[0]}) > 0.01 || Math.
     assert result.returncode == 0, result.stderr
 
 
-def test_v2_renderer_derives_plain_tail_sample_pua_for_any_end_letter():
+def test_v2_renderer_rejects_unverified_plain_tail_even_when_a_probe_candidate_exists():
     tails = [
         {
             "key": "tail_name_last_m",
@@ -1281,16 +1592,12 @@ def test_v2_renderer_derives_plain_tail_sample_pua_for_any_end_letter():
     task = tail_text_task(tails, value="Mastka")
     task["render_task"]["outputs"][0]["actions"][1]["preset"] = "direct_text"
     task["mock_pua_tail_base"] = 0xE054
-    harness = node_mock_harness(task, """
-const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
-const expected = 'Mastk' + String.fromCharCode(0xE054);
-if (child(designCopy, 'slot_name').contents !== expected) throw new Error('direct text did not derive PUA tail glyph: ' + child(designCopy, 'slot_name').contents);
-if (designCopy.pageItems.find(item => item.name === 'tail_name_last_m')) throw new Error('direct text retained plain tail sample helper');
-""")
+    harness = node_mock_harness(task, "")
 
     result = run_node(harness)
 
-    assert result.returncode == 0, result.stderr
+    assert result.returncode != 0
+    assert "tail glyph coverage is missing" in result.stderr
 
 
 def test_v2_renderer_bounds_plain_tail_pua_probe_candidates():
@@ -1298,7 +1605,8 @@ def test_v2_renderer_bounds_plain_tail_pua_probe_candidates():
 
     assert "knownTailPuaBases" in source
     assert "for (var candidate = 0xE000; candidate <= 0xF8FF - 25; candidate++)" not in source
-    assert "puaTailGlyphOrFallback" in source
+    assert "puaTailGlyph" in source
+    assert "missingCount === 0" in source
 
 
 def test_v2_renderer_rejects_plain_tail_pua_when_alphabet_is_incomplete():
@@ -1315,18 +1623,15 @@ def test_v2_renderer_rejects_plain_tail_pua_when_alphabet_is_incomplete():
     task["render_task"]["outputs"][0]["actions"][1]["preset"] = "direct_text"
     task["mock_pua_tail_base"] = 0xE054
     task["mock_pua_incomplete_base"] = 0xE054
-    harness = node_mock_harness(task, """
-const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
-if (child(designCopy, 'slot_name').contents !== 'Mastka') throw new Error('incomplete PUA alphabet was adopted: ' + child(designCopy, 'slot_name').contents);
-if (designCopy.pageItems.find(item => item.name === 'tail_name_last_m')) throw new Error('direct text retained rejected tail sample helper');
-""")
+    harness = node_mock_harness(task, "")
 
     result = run_node(harness)
 
-    assert result.returncode == 0, result.stderr
+    assert result.returncode != 0
+    assert "tail glyph coverage is missing" in result.stderr
 
 
-def test_v2_renderer_falls_back_to_latin_when_the_requested_plain_tail_pua_is_missing():
+def test_v2_renderer_blocks_when_the_requested_plain_tail_pua_is_missing():
     tails = [
         {
             "key": "tail_name_last_m",
@@ -1341,25 +1646,22 @@ def test_v2_renderer_falls_back_to_latin_when_the_requested_plain_tail_pua_is_mi
     task["mock_pua_tail_base"] = 0xE054
     task["mock_pua_missing_base"] = 0xE054
     task["mock_pua_missing_index"] = 5
-    harness = node_mock_harness(task, """
-const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
-if (child(designCopy, 'slot_name').contents !== 'Mastkf') {
-  throw new Error('missing PUA endpoint did not fall back to the Latin letter: ' + child(designCopy, 'slot_name').contents);
-}
-""")
+    harness = node_mock_harness(task, "")
 
     result = run_node(harness)
 
-    assert result.returncode == 0, result.stderr
+    assert result.returncode != 0
+    assert "tail glyph coverage is missing" in result.stderr
 
 
-def test_v2_renderer_applies_plain_tail_evidence_to_split_part_only():
+def test_v2_renderer_applies_verified_pua_tail_to_split_part_only():
     tails = [
         {
             "key": "tail_year_tail_last_a",
             "position": "last",
             "sample": "a",
-            "glyph_mode": "plain_text",
+            "glyph_mode": "pua_contiguous",
+            "pua_base": TAIL_PUA_BASE,
             "path": "Template/Output_main/Design/Design03/tail_year_tail_last_a",
         }
     ]
@@ -1377,10 +1679,10 @@ def test_v2_renderer_applies_plain_tail_evidence_to_split_part_only():
             "tails": tails,
         }
     )
-    harness = node_mock_harness(task, """
+    harness = node_mock_harness(task, f"""
 const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
 if (child(designCopy, 'slot_year_tail').contents !== 'Omeg') throw new Error('plain split main mismatch: ' + child(designCopy, 'slot_year_tail').contents);
-if (child(designCopy, 'tail_year_tail_last_a').contents !== 'a') throw new Error('plain split tail mismatch: ' + child(designCopy, 'tail_year_tail_last_a').contents);
+if (child(designCopy, 'tail_year_tail_last_a').contents !== String.fromCharCode({TAIL_PUA_BASE})) throw new Error('PUA split tail mismatch: ' + child(designCopy, 'tail_year_tail_last_a').contents);
 """)
 
     result = run_node(harness)
@@ -1439,6 +1741,106 @@ const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
 const firstTail = designCopy.pageItems.find(item => item.name === 'tail_name_first_a');
 if (!firstTail || firstTail.contents !== {json.dumps(chr(0xE219))}) throw new Error('glyph map tail mismatch');
 if (child(designCopy, 'slot_name').contents !== 'elda') throw new Error('main tail removal mismatch');
+""")
+
+    result = run_node(harness)
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_v2_renderer_embeds_one_materialized_opentype_word_for_direct_text():
+    tails = [
+        {
+            "key": "tail_name_first_a",
+            "position": "first",
+            "sample": "a",
+            "glyph_mode": "opentype_alternate",
+            "opentype_word_asset": {"path": "alice.svg"},
+            "path": "Template/Output_main/Design/Design03/tail_name_first_a",
+        },
+        {
+            "key": "tail_name_last_a",
+            "position": "last",
+            "sample": "a",
+            "glyph_mode": "opentype_alternate",
+            "path": "Template/Output_main/Design/Design03/tail_name_last_a",
+        },
+    ]
+    task = tail_text_task(tails, value="Alice")
+    task["render_task"]["outputs"][0]["actions"][1]["preset"] = "direct_text"
+    harness = node_mock_harness(task, f"""
+const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
+if (designCopy.pageItems.find(item => item.name === 'slot_name')) throw new Error('OpenType composition retained editable normal endpoint text');
+if (designCopy.pageItems.find(item => item.name === 'tail_name_first_a' || item.name === 'tail_name_last_a')) throw new Error('OpenType helper sample remained in output');
+if (!designCopy.pageItems.find(item => item.name === 'TAIL_VECTOR_WORD_slot_name' && item.typename === 'PathItem')) throw new Error('OpenType word outline was not inserted');
+const embedded = designCopy.pageItems.filter(item => item.typename === 'PathItem' && /^TAIL_VECTOR_WORD_/.test(item.name));
+if (embedded.length !== 1) throw new Error('OpenType word SVG was not embedded');
+""")
+
+    result = run_node(harness)
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_v2_renderer_composes_mixed_opentype_and_pua_as_one_word_vector_for_one_slot():
+    tails = [
+        {
+            "key": "tail_name_first_a",
+            "position": "first",
+            "sample": "a",
+            "glyph_mode": "opentype_alternate",
+            "opentype_word_asset": {"path": "alice.svg"},
+            "path": "Template/Output_main/Design/Design03/tail_name_first_a",
+        },
+        {
+            "key": "tail_name_last_a",
+            "position": "last",
+            "sample": "a",
+            "glyph_mode": "pua_contiguous",
+            "pua_base": TAIL_PUA_BASE,
+            "tail_vector_asset": {"path": "last-e.svg"},
+            "path": "Template/Output_main/Design/Design03/tail_name_last_a",
+        },
+    ]
+    task = tail_text_task(tails, value="Alice")
+    task["render_task"]["outputs"][0]["actions"][1]["preset"] = "direct_text"
+    harness = node_mock_harness(task, """
+const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
+if (designCopy.pageItems.find(item => item.name === 'slot_name')) throw new Error('mixed composition retained editable endpoint text');
+if (!designCopy.pageItems.find(item => item.name === 'TAIL_VECTOR_WORD_slot_name' && item.typename === 'PathItem')) {
+  throw new Error('mixed word vector was not inserted');
+}
+""")
+
+    result = run_node(harness)
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_v2_renderer_applies_word_appearance_to_compound_svg_paths():
+    tails = [
+        {
+            "key": "tail_name_first_a",
+            "position": "first",
+            "sample": "a",
+            "glyph_mode": "opentype_alternate",
+            "opentype_word_asset": {"path": "alice.svg"},
+            "path": "Template/Output_main/Design/Design03/tail_name_first_a",
+        }
+    ]
+    task = tail_text_task(tails, value="Alice")
+    task["mock_opentype_compound"] = True
+    task["render_task"]["outputs"][0]["actions"][1]["preset"] = "direct_text"
+    harness = node_mock_harness(task, """
+const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
+const word = designCopy.pageItems.find(item => item.name === 'TAIL_VECTOR_WORD_slot_name');
+if (!word) throw new Error('OpenType word outline missing');
+const compound = word.pageItems.find(item => item.typename === 'CompoundPathItem');
+if (!compound || !compound.pathItems || !compound.pathItems.length) throw new Error('mock compound path missing');
+const filledPath = compound.pathItems[0];
+if (!filledPath.filled || !filledPath.fillColor || filledPath.fillColor.red !== 0 || filledPath.fillColor.green !== 0 || filledPath.fillColor.blue !== 0) {
+  throw new Error('compound path did not inherit text fill');
+}
 """)
 
     result = run_node(harness)
@@ -2239,7 +2641,7 @@ global.$ = {{ getenv: () => 'task.json' }};
 global.File = function(path) {{
   return {{
     fsName: path,
-    exists: path === 'task.json',
+    exists: path === 'task.json' || /\.svg$/i.test(path),
     parent: folder,
     open: () => true,
     read: () => taskText,
@@ -2250,15 +2652,17 @@ global.File = function(path) {{
 }};
 global.UserInteractionLevel = {{ DONTDISPLAYALERTS: 0 }};
 global.DocumentColorSpace = {{ RGB: 1 }};
-global.ElementPlacement = {{ PLACEATEND: 1 }};
+global.ElementPlacement = {{ PLACEATEND: 1, PLACEBEFORE: 2 }};
 global.SaveOptions = {{ DONOTSAVECHANGES: 0 }};
 global.Compatibility = {{ ILLUSTRATOR8: 8 }};
 global.IllustratorSaveOptions = function() {{}};
 global.ExportOptionsPNG24 = function() {{}};
 global.ExportType = {{ PNG24: 24 }};
 global.Transformation = {{ CENTER: 0 }};
+global.RGBColor = function() {{ this.red = 0; this.green = 0; this.blue = 0; }};
 function item(typename, name, contents, children, styleToken, bounds, options) {{
   let text = contents || '';
+  const characterColors = {{}};
   const opts = options || {{}};
   let textSize = Number(opts.textSize || 18);
   let box = (bounds || defaultBounds(typename, name, text)).slice();
@@ -2272,6 +2676,7 @@ function item(typename, name, contents, children, styleToken, bounds, options) {
     outlineToken: opts.outlineToken || '',
     styleToken: styleToken || '',
     pageItems: children || [],
+    pathItems: opts.pathItems || [],
     translateCalls: 0,
     resizeCalls: 0,
     duplicate: function(targetLayer) {{
@@ -2280,6 +2685,19 @@ function item(typename, name, contents, children, styleToken, bounds, options) {
       return copy;
     }},
     createOutline: function() {{
+      if (typename === 'TextFrame' && Object.keys(characterColors).length) {{
+        const glyphs = text.split('').map((character, index) => {{
+          const width = Math.max(1, (box[2] - box[0]) / Math.max(text.length, 1));
+          const glyph = item('PathItem', '', '', [], '', [box[0] + width * index, box[1], box[0] + width * (index + 1), box[3]]);
+          glyph.fillColor = characterColors[index] || {{ red: 0, green: 0, blue: 0 }};
+          return glyph;
+        }});
+        const outlined = item('GroupItem', '', '', glyphs, '', this.visibleBounds);
+        const parent = this.parent;
+        this.remove();
+        if (parent) attach(parent, outlined);
+        return outlined;
+      }}
       const code = text.length === 1 ? text.charCodeAt(0) : 0;
       const matchesTailSample = opts.puaTailBase && (text === 'm' || code === Number(opts.puaTailBase) + 12);
       const token = matchesTailSample ? 'tail-sample-m' : ('glyph-' + code);
@@ -2318,7 +2736,7 @@ function item(typename, name, contents, children, styleToken, bounds, options) {
         throw new Error('dom move failed: ' + this.name);
       }}
       this.remove();
-      attach(target, this);
+      attach(placement === ElementPlacement.PLACEBEFORE && target && target.parent ? target.parent : target, this);
     }},
     translate: function(dx, dy) {{
       this.translateCalls++;
@@ -2362,6 +2780,19 @@ function item(typename, name, contents, children, styleToken, bounds, options) {
   node.textRange = {{
     characterAttributes: {{}}
   }};
+  node.textRange.characterAttributes.fillColor = {{ red: 0, green: 0, blue: 0 }};
+  node.textRange.characterAttributes.strokeColor = {{ red: 0, green: 0, blue: 0 }};
+  node.textRange.characterAttributes.strokeWeight = 0;
+  Object.defineProperty(node.textRange, 'characters', {{
+    get: () => text.split('').map((character, index) => {{
+      const attributes = {{}};
+      Object.defineProperty(attributes, 'fillColor', {{
+        get: () => characterColors[index] || node.textRange.characterAttributes.fillColor,
+        set: value => {{ characterColors[index] = value; }}
+      }});
+      return {{ characterAttributes: attributes }};
+    }})
+  }});
   Object.defineProperty(node.textRange.characterAttributes, 'size', {{
     get: () => textSize,
     set: value => {{
@@ -2441,7 +2872,8 @@ function clone(node) {{
     kind: node.kind,
     pathToken: node.pathToken,
     textSize: node.textSize,
-    puaTailBase: node.puaTailBase
+    puaTailBase: node.puaTailBase,
+    pathItems: node.pathItems.map(clone)
   }});
   copy.fromCopy = true;
   return copy;
@@ -2461,6 +2893,7 @@ const f1 = item('GroupItem', 'F1', '', [item('TextFrame', 'slot_name', 'F1 sampl
 const f10 = item('GroupItem', 'F10', '', [
   item('TextFrame', 'slot_name', 'F10 sample', [], 'F10-style'),
   item('TextFrame', 'slot_title', 'Arc sample', [], 'Arc-style', [0, 40, 100, 20], {{ kind: 'PATHTEXT', pathToken: 'arc-main', textSize: 18 }}),
+  ...(task.mock_font_tail ? [item('TextFrame', 'tail_name_last_m', 'm', [], 'F10-style', undefined, {{ puaTailBase: task.mock_pua_tail_base || 0 }})] : []),
   item('PathItem', '', '', [])
 ]);
 const design03 = item('GroupItem', 'Design03', '', [
@@ -2485,7 +2918,7 @@ const design03 = item('GroupItem', 'Design03', '', [
   item('TextFrame', 'tail_name_1', 'Tail 1', [], 'Tail-style'),
   item('TextFrame', 'tail_name_2', 'Tail 2', [], 'Tail-style'),
   item('TextFrame', 'slot_year', '2026', [], 'Year-style'),
-  item('PathItem', 'fixed_heart', '', []),
+  item('PathItem', task.mock_fixed_parent === 'F1' ? '' : (task.mock_fixed_annotation_name || ''), '', [], '', task.mock_fixed_bounds),
   item('GroupItem', 'Assets', '', [
     item('GroupItem', 'initial_top', '', [
       item('PathItem', 'A', '', []),
@@ -2494,6 +2927,9 @@ const design03 = item('GroupItem', 'Design03', '', [
   ]),
   item('PathItem', '', '', [])
 ]);
+if (task.mock_fixed_parent === 'F1') {{
+  attach(f1, item('PathItem', task.mock_fixed_annotation_name || 'fixed', '', [], '', task.mock_fixed_bounds));
+}}
 const style1 = item('GroupItem', 'style1', '', [item('PathItem', 'style1_shape', '', [], '', style1Bounds)]);
 const style2 = item('GroupItem', 'style2', '', [item('PathItem', 'style2_shape', '', [], '', [0, 200, 200, 0])]);
 const styleGroup = item('GroupItem', 'Style', '', [style1, style2]);
@@ -2522,6 +2958,20 @@ const outputDoc = {{
   exportFile: (file, type, options) => {{ exportedAs = file.fsName + '.png'; exportOptions = options; }},
   close: () => undefined
 }};
+function glyphDocument() {{
+  const glyph = item('PathItem', '', '', [], '', [0, 20, 10, 0]);
+  glyph.openTypeTail = true;
+  const glyphItems = [glyph];
+  if (task.mock_opentype_compound) {{
+    const compoundInner = item('PathItem', '', '', [], '', [10, 20, 20, 0]);
+    const compound = item('CompoundPathItem', '', '', [], '', [10, 20, 20, 0], {{ pathItems: [compoundInner] }});
+    compoundInner.parent = compound;
+    glyphItems.push(compound);
+  }}
+  const glyphLayer = {{ typename: 'Layer', name: 'SVG', pageItems: glyphItems }};
+  for (const glyphItem of glyphItems) glyphItem.parent = glyphLayer;
+  return {{ layers: [glyphLayer], close: () => undefined }};
+}}
 function groupSelectedOutputItems() {{
   const selected = outputLayer.pageItems.filter(item => item.selected);
   const group = item('GroupItem', '', '', []);
@@ -2534,7 +2984,7 @@ function groupSelectedOutputItems() {{
 }}
 global.app = {{
   userInteractionLevel: 0,
-  open: () => templateDoc,
+  open: file => /\.svg$/i.test(String(file && file.fsName || '')) ? glyphDocument() : templateDoc,
   activeDocument: outputDoc,
   documents: {{ add: () => {{
     global.app.activeDocument = outputDoc;
