@@ -221,6 +221,7 @@
       slots: "槽位",
       anchors: "定位框",
       tails: "尾巴样本",
+      fixed: "固定图案",
       fixedObjects: "固定对象汇总"
     };
     return `${labels[key] || key}（${count}）`;

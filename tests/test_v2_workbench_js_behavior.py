@@ -771,12 +771,22 @@ def test_v2_workbench_structure_stage_uses_nested_template_tree():
                   outputs: [{
                     key: "Output_main",
                     design: { options: [
-                      { key: "Design01", slots: [{ key: "slot_name" }], anchors: [{ key: "anchor_name" }], tails: [] },
+                      {
+                        key: "Design01",
+                        slots: [{ key: "slot_name" }],
+                        anchors: [{ key: "anchor_name" }],
+                        tails: [],
+                        fixed_annotations: Array.from({ length: 9 }, (_, index) => ({
+                          key: index === 0 ? "fixed" : `fixed_${index + 1}`,
+                          path: `Template/Output_main/Design/Design01/fixed_${index + 1}`,
+                          type: "CompoundPathItem"
+                        }))
+                      },
                       { key: "Design02", slots: [{ key: "slot_name1" }, { key: "slot_name2" }], anchors: [], tails: [{ key: "tail_name1_last_m" }] }
                     ] },
-                    font: { options: [] },
+                    font: { options: [{ key: "F1", slots: [], fixed_annotations: [{ key: "fixed_font" }] }] },
                     style: { options: [] },
-                    summary: { designs: 2, fonts: 0, styles: 0, slots: 3, anchors: 1, tails: 1, assets: 0, fixed_objects: 5 }
+                    summary: { designs: 2, fonts: 1, styles: 0, slots: 3, anchors: 1, tails: 1, assets: 0, fixed_objects: 5 }
                   }]
                 }
               }});
@@ -791,6 +801,8 @@ def test_v2_workbench_structure_stage_uses_nested_template_tree():
           global.setWorkbenchStage("structure");
           await flush();
 
+          const model = global.scanModel(global.DrawFlowV2WorkbenchContext.state.scan, global.DrawFlowV2WorkbenchContext.state.draft.config);
+          assert.strictEqual(model.designs[0].fixed_annotations[0].key, "fixed");
           const rows = document.querySelectorAll("#structureTree .structure-tree-row");
           assert(rows.length >= 5);
           const templateRow = rows.find((row) => row.className.includes("depth-0") && row.textContent.includes("Template"));
@@ -802,7 +814,22 @@ def test_v2_workbench_structure_stage_uses_nested_template_tree():
           assert(app.elements.structureTree.textContent.includes("未命名固定对象"));
           assert(!app.elements.structureTree.textContent.includes("槽位（"));
 
-          const outputRow = rows.find((row) => row.dataset.nodeKind === "output");
+          const designRow = rows.find((row) => row.dataset.nodeKind === "designs" && row.textContent.includes("Design01"));
+          assert.strictEqual(designRow.getAttribute("aria-expanded"), "false");
+          designRow.dispatch("click");
+          await flush();
+          const expandedDesignRow = document.querySelectorAll("#structureTree .structure-tree-row").find((row) => row.dataset.nodeKind === "designs" && row.textContent.includes("Design01"));
+          assert.strictEqual(expandedDesignRow.getAttribute("aria-expanded"), "true");
+          assert(app.elements.structureTree.textContent.includes("fixed"), app.elements.structureTree.textContent);
+          assert(app.elements.structureTree.textContent.includes("fixed_9"), app.elements.structureTree.textContent);
+          assert(app.elements.structureTree.textContent.includes("固定图案 · 自动保护"), app.elements.structureTree.textContent);
+
+          const fontRow = document.querySelectorAll("#structureTree .structure-tree-row").find((row) => row.dataset.nodeKind === "fonts" && row.textContent.includes("F1"));
+          fontRow.dispatch("click");
+          await flush();
+          assert(app.elements.structureTree.textContent.includes("fixed_font"), app.elements.structureTree.textContent);
+
+          const outputRow = document.querySelectorAll("#structureTree .structure-tree-row").find((row) => row.dataset.nodeKind === "output");
           outputRow.dispatch("click");
           await flush();
           const collapsedRows = document.querySelectorAll("#structureTree .structure-tree-row");
@@ -810,7 +837,8 @@ def test_v2_workbench_structure_stage_uses_nested_template_tree():
           assert.strictEqual(collapsedOutput.getAttribute("aria-expanded"), "false");
           assert(!app.elements.structureTree.textContent.includes("Design01"));
         })().catch((error) => { console.error(error); process.exit(1); });
-        """
+        """,
+        cwd=Path(__file__).resolve().parents[1],
     )
 
 
@@ -831,7 +859,7 @@ def test_v2_workbench_field_bindings_do_not_list_each_design_option():
                   outputs: [{
                     key: "Output_main",
                     design: { options: [
-                      { key: "Design01", slots: [{ key: "slot_name" }] },
+                      { key: "Design01", slots: [{ key: "slot_name" }], fixed_annotations: [{ key: "fixed" }] },
                       { key: "Design02", slots: [{ key: "slot_name1" }, { key: "slot_name2" }] }
                     ] },
                     font: { options: [] },
@@ -857,12 +885,14 @@ def test_v2_workbench_field_bindings_do_not_list_each_design_option():
           assert(fields.includes("name"));
           assert(fields.includes("name1"));
           assert(fields.includes("name2"));
+          assert(!fields.includes("fixed"));
           assert(!fields.includes("Design01"));
           assert(!fields.includes("Design02"));
           assert(fields.length <= 5);
           assert(app.elements.fieldBindingRows.textContent.includes("待确认"));
         })().catch((error) => { console.error(error); process.exit(1); });
-        """
+        """,
+        cwd=Path(__file__).resolve().parents[1],
     )
 
 
