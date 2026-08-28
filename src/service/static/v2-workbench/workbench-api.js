@@ -31,7 +31,12 @@
     }
     const text = await response.text();
     const payload = parseJson(text);
-    if (!response.ok) throw new Error(errorFromPayload(payload, fallback));
+    if (!response.ok) {
+      const problem = objectOf(payload && payload.error);
+      const requestError = new Error(errorFromPayload(payload, fallback));
+      requestError.code = cleanText(problem.code);
+      throw requestError;
+    }
     return payload === null ? {} : payload;
   }
 

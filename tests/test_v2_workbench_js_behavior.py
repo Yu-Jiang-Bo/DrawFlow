@@ -395,6 +395,45 @@ def test_v2_workbench_opens_the_published_shared_template_requested_by_direct_li
     )
 
 
+def test_v2_workbench_loads_the_draft_when_an_older_central_service_lacks_published_reading():
+    run_node(
+        r"""
+        (async () => {
+          const requests = [];
+          const compatibleDraft = {
+            metadata: { template_id: "LEGACY001", name: "兼容模板", shop_name: "Demo Shop" },
+            manifest: { draft_revision: "d0007" },
+            config: { template: { template_id: "LEGACY001" }, field_bindings: { slot_name: "Name" }, outputs: [] },
+            scan: { outputs: [{ key: "Output_main" }] }
+          };
+          async function fakeFetch(url) {
+            const textUrl = String(url);
+            requests.push(textUrl);
+            if (textUrl === "/api/v2/templates") {
+              return response({ templates: [{ template_id: "LEGACY001", name: "兼容模板", publication: { status: "active", current_version: "v0001" } }] });
+            }
+            if (textUrl === "/api/v2/templates/LEGACY001/published") {
+              return response({ error: { code: "v2_route_not_found", message: "请求的 V2 模板接口不存在。" } }, false);
+            }
+            if (textUrl === "/api/v2/templates/LEGACY001/draft") return response({ draft: compatibleDraft });
+            throw new Error(`unexpected request ${textUrl}`);
+          }
+          const app = createApp(fakeFetch, undefined, "?template_id=LEGACY001");
+          const state = global.DrawFlowV2WorkbenchContext.state;
+          for (let index = 0; index < 5 && !state.draft; index += 1) await flush();
+          assert.strictEqual(state.selectedTemplateId, "LEGACY001");
+          assert.strictEqual(state.isPublishedView, false);
+          assert.strictEqual(state.draft.manifest.draft_revision, "d0007");
+          assert.strictEqual(state.scan.outputs[0].key, "Output_main");
+          assert(requests.includes("/api/v2/templates/LEGACY001/published"));
+          assert(requests.includes("/api/v2/templates/LEGACY001/draft"));
+          assert(app.elements.draftStatusBadge.textContent.includes("中央服务未提供已发布版本读取"));
+        })().catch((error) => { console.error(error); process.exit(1); });
+        """,
+        cwd=Path(__file__).resolve().parents[1],
+    )
+
+
 def test_v2_workbench_keeps_the_upload_stage_when_the_shared_configuration_cannot_be_read():
     run_node(
         r"""
@@ -425,7 +464,7 @@ def test_v2_workbench_keeps_the_upload_stage_when_the_shared_configuration_canno
           assert.strictEqual(state.stage, "upload");
           assert(app.elements.scanFailedMessage.textContent.includes("共享配置不存在"));
           app.elements.retryScanBtn.dispatch("click");
-          await flush();
+          for (let index = 0; index < 4 && !state.isPublishedView; index += 1) await flush();
           assert.strictEqual(publishedRequested, 2);
           assert.strictEqual(state.isPublishedView, true);
           assert.strictEqual(state.draft.scan.outputs[0].key, "Output_main");
