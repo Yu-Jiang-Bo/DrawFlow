@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 from src.renderer.v2_template_renderer import (
     V2TemplateRenderer,
@@ -77,6 +78,7 @@ def test_png_master_task_keeps_paging_settings_in_the_pure_payload(tmp_path):
         preview_background={"enabled": True},
         debug_report_path=tmp_path / "master.debug.json",
         page_count=2,
+        output_policy={"outline_text": True, "pathfinder_merge": False},
     )
 
     assert task["type"] == "compose_png_master_pages"
@@ -84,6 +86,16 @@ def test_png_master_task_keeps_paging_settings_in_the_pure_payload(tmp_path):
     assert task["page_count"] == 2
     assert task["preview_background"] == {"enabled": True}
     assert task["debug"] == {"report_path": str(tmp_path / "master.debug.json")}
+    assert task["output"] == {"outline_text": True, "pathfinder_merge": False}
+
+
+def test_png_master_composer_outlines_final_labels_only_after_layout():
+    source = Path("scripts/illustrator/compose_png_master_pages.jsx").read_text(encoding="utf-8")
+
+    assert "function applyOutputTransforms(doc, policy)" in source
+    assert source.index("drawFrame(layer, 0, pageHeight, frameWidth, pageHeight);") < source.index(
+        "applyOutputTransforms(doc, task.output || {});"
+    ) < source.index("saveAsAI(doc, aiFile, String(task.compatibility || \"CS5\"));")
 
 
 def test_composition_task_builders_do_not_share_nested_input_values(tmp_path):

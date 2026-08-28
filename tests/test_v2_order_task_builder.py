@@ -164,6 +164,7 @@ def test_factory_is_compatible_with_shared_pipeline_builder_kwargs(tmp_path, mon
     assert "units" not in task
     assert task["production"]["color_summary"] is True
     assert calls[0]["kwargs"]["pack_order_blocks"] is True
+    assert calls[0]["kwargs"]["defer_output_transforms"] is False
     assert calls[0]["kwargs"]["values"] == {"name": "Cara"}
 
 
@@ -192,6 +193,7 @@ def test_component_reuse_strategy_builds_unannotated_v2_component_and_composers(
 
     assert component["layout"]["suppress_labels"] is True
     assert component["production"]["component_reuse"] is True
+    assert component["defer_output_transforms"] is True
     assert component["output"]["format"] == "ai"
     assert order["type"] == "compose_v2_order_column"
     assert order["label_lines"] == ["ORDER-6", "金色"]

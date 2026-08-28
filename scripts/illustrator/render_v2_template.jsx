@@ -25,6 +25,7 @@
     var renderedOutputItems = [];
     var renderedOutputCount = 0;
     var tailPuaBaseCache = {};
+    var plainTailCoverageCache = directPlainTailCoverageCache();
     var fixedVisualLayoutCache = [];
     // Bounded candidates cover the installed tail fonts while keeping one
     // preview from ever issuing thousands of Illustrator outline operations.
@@ -46,7 +47,9 @@
             renderedOutputCount += 1;
         }
         if (selectedOutputKey && renderedOutputCount !== 1) throw new Error("Selected V2 output was not rendered: " + selectedOutputKey);
-        applyOutputTransforms(doc, execution.output || task.output || {});
+        if (execution.defer_output_transforms !== true) {
+            applyOutputTransforms(doc, execution.output || task.output || {});
+        }
         var finalFitAction = selectedFitAction(task, selectedOutputKey, selections);
         if (finalFitAction) fitRenderedOutput(renderedOutputItems, finalFitAction);
         if (execution.pack_order_blocks === true) {
@@ -621,22 +624,88 @@
         var letter = String(endpoint || "").toLowerCase();
         if (!isPlainTextTailSpec(spec)) return V2TailText.tailGlyphForSpec(letter, spec);
         var sampleText = String(tailFrame.contents || "");
-        var sampleIndex = tailSampleLatinIndex(sampleText, position);
-        if (sampleText.length !== 1 || sampleIndex !== 0) {
+        var sampleSegment = V2TailText.tailSampleSegment(sampleText, "", position);
+        var configuredSample = String((spec || {}).sample || "").toLowerCase();
+        if (tailSampleLatinCount(sampleText) !== 1 || !sampleSegment.sample_letter || sampleSegment.sample_letter !== configuredSample) {
             throw new Error("V2 tail glyph coverage is missing: " + String((spec || {}).key || ""));
         }
-        var encoding = inferPuaTailEncodingFromSample(tailFrame, sampleText.charAt(0).toLowerCase());
-        if (!encoding) throw new Error("V2 tail glyph coverage is missing: " + String((spec || {}).key || ""));
-        return puaTailGlyph(tailFrame, encoding, letter, spec);
+        // Published direct_text templates may encode the swash as ordinary
+        // text around one sample letter, for example "__m" or "a__". Keep
+        // the decoration intact and replace only its endpoint letter.
+        if (sampleText.length > 1) {
+            if (!plainTextTailAlphabetHasCompleteCoverage(tailFrame, sampleText, position)) {
+                throw new Error("V2 tail glyph coverage is missing: " + String((spec || {}).key || ""));
+            }
+            return letter;
+        }
+        var encoding = inferPuaTailEncodingFromSample(tailFrame, sampleSegment.sample_letter);
+        if (encoding) return puaTailGlyph(tailFrame, encoding, letter, spec);
+        // A single PUA glyph that happens to share the sample outline is not
+        // proof of a PUA tail. A PUA encoding is accepted only when its full
+        // A-Z alphabet passed inference; otherwise require normal A-Z proof.
+        if (!plainTextTailAlphabetHasCompleteCoverage(tailFrame, sampleText, position)) {
+            throw new Error("V2 tail glyph coverage is missing (normal A-Z coverage is incomplete): " + String((spec || {}).key || ""));
+        }
+        return letter;
     }
 
-    function tailSampleLatinIndex(text, position) {
-        var start = position === "first" ? 0 : String(text || "").length - 1;
-        var step = position === "first" ? 1 : -1;
-        for (var index = start; index >= 0 && index < String(text || "").length; index += step) {
-            if (/^[A-Za-z]$/.test(String(text || "").charAt(index))) return index;
+    function tailSampleLatinCount(text) {
+        var count = 0;
+        for (var index = 0; index < String(text || "").length; index++) {
+            if (/^[A-Za-z]$/.test(String(text || "").charAt(index))) count += 1;
         }
-        return -1;
+        return count;
+    }
+
+    function directPlainTailCoverageCache() {
+        try {
+            var globalScope = $.global;
+            if (!globalScope) return {};
+            if (!globalScope.__drawFlowPlainTailCoverageCache) globalScope.__drawFlowPlainTailCoverageCache = {};
+            return globalScope.__drawFlowPlainTailCoverageCache;
+        } catch (error) {
+            return {};
+        }
+    }
+
+    function plainTextTailAlphabetHasCompleteCoverage(frame, sampleText, position) {
+        var cacheKey = plainTailCoverageCacheKey(frame, sampleText, position);
+        if (plainTailCoverageCache.hasOwnProperty(cacheKey)) return plainTailCoverageCache[cacheKey];
+        var signatures = {};
+        var missingEvidence = outlinedTailSampleEvidence(frame, sampleText, position, String.fromCharCode(0xF8FF));
+        var missingSignature = missingEvidence && missingEvidence.signature ? missingEvidence.signature : "";
+        var complete = true;
+        for (var index = 0; index < 26; index++) {
+            var glyph = String.fromCharCode(97 + index);
+            var evidence = outlinedTailSampleEvidence(frame, sampleText, position, glyph);
+            if (!evidence || !evidence.signature || (missingSignature && evidence.signature === missingSignature) || signatures.hasOwnProperty(evidence.signature)) {
+                complete = false;
+                break;
+            }
+            signatures[evidence.signature] = true;
+        }
+        plainTailCoverageCache[cacheKey] = complete;
+        return complete;
+    }
+
+    function plainTailCoverageCacheKey(frame, sampleText, position) {
+        var fontName = "";
+        try { fontName = String(frame.textRange.characterAttributes.textFont.name || ""); } catch (error) {}
+        return fontName + "|" + String(position || "") + "|" + String(sampleText || "");
+    }
+
+    function outlinedTailSampleEvidence(frame, sampleText, position, glyph) {
+        var segment = V2TailText.tailSampleSegment(sampleText, glyph, position);
+        var duplicate = null;
+        try {
+            duplicate = frame.duplicate();
+            duplicate.contents = segment.text;
+            return outlinedTextEvidence(duplicate);
+        } catch (error) {
+            return null;
+        } finally {
+            removePageItem(duplicate);
+        }
     }
 
     function isPlainTextTailSpec(spec) {
@@ -649,28 +718,30 @@
 
     function inferPuaTailEncodingFromSample(frame, sampleLetter) {
         var sampleIndex = sampleLetter.charCodeAt(0) - 97;
-        if (sampleIndex < 0 || sampleIndex > 25) return 0;
+        if (sampleIndex < 0 || sampleIndex > 25) return null;
         var sourceEvidence = outlinedTextEvidence(frame);
-        if (!sourceEvidence) return 0;
+        if (!sourceEvidence) return null;
         var sourceWidth = Math.abs(Number(sourceEvidence.bounds[2]) - Number(sourceEvidence.bounds[0]));
         var sourceHeight = Math.abs(Number(sourceEvidence.bounds[1]) - Number(sourceEvidence.bounds[3]));
-        if (sourceWidth <= 0 || sourceHeight <= 0 || !sourceEvidence.signature) return 0;
+        if (sourceWidth <= 0 || sourceHeight <= 0 || !sourceEvidence.signature) return null;
         var cacheKey = tailPuaSampleCacheKey(frame, sampleLetter, sourceWidth, sourceHeight);
         if (tailPuaBaseCache.hasOwnProperty(cacheKey)) return tailPuaBaseCache[cacheKey];
         var encoding = null;
         for (var index = 0; index < knownTailPuaBases.length; index++) {
             var candidate = knownTailPuaBases[index];
             var contiguousEvidence = outlinedTailGlyphEvidence(frame, candidate + sampleIndex);
-            if (contiguousEvidence && contiguousEvidence.signature === sourceEvidence.signature
-                && puaTailAlphabetHasCompleteCoverage(frame, candidate, false)) {
-                encoding = { base: candidate, decimal: false };
-                break;
+            if (contiguousEvidence && contiguousEvidence.signature === sourceEvidence.signature) {
+                if (puaTailAlphabetHasCompleteCoverage(frame, candidate, false)) {
+                    encoding = { base: candidate, decimal: false };
+                    break;
+                }
             }
             var decimalEvidence = outlinedTailGlyphEvidence(frame, decimalPuaCodepoint(candidate, sampleIndex));
-            if (decimalEvidence && decimalEvidence.signature === sourceEvidence.signature
-                && puaTailAlphabetHasCompleteCoverage(frame, candidate, true)) {
-                encoding = { base: candidate, decimal: true };
-                break;
+            if (decimalEvidence && decimalEvidence.signature === sourceEvidence.signature) {
+                if (puaTailAlphabetHasCompleteCoverage(frame, candidate, true)) {
+                    encoding = { base: candidate, decimal: true };
+                    break;
+                }
             }
         }
         tailPuaBaseCache[cacheKey] = encoding;

@@ -243,6 +243,8 @@ def test_v2_cross_department_merge_keeps_pw_summary_labels_department_local(tmp_
     summary_order_tasks = [payload for path, payload in written if "department-summary-order-tasks" in str(path)]
     assert len(summary_order_tasks) == 1
     assert summary_order_tasks[0]["label_lines"] == ["ORDER-Y", "盒子"]
+    assert summary_order_tasks[0]["intermediate_component"] is True
+    assert summary_order_tasks[0]["output"] == {"outline_text": False, "pathfinder_merge": False}
 
 
 def test_public_output_downstream_gate_rejects_template_copied_department_rule_conflict():

@@ -816,7 +816,7 @@ def test_compiles_tail_text_metadata_from_current_option_scope():
     ]
 
 
-def test_rejects_unverified_tail_evidence_for_direct_text_slot():
+def test_compiles_legacy_direct_text_tail_sample_for_runtime_glyph_verification():
     config = render_config()
     design = config["outputs"][0]["design"]["options"][0]
     design["content_preset"] = "direct_text"
@@ -835,11 +835,68 @@ def test_rejects_unverified_tail_evidence_for_direct_text_slot():
     scan_design["slots"][0]["tails"] = [{"key": "tail_name_last_m", "path": "Template/Output_main/Design/Design03/tail_name_last_m"}]
     scan_design["tails"] = [{"key": "tail_name_last_m", "path": "Template/Output_main/Design/Design03/tail_name_last_m"}]
 
+    task = compile_task(config=config, scan=scan)
+    action = next(action for action in task["outputs"][0]["actions"] if action.get("slot_key") == "slot_name")
+
+    assert action["tails"] == [
+        {
+            "key": "tail_name_last_m",
+            "position": "last",
+            "sample": "m",
+            "path": "Template/Output_main/Design/Design03/tail_name_last_m",
+            "glyph_mode": "plain_text",
+        }
+    ]
+
+
+def test_rejects_unconfirmed_direct_text_tail_sample():
+    config = render_config()
+    design = config["outputs"][0]["design"]["options"][0]
+    design["content_preset"] = "direct_text"
+    design["assets"] = []
+    design["slots"] = [
+        {
+            "key": "slot_name",
+            "source_field": "name",
+            "preset": "direct_text",
+            "anchor": "anchor_name",
+            "tails": [{"key": "tail_name_last_m", "position": "last", "sample": "m"}],
+        }
+    ]
+    scan = scan_evidence()
+    scan_design = scan["outputs"][0]["designs"][0]
+    scanned_tails = [
+        {"key": "tail_name_last_m", "path": "Template/Output_main/Design/Design03/tail_name_last_m"},
+        {"key": "tail_name_last_n", "path": "Template/Output_main/Design/Design03/tail_name_last_n"},
+    ]
+    scan_design["slots"][0]["tails"] = scanned_tails
+    scan_design["tails"] = scanned_tails
+
     with pytest.raises(V2RenderTaskError) as exc_info:
         compile_task(config=config, scan=scan)
 
-    assert exc_info.value.code == "tail_glyph_coverage_missing"
-    assert exc_info.value.path == "$.Output_main.design.Design03.slot_name.tails[0]"
+    assert exc_info.value.code == "tail_sample_unconfirmed"
+    assert exc_info.value.path == "$.Output_main.design.Design03.slot_name.tails"
+
+
+def test_rejects_unconfirmed_direct_text_font_style_tail_sample():
+    config = render_config()
+    font_slot = config["outputs"][0]["font"]["options"][0]["slots"][0]
+    font_slot["tails"] = [{"key": "tail_name_last_m", "position": "last", "sample": "m"}]
+    scan = scan_evidence()
+    scan_font = scan["outputs"][0]["fonts"][0]
+    scanned_tails = [
+        {"key": "tail_name_last_m", "path": "Template/Output_main/Font/F10/tail_name_last_m"},
+        {"key": "tail_name_last_n", "path": "Template/Output_main/Font/F10/tail_name_last_n"},
+    ]
+    scan_font["slots"][0]["tails"] = scanned_tails
+    scan_font["tails"] = scanned_tails
+
+    with pytest.raises(V2RenderTaskError) as exc_info:
+        compile_task(config=config, scan=scan)
+
+    assert exc_info.value.code == "tail_sample_unconfirmed"
+    assert exc_info.value.path == "$.Output_main.font.F10.slot_name.tails"
 
 
 def test_compiles_mixed_slots_without_overwriting_independent_sources_or_tails():
