@@ -639,8 +639,14 @@
             return letter;
         }
         var encoding = inferPuaTailEncodingFromSample(tailFrame, sampleSegment.sample_letter);
-        if (!encoding) throw new Error("V2 tail glyph coverage is missing: " + String((spec || {}).key || ""));
-        return puaTailGlyph(tailFrame, encoding, letter, spec);
+        if (encoding) return puaTailGlyph(tailFrame, encoding, letter, spec);
+        // A single PUA glyph that happens to share the sample outline is not
+        // proof of a PUA tail. A PUA encoding is accepted only when its full
+        // A-Z alphabet passed inference; otherwise require normal A-Z proof.
+        if (!plainTextTailAlphabetHasCompleteCoverage(tailFrame, sampleText, position)) {
+            throw new Error("V2 tail glyph coverage is missing (normal A-Z coverage is incomplete): " + String((spec || {}).key || ""));
+        }
+        return letter;
     }
 
     function tailSampleLatinCount(text) {
@@ -712,28 +718,30 @@
 
     function inferPuaTailEncodingFromSample(frame, sampleLetter) {
         var sampleIndex = sampleLetter.charCodeAt(0) - 97;
-        if (sampleIndex < 0 || sampleIndex > 25) return 0;
+        if (sampleIndex < 0 || sampleIndex > 25) return null;
         var sourceEvidence = outlinedTextEvidence(frame);
-        if (!sourceEvidence) return 0;
+        if (!sourceEvidence) return null;
         var sourceWidth = Math.abs(Number(sourceEvidence.bounds[2]) - Number(sourceEvidence.bounds[0]));
         var sourceHeight = Math.abs(Number(sourceEvidence.bounds[1]) - Number(sourceEvidence.bounds[3]));
-        if (sourceWidth <= 0 || sourceHeight <= 0 || !sourceEvidence.signature) return 0;
+        if (sourceWidth <= 0 || sourceHeight <= 0 || !sourceEvidence.signature) return null;
         var cacheKey = tailPuaSampleCacheKey(frame, sampleLetter, sourceWidth, sourceHeight);
         if (tailPuaBaseCache.hasOwnProperty(cacheKey)) return tailPuaBaseCache[cacheKey];
         var encoding = null;
         for (var index = 0; index < knownTailPuaBases.length; index++) {
             var candidate = knownTailPuaBases[index];
             var contiguousEvidence = outlinedTailGlyphEvidence(frame, candidate + sampleIndex);
-            if (contiguousEvidence && contiguousEvidence.signature === sourceEvidence.signature
-                && puaTailAlphabetHasCompleteCoverage(frame, candidate, false)) {
-                encoding = { base: candidate, decimal: false };
-                break;
+            if (contiguousEvidence && contiguousEvidence.signature === sourceEvidence.signature) {
+                if (puaTailAlphabetHasCompleteCoverage(frame, candidate, false)) {
+                    encoding = { base: candidate, decimal: false };
+                    break;
+                }
             }
             var decimalEvidence = outlinedTailGlyphEvidence(frame, decimalPuaCodepoint(candidate, sampleIndex));
-            if (decimalEvidence && decimalEvidence.signature === sourceEvidence.signature
-                && puaTailAlphabetHasCompleteCoverage(frame, candidate, true)) {
-                encoding = { base: candidate, decimal: true };
-                break;
+            if (decimalEvidence && decimalEvidence.signature === sourceEvidence.signature) {
+                if (puaTailAlphabetHasCompleteCoverage(frame, candidate, true)) {
+                    encoding = { base: candidate, decimal: true };
+                    break;
+                }
             }
         }
         tailPuaBaseCache[cacheKey] = encoding;

@@ -1720,6 +1720,77 @@ def test_v2_renderer_rejects_unverified_plain_tail_even_when_a_probe_candidate_e
     assert "tail glyph coverage is missing" in result.stderr
 
 
+def test_v2_renderer_accepts_verified_normal_single_character_direct_tail():
+    tails = [
+        {
+            "key": "tail_name1_last_m",
+            "position": "last",
+            "sample": "m",
+            "glyph_mode": "plain_text",
+            "path": "Template/Output_main/Design/Design03/tail_name_last_m",
+        }
+    ]
+    task = tail_text_task(tails, value="Mastka")
+    task["render_task"]["outputs"][0]["actions"][1]["preset"] = "direct_text"
+    task["mock_plain_tail_normal_coverage"] = True
+    harness = node_mock_harness(task, """
+const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
+const slot = child(designCopy, 'slot_name');
+if (!slot || slot.contents !== 'Mastka') throw new Error('verified normal direct tail did not keep endpoint text: ' + (slot && slot.contents));
+""")
+
+    result = run_node(harness)
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_v2_renderer_accepts_normal_tail_when_only_an_incomplete_pua_probe_matches():
+    tails = [
+        {
+            "key": "tail_name1_last_m",
+            "position": "last",
+            "sample": "m",
+            "glyph_mode": "plain_text",
+            "path": "Template/Output_main/Design/Design03/tail_name_last_m",
+        }
+    ]
+    task = tail_text_task(tails, value="Mastka")
+    task["render_task"]["outputs"][0]["actions"][1]["preset"] = "direct_text"
+    task["mock_pua_tail_base"] = 0xE054
+    task["mock_pua_incomplete_base"] = 0xE054
+    task["mock_plain_tail_normal_coverage"] = True
+    harness = node_mock_harness(task, """
+const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
+const slot = child(designCopy, 'slot_name');
+if (!slot || slot.contents !== 'Mastka') throw new Error('incomplete PUA probe incorrectly blocked verified normal tail: ' + (slot && slot.contents));
+""")
+
+    result = run_node(harness)
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_v2_renderer_rejects_normal_single_character_direct_tail_with_missing_glyph():
+    tails = [
+        {
+            "key": "tail_name1_last_m",
+            "position": "last",
+            "sample": "m",
+            "glyph_mode": "plain_text",
+            "path": "Template/Output_main/Design/Design03/tail_name_last_m",
+        }
+    ]
+    task = tail_text_task(tails, value="Mastka")
+    task["render_task"]["outputs"][0]["actions"][1]["preset"] = "direct_text"
+    task["mock_plain_tail_normal_coverage"] = True
+    task["mock_plain_tail_missing_code"] = ord("d")
+
+    result = run_node(node_mock_harness(task, ""))
+
+    assert result.returncode != 0
+    assert "tail glyph coverage is missing" in result.stderr
+
+
 def test_v2_renderer_bounds_plain_tail_pua_probe_candidates():
     source = SCRIPT.read_text(encoding="utf-8")
 
@@ -2821,6 +2892,8 @@ function item(typename, name, contents, children, styleToken, bounds, options) {
       }}
       let code = text.length === 1 ? text.charCodeAt(0) : 0;
       const isDecoratedTailSample = typename === 'TextFrame' && /^tail_name/.test(String(name || '')) && text.length > 1;
+      const isVerifiedNormalPlainTail = typename === 'TextFrame' && /^tail_name/.test(String(name || ''))
+        && text.length === 1 && Boolean(task.mock_plain_tail_normal_coverage);
       if (isDecoratedTailSample) {{
         decoratedTailOutlineCalls++;
         const tailCharacter = text.split('').find(character => /^[A-Za-z]$/.test(character) || character.charCodeAt(0) === 0xF8FF);
@@ -2839,9 +2912,9 @@ function item(typename, name, contents, children, styleToken, bounds, options) {
           ? 0xF8FF
           : (task.mock_pua_incomplete_base === Number(opts.puaTailBase) && puaIndex === 1
             ? effectiveCode - 1
-            : effectiveCode);
+            : (isVerifiedNormalPlainTail && effectiveCode >= 0xE000 ? 0xF8FF : effectiveCode));
         points = [];
-        const pointCount = geometryCode === 0xF8FF && isDecoratedTailSample ? 31 : 4 + (geometryCode % 26);
+        const pointCount = geometryCode === 0xF8FF && (isDecoratedTailSample || isVerifiedNormalPlainTail) ? 31 : 4 + (geometryCode % 26);
         for (let pointIndex = 0; pointIndex < pointCount; pointIndex++) {{
           points.push([pointIndex / (3 + (geometryCode % 26)), pointIndex % 2]);
         }}
