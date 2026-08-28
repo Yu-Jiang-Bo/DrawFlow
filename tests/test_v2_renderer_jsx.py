@@ -1494,7 +1494,7 @@ if (width >= 99.9) throw new Error('preserved tail text unexpectedly filled full
     assert result.returncode == 0, result.stderr
 
 
-def test_v2_renderer_rejects_unverified_direct_text_tail_samples():
+def test_v2_renderer_preserves_verified_decorated_direct_text_tail_samples():
     tails = [
         {
             "key": "tail_name_first_m",
@@ -1515,9 +1515,120 @@ def test_v2_renderer_rejects_unverified_direct_text_tail_samples():
     task["render_task"]["outputs"][0]["actions"][1]["preset"] = "direct_text"
     task["mock_first_tail_sample"] = "__m"
     task["mock_last_tail_sample"] = "a__"
-    harness = node_mock_harness(task, "")
+    harness = node_mock_harness(task, """
+const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
+const slot = child(designCopy, 'slot_name');
+if (!slot || slot.contents !== '__custo' + 'm__') throw new Error('decorated direct tail text was not preserved: ' + (slot && slot.contents));
+""")
 
     result = run_node(harness)
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_v2_renderer_reuses_decorated_tail_coverage_only_for_matching_sample_key():
+    tails = [
+        {
+            "key": "tail_name_first_m",
+            "position": "first",
+            "sample": "m",
+            "glyph_mode": "plain_text",
+            "path": "Template/Output_main/Design/Design03/tail_name_first_m",
+        },
+        {
+            "key": "tail_name_last_a",
+            "position": "last",
+            "sample": "a",
+            "glyph_mode": "plain_text",
+            "path": "Template/Output_main/Design/Design03/tail_name_last_a",
+        },
+    ]
+    task = tail_text_task(tails, value="Custom")
+    task["render_task"]["outputs"][0]["actions"][1]["preset"] = "direct_text"
+    task["mock_first_tail_sample"] = "__m"
+    task["mock_last_tail_sample"] = "a__"
+    harness = node_mock_harness(task, """
+const cache = $.global.__drawFlowPlainTailCoverageCache;
+const keys = Object.keys(cache || {});
+if (!keys.some(key => /\\|first\\|__m$/.test(key)) || !keys.some(key => /\\|last\\|a__$/.test(key))) {
+  throw new Error('decorated tail cache key does not preserve font/position/sample: ' + keys.join(','));
+}
+const firstPassOutlineCalls = decoratedTailOutlineCalls;
+new Function(source)();
+if (decoratedTailOutlineCalls !== firstPassOutlineCalls) {
+  throw new Error('matching decorated-tail coverage was recomputed instead of using the Illustrator-session cache');
+}
+""")
+
+    result = run_node(harness)
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_v2_renderer_rechecks_decorated_tail_coverage_when_font_changes():
+    tails = [{
+        "key": "tail_name_first_m",
+        "position": "first",
+        "sample": "m",
+        "glyph_mode": "plain_text",
+        "path": "Template/Output_main/Design/Design03/tail_name_first_m",
+    }]
+    task = tail_text_task(tails, value="Custom")
+    task["render_task"]["outputs"][0]["actions"][1]["preset"] = "direct_text"
+    task["mock_first_tail_sample"] = "__m"
+    harness = node_mock_harness(task, """
+const cache = $.global.__drawFlowPlainTailCoverageCache;
+const sourceTail = child(design03, 'tail_name_first_m');
+sourceTail.textRange.characterAttributes.textFont.name = 'Second-tail-font';
+task.mock_plain_tail_missing_code = 'd'.charCodeAt(0);
+let rejected = false;
+try {{
+  new Function(source)();
+}} catch (error) {{
+  rejected = String(error).indexOf('tail glyph coverage is missing') >= 0;
+}}
+if (!rejected) throw new Error('decorated-tail cache was incorrectly reused after the source font changed');
+const keys = Object.keys(cache || {});
+if (!keys.some(key => /^First-tail-style\\|first\\|__m$/.test(key))) throw new Error('first font cache entry missing: ' + keys.join(','));
+""")
+
+    result = run_node(harness)
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_v2_renderer_rejects_decorated_direct_tail_when_sample_letter_differs():
+    tails = [{
+        "key": "tail_name_first_m",
+        "position": "first",
+        "sample": "z",
+        "glyph_mode": "plain_text",
+        "path": "Template/Output_main/Design/Design03/tail_name_first_m",
+    }]
+    task = tail_text_task(tails, value="Custom")
+    task["render_task"]["outputs"][0]["actions"][1]["preset"] = "direct_text"
+    task["mock_first_tail_sample"] = "__m"
+
+    result = run_node(node_mock_harness(task, ""))
+
+    assert result.returncode != 0
+    assert "tail glyph coverage is missing" in result.stderr
+
+
+def test_v2_renderer_rejects_decorated_direct_tail_when_alphabet_is_incomplete():
+    tails = [{
+        "key": "tail_name_first_m",
+        "position": "first",
+        "sample": "m",
+        "glyph_mode": "plain_text",
+        "path": "Template/Output_main/Design/Design03/tail_name_first_m",
+    }]
+    task = tail_text_task(tails, value="Custom")
+    task["render_task"]["outputs"][0]["actions"][1]["preset"] = "direct_text"
+    task["mock_first_tail_sample"] = "__m"
+    task["mock_plain_tail_missing_code"] = ord("d")
+
+    result = run_node(node_mock_harness(task, ""))
 
     assert result.returncode != 0
     assert "tail glyph coverage is missing" in result.stderr
@@ -2646,7 +2757,8 @@ let savedArtboard = null;
 let exportedAs = '';
 let exportOptions = null;
 const writtenFiles = {{}};
-global.$ = {{ getenv: () => 'task.json' }};
+let decoratedTailOutlineCalls = 0;
+global.$ = {{ getenv: () => 'task.json', global: {{}} }};
 global.File = function(path) {{
   return {{
     fsName: path,
@@ -2707,22 +2819,30 @@ function item(typename, name, contents, children, styleToken, bounds, options) {
         if (parent) attach(parent, outlined);
         return outlined;
       }}
-      const code = text.length === 1 ? text.charCodeAt(0) : 0;
+      let code = text.length === 1 ? text.charCodeAt(0) : 0;
+      const isDecoratedTailSample = typename === 'TextFrame' && /^tail_name/.test(String(name || '')) && text.length > 1;
+      if (isDecoratedTailSample) {{
+        decoratedTailOutlineCalls++;
+        const tailCharacter = text.split('').find(character => /^[A-Za-z]$/.test(character) || character.charCodeAt(0) === 0xF8FF);
+        if (tailCharacter) code = tailCharacter.charCodeAt(0);
+      }}
+      const effectiveCode = Number(task.mock_plain_tail_missing_code) === code ? 0xF8FF : code;
       const matchesTailSample = opts.puaTailBase && (text === 'm' || code === Number(opts.puaTailBase) + 12);
       const token = matchesTailSample ? 'tail-sample-m' : ('glyph-' + code);
       let points;
       if (token === 'tail-sample-m') {{
         points = [[0, 0], [1, 0], [1, 1], [0, 1]];
       }} else {{
-        const puaIndex = opts.puaTailBase ? code - Number(opts.puaTailBase) : -1;
+        const puaIndex = opts.puaTailBase ? effectiveCode - Number(opts.puaTailBase) : -1;
         const geometryCode = task.mock_pua_missing_base === Number(opts.puaTailBase)
             && puaIndex === Number(task.mock_pua_missing_index)
           ? 0xF8FF
           : (task.mock_pua_incomplete_base === Number(opts.puaTailBase) && puaIndex === 1
-            ? code - 1
-            : code);
+            ? effectiveCode - 1
+            : effectiveCode);
         points = [];
-        for (let pointIndex = 0; pointIndex < 4 + (geometryCode % 26); pointIndex++) {{
+        const pointCount = geometryCode === 0xF8FF && isDecoratedTailSample ? 31 : 4 + (geometryCode % 26);
+        for (let pointIndex = 0; pointIndex < pointCount; pointIndex++) {{
           points.push([pointIndex / (3 + (geometryCode % 26)), pointIndex % 2]);
         }}
       }}
@@ -2789,6 +2909,7 @@ function item(typename, name, contents, children, styleToken, bounds, options) {
   node.textRange = {{
     characterAttributes: {{}}
   }};
+  node.textRange.characterAttributes.textFont = {{ name: String(opts.fontName || styleToken || '') }};
   node.textRange.characterAttributes.fillColor = {{ red: 0, green: 0, blue: 0 }};
   node.textRange.characterAttributes.strokeColor = {{ red: 0, green: 0, blue: 0 }};
   node.textRange.characterAttributes.strokeWeight = 0;
@@ -2881,6 +3002,9 @@ function clone(node) {{
     kind: node.kind,
     pathToken: node.pathToken,
     textSize: node.textSize,
+    fontName: node.textRange && node.textRange.characterAttributes && node.textRange.characterAttributes.textFont
+      ? node.textRange.characterAttributes.textFont.name
+      : '',
     puaTailBase: node.puaTailBase,
     pathItems: node.pathItems.map(clone)
   }});
