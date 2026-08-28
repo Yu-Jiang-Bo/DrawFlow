@@ -182,8 +182,10 @@
 
     function applyOutputTransforms(doc, policy) {
         if (!policy || policy.outline_text !== true) return;
+        // Use the document collection so a nested frame is never converted
+        // twice through both layer.pageItems and its parent group.
         var frames = [];
-        for (var layerIndex = 0; layerIndex < doc.layers.length; layerIndex++) collectTextFrames(doc.layers[layerIndex], frames);
+        for (var frameIndex = 0; frameIndex < doc.textFrames.length; frameIndex++) frames.push(doc.textFrames[frameIndex]);
         for (var index = frames.length - 1; index >= 0; index--) {
             var outline = frames[index].createOutline();
             if (!outline) throw new Error("V2 PNG master text outline failed");
@@ -193,15 +195,6 @@
                 app.executeMenuCommand("expandStyle");
                 outline.selected = false;
             }
-        }
-    }
-
-    function collectTextFrames(container, result) {
-        if (!container || !container.pageItems) return;
-        for (var index = 0; index < container.pageItems.length; index++) {
-            var item = container.pageItems[index];
-            if (item.typename === "TextFrame") result.push(item);
-            if (item.typename === "GroupItem" || item.typename === "Layer") collectTextFrames(item, result);
         }
     }
 

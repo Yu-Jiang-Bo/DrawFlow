@@ -62,7 +62,14 @@ class V2OrderRenderService:
             self.jobs.update(record, status="completed")
         except Exception as exc:
             message, code = business_error(exc)
-            self.jobs.update(record, status="failed", error=message, error_code=code)
+            technical_error = str(getattr(exc, "technical_message", "") or exc)
+            self.jobs.update(
+                record,
+                status="failed",
+                error=message,
+                error_code=code,
+                technical_error=technical_error,
+            )
         return record
 
     def _published_version(self, template_id: str) -> dict[str, str]:

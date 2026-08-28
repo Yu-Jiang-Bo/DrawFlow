@@ -98,6 +98,20 @@ def test_png_master_composer_outlines_final_labels_only_after_layout():
     ) < source.index("saveAsAI(doc, aiFile, String(task.compatibility || \"CS5\"));")
 
 
+def test_v2_output_composers_outline_each_document_text_frame_once():
+    scripts = (
+        Path("scripts/illustrator/compose_v2_order_column.jsx"),
+        Path("scripts/illustrator/compose_png_master_pages.jsx"),
+        Path("scripts/illustrator/render_v2_template.jsx"),
+    )
+
+    for script in scripts:
+        source = script.read_text(encoding="utf-8")
+        assert "doc.textFrames.length" in source
+        assert "collectTextFrames(doc.layers" not in source
+        assert "frames[index].createOutline();" in source
+
+
 def test_composition_task_builders_do_not_share_nested_input_values(tmp_path):
     color_inputs = [{"path": str(tmp_path / "gold.ai"), "order_nos": ["ORDER-1"]}]
     packing = {"target_width_mm": 480, "nested": {"gap": 2}}

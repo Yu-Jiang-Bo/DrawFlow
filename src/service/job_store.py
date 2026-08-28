@@ -36,6 +36,7 @@ class JobStore:
             "progress": {"current": 0, "total": 0, "stage": "queued"},
             "error": "",
             "error_code": "",
+            "technical_error": "",
         }
         self.save(record)
         return record

@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 from openpyxl import Workbook
 
+from src.renderer.illustrator_bridge import IllustratorBridgeError
 from src.service.http_server import RenderRequestHandler
 from src.service.local_client import LocalClientError, LocalDrawFlowClient
 from src.service.template_registry import TemplateRegistry
@@ -415,6 +416,54 @@ def test_v2_single_name_template_splits_newline_names_into_one_order_column(tmp_
     assert color_component_compose["input_order_nos"] == ["ORDER-K", "ORDER-K", "ORDER-K"]
     assert color_component_compose["label_lines"] == []
     assert renderer.color_frame_calls[0]["inputs"][0]["order_nos"] == ["ORDER-K"]
+
+
+def test_v2_order_render_preserves_technical_illustrator_error_in_job_and_gateway_result(tmp_path):
+    bundle_path = tmp_path / "published.zip"
+    _bundle(
+        bundle_path,
+        "V2ORDER001",
+        b"template-ai",
+        with_styles=True,
+        config_updates={
+            "field_bindings": {
+                "order_no": "订单号",
+                "detail_id": "订单明细号",
+                "department": "生产部门",
+                "product_name": "产品名称",
+                "font": "字体",
+                "style": "尺寸",
+                "name": "定制信息",
+                "quantity": "数量",
+                "color": "字体颜色",
+            }
+        },
+    )
+    order_path = tmp_path / "order.xlsx"
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["订单号", "订单明细号", "生产部门", "产品名称", "字体", "尺寸", "定制信息", "数量", "字体颜色"])
+    sheet.append(["ORDER-K", "LINE-K", "K", "Bracelet", "F1", "M", "Alice", 1, "White"])
+    workbook.save(order_path)
+
+    class FailingOrderComposer(CapturingRenderer):
+        def compose_order_column(self, **kwargs):
+            raise IllustratorBridgeError("Illustrator JSX failed: frames[index].createOutline is not a function")
+
+    client = LocalDrawFlowClient(
+        V2PublishedCentral(bundle_path),
+        tmp_path / "local",
+        v2_renderer=FailingOrderComposer(),
+        font_dirs=[],
+    )
+
+    with pytest.raises(LocalClientError) as exc_info:
+        client.render({"template_id": "V2ORDER001", "order_file": str(order_path)})
+
+    assert exc_info.value.code == "v2_order_render_failed"
+    assert "createOutline is not a function" in exc_info.value.technical_message
+    job = client.jobs.list_recent(1)[0]
+    assert "createOutline is not a function" in job["technical_error"]
 
 
 def test_v2_newline_names_do_not_split_when_selected_template_has_multiple_name_slots():

@@ -158,6 +158,7 @@ class LocalDrawFlowClient:
             raise LocalClientError(
                 str(record.get("error") or "V2 模板出图失败"),
                 code=str(record.get("error_code") or "v2_order_render_failed"),
+                technical_message=str(record.get("technical_error") or ""),
             )
         request = dict(record.get("request") or {})
         record["template_cache"] = {

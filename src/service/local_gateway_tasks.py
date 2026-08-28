@@ -48,7 +48,12 @@ class LocalGatewayTaskMixin:
                 )
             self._send_json(record)
         except LocalClientError as exc:
-            LOGGER.warning("local render rejected: code=%s message=%s", exc.code, exc)
+            LOGGER.warning(
+                "local render rejected: code=%s message=%s technical=%s",
+                exc.code,
+                exc,
+                exc.technical_message or "<none>",
+            )
             self._send_client_error(HTTPStatus.BAD_REQUEST, exc)
         except Exception:
             LOGGER.exception("local render failed")
