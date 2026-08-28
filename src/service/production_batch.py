@@ -12,6 +12,7 @@ from ..renderer.illustrator_bridge import IllustratorBridge, IllustratorBridgeEr
 PRODUCTION_BATCH_COM_RETRY_ATTEMPTS = 3
 PRODUCTION_BATCH_COM_RETRY_DELAY_SECONDS = 3.0
 PRODUCTION_BATCH_CHUNK_DELAY_SECONDS = 1.0
+_RETRYABLE_ILLUSTRATOR_SESSION_ERRORS = ("an illustrator error occurred: 248",)
 
 
 def render_production_batch_files(batch_files: Iterable[Path], visible: bool) -> None:
@@ -62,7 +63,12 @@ def _render_production_batch_chunk(bridge: IllustratorBridge, script: Path, task
 
 
 def _is_retryable_com_failure(exc: IllustratorBridgeError) -> bool:
-    return "-2147417851" in str(exc) or "-2147023170" in str(exc)
+    detail = str(exc).lower()
+    return (
+        "-2147417851" in detail
+        or "-2147023170" in detail
+        or any(marker in detail for marker in _RETRYABLE_ILLUSTRATOR_SESSION_ERRORS)
+    )
 
 
 __all__ = [
