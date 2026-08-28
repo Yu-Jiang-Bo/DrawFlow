@@ -816,7 +816,7 @@ def test_compiles_tail_text_metadata_from_current_option_scope():
     ]
 
 
-def test_rejects_unverified_tail_evidence_for_direct_text_slot():
+def test_compiles_legacy_plain_tail_evidence_for_direct_text_slot():
     config = render_config()
     design = config["outputs"][0]["design"]["options"][0]
     design["content_preset"] = "direct_text"
@@ -835,11 +835,16 @@ def test_rejects_unverified_tail_evidence_for_direct_text_slot():
     scan_design["slots"][0]["tails"] = [{"key": "tail_name_last_m", "path": "Template/Output_main/Design/Design03/tail_name_last_m"}]
     scan_design["tails"] = [{"key": "tail_name_last_m", "path": "Template/Output_main/Design/Design03/tail_name_last_m"}]
 
-    with pytest.raises(V2RenderTaskError) as exc_info:
-        compile_task(config=config, scan=scan)
+    task = compile_task(config=config, scan=scan)
 
-    assert exc_info.value.code == "tail_glyph_coverage_missing"
-    assert exc_info.value.path == "$.Output_main.design.Design03.slot_name.tails[0]"
+    action = next(action for action in task["outputs"][0]["actions"] if action.get("slot_key") == "slot_name")
+    assert action["tails"] == [{
+        "key": "tail_name_last_m",
+        "position": "last",
+        "sample": "m",
+        "path": "Template/Output_main/Design/Design03/tail_name_last_m",
+        "glyph_mode": "plain_text",
+    }]
 
 
 def test_compiles_mixed_slots_without_overwriting_independent_sources_or_tails():
@@ -1212,6 +1217,50 @@ def test_passes_tail_font_samples_to_the_design_style_source():
                 "pua_base": TAIL_PUA_BASE,
                 "font_postscript_name": "Milkshake",
                 "coverage": "a-z",
+            }
+        ]
+    }
+
+
+def test_passes_legacy_plain_tail_font_samples_to_the_design_style_source():
+    config = render_config()
+    scan = scan_evidence()
+    font_option = config["outputs"][0]["font"]["options"][0]
+    font_option["key"] = "F3"
+    font_option["content_preset"] = "direct_text"
+    font_option["slots"][0].update(
+        {
+            "preset": "direct_text",
+            "tails": [{"key": "tail_name_last_m", "position": "last", "sample": "m"}],
+        }
+    )
+    config["option_mappings"][0].update({"source_value": "F3", "target": "F3"})
+    scan_font = scan["outputs"][0]["fonts"][0]
+    scan_font["key"] = "F3"
+    scan_font["path"] = "Template/Output_main/Font/F3"
+    scan_font["slots"][0]["path"] = "Template/Output_main/Font/F3/slot_name"
+    scan_font["slots"][0]["tails"] = [
+        {"key": "tail_name_last_m", "path": "Template/Output_main/Font/F3/tail_name_last_m"}
+    ]
+    scan_font["tails"] = [
+        {"key": "tail_name_last_m", "path": "Template/Output_main/Font/F3/tail_name_last_m"}
+    ]
+
+    task = compile_task(config, scan)
+
+    design_action = next(
+        action
+        for action in task["outputs"][0]["actions"]
+        if action["type"] == "replace_slot_text" and action["group"] == "design" and action["slot_key"] == "slot_name"
+    )
+    assert design_action["style_source"]["tails_by_option"] == {
+        "F3": [
+            {
+                "key": "tail_name_last_m",
+                "position": "last",
+                "sample": "m",
+                "path": "Template/Output_main/Font/F3/tail_name_last_m",
+                "glyph_mode": "plain_text",
             }
         ]
     }

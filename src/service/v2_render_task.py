@@ -345,7 +345,7 @@ def _slot_actions(
             slot_scan,
             slot_key,
             f"$.{output_key}.{group}.{option_key}.{slot_key}.tails",
-            require_glyphs=bool(slot_data.get("tails")),
+            require_glyphs=preset == "tail_text",
             font_dependencies=_tail_font_dependencies(slot_data, option),
         )
         if preset == "path_text" and "path" not in text_kind.lower():
@@ -544,7 +544,7 @@ def _font_tail_sources(
                 slot_scan,
                 slot_key,
                 f"$.{output_key}.font.{font_key}.{slot_key}.tails",
-                require_glyphs=bool(slot_data.get("tails")),
+                require_glyphs=preset == "tail_text",
                 font_dependencies=_tail_font_dependencies(slot_data, font_data),
             )
             if tails:
