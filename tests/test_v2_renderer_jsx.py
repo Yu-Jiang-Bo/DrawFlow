@@ -793,6 +793,7 @@ def test_v2_renderer_uses_anchor_bounds_without_moving_fixed_art():
         "output_ai": "out.ai",
         "values": {"design": "03", "name": "Anchored-Long-Name"},
         "selections": {"Output_main": {"design": "Design03"}},
+        "mock_fixed_annotation_name": "fixed",
         "render_task": {
             "$schema": "custom-renderer/v2-render-task",
             "outputs": [
@@ -823,7 +824,7 @@ def test_v2_renderer_uses_anchor_bounds_without_moving_fixed_art():
     harness = node_mock_harness(task, """
 const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
 const slot = child(designCopy, 'slot_name');
-const fixed = child(designCopy, 'fixed_heart');
+const fixed = child(designCopy, 'fixed');
 const width = slot.visibleBounds[2] - slot.visibleBounds[0];
 const height = slot.visibleBounds[1] - slot.visibleBounds[3];
 if (width > 60.01) throw new Error('anchored text escaped anchor width: ' + width);
@@ -847,6 +848,7 @@ def test_v2_renderer_extreme_text_keeps_shrinking_without_touching_fixed_art():
         "layout_warning_file": "warnings.json",
         "values": {"design": "03", "name": "X" * 160},
         "selections": {"Output_main": {"design": "Design03"}},
+        "mock_fixed_annotation_name": "fixed",
         "render_task": {
             "$schema": "custom-renderer/v2-render-task",
             "outputs": [
@@ -876,7 +878,7 @@ def test_v2_renderer_extreme_text_keeps_shrinking_without_touching_fixed_art():
     harness = node_mock_harness(task, """
 const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
 const slot = child(designCopy, 'slot_name');
-const fixed = child(designCopy, 'fixed_heart');
+const fixed = child(designCopy, 'fixed');
 const width = slot.visibleBounds[2] - slot.visibleBounds[0];
 if (width > 100.01) throw new Error('extreme text escaped slot width: ' + width);
 if (slot.resizeCalls < 1) throw new Error('extreme text was not shrunk');
@@ -888,6 +890,243 @@ if (!warning.warnings || warning.warnings[0].code !== 'text_fit_extreme') throw 
     result = run_node(harness)
 
     assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize(
+    ("fixed_marker", "pack_order_blocks"),
+    [("fixed", False), ("fixd", False), ("fixd_legacy", False), ("fixed", True)],
+)
+def test_v2_renderer_preserves_fixed_art_size_during_non_uniform_output_fit(
+    fixed_marker, pack_order_blocks
+):
+    task = {
+        "$schema": "custom-renderer/v2-render-execution",
+        "template_ai": "template.ai",
+        "output_ai": "out.ai",
+        "pack_order_blocks": pack_order_blocks,
+        "values": {"design": "03", "name": "Design sample"},
+        "selections": {"Output_main": {"design": "Design03"}},
+        "mock_fixed_annotation_name": fixed_marker,
+        "mock_fixed_bounds": [65, 30, 85, 10],
+        "render_task": {
+            "$schema": "custom-renderer/v2-render-task",
+            "outputs": [
+                {
+                    "key": "Output_main",
+                    "actions": [
+                        {
+                            "type": "copy_option_group",
+                            "group": "design",
+                            "option_key": "Design03",
+                            "object_path": "Template/Output_main/Design/Design03",
+                        },
+                        {
+                            "type": "replace_slot_text",
+                            "group": "design",
+                            "option_key": "Design03",
+                            "object_path": "Template/Output_main/Design/Design03/slot_name",
+                            "source_field": "name",
+                            "required": True,
+                            "tail_paths": [],
+                        },
+                        {
+                            "type": "fit_output_bounds",
+                            "group": "design",
+                            "option_key": "Design03",
+                            "dimensions": {"width_mm": 35.278, "height_mm": 14.111},
+                        },
+                    ],
+                }
+            ],
+        },
+    }
+    harness = node_mock_harness(task, """
+const packedBlock = outputLayer.pageItems.find(item => item.name === 'ORDER_PACK_BLOCK_0');
+if (__PACK_ORDER_BLOCKS__ && !packedBlock) throw new Error('output fit did not preserve the packed order block');
+const designCopy = packedBlock || outputLayer.pageItems.find(item => item.name === 'Design03');
+const fixed = child(designCopy, __FIXED_MARKER__);
+const width = fixed.visibleBounds[2] - fixed.visibleBounds[0];
+const height = fixed.visibleBounds[1] - fixed.visibleBounds[3];
+if (Math.abs(width - 20) > 0.1 || Math.abs(height - 20) > 0.1) {
+  throw new Error('fixed art size changed during output fit: ' + width + 'x' + height);
+}
+const fixedCenterX = (fixed.visibleBounds[0] + fixed.visibleBounds[2]) / 2;
+const fixedCenterY = (fixed.visibleBounds[1] + fixed.visibleBounds[3]) / 2;
+if (Math.abs(fixedCenterX - 50) > 0.1 || Math.abs(fixedCenterY - 20) > 0.1) {
+  throw new Error('fixed art center was not mapped by output fit: actual=' + fixedCenterX + ',' + fixedCenterY
+    + ', expected=50,20');
+}
+if (fixed.resizeCalls < 2 || fixed.translateCalls < 1) {
+  throw new Error('fixed art was not restored and repositioned after output fit');
+}
+const slot = child(designCopy, 'slot_name');
+if (slot.resizeCalls < 1) throw new Error('ordinary slot content did not participate in output fit');
+""".replace("__FIXED_MARKER__", json.dumps(fixed_marker)).replace(
+        "__PACK_ORDER_BLOCKS__", json.dumps(pack_order_blocks)
+    ))
+
+    result = run_node(harness)
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_v2_renderer_preserves_fixed_art_inside_font_during_output_fit_and_packing():
+    task = {
+        "$schema": "custom-renderer/v2-render-execution",
+        "template_ai": "template.ai",
+        "output_ai": "out.ai",
+        "pack_order_blocks": True,
+        "values": {"font": "F1", "name": "Design sample"},
+        "selections": {"Output_main": {"font": "F1"}},
+        "mock_fixed_annotation_name": "fixed",
+        "mock_fixed_parent": "F1",
+        "mock_fixed_bounds": [65, 30, 85, 10],
+        "render_task": {
+            "$schema": "custom-renderer/v2-render-task",
+            "outputs": [
+                {
+                    "key": "Output_main",
+                    "actions": [
+                        {
+                            "type": "copy_option_group",
+                            "group": "font",
+                            "option_key": "F1",
+                            "object_path": "Template/Output_main/Font/F1",
+                        },
+                        {
+                            "type": "replace_slot_text",
+                            "group": "font",
+                            "option_key": "F1",
+                            "object_path": "Template/Output_main/Font/F1/slot_name",
+                            "source_field": "name",
+                            "required": True,
+                            "tail_paths": [],
+                        },
+                        {
+                            "type": "fit_output_bounds",
+                            "group": "font",
+                            "option_key": "F1",
+                            "dimensions": {"width_mm": 35.278, "height_mm": 14.111},
+                        },
+                    ],
+                }
+            ],
+        },
+    }
+    harness = node_mock_harness(task, """
+const packedBlock = outputLayer.pageItems.find(item => item.name === 'ORDER_PACK_BLOCK_0');
+if (!packedBlock) throw new Error('font output was not packed');
+const fixed = child(packedBlock, 'fixed');
+const width = fixed.visibleBounds[2] - fixed.visibleBounds[0];
+const height = fixed.visibleBounds[1] - fixed.visibleBounds[3];
+if (Math.abs(width - 20) > 0.1 || Math.abs(height - 20) > 0.1) {
+  throw new Error('fixed font art size changed during output fit: ' + width + 'x' + height);
+}
+if (fixed.resizeCalls < 2 || fixed.translateCalls < 1) {
+  throw new Error('fixed font art was not restored and repositioned after output fit');
+}
+""")
+
+    result = run_node(harness)
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_v2_renderer_maps_design_fixed_art_against_its_design_not_font_bounds():
+    task = {
+        "$schema": "custom-renderer/v2-render-execution",
+        "template_ai": "template.ai",
+        "output_ai": "out.ai",
+        "values": {"design": "03", "font": "F1", "name": "Design sample"},
+        "selections": {"Output_main": {"design": "Design03", "font": "F1"}},
+        "mock_fixed_annotation_name": "fixed",
+        "mock_fixed_bounds": [65, 30, 85, 10],
+        "mock_f1_slot_bounds": [1000, 1000, 2000, 0],
+        "render_task": {
+            "$schema": "custom-renderer/v2-render-task",
+            "outputs": [
+                {
+                    "key": "Output_main",
+                    "actions": [
+                        {
+                            "type": "copy_option_group",
+                            "group": "design",
+                            "option_key": "Design03",
+                            "object_path": "Template/Output_main/Design/Design03",
+                        },
+                        {
+                            "type": "copy_option_group",
+                            "group": "font",
+                            "option_key": "F1",
+                            "object_path": "Template/Output_main/Font/F1",
+                        },
+                        {
+                            "type": "fit_output_bounds",
+                            "group": "design",
+                            "option_key": "Design03",
+                            "dimensions": {"width_mm": 352.778, "height_mm": 352.778},
+                        },
+                    ],
+                }
+            ],
+        },
+    }
+    harness = node_mock_harness(task, """
+const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
+const fixed = child(designCopy, 'fixed');
+const width = fixed.visibleBounds[2] - fixed.visibleBounds[0];
+const height = fixed.visibleBounds[1] - fixed.visibleBounds[3];
+if (Math.abs(width - 20) > 0.1 || Math.abs(height - 20) > 0.1) {
+  throw new Error('design fixed art changed size when font bounds were present');
+}
+const fixedCenterX = (fixed.visibleBounds[0] + fixed.visibleBounds[2]) / 2;
+if (fixedCenterX >= 100) {
+  throw new Error('design fixed art was mapped against font/output bounds: ' + fixedCenterX);
+}
+""")
+
+    result = run_node(harness)
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_v2_renderer_rejects_fixed_art_that_cannot_fit_output_bounds():
+    task = {
+        "$schema": "custom-renderer/v2-render-execution",
+        "template_ai": "template.ai",
+        "output_ai": "out.ai",
+        "values": {"design": "03"},
+        "selections": {"Output_main": {"design": "Design03"}},
+        "mock_fixed_annotation_name": "fixed",
+        "mock_fixed_bounds": [0, 120, 160, 0],
+        "render_task": {
+            "$schema": "custom-renderer/v2-render-task",
+            "outputs": [
+                {
+                    "key": "Output_main",
+                    "actions": [
+                        {
+                            "type": "copy_option_group",
+                            "group": "design",
+                            "option_key": "Design03",
+                            "object_path": "Template/Output_main/Design/Design03",
+                        },
+                        {
+                            "type": "fit_output_bounds",
+                            "group": "design",
+                            "option_key": "Design03",
+                            "dimensions": {"width_mm": 35.278, "height_mm": 14.111},
+                        },
+                    ],
+                }
+            ],
+        },
+    }
+
+    result = run_node(node_mock_harness(task, ""))
+
+    assert result.returncode != 0
+    assert "V2 output exceeds target bounds or does not match target bounds" in result.stderr
 
 
 def test_v2_renderer_ignores_sub_tolerance_text_fit_rounding_warning():
@@ -2679,7 +2918,7 @@ const design03 = item('GroupItem', 'Design03', '', [
   item('TextFrame', 'tail_name_1', 'Tail 1', [], 'Tail-style'),
   item('TextFrame', 'tail_name_2', 'Tail 2', [], 'Tail-style'),
   item('TextFrame', 'slot_year', '2026', [], 'Year-style'),
-  item('PathItem', 'fixed_heart', '', []),
+  item('PathItem', task.mock_fixed_parent === 'F1' ? '' : (task.mock_fixed_annotation_name || ''), '', [], '', task.mock_fixed_bounds),
   item('GroupItem', 'Assets', '', [
     item('GroupItem', 'initial_top', '', [
       item('PathItem', 'A', '', []),
@@ -2688,6 +2927,9 @@ const design03 = item('GroupItem', 'Design03', '', [
   ]),
   item('PathItem', '', '', [])
 ]);
+if (task.mock_fixed_parent === 'F1') {{
+  attach(f1, item('PathItem', task.mock_fixed_annotation_name || 'fixed', '', [], '', task.mock_fixed_bounds));
+}}
 const style1 = item('GroupItem', 'style1', '', [item('PathItem', 'style1_shape', '', [], '', style1Bounds)]);
 const style2 = item('GroupItem', 'style2', '', [item('PathItem', 'style2_shape', '', [], '', [0, 200, 200, 0])]);
 const styleGroup = item('GroupItem', 'Style', '', [style1, style2]);

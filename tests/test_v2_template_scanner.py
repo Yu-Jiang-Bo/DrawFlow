@@ -679,6 +679,7 @@ def test_normalizes_nested_jsx_scan_contract():
         "tails": 0,
         "assets": 1,
         "fixed_objects": 0,
+        "fixed_annotations": 0,
     }
     assert output["designs"][0]["assets"][0]["slot"] == "slot_logo"
     assert output["designs"][0]["slots"][0]["asset_key"] == "logo"
@@ -736,6 +737,90 @@ def test_preserves_jsx_fixed_object_summary_without_detail_items():
     assert font["fixed_object_type_counts"] == {"GroupItem": 1, "PathItem": 1}
     assert font["fixed_objects"] == [{"key": "unnamed_fixed_objects", "count": 2, "path": "Template/Output_main/Font/F1"}]
     assert result["outputs"][0]["summary"]["fixed_objects"] == 2
+
+
+def test_collects_explicit_fixed_annotations_without_guessing_the_artwork_type():
+    items = valid_scan_items()
+    items.extend(
+        [
+            path_item(
+                "Template/Output_main/Design/Design03/fixed",
+                "fixed",
+                bounds=[120, 48, 140, 28],
+            ),
+            group(
+                "Template/Output_main/Design/Design03/fixed_legacy",
+                "fixed_legacy",
+                bounds=[150, 52, 180, 22],
+            ),
+            group(
+                "Template/Output_main/Design/Design03/fixd_legacy",
+                "fixd_legacy",
+                bounds=[220, 50, 250, 20],
+            ),
+            path_item(
+                "Template/Output_main/Design/Design03/ordinary_star",
+                "ordinary_star",
+                bounds=[190, 48, 210, 28],
+            ),
+        ]
+    )
+
+    result = normalize_v2_template_scan(base_raw_scan(*items))
+
+    design = result["outputs"][0]["designs"][0]
+    assert result["blocked"] is False
+    assert design["fixed_annotations"] == [
+        {
+            "key": "fixd_legacy",
+            "path": "Template/Output_main/Design/Design03/fixd_legacy",
+            "type": "GroupItem",
+            "visible_bounds": [220, 50, 250, 20],
+            "dimensions": {"width_mm": 10.583, "height_mm": 10.583},
+        },
+        {
+            "key": "fixed",
+            "path": "Template/Output_main/Design/Design03/fixed",
+            "type": "PathItem",
+            "visible_bounds": [120, 48, 140, 28],
+            "dimensions": {"width_mm": 7.056, "height_mm": 7.056},
+        },
+        {
+            "key": "fixed_legacy",
+            "path": "Template/Output_main/Design/Design03/fixed_legacy",
+            "type": "GroupItem",
+            "visible_bounds": [150, 52, 180, 22],
+            "dimensions": {"width_mm": 10.583, "height_mm": 10.583},
+        },
+    ]
+    assert all(item["key"] != "ordinary_star" for item in design["fixed_annotations"])
+    assert result["outputs"][0]["summary"]["fixed_annotations"] == 3
+
+
+def test_blocks_fixed_annotation_nested_in_a_replaceable_slot_or_assets():
+    items = valid_scan_items()
+    items.extend(
+        [
+            path_item(
+                "Template/Output_main/Design/Design03/slot_name/fixed",
+                "fixed",
+            ),
+            group("Template/Output_main/Design/Design03/Assets", "Assets"),
+            group(
+                "Template/Output_main/Design/Design03/Assets/logo",
+                "logo",
+            ),
+            path_item(
+                "Template/Output_main/Design/Design03/Assets/logo/fixed",
+                "fixed",
+            ),
+        ]
+    )
+
+    result = normalize_v2_template_scan(base_raw_scan(*items))
+
+    assert result["blocked"] is True
+    assert "fixed_marker_forbidden_scope" in issue_codes(result)
 
 
 def test_scan_errors_are_sanitized_for_web_consumption():
@@ -824,7 +909,7 @@ function link(parent) {{
 }}
 const fixed = {{ typename: 'PathItem', name: '', filled: true, closed: true, pathPoints: [1], visibleBounds: [0, 10, 10, 0], opacity: 100 }};
 const design = group('Design03', [
-  group('slot_logo', [text('slot_logo_text', TextType.PATHTEXT), pathItem('keep_ratio_heart', {{ typename: 'RGBColor', red: 0, green: 0, blue: 0 }})]),
+  group('slot_logo', [text('slot_logo_text', TextType.PATHTEXT), pathItem('keep_ratio_heart', {{ typename: 'RGBColor', red: 0, green: 0, blue: 0 }}), pathItem('fixed', {{ typename: 'RGBColor', red: 0, green: 0, blue: 0 }})]),
   text(' slot_LOGO ', TextType.POINTTEXT),
   group('Assets', [group('logo', [group('A', [])])]),
   fixed
@@ -863,12 +948,13 @@ if (option.fixed_object_count !== 1) throw new Error('fixed object count lost');
 if (scan.items.some(item => item.name === '' || item.layer_path.indexOf('/PathItem') >= 0)) throw new Error('fixed object leaked into items');
 if (!option.slots.some(slot => slot.text && slot.text.text_kind === 'path_text')) throw new Error('path text not detected');
 if (!option.slots.some(slot => slot.preserve_composition === true)) throw new Error('keep ratio marker not detected');
+if (!scan.items.some(item => item.name === 'fixed')) throw new Error('nested fixed marker was omitted from evidence');
 if (scan.colors[0].fill_color.space !== 'RGB') throw new Error('RGB color not scanned');
 if (!scan.issues.some(issue => issue.code === 'slot_duplicate')) throw new Error('duplicate slot issue missing');
-console.log(NativeJSON.stringify({{ status: scan.status, fixed: option.fixed_object_count, colors: scan.colors.length }}));
+console.log(NativeJSON.stringify({{ status: scan.status, fixed: option.fixed_object_count, colors: scan.colors.length, fixed_emitted: scan.items.some(item => item.name === 'fixed') }}));
 """
 
     result = subprocess.run([node, "-e", harness], capture_output=True, text=True, check=False)
 
     assert result.returncode == 0, result.stderr
-    assert json.loads(result.stdout) == {"status": "blocked", "fixed": 1, "colors": 1}
+    assert json.loads(result.stdout) == {"status": "blocked", "fixed": 1, "colors": 1, "fixed_emitted": True}
