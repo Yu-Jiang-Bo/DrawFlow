@@ -1509,14 +1509,14 @@ if (child(designCopy, 'slot_name').contents !== 'elda') throw new Error('main ta
     assert result.returncode == 0, result.stderr
 
 
-def test_v2_renderer_embeds_materialized_opentype_tail_glyphs_for_direct_text():
+def test_v2_renderer_embeds_one_materialized_opentype_word_for_direct_text():
     tails = [
         {
             "key": "tail_name_first_a",
             "position": "first",
             "sample": "a",
             "glyph_mode": "opentype_alternate",
-            "opentype_glyph_asset": {"path": "first-a.svg"},
+            "opentype_word_asset": {"path": "alice.svg"},
             "path": "Template/Output_main/Design/Design03/tail_name_first_a",
         },
         {
@@ -1524,7 +1524,6 @@ def test_v2_renderer_embeds_materialized_opentype_tail_glyphs_for_direct_text():
             "position": "last",
             "sample": "a",
             "glyph_mode": "opentype_alternate",
-            "opentype_glyph_asset": {"path": "last-a.svg"},
             "path": "Template/Output_main/Design/Design03/tail_name_last_a",
         },
     ]
@@ -1534,10 +1533,9 @@ def test_v2_renderer_embeds_materialized_opentype_tail_glyphs_for_direct_text():
 const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
 if (designCopy.pageItems.find(item => item.name === 'slot_name')) throw new Error('OpenType composition retained editable normal endpoint text');
 if (designCopy.pageItems.find(item => item.name === 'tail_name_first_a' || item.name === 'tail_name_last_a')) throw new Error('OpenType helper sample remained in output');
-if (!designCopy.pageItems.find(item => item.name === 'TAIL_VECTOR_tail_name_first_a' && item.typename === 'PathItem')) throw new Error('OpenType first glyph was not inserted');
-if (!designCopy.pageItems.find(item => item.name === 'TAIL_VECTOR_tail_name_last_a' && item.typename === 'PathItem')) throw new Error('OpenType last glyph was not inserted');
-const embedded = designCopy.pageItems.filter(item => item.typename === 'PathItem' && /^TAIL_VECTOR_/.test(item.name));
-if (embedded.length !== 2) throw new Error('OpenType glyph SVGs were not embedded');
+if (!designCopy.pageItems.find(item => item.name === 'TAIL_VECTOR_WORD_slot_name' && item.typename === 'PathItem')) throw new Error('OpenType word outline was not inserted');
+const embedded = designCopy.pageItems.filter(item => item.typename === 'PathItem' && /^TAIL_VECTOR_WORD_/.test(item.name));
+if (embedded.length !== 1) throw new Error('OpenType word SVG was not embedded');
 """)
 
     result = run_node(harness)
@@ -1545,14 +1543,14 @@ if (embedded.length !== 2) throw new Error('OpenType glyph SVGs were not embedde
     assert result.returncode == 0, result.stderr
 
 
-def test_v2_renderer_composes_mixed_opentype_and_pua_tail_vectors_for_one_slot():
+def test_v2_renderer_composes_mixed_opentype_and_pua_as_one_word_vector_for_one_slot():
     tails = [
         {
             "key": "tail_name_first_a",
             "position": "first",
             "sample": "a",
             "glyph_mode": "opentype_alternate",
-            "tail_vector_asset": {"path": "first-a.svg"},
+            "opentype_word_asset": {"path": "alice.svg"},
             "path": "Template/Output_main/Design/Design03/tail_name_first_a",
         },
         {
@@ -1570,10 +1568,39 @@ def test_v2_renderer_composes_mixed_opentype_and_pua_tail_vectors_for_one_slot()
     harness = node_mock_harness(task, """
 const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
 if (designCopy.pageItems.find(item => item.name === 'slot_name')) throw new Error('mixed composition retained editable endpoint text');
-for (const key of ['tail_name_first_a', 'tail_name_last_a']) {
-  if (!designCopy.pageItems.find(item => item.name === 'TAIL_VECTOR_' + key && item.typename === 'PathItem')) {
-    throw new Error('mixed vector tail was not inserted: ' + key);
-  }
+if (!designCopy.pageItems.find(item => item.name === 'TAIL_VECTOR_WORD_slot_name' && item.typename === 'PathItem')) {
+  throw new Error('mixed word vector was not inserted');
+}
+""")
+
+    result = run_node(harness)
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_v2_renderer_applies_word_appearance_to_compound_svg_paths():
+    tails = [
+        {
+            "key": "tail_name_first_a",
+            "position": "first",
+            "sample": "a",
+            "glyph_mode": "opentype_alternate",
+            "opentype_word_asset": {"path": "alice.svg"},
+            "path": "Template/Output_main/Design/Design03/tail_name_first_a",
+        }
+    ]
+    task = tail_text_task(tails, value="Alice")
+    task["mock_opentype_compound"] = True
+    task["render_task"]["outputs"][0]["actions"][1]["preset"] = "direct_text"
+    harness = node_mock_harness(task, """
+const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
+const word = designCopy.pageItems.find(item => item.name === 'TAIL_VECTOR_WORD_slot_name');
+if (!word) throw new Error('OpenType word outline missing');
+const compound = word.pageItems.find(item => item.typename === 'CompoundPathItem');
+if (!compound || !compound.pathItems || !compound.pathItems.length) throw new Error('mock compound path missing');
+const filledPath = compound.pathItems[0];
+if (!filledPath.filled || !filledPath.fillColor || filledPath.fillColor.red !== 0 || filledPath.fillColor.green !== 0 || filledPath.fillColor.blue !== 0) {
+  throw new Error('compound path did not inherit text fill');
 }
 """)
 
@@ -2410,6 +2437,7 @@ function item(typename, name, contents, children, styleToken, bounds, options) {
     outlineToken: opts.outlineToken || '',
     styleToken: styleToken || '',
     pageItems: children || [],
+    pathItems: opts.pathItems || [],
     translateCalls: 0,
     resizeCalls: 0,
     duplicate: function(targetLayer) {{
@@ -2605,7 +2633,8 @@ function clone(node) {{
     kind: node.kind,
     pathToken: node.pathToken,
     textSize: node.textSize,
-    puaTailBase: node.puaTailBase
+    puaTailBase: node.puaTailBase,
+    pathItems: node.pathItems.map(clone)
   }});
   copy.fromCopy = true;
   return copy;
@@ -2690,8 +2719,15 @@ const outputDoc = {{
 function glyphDocument() {{
   const glyph = item('PathItem', '', '', [], '', [0, 20, 10, 0]);
   glyph.openTypeTail = true;
-  const glyphLayer = {{ typename: 'Layer', name: 'SVG', pageItems: [glyph] }};
-  glyph.parent = glyphLayer;
+  const glyphItems = [glyph];
+  if (task.mock_opentype_compound) {{
+    const compoundInner = item('PathItem', '', '', [], '', [10, 20, 20, 0]);
+    const compound = item('CompoundPathItem', '', '', [], '', [10, 20, 20, 0], {{ pathItems: [compoundInner] }});
+    compoundInner.parent = compound;
+    glyphItems.push(compound);
+  }}
+  const glyphLayer = {{ typename: 'Layer', name: 'SVG', pageItems: glyphItems }};
+  for (const glyphItem of glyphItems) glyphItem.parent = glyphLayer;
   return {{ layers: [glyphLayer], close: () => undefined }};
 }}
 function groupSelectedOutputItems() {{

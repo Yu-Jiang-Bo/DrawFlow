@@ -22,6 +22,52 @@ def test_resolves_template_selected_alternate_ordinal_from_feature_lookup():
     assert opentype_tail._alternate_glyph_name(font, "aalt", 2, "c") == "c.2"
 
 
+def test_resolves_single_substitution_feature_for_template_tail_profile():
+    lookup = SimpleNamespace(
+        LookupType=1,
+        SubTable=[SimpleNamespace(mapping={"c": "c.swash"})],
+    )
+    font = {
+        "GSUB": SimpleNamespace(
+            table=SimpleNamespace(
+                FeatureList=SimpleNamespace(
+                    FeatureRecord=[SimpleNamespace(FeatureTag="swsh", Feature=SimpleNamespace(LookupListIndex=[0]))]
+                ),
+                LookupList=SimpleNamespace(Lookup=[lookup]),
+            )
+        )
+    }
+
+    assert opentype_tail._alternate_glyph_name(font, "swsh", 1, "c") == "c.swash"
+
+
+def test_reads_pairpos_kerning_x_advance_for_complete_word_layout():
+    pair_record = SimpleNamespace(SecondGlyph="r", Value1=SimpleNamespace(XAdvance=-42))
+    pair_set = SimpleNamespace(PairValueRecord=[pair_record])
+    lookup = SimpleNamespace(
+        LookupType=2,
+        SubTable=[
+            SimpleNamespace(
+                Format=1,
+                Coverage=SimpleNamespace(glyphs=["c.2"]),
+                PairSet=[pair_set],
+            )
+        ],
+    )
+    font = {
+        "GPOS": SimpleNamespace(
+            table=SimpleNamespace(
+                FeatureList=SimpleNamespace(
+                    FeatureRecord=[SimpleNamespace(FeatureTag="kern", Feature=SimpleNamespace(LookupListIndex=[0]))]
+                ),
+                LookupList=SimpleNamespace(Lookup=[lookup]),
+            )
+        )
+    }
+
+    assert opentype_tail._gpos_pair_x_advance(font, "c.2", "r") == -42
+
+
 def test_materializes_svg_with_template_profile_and_normalized_endpoint(tmp_path, monkeypatch):
     font_file = tmp_path / "demo.ttf"
     font_file.write_bytes(b"demo-font")
@@ -55,17 +101,21 @@ def test_materializes_svg_with_template_profile_and_normalized_endpoint(tmp_path
     assert glyph.task_payload()["opentype_alternate_index"] == 2
 
 
-def test_materializes_pua_and_opentype_tail_vectors_together(tmp_path):
+def test_materializes_one_complete_word_for_mixed_pua_and_opentype_tails(tmp_path):
     calls = []
 
     class Resolver:
-        def materialize(self, **kwargs):
+        def resolve_alternate_glyph_name(self, **kwargs):
             calls.append(("opentype", kwargs))
-            return SimpleNamespace(task_payload=lambda: {"path": "first-c.svg"})
+            return "c.2"
 
-        def materialize_codepoint(self, **kwargs):
+        def resolve_codepoint_glyph_name(self, **kwargs):
             calls.append(("pua", kwargs))
-            return SimpleNamespace(task_payload=lambda: {"path": "last-m.svg"})
+            return "m.pua"
+
+        def materialize_word(self, **kwargs):
+            calls.append(("word", kwargs))
+            return SimpleNamespace(task_payload=lambda: {"path": "cream.svg", "glyph_names": ["c.2", "r", "e", "a", "m.pua"]})
 
     specs = [
         {
@@ -95,17 +145,18 @@ def test_materializes_pua_and_opentype_tail_vectors_together(tmp_path):
 
     assert calls == [
         ("opentype", {
-            "font_postscript_name": "DemoPS", "feature": "aalt", "alternate_index": 2,
-            "letter": "C", "output_dir": tmp_path,
+            "font_postscript_name": "DemoPS", "feature": "aalt", "alternate_index": 2, "letter": "C",
         }),
         ("pua", {
             "font_postscript_name": "DemoPS", "codepoint": 0xE00C,
-            "letter": "m", "output_dir": tmp_path,
+        }),
+        ("word", {
+            "font_postscript_name": "DemoPS", "text": "Cream", "endpoint_glyphs": {0: "c.2", 4: "m.pua"},
+            "output_dir": tmp_path,
         }),
     ]
-    assert specs[0]["opentype_glyph_asset"] == {"path": "first-c.svg"}
-    assert specs[0]["tail_vector_asset"] == {"path": "first-c.svg"}
-    assert specs[1]["tail_vector_asset"] == {"path": "last-m.svg"}
+    assert specs[0]["opentype_word_asset"]["path"] == "cream.svg"
+    assert specs[1]["opentype_word_asset"]["glyph_names"][-1] == "m.pua"
 
 
 def test_skips_optional_blank_opentype_tail_slot_without_resolving_endpoints(tmp_path):

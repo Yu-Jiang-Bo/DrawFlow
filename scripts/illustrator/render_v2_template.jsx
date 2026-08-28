@@ -424,33 +424,25 @@
     }
 
     function replaceTextWithOpenTypeTailComposition(target, value, tailSpecs, fitBounds, action) {
-        for (var checkIndex = 0; checkIndex < tailSpecs.length; checkIndex++) {
-            var vectorAsset = tailVectorGlyphAsset(tailSpecs[checkIndex] || {});
-            if (!String(vectorAsset.path || "")) {
-                throw new Error("V2 tail vector glyph asset is missing: " + String((tailSpecs[checkIndex] || {}).key || ""));
-            }
+        var wordAsset = tailWordVectorAsset(tailSpecs);
+        if (!String(wordAsset.path || "")) {
+            throw new Error("V2 OpenType tail word asset is missing");
         }
-        var parsed = V2TailText.tailEndpointParts(String(value || ""), tailSpecs);
         var frame = writeTextToItem(target, value);
-        fitItemWithinBounds(frame, fitBounds, action, shouldPreserveSlotComposition(target, action));
         var appearance = captureTailTextAppearance(frame);
-        var firstColor = tailMarkerColor(253, 1, 37);
-        var lastColor = tailMarkerColor(1, 107, 253);
-        if (parsed.first_index >= 0) colorTextCharacter(frame, parsed.first_index, firstColor);
-        if (parsed.last_index >= 0 && parsed.last_index !== parsed.first_index) colorTextCharacter(frame, parsed.last_index, lastColor);
-        var outline = frame.createOutline();
-        if (!outline) throw new Error("V2 OpenType tail text outline failed: " + String(action.slot_key || ""));
+        var replacement = importOpenTypeGlyph(String(wordAsset.path || ""), frame);
+        applyTailAppearance(replacement, appearance);
+        replacement.name = "TAIL_VECTOR_WORD_" + String(action.slot_key || "");
+        fitItemWithinBounds(replacement, fitBounds, action, shouldPreserveSlotComposition(target, action));
+        removePageItem(frame);
+    }
+
+    function tailWordVectorAsset(tailSpecs) {
         for (var index = 0; index < tailSpecs.length; index++) {
-            var spec = tailSpecs[index] || {};
-            var marker = String(spec.position || "") === "first" ? firstColor : lastColor;
-            var bounds = removeOutlinedMarkerGlyph(outline, marker);
-            if (!bounds) throw new Error("V2 OpenType endpoint outline was not found: " + String(spec.key || ""));
-            var asset = tailVectorGlyphAsset(spec);
-            var replacement = importOpenTypeGlyph(String(asset.path || ""), outline);
-            applyTailAppearance(replacement, appearance);
-            replacement.name = "TAIL_VECTOR_" + String(spec.key || "");
-            fitItemWithinBounds(replacement, bounds, action, true);
+            var asset = (tailSpecs[index] || {}).opentype_word_asset || {};
+            if (String(asset.path || "")) return asset;
         }
+        return {};
     }
 
     function tailVectorGlyphAsset(spec) {
@@ -545,14 +537,36 @@
         var glyphDoc = null;
         try {
             glyphDoc = app.open(file);
-            var source = firstPageItemInDocument(glyphDoc);
-            if (!source) throw new Error("V2 OpenType tail glyph SVG has no page item: " + assetPath);
-            var replacement = source.duplicate(doc.layers[0], ElementPlacement.PLACEATEND);
+            var replacement = duplicateSvgDocumentPageItems(glyphDoc);
+            if (!replacement) throw new Error("V2 OpenType tail glyph SVG has no page item: " + assetPath);
             try { replacement.move(beforeItem, ElementPlacement.PLACEBEFORE); } catch (moveError) {}
             return replacement;
         } finally {
             try { if (glyphDoc) glyphDoc.close(SaveOptions.DONOTSAVECHANGES); } catch (closeError) {}
         }
+    }
+
+    function duplicateSvgDocumentPageItems(sourceDoc) {
+        var sources = [];
+        var layers = sourceDoc && sourceDoc.layers ? sourceDoc.layers : [];
+        for (var layerIndex = 0; layerIndex < layers.length; layerIndex++) {
+            var layer = layers[layerIndex];
+            var items = layer.pageItems || [];
+            for (var itemIndex = 0; itemIndex < items.length; itemIndex++) {
+                var item = items[itemIndex];
+                try {
+                    if (item.parent !== layer) continue;
+                } catch (parentError) {}
+                sources.push(item);
+            }
+        }
+        if (!sources.length) return null;
+        if (sources.length === 1) return sources[0].duplicate(doc.layers[0], ElementPlacement.PLACEATEND);
+        var group = doc.layers[0].groupItems.add();
+        for (var sourceIndex = 0; sourceIndex < sources.length; sourceIndex++) {
+            sources[sourceIndex].duplicate(group, ElementPlacement.PLACEATEND);
+        }
+        return group;
     }
 
     function firstPageItemInDocument(sourceDoc) {
@@ -581,6 +595,13 @@
         if (item.typename === "PathItem") {
             try { item.filled = true; item.fillColor = attributes.fillColor; } catch (fillError) {}
             try { item.stroked = attributes.strokeColor && attributes.strokeWeight > 0; item.strokeColor = attributes.strokeColor; item.strokeWidth = attributes.strokeWeight; } catch (strokeError) {}
+            return;
+        }
+        if (item.typename === "CompoundPathItem") {
+            var compoundPaths = item.pathItems || [];
+            for (var compoundIndex = 0; compoundIndex < compoundPaths.length; compoundIndex++) {
+                applyTailAppearanceToPaths(compoundPaths[compoundIndex], attributes);
+            }
             return;
         }
         var children = item.pageItems || [];
