@@ -95,6 +95,30 @@ def test_normal_save_invalidates_registered_preview_proof(tmp_path):
     assert checked["validation"]["checks"]["preview"]["status"] == "pending"
 
 
+def test_publication_check_blocks_a_legacy_pua_profile_without_matching_auto_scan(tmp_path):
+    api = publication_api(tmp_path)
+    draft = prepared_draft(api)
+    config = dict(draft["config"])
+    slot = config["outputs"][0]["font"]["options"][0]["slots"][0]
+    slot["tails"] = [{"key": "tail_name_last_m", "position": "last", "sample": "m", "pua_base": 0xE040}]
+    api.store.save_draft(
+        "V2API001",
+        metadata=draft["metadata"],
+        config=config,
+        scan=draft["scan"],
+        assets=[{"filename": "template.ai", "role": "template", "content": b"real-template-ai-source"}],
+    )
+    legacy = api.read_draft("V2API001")
+
+    checked = api.publication_check(
+        "V2API001",
+        {"expected_draft_revision": legacy["manifest"]["draft_revision"]},
+    )
+
+    assert checked["validation"]["can_publish"] is False
+    assert any(issue["code"] == "tail_pua_profile_unverified" for issue in checked["validation"]["issues"])
+
+
 def test_draft_template_asset_download_is_manifest_bound(tmp_path):
     api = publication_api(tmp_path)
     draft = prepared_draft(api)

@@ -854,6 +854,35 @@ def _marker_record(item: Mapping[str, Any]) -> Dict[str, Any]:
     alternate_index = item.get("opentype_alternate_index")
     if isinstance(alternate_index, int) and not isinstance(alternate_index, bool) and alternate_index >= 1:
         record["opentype_alternate_index"] = alternate_index
+    pua_base = item.get("pua_base")
+    if isinstance(pua_base, int) and not isinstance(pua_base, bool) and 0xE000 <= pua_base <= 0xF8FF:
+        record["pua_base"] = pua_base
+    glyph_map = item.get("glyph_map")
+    if isinstance(glyph_map, Mapping):
+        normalized_map = {
+            str(letter).casefold(): codepoint
+            for letter, codepoint in glyph_map.items()
+            if isinstance(codepoint, int)
+            and not isinstance(codepoint, bool)
+            and len(str(letter)) == 1
+            and str(letter).isalpha()
+            and 0xE000 <= codepoint <= 0xF8FF
+        }
+        if normalized_map:
+            record["glyph_map"] = normalized_map
+    coverage = item.get("tail_profile_coverage")
+    if isinstance(coverage, Mapping):
+        normalized_coverage = {
+            "version": coverage.get("version"),
+            "alphabet": str(coverage.get("alphabet") or ""),
+            "verified": coverage.get("verified") is True,
+        }
+        if (
+            isinstance(normalized_coverage["version"], int)
+            and not isinstance(normalized_coverage["version"], bool)
+            and normalized_coverage["alphabet"]
+        ):
+            record["tail_profile_coverage"] = normalized_coverage
     text = item.get("text")
     if isinstance(text, Mapping):
         sample_text = str(text.get("text") or "").strip()

@@ -38,6 +38,8 @@ from .v2_template_publication_support import (
     verified_payload_sha,
 )
 from .v2_template_validation import validate_v2_template_configuration
+from .v2_template_validation import block_validation_with_content_issues
+from .v2_tail_profile_proof import tail_profile_issues
 
 
 class V2TemplatePublicationService:
@@ -198,7 +200,12 @@ class V2TemplatePublicationService:
             }
 
     def publication_validation(self, template_id: str, draft: Mapping[str, Any]) -> dict[str, Any]:
-        validation = validate_v2_template_configuration(dict(draft.get("config") or {}))
+        config = dict(draft.get("config") or {})
+        validation = validate_v2_template_configuration(config)
+        validation = block_validation_with_content_issues(
+            validation,
+            tail_profile_issues(config, dict(draft.get("scan") or {})),
+        )
         if validation.get("ok"):
             try:
                 self._verify_current(template_id, draft)

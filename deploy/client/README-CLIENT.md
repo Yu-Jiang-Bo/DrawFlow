@@ -6,7 +6,7 @@
 2. 确认本机已安装并激活 Adobe Illustrator，模板需要的字体也已安装。
 3. 双击 `DrawFlowClient.exe`。程序直接使用包内正式中央地址，只监听 `127.0.0.1:8766`，并自动打开 `http://127.0.0.1:8766/`。
 4. 仅在中央服务器地址变化时编辑同级 `drawflow-client.json`，不需要重新打包 exe。
-5. V2 工作台的真实样例预览需要可信 Windows 工作端与中央服务配置同一 `DRAWFLOW_PREVIEW_WORKER_SECRET`。该密钥不在压缩包内：由演示管理员在受控环境中为本机进程设置后，再启动客户端；不要把它填到 `drawflow-client.json`、页面、日志或截图中。设置完成后，可在工作台对已发布模板执行一次真实样例预览确认。
+5. V2 工作台的真实样例预览需要可信 Windows 工作端与中央服务配置同一 `DRAWFLOW_PREVIEW_WORKER_SECRET`；自动识别 OpenType/PUA 尾巴字形还需要同一台可信 Illustrator 扫描工作端与中央服务配置独立的 `DRAWFLOW_SCAN_WORKER_SECRET`。两把密钥均不在压缩包内：由演示管理员在受控环境中为本机进程设置后，再启动客户端；不要把它们填到 `drawflow-client.json`、页面、日志或截图中，也不要复用两把密钥。设置完成后，扫描带尾巴的模板会自动提交受签名的完整字母表字形证明。
 6. 若页面提示生成失败，保留页面中的用户可读提示；同时可查看 `%LOCALAPPDATA%\\DrawFlow\\logs\\drawflow-client.log` 的最后几行，用于定位问题。
 
 ## 本地职责

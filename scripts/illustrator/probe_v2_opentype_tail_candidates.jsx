@@ -13,48 +13,70 @@
     var outputFile = File(String(task.output_json || ""));
     if (!String(task.output_json || "")) throw new Error("Task missing output_json");
     var result = { candidates: [], errors: [] };
-    var doc = null;
-
     try {
         try { app.userInteractionLevel = UserInteractionLevel.DONTDISPLAYALERTS; } catch (ignored0) {}
-        try { doc = app.documents.add(DocumentColorSpace.RGB); } catch (ignored1) { doc = app.documents.add(); }
         var candidates = task.candidates instanceof Array ? task.candidates : [];
         for (var index = 0; index < candidates.length; index++) {
-            result.candidates.push(probeCandidate(doc, candidates[index] || {}));
+            result.candidates.push(probeCandidate(candidates[index] || {}));
         }
     } catch (error) {
         result.errors.push(errorText(error));
-    } finally {
-        if (doc) {
-            try { doc.close(SaveOptions.DONOTSAVECHANGES); } catch (ignored2) {}
-        }
     }
 
     writeText(outputFile, toJson(result));
     return result.errors.length ? "PROBE_V2_OPENTYPE_TAIL_CANDIDATES_ERROR" : "PROBE_V2_OPENTYPE_TAIL_CANDIDATES_OK";
 
-    function probeCandidate(document, candidate) {
+    function probeCandidate(candidate) {
         var record = { id: String(candidate.id || "") };
-        var imported = null;
+        var document = null;
         try {
             var source = File(String(candidate.svg_path || ""));
             if (!source.exists) throw new Error("Candidate SVG missing");
-            imported = document.groupItems.createFromFile(source);
-            var bounds = measuredBounds(imported);
-            var signature = outlineGeometrySignature(imported, bounds);
+            // A headless Illustrator instance can reject documents.add() with
+            // error 248 after scanning an .ai file. Opening the SVG itself is
+            // both more reliable and gives the same Illustrator-normalized
+            // path geometry used by the renderer.
+            document = app.open(source);
+            var bounds = documentBounds(document);
+            var signature = outlineGeometrySignature(document, bounds);
             if (!signature) throw new Error("Candidate SVG has no outline signature");
             record.outline_signature = signature;
         } catch (error) {
             record.error = errorText(error);
         } finally {
-            removePageItem(imported);
+            if (document) {
+                try { document.close(SaveOptions.DONOTSAVECHANGES); } catch (ignored0) {}
+            }
         }
         return record;
     }
 
-    function measuredBounds(item) {
-        var bounds = item.visibleBounds;
-        return [Number(bounds[0]), Number(bounds[1]), Number(bounds[2]), Number(bounds[3])];
+    function documentBounds(document) {
+        var pageItems = topLevelDocumentItems(document);
+        var left = null, top = null, right = null, bottom = null;
+        for (var index = 0; index < pageItems.length; index++) {
+            var bounds = pageItems[index].visibleBounds;
+            if (!bounds || bounds.length !== 4) continue;
+            left = left === null ? Number(bounds[0]) : Math.min(left, Number(bounds[0]));
+            top = top === null ? Number(bounds[1]) : Math.max(top, Number(bounds[1]));
+            right = right === null ? Number(bounds[2]) : Math.max(right, Number(bounds[2]));
+            bottom = bottom === null ? Number(bounds[3]) : Math.min(bottom, Number(bounds[3]));
+        }
+        return left === null ? null : [left, top, right, bottom];
+    }
+
+    function topLevelDocumentItems(document) {
+        var roots = [];
+        var pageItems = document.pageItems || [];
+        // Document.pageItems is a flat collection: it contains both a
+        // compound/group and its descendants. Probe only roots, because the
+        // recursive outline collector below will visit every descendant once.
+        for (var index = 0; index < pageItems.length; index++) {
+            var item = pageItems[index];
+            var parent = item ? item.parent : null;
+            if (parent && parent.typename === "Layer") roots.push(item);
+        }
+        return roots;
     }
 
     function outlineGeometrySignature(item, bounds) {
@@ -63,7 +85,15 @@
         collectOutlinePathSignatures(item, bounds, paths);
         if (!paths.length) return "";
         paths.sort();
-        return paths.join("|");
+        return uniquePathSignatures(paths).join("|");
+    }
+
+    function uniquePathSignatures(paths) {
+        var result = [];
+        for (var index = 0; index < paths.length; index++) {
+            if (!result.length || result[result.length - 1] !== paths[index]) result.push(paths[index]);
+        }
+        return result;
     }
 
     function collectOutlinePathSignatures(item, bounds, paths) {
@@ -105,11 +135,6 @@
         if (!point || point.length < 2) return "?";
         return Math.round((Number(point[0]) - Number(bounds[0])) * 1000 / width)
             + "," + Math.round((Number(point[1]) - Number(bounds[3])) * 1000 / height);
-    }
-
-    function removePageItem(item) {
-        if (!item) return;
-        try { item.remove(); } catch (ignored0) {}
     }
 
     function errorText(error) {
