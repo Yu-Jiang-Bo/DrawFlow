@@ -198,7 +198,7 @@ function createApp(fetchImpl, fileNames, locationSearch) {
   global.window.location = { search: locationSearch || "" };
   global.FormData = FakeFormData;
   global.fetch = fetchImpl;
-  (fileNames || [
+  const workbenchFiles = [...(fileNames || [
     "workbench.js",
     "workbench-dom.js",
     "workbench-api.js",
@@ -223,7 +223,16 @@ function createApp(fetchImpl, fileNames, locationSearch) {
     "workbench-structure-tree.js",
     "workbench-draft-actions.js",
     "workbench-scan-actions.js"
-  ]).forEach((fileName) => {
+  ])];
+  const publishedActionIndex = workbenchFiles.indexOf("workbench-draft-actions.js");
+  if (
+    publishedActionIndex >= 0 &&
+    !workbenchFiles.includes("workbench-published-actions.js") &&
+    fs.existsSync("src/service/static/v2-workbench/workbench-published-actions.js")
+  ) {
+    workbenchFiles.splice(publishedActionIndex + 1, 0, "workbench-published-actions.js");
+  }
+  workbenchFiles.forEach((fileName) => {
     eval(fs.readFileSync(`src/service/static/v2-workbench/${fileName}`, "utf8"));
   });
   document.fireReady();

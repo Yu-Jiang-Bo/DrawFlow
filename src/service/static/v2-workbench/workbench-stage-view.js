@@ -61,7 +61,9 @@
 
   function scanWarningText(summary, hasScan) {
     if (!hasScan) return "等待扫描结果。完成扫描后先核对规范标注字段，再进入结构与字段核验。";
-    if (state.isPublishedView) return "当前为中央服务共享的正式版本，可只读查看扫描摘要和结构字段配置。";
+    if (state.isPublishedView) return state.publishedDraftCompatibility
+      ? "中央服务暂不支持正式版本详情；当前以草稿内容兼容只读显示，不能修改或发布。"
+      : "当前为中央服务共享的正式版本，可只读查看扫描摘要和结构字段配置。";
     if ((summary.outputs || 0) > 1) return "待核验：检测到多个 Output，请进入下一步填写中文部件名并确认订单字段绑定。";
     return "待核验：扫描摘要只陈述 AI 文件事实，字段绑定和选项映射需要进入下一步人工确认。";
   }
@@ -72,7 +74,7 @@
     const status = mode || (state.isScanning ? "active" : "idle");
     const hasScan = scanSummary(state.scan || {}).total > 0 || Object.keys(state.scan || {}).length > 0;
     const steps = [
-      [state.isPublishedView ? "共享配置已加载" : "文件已保存", state.isPublishedView || state.uploadFile || state.draft || hasScan ? "success" : ""],
+      [state.isPublishedView ? (state.publishedDraftCompatibility ? "兼容只读配置已加载" : "共享配置已加载") : "文件已保存", state.isPublishedView || state.uploadFile || state.draft || hasScan ? "success" : ""],
       ["Illustrator 结构扫描", hasScan ? "success" : (status === "active" ? "active" : "")],
       ["规范变量提取", hasScan ? "success" : ""],
       [message || (hasScan ? "等待人工核验" : "等待选择 .ai 文件"), hasScan ? "active" : ""]

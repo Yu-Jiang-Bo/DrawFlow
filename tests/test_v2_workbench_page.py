@@ -37,6 +37,7 @@ JS = "\n".join(
         "workbench-view.js",
         "workbench-structure-tree.js",
         "workbench-draft-actions.js",
+        "workbench-published-actions.js",
         "workbench-scan-actions.js",
     ]
 )

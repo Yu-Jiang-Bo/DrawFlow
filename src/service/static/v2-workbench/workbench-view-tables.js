@@ -37,9 +37,9 @@
     const manifest = objectOf(draft && draft.manifest);
     setText("draftVersion", manifest.draft_revision || manifest.version || "-");
     setText("currentTemplateContext", templateContextText(template, fallbackId));
-    setHidden("createDraftFromPublishedBtn", !state.isPublishedView);
+    setHidden("createDraftFromPublishedBtn", !state.isPublishedView || state.publishedDraftCompatibility);
     setDraftStatus(
-      draft ? (state.isPublishedView ? "已发布 · 只读" : "草稿已读取") : "等待创建草稿",
+      draft ? (state.isPublishedView ? (state.publishedDraftCompatibility ? "已发布 · 兼容只读" : "已发布 · 只读") : "草稿已读取") : "等待创建草稿",
       draft ? "confirmed" : "pending"
     );
   }
@@ -58,14 +58,14 @@
     globalThis.renderScanMetrics(summary);
     setText("scanSummary", message || (hasScan ? summaryText(summary) : "等待扫描结果"));
     setText("scanSummaryWarning", globalThis.scanWarningText(summary, hasScan));
-    setText("uploadScanBadge", hasScan ? (state.isPublishedView ? "已发布扫描" : "扫描已完成") : (state.uploadFile ? "待上传" : "等待文件"));
+    setText("uploadScanBadge", hasScan ? (state.isPublishedView ? (state.publishedDraftCompatibility ? "兼容只读" : "已发布扫描") : "扫描已完成") : (state.uploadFile ? "待上传" : "等待文件"));
     if (globalThis.renderScanProgress) {
-      globalThis.renderScanProgress(message || (hasScan ? (state.isPublishedView ? "共享配置已加载，可查看结构字段。" : "等待人工核验") : "等待选择 .ai 文件"), "idle");
+      globalThis.renderScanProgress(message || (hasScan ? (state.isPublishedView ? (state.publishedDraftCompatibility ? "已加载草稿兼容视图，只读查看。" : "共享配置已加载，可查看结构字段。") : "等待人工核验") : "等待选择 .ai 文件"), "idle");
     }
     setText("scanEmptyState", hasScan ? "" : "等待扫描结果，扫描接口未就绪时可先保存文件。");
     setHidden("scanEmptyState", hasScan);
     setDisabled("enterStructureBtn", !hasScan);
-    setText("draftSummary", state.isPublishedView ? "当前为中央服务已发布版本，只读查看。" : draftSummaryText(summary));
+    setText("draftSummary", state.isPublishedView ? (state.publishedDraftCompatibility ? "中央服务暂不支持正式版本详情；当前以草稿内容兼容只读显示。" : "当前为中央服务已发布版本，只读查看。") : draftSummaryText(summary));
   }
 
   function renderTables() {

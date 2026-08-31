@@ -325,6 +325,8 @@ def test_local_gateway_serves_v2_workbench_fallback_when_central_is_unavailable(
             preview_js = response.read().decode("utf-8")
         with urllib.request.urlopen(f"{base_url}/static/v2-workbench/workbench-preview-actions.js") as response:
             preview_actions_js = response.read().decode("utf-8")
+        with urllib.request.urlopen(f"{base_url}/static/v2-workbench/workbench-published-actions.js") as response:
+            published_actions_js = response.read().decode("utf-8")
         with urllib.request.urlopen(f"{base_url}/static/v2-workbench/workbench-scan-actions.js") as response:
             scan_actions_js = response.read().decode("utf-8")
         with urllib.request.urlopen(f"{base_url}/static/v2-workbench/workbench-scan-model.js") as response:
@@ -349,6 +351,7 @@ def test_local_gateway_serves_v2_workbench_fallback_when_central_is_unavailable(
     assert "function renderVersionSummary" in preview_versions_js
     assert "function renderPreviewStage" in preview_js
     assert "/trial-render" in preview_actions_js
+    assert "function selectTemplate" in published_actions_js
     assert "/local/templates/scan" in scan_actions_js
     assert "function scanModel" in scan_model_js
     assert "function renderContentOptionRows" in content_js
