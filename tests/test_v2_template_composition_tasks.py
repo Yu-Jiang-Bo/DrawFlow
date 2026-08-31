@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 from src.renderer.v2_template_renderer import (
     V2TemplateRenderer,
@@ -86,18 +87,19 @@ def test_png_master_task_keeps_paging_settings_in_the_pure_payload(tmp_path):
     assert task["debug"] == {"report_path": str(tmp_path / "master.debug.json")}
 
 
-def test_v2_output_composers_outline_each_document_text_frame_once():
-    scripts = (
-        Path("scripts/illustrator/compose_v2_order_column.jsx"),
-        Path("scripts/illustrator/compose_png_master_pages.jsx"),
-        Path("scripts/illustrator/render_v2_template.jsx"),
-    )
+def test_v2_output_transforms_keep_the_pre_defer_execution_flow():
+    order_source = Path("scripts/illustrator/compose_v2_order_column.jsx").read_text(encoding="utf-8")
+    render_source = Path("scripts/illustrator/render_v2_template.jsx").read_text(encoding="utf-8")
+    png_master_source = Path("scripts/illustrator/compose_png_master_pages.jsx").read_text(encoding="utf-8")
+    task_builder_source = Path("src/service/v2_order_task_builder.py").read_text(encoding="utf-8")
+    pipeline_source = Path("src/service/production_pipeline.py").read_text(encoding="utf-8")
 
-    for script in scripts:
-        source = script.read_text(encoding="utf-8")
-        assert "doc.textFrames.length" in source
-        assert "collectTextFrames(doc.layers" not in source
-        assert "frames[index].createOutline();" in source
+    assert "collectTextFrames(doc.layers[layerIndex], frames);" in order_source
+    assert "collectTextFrames(doc.layers[layerIndex], frames);" in render_source
+    assert "applyOutputTransforms(doc, execution.output || task.output || {});" in render_source
+    assert "defer_output_transforms" not in task_builder_source
+    assert 'task["output"] = {"outline_text": False, "pathfinder_merge": False}' not in pipeline_source
+    assert "applyOutputTransforms" not in png_master_source
 
 
 def test_composition_task_builders_do_not_share_nested_input_values(tmp_path):
