@@ -61,13 +61,15 @@ def test_v2_renderer_static_contract_uses_paths_and_safe_actions():
     assert "String.fromCharCode" in include
 
 
-def test_v2_renderer_defers_component_output_transforms_only_when_requested():
+def test_v2_renderer_outlines_components_even_when_final_layout_is_deferred():
     source = SCRIPT.read_text(encoding="utf-8")
 
-    assert "if (execution.defer_output_transforms !== true)" in source
+    assert "if (execution.defer_output_transforms !== true)" not in source
     assert source.index("applyOutputTransforms(doc, execution.output || task.output || {});") < source.index(
         "var finalFitAction = selectedFitAction"
     )
+    assert "function collectTextFrames(container, result)" in source
+    assert "assertNoTextFrames(doc, \"V2 render output\");" in source
 
 
 def test_v2_renderer_jsx_runs_without_native_json_parser():

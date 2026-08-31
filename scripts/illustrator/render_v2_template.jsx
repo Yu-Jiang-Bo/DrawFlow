@@ -47,9 +47,11 @@
             renderedOutputCount += 1;
         }
         if (selectedOutputKey && renderedOutputCount !== 1) throw new Error("Selected V2 output was not rendered: " + selectedOutputKey);
-        if (execution.defer_output_transforms !== true) {
-            applyOutputTransforms(doc, execution.output || task.output || {});
-        }
+        // Component reuse may defer final page layout, but it must never defer
+        // conversion to production-safe vector artwork.  AI8 component files
+        // reopen as legacy nested TextFrames that the later composer cannot
+        // enumerate through doc.textFrames.
+        applyOutputTransforms(doc, execution.output || task.output || {});
         var finalFitAction = selectedFitAction(task, selectedOutputKey, selections);
         if (finalFitAction) fitRenderedOutput(renderedOutputItems, finalFitAction);
         if (execution.pack_order_blocks === true) {
@@ -142,19 +144,33 @@
     function applyOutputTransforms(doc, policy) {
         if (!policy || policy.outline_text !== true) return;
         outlineAllTextFrames(doc, policy.pathfinder_merge === true);
+        assertNoTextFrames(doc, "V2 render output");
     }
 
     function outlineAllTextFrames(doc, pathfinderMerge) {
-        // doc.layers[n].pageItems includes nested group items, so recursive
-        // traversal could retain duplicate, stale text-frame references after
-        // the first outline conversion.  doc.textFrames is a unique list.
         var frames = [];
-        for (var frameIndex = 0; frameIndex < doc.textFrames.length; frameIndex++) frames.push(doc.textFrames[frameIndex]);
+        for (var layerIndex = 0; layerIndex < doc.layers.length; layerIndex++) collectTextFrames(doc.layers[layerIndex], frames);
         for (var index = frames.length - 1; index >= 0; index--) {
             var outline = frames[index].createOutline();
             if (!outline) throw new Error("V2 text outline failed");
             if (pathfinderMerge) cleanupOutline(outline);
         }
+    }
+
+    function collectTextFrames(container, result) {
+        if (!container || !container.pageItems) return;
+        for (var index = 0; index < container.pageItems.length; index++) {
+            var item = container.pageItems[index];
+            if (item.parent !== container) continue;
+            if (item.typename === "TextFrame") result.push(item);
+            else if (item.typename === "GroupItem" || item.typename === "Layer") collectTextFrames(item, result);
+        }
+    }
+
+    function assertNoTextFrames(doc, stage) {
+        var remaining = [];
+        for (var layerIndex = 0; layerIndex < doc.layers.length; layerIndex++) collectTextFrames(doc.layers[layerIndex], remaining);
+        if (remaining.length) throw new Error(stage + " retains live text: " + remaining.length);
     }
 
     function cleanupOutline(item) {

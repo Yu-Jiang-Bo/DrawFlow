@@ -173,6 +173,7 @@ def _materialize_action_tails(
         for spec in specs
     ):
         return
+    asset_dir.mkdir(parents=True, exist_ok=True)
     endpoint_indexes = _latin_endpoint_indexes(endpoint_value)
     endpoint_glyphs: dict[int, str] = {}
     font_postscript_name = ""

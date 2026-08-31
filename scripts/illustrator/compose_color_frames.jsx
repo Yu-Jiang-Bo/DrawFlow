@@ -108,7 +108,10 @@
     }
 
     var outputPolicy = task.output || {};
-    if (!task.output || outputPolicy.outline_text !== false) outlineAllTextFrames(doc, outputPolicy.pathfinder_merge === true);
+    if (!task.output || outputPolicy.outline_text !== false) {
+        outlineAllTextFrames(doc, outputPolicy.pathfinder_merge === true);
+        assertNoTextFrames(doc, "V2 color frame output");
+    }
     writeDebug(task, plans, docWidth, finalHeight, frameWidth, usableWidth, algorithm, frameLayout);
     var output = File(String(task.output_ai));
     ensureFolder(output.parent);
@@ -730,8 +733,8 @@
 
     function outlineAllTextFrames(doc, pathfinderMerge) {
         var frames = [];
-        for (var index = 0; index < doc.textFrames.length; index++) frames.push(doc.textFrames[index]);
-        for (var frameIndex = 0; frameIndex < frames.length; frameIndex++) {
+        for (var layerIndex = 0; layerIndex < doc.layers.length; layerIndex++) collectTextFrames(doc.layers[layerIndex], frames);
+        for (var frameIndex = frames.length - 1; frameIndex >= 0; frameIndex--) {
             var outline = frames[frameIndex].createOutline();
             if (!outline) throw new Error("V2 color frame text outline failed");
             if (pathfinderMerge) {
@@ -741,6 +744,22 @@
                 outline.selected = false;
             }
         }
+    }
+
+    function collectTextFrames(container, result) {
+        if (!container || !container.pageItems) return;
+        for (var index = 0; index < container.pageItems.length; index++) {
+            var item = container.pageItems[index];
+            if (item.parent !== container) continue;
+            if (item.typename === "TextFrame") result.push(item);
+            else if (item.typename === "GroupItem" || item.typename === "Layer") collectTextFrames(item, result);
+        }
+    }
+
+    function assertNoTextFrames(doc, stage) {
+        var remaining = [];
+        for (var layerIndex = 0; layerIndex < doc.layers.length; layerIndex++) collectTextFrames(doc.layers[layerIndex], remaining);
+        if (remaining.length) throw new Error(stage + " retains live text: " + remaining.length);
     }
 
     function estimateLabelWidth(text, size) {
