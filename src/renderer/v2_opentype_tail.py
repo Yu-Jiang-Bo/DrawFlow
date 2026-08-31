@@ -311,6 +311,52 @@ class OpenTypeTailResolver:
             letter=str(letter).casefold(),
         )
 
+    def materialize_alternate_candidates(
+        self,
+        *,
+        font_postscript_name: str,
+        letter: str,
+        output_dir: Path | str,
+    ) -> list[OpenTypeTailGlyph]:
+        """Write every directly addressable GSUB alternate for one letter.
+
+        This is deliberately font-local.  The caller compares the resulting
+        outlines with a sample that came from the same template; it must never
+        assume that another font's ``aalt`` ordinal has the same meaning.
+        """
+
+        postscript_name = str(font_postscript_name or "").strip()
+        normalized_letter = str(letter or "").casefold()
+        if not postscript_name:
+            raise OpenTypeTailError("opentype_tail_font_missing", "OpenType 尾巴字形缺少字体 PostScript 名称。")
+        if not _LETTER_RE.match(normalized_letter):
+            raise OpenTypeTailError("opentype_tail_endpoint_missing", "OpenType 尾巴字形需要单个拉丁字母。")
+        font_path = self.find_font_file(postscript_name)
+        try:
+            font = TTFont(str(font_path), lazy=False)
+        except Exception as exc:
+            raise OpenTypeTailError("opentype_tail_font_invalid", f"无法读取 OpenType 字体：{postscript_name}") from exc
+        try:
+            records = _alternate_glyph_candidates(font, normalized_letter)
+            assets: list[OpenTypeTailGlyph] = []
+            for feature, alternate_index, glyph_name in records:
+                assets.append(
+                    self._write_glyph_asset(
+                        font_path=font_path,
+                        glyph_name=glyph_name,
+                        svg=_glyph_svg(font, glyph_name),
+                        output_dir=output_dir,
+                        filename_prefix=f"{feature}-{alternate_index}-{normalized_letter}",
+                        font_postscript_name=postscript_name,
+                        feature=feature,
+                        alternate_index=alternate_index,
+                        letter=normalized_letter,
+                    )
+                )
+            return assets
+        finally:
+            font.close()
+
     def resolve_alternate_glyph_name(
         self,
         *,
@@ -528,6 +574,42 @@ def _alternate_glyph_name(font: TTFont, feature: str, alternate_index: int, lett
             f"字体 {feature} 没有字母 {letter} 的第 {alternate_index} 个替代字形。",
         )
     return alternates[alternate_index - 1]
+
+
+def _alternate_glyph_candidates(font: TTFont, letter: str) -> list[tuple[str, int, str]]:
+    """Return all simple GSUB alternate profiles, in stable preference order."""
+
+    if "GSUB" not in font or font["GSUB"].table.FeatureList is None:
+        return []
+    tags = {
+        str(record.FeatureTag or "").casefold()
+        for record in font["GSUB"].table.FeatureList.FeatureRecord or []
+        if _FEATURE_TAG_RE.match(str(record.FeatureTag or ""))
+    }
+    result: list[tuple[str, int, str]] = []
+    for feature in sorted(tags, key=_feature_sort_key):
+        index = 1
+        while True:
+            try:
+                glyph_name = _alternate_glyph_name(font, feature, index, letter)
+            except OpenTypeTailError as exc:
+                if exc.code == "opentype_tail_glyph_missing":
+                    break
+                raise
+            result.append((feature, index, glyph_name))
+            index += 1
+    return result
+
+
+def _feature_sort_key(feature: str) -> tuple[int, str]:
+    # If aliases expose the exact same glyph, prefer the profile users see in
+    # Illustrator's Glyphs panel, then fall back to other standard features.
+    preferred = {"aalt": 0, "salt": 1, "swsh": 2}
+    if feature in preferred:
+        return preferred[feature], feature
+    if re.fullmatch(r"ss\d\d", feature):
+        return 3, feature
+    return 4, feature
 
 
 def _glyph_svg(font: TTFont, glyph_name: str) -> str:

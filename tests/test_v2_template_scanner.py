@@ -7,6 +7,8 @@ from pathlib import Path
 import pytest
 
 from src.service import v2_template_scanner as scanner_module
+from src.renderer.v2_opentype_tail import OpenTypeTailGlyph
+from src.service.v2_opentype_tail_profile import OpenTypeTailProfileInferer, _outline_match_score
 from src.service.v2_template_scanner import (
     V2_SCAN_PROTOCOL_VERSION,
     V2TemplateScanner,
@@ -291,6 +293,194 @@ def test_marker_visible_bounds_are_preserved():
     assert option["tails"][0]["related_slot"] == "slot_name"
     assert option["tails"][0]["text"] == "a"
     assert option["tails"][0]["font_dependencies"] == ["TailFont"]
+
+
+def test_preserves_auto_matched_opentype_tail_profile_from_scanned_evidence():
+    result = normalize_v2_template_scan(
+        base_raw_scan(
+            group("Template", "Template"),
+            group("Template/Output_main", "Output_main"),
+            group("Template/Output_main/Design", "Design"),
+            group("Template/Output_main/Design/Design03", "Design03"),
+            text("Template/Output_main/Design/Design03/slot_name", "slot_name"),
+            text(
+                "Template/Output_main/Design/Design03/tail_name_first_c",
+                "tail_name_first_c",
+                position="first",
+                sample="c",
+                font_name="TailFont",
+                opentype_feature="aalt",
+                opentype_alternate_index=2,
+                tail_profile_status="auto",
+                tail_profile_message="matched",
+            ),
+        )
+    )
+
+    tail = result["outputs"][0]["design"]["options"][0]["slots"][0]["tails"][0]
+    assert tail["opentype_feature"] == "aalt"
+    assert tail["opentype_alternate_index"] == 2
+    assert tail["tail_profile_status"] == "auto"
+
+
+def test_outline_profile_inference_sets_only_the_matching_template_profile(tmp_path):
+    class Resolver:
+        def materialize_alternate_candidates(self, **_kwargs):
+            return [
+                OpenTypeTailGlyph(
+                    path=tmp_path / "aalt-1.svg",
+                    glyph_name="c.1",
+                    font_postscript_name="TailFont",
+                    font_sha256="font-hash",
+                    feature="aalt",
+                    alternate_index=1,
+                    letter="c",
+                ),
+                OpenTypeTailGlyph(
+                    path=tmp_path / "aalt-2.svg",
+                    glyph_name="c.2",
+                    font_postscript_name="TailFont",
+                    font_sha256="font-hash",
+                    feature="aalt",
+                    alternate_index=2,
+                    letter="c",
+                ),
+            ]
+
+    class ProbeBridge:
+        def render(self, _script_path, task_path):
+            task = json.loads(Path(task_path).read_text(encoding="utf-8"))
+            Path(task["output_json"]).write_text(
+                json.dumps(
+                    {
+                        "candidates": [
+                            {
+                                "id": item["id"],
+                                "outline_signature": "sample-signature" if item["svg_path"].endswith("aalt-2.svg") else "other",
+                            }
+                            for item in task["candidates"]
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+    raw = {
+        "items": [
+            {
+                "name": "tail_name_first_c",
+                "path": "Template/Output_main/Design/Design03/tail_name_first_c",
+                "font": {"name": "TailFont"},
+                "outline_signature": "sample-signature",
+            }
+        ]
+    }
+
+    result = OpenTypeTailProfileInferer(bridge=ProbeBridge(), resolver=Resolver()).apply(raw, work_dir=tmp_path)
+
+    tail = result["items"][0]
+    assert tail["opentype_feature"] == "aalt"
+    assert tail["opentype_alternate_index"] == 2
+    assert tail["tail_profile_status"] == "auto"
+    assert "opentype_feature" not in raw["items"][0]
+
+
+def test_outline_profile_match_ignores_contour_direction_and_start_point():
+    source = "C:2:0,0:0,1:1,0:10,0:10,1:11,0"
+    imported_svg = "C:2:10,0:11,0:10,1:0,0:1,0:0,1"
+
+    assert _outline_match_score(source, imported_svg) == 0.0
+
+
+def test_outline_profile_match_uses_a_half_point_rounding_boundary():
+    source = "C:1:0,0:0,0:0,0"
+    within_rounding_noise = "C:1:3,0:0,0:0,0"
+    outside_rounding_noise = "C:1:4,0:0,0:0,0"
+
+    assert _outline_match_score(source, within_rounding_noise) == 0.5
+    assert _outline_match_score(source, outside_rounding_noise) > 0.5
+
+
+def test_outline_profile_inference_uses_canonical_profile_for_same_glyph_aliases(tmp_path):
+    class Resolver:
+        def materialize_alternate_candidates(self, **_kwargs):
+            return [
+                OpenTypeTailGlyph(tmp_path / "swsh-1.svg", "c.tail", "TailFont", "font-hash", "swsh", 1, "c"),
+                OpenTypeTailGlyph(tmp_path / "aalt-2.svg", "c.tail", "TailFont", "font-hash", "aalt", 2, "c"),
+            ]
+
+    class ProbeBridge:
+        def render(self, _script_path, task_path):
+            task = json.loads(Path(task_path).read_text(encoding="utf-8"))
+            Path(task["output_json"]).write_text(
+                json.dumps({"candidates": [{"id": item["id"], "outline_signature": "sample-signature"} for item in task["candidates"]]}),
+                encoding="utf-8",
+            )
+
+    raw = {
+        "items": [{
+            "name": "tail_name_first_c",
+            "path": "Template/Output_main/Design/Design03/tail_name_first_c",
+            "font": {"name": "TailFont"},
+            "outline_signature": "sample-signature",
+        }]
+    }
+
+    tail = OpenTypeTailProfileInferer(bridge=ProbeBridge(), resolver=Resolver()).apply(raw, work_dir=tmp_path)["items"][0]
+
+    assert tail["tail_profile_status"] == "auto"
+    assert tail["opentype_feature"] == "aalt"
+    assert tail["opentype_alternate_index"] == 2
+
+
+def test_outline_profile_inference_does_not_choose_between_distinct_matched_glyphs(tmp_path):
+    class Resolver:
+        def materialize_alternate_candidates(self, **_kwargs):
+            return [
+                OpenTypeTailGlyph(tmp_path / "one.svg", "c.1", "TailFont", "font-hash", "aalt", 1, "c"),
+                OpenTypeTailGlyph(tmp_path / "two.svg", "c.2", "TailFont", "font-hash", "aalt", 2, "c"),
+            ]
+
+    class ProbeBridge:
+        def render(self, _script_path, task_path):
+            task = json.loads(Path(task_path).read_text(encoding="utf-8"))
+            Path(task["output_json"]).write_text(
+                json.dumps({"candidates": [{"id": item["id"], "outline_signature": "sample-signature"} for item in task["candidates"]]}),
+                encoding="utf-8",
+            )
+
+    raw = {
+        "items": [{
+            "name": "tail_name_first_c",
+            "path": "Template/Output_main/Design/Design03/tail_name_first_c",
+            "font": {"name": "TailFont"},
+            "outline_signature": "sample-signature",
+        }]
+    }
+
+    tail = OpenTypeTailProfileInferer(bridge=ProbeBridge(), resolver=Resolver()).apply(raw, work_dir=tmp_path)["items"][0]
+
+    assert "opentype_feature" not in tail
+    assert tail["tail_profile_status"] == "unresolved"
+    assert "多个不同" in tail["tail_profile_message"]
+
+
+def test_scanner_marks_tail_unresolved_when_the_auto_probe_raises(tmp_path):
+    class RaisingInferer:
+        def apply(self, *_args, **_kwargs):
+            raise RuntimeError("probe failed")
+
+    raw = {
+        "items": [{
+            "name": "tail_name_first_c",
+            "path": "Template/Output_main/Design/Design03/tail_name_first_c",
+            "outline_signature": "sample-signature",
+        }]
+    }
+
+    result = V2TemplateScanner(tail_profile_inferer=RaisingInferer())._infer_opentype_tail_profiles(raw, tmp_path)
+
+    assert result["items"][0]["tail_profile_status"] == "unresolved"
 
 
 def test_design_option_visible_bounds_are_preserved_as_output_dimensions():

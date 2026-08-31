@@ -354,7 +354,96 @@
         record.related_slot = info.slot_key;
         record.position = info.position;
         record.sample = info.sample;
+        // Illustrator does not expose the ordinal selected in the Glyphs
+        // panel (for example, aalt #2).  Preserve a normalized outline of the
+        // artist's sample instead, so the Python scan can compare it with the
+        // actual GSUB candidates from this exact font.
+        var evidence = outlinedTextEvidence(firstTextFrame(item));
+        if (evidence) {
+            record.outline_signature = evidence.signature;
+            record.outline_bounds = evidence.bounds;
+        }
         return record;
+    }
+
+    function outlinedTextEvidence(frame) {
+        var duplicate = null;
+        var outlined = null;
+        try {
+            if (!frame) return null;
+            duplicate = frame.duplicate();
+            outlined = duplicate.createOutline();
+            var bounds = measuredBounds(outlined);
+            var signature = outlineGeometrySignature(outlined, bounds);
+            return signature ? { bounds: bounds, signature: signature } : null;
+        } catch (ignored0) {
+            return null;
+        } finally {
+            removePageItem(outlined || duplicate);
+        }
+    }
+
+    function measuredBounds(item) {
+        try {
+            var bounds = item.visibleBounds;
+            return [Number(bounds[0]), Number(bounds[1]), Number(bounds[2]), Number(bounds[3])];
+        } catch (ignored0) {}
+        return null;
+    }
+
+    function outlineGeometrySignature(item, bounds) {
+        if (!bounds || bounds.length !== 4) return "";
+        var paths = [];
+        collectOutlinePathSignatures(item, bounds, paths);
+        if (!paths.length) return "";
+        paths.sort();
+        return paths.join("|");
+    }
+
+    function collectOutlinePathSignatures(item, bounds, paths) {
+        if (!item) return;
+        if (item.typename === "PathItem") {
+            var signature = outlinePathSignature(item, bounds);
+            if (signature) paths.push(signature);
+            return;
+        }
+        if (item.typename === "CompoundPathItem" && item.pathItems) {
+            for (var pathIndex = 0; pathIndex < item.pathItems.length; pathIndex++) {
+                collectOutlinePathSignatures(item.pathItems[pathIndex], bounds, paths);
+            }
+            return;
+        }
+        var children = item.pageItems || [];
+        for (var childIndex = 0; childIndex < children.length; childIndex++) {
+            collectOutlinePathSignatures(children[childIndex], bounds, paths);
+        }
+    }
+
+    function outlinePathSignature(path, bounds) {
+        var points = path.pathPoints || [];
+        if (!points.length) return "";
+        var width = Math.abs(Number(bounds[2]) - Number(bounds[0]));
+        var height = Math.abs(Number(bounds[1]) - Number(bounds[3]));
+        if (width <= 0 || height <= 0) return "";
+        var result = String(path.closed === true ? "C" : "O") + ":" + points.length;
+        for (var index = 0; index < points.length; index++) {
+            var point = points[index];
+            result += ":" + outlinePointSignature(point.anchor, bounds, width, height);
+            result += ":" + outlinePointSignature(point.leftDirection, bounds, width, height);
+            result += ":" + outlinePointSignature(point.rightDirection, bounds, width, height);
+        }
+        return result;
+    }
+
+    function outlinePointSignature(point, bounds, width, height) {
+        if (!point || point.length < 2) return "?";
+        return Math.round((Number(point[0]) - Number(bounds[0])) * 1000 / width)
+            + "," + Math.round((Number(point[1]) - Number(bounds[3])) * 1000 / height);
+    }
+
+    function removePageItem(item) {
+        if (!item) return;
+        try { item.remove(); } catch (ignored0) {}
     }
 
     function validateOptionMarkers(option, output) {
@@ -471,11 +560,27 @@
                 size_pt: numberOr(attr.size, null),
                 tracking: numberOr(attr.tracking, null),
                 horizontal_scale: numberOr(attr.horizontalScale, null),
-                vertical_scale: numberOr(attr.verticalScale, null)
+                vertical_scale: numberOr(attr.verticalScale, null),
+                opentype: openTypeFacts(attr)
             };
             record.fill_color = colorValue(attr.fillColor);
         } catch (ignored0) {}
         return record;
+    }
+
+    function openTypeFacts(attr) {
+        var flags = {};
+        var names = ["swash", "stylisticAlternates", "ornaments", "titling", "ligature", "discretionaryLigature", "contextualLigature"];
+        for (var index = 0; index < names.length; index++) {
+            var name = names[index];
+            try {
+                if (attr[name] !== undefined) flags[name] = !!attr[name];
+            } catch (ignored0) {}
+        }
+        try {
+            if (attr.alternateGlyphs !== undefined) flags.alternateGlyphs = String(attr.alternateGlyphs);
+        } catch (ignored1) {}
+        return flags;
     }
 
     function firstTextFrame(item) {
