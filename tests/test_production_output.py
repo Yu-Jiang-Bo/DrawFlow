@@ -119,6 +119,8 @@ def test_generic_batch_jsx_executes_child_tasks_by_script_path():
     assert 'var scriptPath = String(entry.script || "");' in source
     assert 'var childTaskPath = String(entry.task_file || entry.task_path || "");' in source
     assert "$.evalFile(File(scriptPath))" in source
+    assert "app.redraw();" in source
+    assert "$.sleep(100);" in source
 
 
 def test_h_png_master_composer_embeds_placed_pngs():

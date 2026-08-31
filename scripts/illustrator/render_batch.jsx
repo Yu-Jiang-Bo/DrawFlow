@@ -20,7 +20,14 @@
             if (!childTaskPath) throw new Error("Batch task missing task_file at index " + i);
             $.setenv("CUSTOM_RENDER_TASK", childTaskPath);
             outputs.push(String($.evalFile(File(scriptPath)) || ""));
+            // Saving outlined component artwork creates substantially more native
+            // Illustrator objects than deferred live text.  Give Illustrator one
+            // redraw/cleanup turn before the next child reopens the template.
+            // Without this hand-off, long reuse batches can intermittently fail
+            // the next app.open() with Illustrator error 248.
+            try { app.redraw(); } catch (redrawError) {}
             try { if ($.gc) $.gc(); } catch (ignored) {}
+            try { $.sleep(100); } catch (sleepError) {}
         }
     } finally {
         $.setenv("CUSTOM_RENDER_TASK", originalTaskPath);

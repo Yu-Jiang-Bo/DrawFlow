@@ -10,21 +10,26 @@ from ..renderer.illustrator_bridge import IllustratorBridge, IllustratorBridgeEr
 
 
 PRODUCTION_BATCH_COM_RETRY_ATTEMPTS = 3
-PRODUCTION_BATCH_COM_RETRY_DELAY_SECONDS = 3.0
-PRODUCTION_BATCH_CHUNK_DELAY_SECONDS = 1.0
+PRODUCTION_BATCH_COM_RETRY_DELAY_SECONDS = 5.0
+# DispatchEx returns before Illustrator has finished shutting down the previous
+# private process.  A short delay is not sufficient after large outlined AI8
+# batches; starting the next process too early can reject DoJavaScript calls.
+PRODUCTION_BATCH_CHUNK_DELAY_SECONDS = 5.0
 
 
 def render_production_batch_files(batch_files: Iterable[Path], visible: bool) -> None:
-    """Render production batch task files through one reusable Illustrator session."""
+    """Render production batches through an isolated Illustrator instance per chunk."""
 
     script = Path(__file__).resolve().parents[2] / "scripts" / "illustrator" / "render_batch.jsx"
-    bridge = IllustratorBridge(visible=visible, fresh_instance=True, reuse_instance=True)
-    try:
-        for batch_file in batch_files:
-            _render_production_batch_chunk(bridge, script, Path(batch_file))
+    batch_paths = [Path(batch_file) for batch_file in batch_files]
+    for index, batch_file in enumerate(batch_paths):
+        bridge = _new_isolated_bridge(visible)
+        try:
+            _render_production_batch_chunk(bridge, script, batch_file)
+        finally:
+            bridge.close()
+        if index + 1 < len(batch_paths):
             time.sleep(PRODUCTION_BATCH_CHUNK_DELAY_SECONDS)
-    finally:
-        bridge.close()
 
 
 def render_production_batch_sequence(
@@ -32,19 +37,29 @@ def render_production_batch_sequence(
     visible: bool,
     after_group: Callable[[int], None] | None = None,
 ) -> None:
-    """Run ordered batch groups in one reusable Illustrator session."""
+    """Run ordered batch groups with one private Illustrator session per chunk."""
 
     script = Path(__file__).resolve().parents[2] / "scripts" / "illustrator" / "render_batch.jsx"
-    bridge = IllustratorBridge(visible=visible, fresh_instance=True, reuse_instance=True)
-    try:
-        for index, batch_files in enumerate(batch_groups):
-            for batch_file in batch_files:
-                _render_production_batch_chunk(bridge, script, Path(batch_file))
+    groups = [[Path(batch_file) for batch_file in batch_files] for batch_files in batch_groups]
+    remaining_batches = sum(len(batch_files) for batch_files in groups)
+    for index, batch_files in enumerate(groups):
+        for batch_file in batch_files:
+            bridge = _new_isolated_bridge(visible)
+            try:
+                _render_production_batch_chunk(bridge, script, batch_file)
+            finally:
+                bridge.close()
+            remaining_batches -= 1
+            if remaining_batches > 0:
                 time.sleep(PRODUCTION_BATCH_CHUNK_DELAY_SECONDS)
-            if after_group is not None:
-                after_group(index)
-    finally:
-        bridge.close()
+        if after_group is not None:
+            after_group(index)
+
+
+def _new_isolated_bridge(visible: bool) -> IllustratorBridge:
+    """Create one automation-only Illustrator session for a single batch."""
+
+    return IllustratorBridge(visible=visible, fresh_instance=True, quit_after=True)
 
 
 def _render_production_batch_chunk(bridge: IllustratorBridge, script: Path, task_file: Path) -> None:
@@ -53,16 +68,31 @@ def _render_production_batch_chunk(bridge: IllustratorBridge, script: Path, task
             bridge.render(script, task_file)
             return
         except IllustratorBridgeError as exc:
-            if attempt + 1 >= PRODUCTION_BATCH_COM_RETRY_ATTEMPTS or not _is_retryable_com_failure(exc):
-                if _is_retryable_com_failure(exc):
-                    raise IllustratorBridgeError(format_com_recovery_message(exc, retries=attempt)) from exc
+            if attempt + 1 >= PRODUCTION_BATCH_COM_RETRY_ATTEMPTS or not _is_retryable_batch_failure(exc):
+                if _is_retryable_batch_failure(exc):
+                    raise IllustratorBridgeError(_format_batch_recovery_message(exc, retries=attempt)) from exc
                 raise
             bridge.reset()
             time.sleep(PRODUCTION_BATCH_COM_RETRY_DELAY_SECONDS)
 
 
-def _is_retryable_com_failure(exc: IllustratorBridgeError) -> bool:
-    return "-2147417851" in str(exc) or "-2147023170" in str(exc)
+def _is_retryable_batch_failure(exc: IllustratorBridgeError) -> bool:
+    detail = str(exc)
+    return (
+        "-2147417851" in detail
+        or "-2147023170" in detail
+        or "an Illustrator error occurred: 248" in detail
+    )
+
+
+def _format_batch_recovery_message(exc: IllustratorBridgeError, *, retries: int) -> str:
+    if "an Illustrator error occurred: 248" in str(exc):
+        return (
+            "Illustrator 在隔离渲染会话中重新打开模板时失败（错误 248）。"
+            f"已自动新建实例重试 {retries} 次仍未恢复。"
+            "请稍后重试；该失败不会影响已经生成的源订单文件。"
+        )
+    return format_com_recovery_message(exc, retries=retries)
 
 
 __all__ = [

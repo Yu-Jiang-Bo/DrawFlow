@@ -159,6 +159,54 @@ def test_materializes_one_complete_word_for_mixed_pua_and_opentype_tails(tmp_pat
     assert specs[1]["opentype_word_asset"]["glyph_names"][-1] == "m.pua"
 
 
+def test_selected_opentype_tail_materialization_creates_the_component_asset_directory(tmp_path, monkeypatch):
+    captured_dirs = []
+
+    class Resolver:
+        def __init__(self, **_kwargs):
+            return None
+
+        def resolve_alternate_glyph_name(self, **_kwargs):
+            return "c.2"
+
+        def materialize_word(self, *, output_dir, **_kwargs):
+            captured_dirs.append(output_dir)
+            return SimpleNamespace(task_payload=lambda: {"path": str(output_dir / "cream.svg")})
+
+    monkeypatch.setattr(opentype_tail, "OpenTypeTailResolver", Resolver)
+    output_ai = tmp_path / "missing" / "artwork" / "component.ai"
+    render_task = {
+        "outputs": [{
+            "key": "Output_main",
+            "actions": [{
+                "type": "replace_slot_text",
+                "group": "font",
+                "option_key": "F3",
+                "source_field": "name",
+                "preset": "direct_text",
+                "tails": [{
+                    "key": "tail_name_first_c",
+                    "position": "first",
+                    "glyph_mode": "opentype_alternate",
+                    "font_postscript_name": "DemoPS",
+                    "opentype_feature": "aalt",
+                    "opentype_alternate_index": 2,
+                }],
+            }],
+        }],
+    }
+
+    opentype_tail.materialize_selected_opentype_tail_assets(
+        render_task,
+        values={"name": "Cream"},
+        selections={"Output_main": {"font": "F3"}},
+        output_ai=output_ai,
+    )
+
+    assert captured_dirs == [output_ai.parent / ".component.opentype-tail-glyphs"]
+    assert captured_dirs[0].is_dir()
+
+
 def test_skips_optional_blank_opentype_tail_slot_without_resolving_endpoints(tmp_path):
     class Resolver:
         def materialize(self, **_kwargs):
