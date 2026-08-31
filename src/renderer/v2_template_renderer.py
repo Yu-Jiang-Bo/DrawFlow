@@ -45,7 +45,6 @@ class V2TemplateRenderer:
         preview_dpi: int | float | None = None,
         layout_warning_file: Path | str | None = None,
         pack_order_blocks: bool = False,
-        defer_output_transforms: bool = False,
     ) -> dict[str, Any]:
         return build_v2_execution_task(
             render_task,
@@ -58,7 +57,6 @@ class V2TemplateRenderer:
             preview_dpi=preview_dpi,
             layout_warning_file=layout_warning_file,
             pack_order_blocks=pack_order_blocks,
-            defer_output_transforms=defer_output_transforms,
         )
 
     def render(
@@ -75,7 +73,6 @@ class V2TemplateRenderer:
         preview_dpi: int | float | None = None,
         layout_warning_file: Path | str | None = None,
         pack_order_blocks: bool = False,
-        defer_output_transforms: bool = False,
     ) -> str:
         execution_task = self.build_execution_task(
             render_task,
@@ -88,7 +85,6 @@ class V2TemplateRenderer:
             preview_dpi=preview_dpi,
             layout_warning_file=layout_warning_file,
             pack_order_blocks=pack_order_blocks,
-            defer_output_transforms=defer_output_transforms,
         )
         task_path = Path(task_file) if task_file is not None else _default_task_file(Path(output_ai))
         task_path.parent.mkdir(parents=True, exist_ok=True)
@@ -191,7 +187,6 @@ class V2TemplateRenderer:
         preview_background: Mapping[str, Any] | None = None,
         debug_report_path: Path | str | None = None,
         page_count: int = 1,
-        output_policy: Mapping[str, Any] | None = None,
     ) -> str:
         task_path = Path(task_file)
         task_path.parent.mkdir(parents=True, exist_ok=True)
@@ -210,7 +205,6 @@ class V2TemplateRenderer:
             preview_background=preview_background,
             debug_report_path=debug_report_path,
             page_count=page_count,
-            output_policy=output_policy,
         )
         task_path.write_text(
             json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2),
@@ -232,7 +226,6 @@ def build_v2_execution_task(
     preview_dpi: int | float | None = None,
     layout_warning_file: Path | str | None = None,
     pack_order_blocks: bool = False,
-    defer_output_transforms: bool = False,
 ) -> dict[str, Any]:
     task = deepcopy(dict(render_task))
     if task.get("$schema") != V2_RENDER_TASK_SCHEMA:
@@ -244,12 +237,6 @@ def build_v2_execution_task(
         preview_png=preview_png,
         layout_warning_file=layout_warning_file,
     )
-    if defer_output_transforms and preview_path:
-        raise V2TemplateRendererError(
-            "deferred_transform_preview_unsupported",
-            "A deferred V2 component render cannot also create a terminal preview.",
-            path="$.defer_output_transforms",
-        )
     normalized_values = {str(key): _string_value(value) for key, value in values.items()}
     normalized_selections = _normalize_selections(task, normalized_values, selections)
     _preflight_renderable_options(task, normalized_selections, selected_output_key)
@@ -287,8 +274,6 @@ def build_v2_execution_task(
         execution["layout_warning_file"] = str(Path(warning_path).resolve())
     if pack_order_blocks:
         execution["pack_order_blocks"] = True
-    if defer_output_transforms:
-        execution["defer_output_transforms"] = True
     return execution
 
 
@@ -409,7 +394,6 @@ def build_v2_png_master_pages_task(
     preview_background: Mapping[str, Any] | None = None,
     debug_report_path: Path | str | None = None,
     page_count: int = 1,
-    output_policy: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build a pure paged PNG master composition task for the shared batch executor."""
 
@@ -432,11 +416,6 @@ def build_v2_png_master_pages_task(
         payload["preview_background"] = deepcopy(dict(preview_background))
     if debug_report_path is not None:
         payload["debug"] = {"report_path": str(Path(debug_report_path))}
-    if output_policy is not None:
-        payload["output"] = {
-            "outline_text": bool(dict(output_policy).get("outline_text", True)),
-            "pathfinder_merge": bool(dict(output_policy).get("pathfinder_merge", True)),
-        }
     return payload
 
 

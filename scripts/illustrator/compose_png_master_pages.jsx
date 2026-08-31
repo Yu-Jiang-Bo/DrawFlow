@@ -170,7 +170,6 @@
             }
         }
         drawFrame(layer, 0, pageHeight, frameWidth, pageHeight);
-        applyOutputTransforms(doc, task.output || {});
 
         var aiFile = numberedFile(String(task.output_ai), pageIndex, pageCount);
         ensureFolder(aiFile.parent);
@@ -178,24 +177,6 @@
         saveAsAI(doc, aiFile, String(task.compatibility || "CS5"));
         doc.close(SaveOptions.DONOTSAVECHANGES);
         return aiFile.fsName;
-    }
-
-    function applyOutputTransforms(doc, policy) {
-        if (!policy || policy.outline_text !== true) return;
-        // Use the document collection so a nested frame is never converted
-        // twice through both layer.pageItems and its parent group.
-        var frames = [];
-        for (var frameIndex = 0; frameIndex < doc.textFrames.length; frameIndex++) frames.push(doc.textFrames[frameIndex]);
-        for (var index = frames.length - 1; index >= 0; index--) {
-            var outline = frames[index].createOutline();
-            if (!outline) throw new Error("V2 PNG master text outline failed");
-            if (policy.pathfinder_merge === true) {
-                outline.selected = true;
-                app.executeMenuCommand("Live Pathfinder Add");
-                app.executeMenuCommand("expandStyle");
-                outline.selected = false;
-            }
-        }
     }
 
     function drawLabel(layer, text, placement, pageHeight) {

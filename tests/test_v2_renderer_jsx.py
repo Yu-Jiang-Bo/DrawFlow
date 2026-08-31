@@ -61,15 +61,6 @@ def test_v2_renderer_static_contract_uses_paths_and_safe_actions():
     assert "String.fromCharCode" in include
 
 
-def test_v2_renderer_defers_component_output_transforms_only_when_requested():
-    source = SCRIPT.read_text(encoding="utf-8")
-
-    assert "if (execution.defer_output_transforms !== true)" in source
-    assert source.index("applyOutputTransforms(doc, execution.output || task.output || {});") < source.index(
-        "var finalFitAction = selectedFitAction"
-    )
-
-
 def test_v2_renderer_jsx_runs_without_native_json_parser():
     task = {
         "$schema": "custom-renderer/v2-render-execution",

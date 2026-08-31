@@ -266,7 +266,6 @@ class V2OrderOutputRenderer:
                 label_gap_mm=float(task.get("label_gap_mm") or 0.8),
                 label_font_size_pt=float(task.get("label_font_size_pt") or 6.0),
                 compatibility=str(task.get("compatibility") or "Illustrator 8"),
-                output_policy=task.get("output") if isinstance(task.get("output"), Mapping) else None,
             )
             return
         if task_type == "compose_color_frames":
@@ -283,7 +282,6 @@ class V2OrderOutputRenderer:
                 show_color_header=bool(task.get("show_color_header")),
                 show_color_frame_boundary=bool(task.get("show_color_frame_boundary")),
                 debug_report_path=debug.get("report_path"),
-                output_policy=task.get("output") if isinstance(task.get("output"), Mapping) else None,
             )
             return
         if task_type == "compose_png_master_pages":
@@ -307,7 +305,6 @@ class V2OrderOutputRenderer:
                 preview_background=task.get("preview_background") if isinstance(task.get("preview_background"), Mapping) else None,
                 debug_report_path=debug.get("report_path"),
                 page_count=int(task.get("page_count") or 1),
-                output_policy=task.get("output") if isinstance(task.get("output"), Mapping) else None,
             )
             return
         renderer = getattr(self.renderer, "render", None)
@@ -326,7 +323,6 @@ class V2OrderOutputRenderer:
             selections=task.get("selections") if isinstance(task.get("selections"), Mapping) else {},
             task_file=task_file,
             pack_order_blocks=bool(task.get("pack_order_blocks")),
-            defer_output_transforms=bool(task.get("defer_output_transforms")),
         )
 
     def _build_public_png_master_plan(
@@ -372,7 +368,6 @@ class V2OrderOutputRenderer:
             compatibility="CS5",
             debug_report_path=master_path.with_suffix(".compact-layout.json"),
             page_count=len(page_paths),
-            output_policy=_v2_output_policy(render_task, rule),
         ) | {"progress": dict(progress)}
         write_json(task_file, task)
         summary_files = tuple(

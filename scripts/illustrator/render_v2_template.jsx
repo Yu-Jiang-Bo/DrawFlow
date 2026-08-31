@@ -47,9 +47,7 @@
             renderedOutputCount += 1;
         }
         if (selectedOutputKey && renderedOutputCount !== 1) throw new Error("Selected V2 output was not rendered: " + selectedOutputKey);
-        if (execution.defer_output_transforms !== true) {
-            applyOutputTransforms(doc, execution.output || task.output || {});
-        }
+        applyOutputTransforms(doc, execution.output || task.output || {});
         var finalFitAction = selectedFitAction(task, selectedOutputKey, selections);
         if (finalFitAction) fitRenderedOutput(renderedOutputItems, finalFitAction);
         if (execution.pack_order_blocks === true) {
