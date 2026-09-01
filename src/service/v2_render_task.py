@@ -238,21 +238,23 @@ def _has_fixed_style_dimensions(dimensions: Mapping[str, Any]) -> bool:
 
 
 def _scanned_design_dimensions(configured_option: Mapping[str, Any], scanned_option: Mapping[str, Any]) -> dict[str, float]:
-    """Choose the configured single-slot frame as the final output frame.
+    """Choose the configured primary-slot frame as the final output frame.
 
     A Design group may include decorative objects outside its editable text slot.
-    For a design with exactly one non-asset slot, its configured anchor defines the
-    workbench's size boundary when an anchor is present. Otherwise, use that slot's
-    scanned dimensions. Multi-slot designs retain the group-level scan as their
-    final frame.
+    For a design with exactly one required non-asset slot, its configured anchor
+    defines the workbench's size boundary when an anchor is present. Optional
+    subtitle slots are independently fitted inside their own anchors and must not
+    expand or redefine the primary artwork frame. Designs with multiple required
+    slots retain the group-level scan as their final frame.
     """
     configured_slots = [
         dict(slot)
         for slot in configured_option.get("slots", [])
         if isinstance(slot, Mapping) and str(dict(slot).get("preset") or "") != "asset_replace"
     ]
-    if len(configured_slots) == 1:
-        slot = configured_slots[0]
+    required_slots = [slot for slot in configured_slots if bool(slot.get("required", True))]
+    if len(required_slots) == 1:
+        slot = required_slots[0]
         anchor_key = str(slot.get("anchor") or "")
         if anchor_key:
             for anchor in scanned_option.get("anchors", []):

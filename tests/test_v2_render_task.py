@@ -595,6 +595,51 @@ def test_compiles_multiple_design_slots_with_design_group_dimensions():
     ]
 
 
+def test_compiles_primary_anchor_dimensions_when_design_has_optional_subtitle_slot():
+    config = render_config()
+    config["outputs"][0].pop("style")
+    config["field_bindings"].pop("size")
+    config["field_bindings"]["subtitle"] = "Subtitle"
+    config["option_mappings"] = [item for item in config["option_mappings"] if item["group"] != "style"]
+    design_config = config["outputs"][0]["design"]["options"][0]
+    design_config["content_preset"] = "mixed_slots"
+    design_config["slots"] = [
+        {"key": "slot_name", "source_field": "name", "preset": "direct_text", "anchor": "anchor_name"},
+        {
+            "key": "slot_subtitle",
+            "source_field": "subtitle",
+            "required": False,
+            "preset": "direct_text",
+            "anchor": "anchor_subtitle",
+        },
+    ]
+    design_config["assets"] = []
+    scan = scan_evidence()
+    design = scan["outputs"][0]["designs"][0]
+    design["dimensions"] = {"width_mm": 167.973, "height_mm": 131.393}
+    design["slots"] = [
+        {"key": "slot_name", "path": "Template/Output_main/Design/Design03/slot_name"},
+        {"key": "slot_subtitle", "path": "Template/Output_main/Design/Design03/slot_subtitle"},
+    ]
+    design["anchors"] = [
+        {
+            "key": "anchor_name",
+            "path": "Template/Output_main/Design/Design03/anchor_name",
+            "dimensions": {"width_mm": 150.231, "height_mm": 47.231},
+        },
+        {
+            "key": "anchor_subtitle",
+            "path": "Template/Output_main/Design/Design03/anchor_subtitle",
+            "dimensions": {"width_mm": 70.056, "height_mm": 6.056},
+        },
+    ]
+
+    task = compile_task(config=config, scan=scan)
+
+    fit_action = next(action for action in task["outputs"][0]["actions"] if action["type"] == "fit_output_bounds")
+    assert fit_action["dimensions"] == {"width_mm": 150.231, "height_mm": 47.231, "tolerance_mm": 0.007}
+
+
 def test_compiles_scanned_design_dimensions_when_style_metadata_has_no_fixed_size():
     config = render_config()
     config["outputs"][0]["style"]["options"][0]["dimensions"] = {"mode": "style"}
