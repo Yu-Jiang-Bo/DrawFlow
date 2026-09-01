@@ -202,7 +202,7 @@ $SourceV2DataRoot = if ($V2TemplateDataPath) { (Resolve-Path -LiteralPath $V2Tem
 $ActiveV2TemplateRecords = Get-ActiveV2TemplateRecords -DataRoot $SourceV2DataRoot
 New-Item -ItemType Directory -Force -Path $ReleaseRoot | Out-Null
 
-Copy-Tree "src" -ExcludeFiles @("local_client.py", "local_gateway.py")
+Copy-Tree "src" -ExcludeFiles @("local_client.py", "local_gateway.py", "local_scan_client.py")
 Copy-Tree "config"
 Copy-Tree "templates"
 Copy-Tree "deploy\linux"
@@ -244,6 +244,18 @@ function Sanitize-ReleaseJson {
 }
 
 function Assert-CleanRelease {
+    $ForbiddenPaths = @(
+        "src\service\local_client.py",
+        "src\service\local_gateway.py",
+        "src\service\local_scan_client.py"
+    )
+    foreach ($RelativePath in $ForbiddenPaths) {
+        $Path = Join-Path $ReleaseRoot $RelativePath
+        if (Test-Path -LiteralPath $Path) {
+            throw "Central release boundary check failed: $RelativePath must not be included."
+        }
+    }
+
     $TextFiles = Get-ChildItem -Path $ReleaseRoot -Recurse -File |
         Where-Object { $_.Extension.ToLowerInvariant() -in @(".json", ".md", ".py", ".sh", ".txt") }
     $ForbiddenPatterns = @(
