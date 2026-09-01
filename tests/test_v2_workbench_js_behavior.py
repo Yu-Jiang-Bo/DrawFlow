@@ -4903,3 +4903,74 @@ def test_v2_workbench_keeps_existing_template_identity_when_display_name_changes
         })().catch((error) => { console.error(error); process.exit(1); });
         """
     )
+
+
+def test_v2_workbench_explains_auto_matched_and_unresolved_tail_profiles():
+    run_node(
+        r"""
+        (async () => {
+          const app = createApp(async () => response({ templates: [] }));
+          await flush();
+          const automatic = global.tailPresentationForSlots([{
+            tails: [{
+              key: "tail_name_first_c", position: "first", sample: "c",
+              opentype_feature: "aalt", opentype_alternate_index: 2,
+              tail_profile_status: "auto"
+            }]
+          }]);
+          assert.strictEqual(automatic.verified, true);
+          assert.strictEqual(automatic.automatic, true);
+          assert(global.tailTreatmentDescription(automatic).includes("样本轮廓自动确认"));
+
+          const unresolved = global.tailPresentationForSlots([{
+            tails: [{ key: "tail_name_last_e", position: "last", sample: "e", tail_profile_status: "unresolved" }]
+          }]);
+          assert.strictEqual(unresolved.verified, false);
+          assert.strictEqual(unresolved.automatic, false);
+          assert(global.tailTreatmentDescription(unresolved).includes("尚未确认"));
+        })().catch((error) => { console.error(error); process.exit(1); });
+        """
+        ,
+        cwd=Path(__file__).resolve().parents[1],
+    )
+
+
+def test_v2_workbench_marks_an_edited_auto_tail_profile_as_manual():
+    run_node(
+        r"""
+        (async () => {
+          const app = createApp(async () => response({ templates: [] }));
+          await flush();
+          const values = { mode: "opentype", opentype_feature: "swsh", opentype_alternate_index: "1" };
+          const row = {
+            querySelector(selector) {
+              const field = Object.keys(values).find((key) => selector.includes(`data-tail-field="${key}"`));
+              return field ? { value: values[field] } : null;
+            }
+          };
+          const scanned = {
+            key: "tail_name_first_c", position: "first", sample: "c",
+            opentype_feature: "aalt", opentype_alternate_index: 2,
+            tail_profile_status: "auto"
+          };
+          values.opentype_feature = "aalt";
+          values.opentype_alternate_index = "2";
+          const autoConfig = global.tailConfigWithProfile(row, scanned);
+          assert.strictEqual(autoConfig.tail_profile_status, undefined);
+          assert.strictEqual(global.mergedTailConfigs([autoConfig], [scanned])[0].tail_profile_status, "auto");
+          values.opentype_feature = "swsh";
+          values.opentype_alternate_index = "1";
+          const changedConfig = global.tailConfigWithProfile(row, scanned);
+          assert.strictEqual(changedConfig.tail_profile_status, undefined);
+          assert.strictEqual(changedConfig.tail_profile_message, undefined);
+          const changed = global.mergedTailConfigs([changedConfig], [scanned])[0];
+          assert.strictEqual(changed.tail_profile_status, "manual");
+          assert(changed.tail_profile_message.includes("人工修改"));
+          const presentation = global.tailPresentationForSlots([{ tails: [changed] }]);
+          assert.strictEqual(presentation.verified, true);
+          assert.strictEqual(presentation.automatic, false);
+          assert(!global.tailTreatmentDescription(presentation).includes("样本轮廓自动确认"));
+        })().catch((error) => { console.error(error); process.exit(1); });
+        """,
+        cwd=Path(__file__).resolve().parents[1],
+    )

@@ -30,11 +30,22 @@ from .v2_template_api_support import (
 )
 from .v2_template_audit import V2AuditRecorder, audit_event_from_state
 from .v2_template_errors import V2ApiError, sanitize_v2_config
+from .v2_tail_profile_proof import (
+    automatic_tail_profile_coverage_issues,
+    scan_needs_trusted_tail_profile_proof,
+    tail_profile_issues,
+)
+from .v2_template_validation import block_validation_with_content_issues
 from .v2_template_limits import StreamingWriteGuard, V2TemplateLimitConfig, V2UploadConcurrencyGate
 from .v2_template_maintenance import build_maintenance_snapshot, drawing_group_safe_view
 from .v2_template_maintenance import require_central_upload_allowed
 from .v2_preview_proof import preview_config_payload
 from .v2_preview_worker_auth import V2PreviewWorkerChallengeRegistry
+from .v2_scan_worker_auth import (
+    V2ScanWorkerAuthError,
+    V2ScanWorkerChallengeRegistry,
+    scan_evidence_sha256,
+)
 from .template_locks import TEMPLATE_STATE_LOCK
 from .v2_template_publication import V2TemplatePublicationService
 from .v2_template_store import V2TemplateStore, V2TemplateStoreError
@@ -45,7 +56,7 @@ from .v2_template_validation import validate_v2_template_configuration
 
 SCAN_TIMESTAMP_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
 V2_WORKBENCH_SERVICE_CONTRACT = {
-    "version": 5,
+    "version": 6,
     "capabilities": [
         "mixed_slot_processing",
         "editable_validation_targets",
@@ -55,6 +66,7 @@ V2_WORKBENCH_SERVICE_CONTRACT = {
         "draft_publication",
         "published_template_read",
         "trusted_preview_worker",
+        "trusted_tail_profile_scanner",
     ],
 }
 
@@ -74,6 +86,7 @@ class V2TemplateApi:
         upload_gate: V2UploadConcurrencyGate | None = None,
         audit_recorder: V2AuditRecorder | None = None,
         preview_worker_secret: str | bytes | None = None,
+        scan_worker_secret: str | bytes | None = None,
         preview_worker_clock: Any | None = None,
         preview_challenge_ttl_seconds: int = 120,
     ) -> None:
@@ -83,6 +96,11 @@ class V2TemplateApi:
         self.audit_recorder = audit_recorder or V2AuditRecorder(self.store.root / "audit.jsonl")
         self.preview_worker_auth = V2PreviewWorkerChallengeRegistry(
             preview_worker_secret,
+            clock=preview_worker_clock,
+            ttl_seconds=preview_challenge_ttl_seconds,
+        )
+        self.scan_worker_auth = V2ScanWorkerChallengeRegistry(
+            scan_worker_secret,
             clock=preview_worker_clock,
             ttl_seconds=preview_challenge_ttl_seconds,
         )
@@ -112,6 +130,8 @@ class V2TemplateApi:
                 return V2ApiResult(self.read_scan(template_id))
             if method == "POST" and action == "scan":
                 return V2ApiResult(self.submit_scan(template_id, payload or {}))
+            if method == "POST" and action == "scan-challenge":
+                return V2ApiResult(self.scan_challenge(template_id, payload or {}), HTTPStatus.CREATED)
             if method == "POST" and action == "validate":
                 return V2ApiResult(self.validate_config(payload or {}))
             if method == "GET" and action == "versions":
@@ -182,6 +202,7 @@ class V2TemplateApi:
         scan = dict(current_draft.get("scan", {})) if current_draft else {}
         assets = current_asset_sources(self.store, template_id, current_draft, replace_file_name="")
         self._apply_trusted_scan_audit(config, scan)
+        self._require_verified_pua_tail_profiles(config, scan)
         if config:
             config = preview_config_payload(config)
         config, validation = self._prepare_saveable_config(config)
@@ -309,8 +330,14 @@ class V2TemplateApi:
         }
 
     def submit_scan(self, template_id: str, payload: Mapping[str, Any]) -> dict[str, Any]:
-        ensure_payload_fields(payload, {"evidence"})
+        ensure_payload_fields(payload, {"evidence", "expected_draft_revision", "worker_proof"})
         evidence = optional_mapping(payload, "evidence")
+        if "tail_profile_proof" in evidence:
+            raise V2TemplateApiError(
+                "v2_scan_proof_client_supplied",
+                "自动尾巴扫描证明只能由中央服务在验证工作端后写入。",
+                suggestion="请通过最新版客户端重新扫描模板。",
+            )
         if not evidence:
             raise V2TemplateApiError(
                 "v2_scan_evidence_missing",
@@ -353,11 +380,49 @@ class V2TemplateApi:
                 status=HTTPStatus.CONFLICT,
                 suggestion="请重新上传当前 .ai 文件并重新扫描，确保扫描结果来自同一个模板文件。",
             )
+        if scan_needs_trusted_tail_profile_proof(evidence):
+            coverage_issues = automatic_tail_profile_coverage_issues(evidence)
+            if coverage_issues:
+                raise V2TemplateApiError(
+                    "v2_tail_profile_coverage_missing",
+                    "自动尾巴字形缺少完整 a-z 覆盖扫描结果，已拒绝保存。",
+                    suggestion="请使用最新版客户端重新扫描当前模板。",
+                )
+            expected = required_text(
+                payload,
+                "expected_draft_revision",
+                "自动尾巴扫描凭证缺少当前草稿版本，请重新扫描。",
+            )
+            revision = str(dict(draft.get("manifest") or {}).get("draft_revision") or "").strip()
+            if expected != revision:
+                raise V2TemplateApiError(
+                    "v2_scan_draft_changed",
+                    "模板草稿已变化，请重新上传并扫描当前 AI 文件。",
+                    status=HTTPStatus.CONFLICT,
+                )
+            try:
+                worker_id = self.scan_worker_auth.verify_and_consume(
+                    optional_mapping(payload, "worker_proof"),
+                    template_id=template_id,
+                    draft_revision=revision,
+                    evidence=evidence,
+                )
+            except V2ScanWorkerAuthError as exc:
+                raise self._scan_worker_auth_error(exc) from exc
+            evidence = {
+                **evidence,
+                "tail_profile_proof": {
+                    "version": 1,
+                    "worker_id": worker_id,
+                    "evidence_sha256": scan_evidence_sha256(evidence),
+                },
+            }
         metadata = metadata_from_state(template_id, self.store.get_state(template_id))
         config = dict(draft.get("config", {}))
         if config:
             config = preview_config_payload(config)
             self._apply_trusted_scan_audit(config, evidence)
+            self._require_verified_pua_tail_profiles(config, evidence)
         assets = current_asset_sources(self.store, template_id, draft, replace_file_name="")
         state = self.store.save_draft(template_id, metadata=metadata, config=config, scan=evidence, assets=assets)
         next_draft = self.store.read_draft(template_id)
@@ -370,6 +435,17 @@ class V2TemplateApi:
             raise V2TemplateApiError("v2_config_invalid", "校验内容格式不正确，请刷新页面后重试。")
         controlled_config = self._validation_config(config)
         validation = validate_v2_template_configuration(controlled_config)
+        if validation.get("ok"):
+            template_id = str(dict(controlled_config.get("template") or {}).get("template_id") or "").strip()
+            if template_id:
+                try:
+                    draft = self.read_draft(template_id)
+                except V2TemplateApiError:
+                    draft = {}
+                validation = block_validation_with_content_issues(
+                    validation,
+                    tail_profile_issues(controlled_config, dict(draft.get("scan") or {})),
+                )
         validation = self.publication.verify_submitted_if_current(controlled_config, validation)
         if validation.get("ok"):
             state = {"template_id": str(dict(validation.get("contract", {}).get("template", {})).get("template_id") or "")}
@@ -392,6 +468,28 @@ class V2TemplateApi:
 
     def preview_challenge(self, template_id: str, payload: Mapping[str, Any]) -> dict[str, Any]:
         return self.publication.preview_challenge(template_id, payload)
+
+    def scan_challenge(self, template_id: str, payload: Mapping[str, Any]) -> dict[str, Any]:
+        ensure_payload_fields(payload, {"expected_draft_revision", "worker_id"})
+        expected = required_text(payload, "expected_draft_revision", "当前草稿版本已缺失，请重新扫描模板。")
+        with TEMPLATE_STATE_LOCK:
+            draft = self.read_draft(template_id)
+            revision = str(dict(draft.get("manifest") or {}).get("draft_revision") or "").strip()
+            if expected != revision:
+                raise V2TemplateApiError(
+                    "v2_scan_draft_changed",
+                    "模板草稿已变化，请重新上传并扫描当前 AI 文件。",
+                    status=HTTPStatus.CONFLICT,
+                )
+            try:
+                challenge = self.scan_worker_auth.issue(
+                    template_id,
+                    revision,
+                    worker_id=str(payload.get("worker_id") or ""),
+                )
+            except V2ScanWorkerAuthError as exc:
+                raise self._scan_worker_auth_error(exc) from exc
+        return {"challenge": challenge, "service_contract": self._service_contract()}
 
     def publication_check(self, template_id: str, payload: Mapping[str, Any]) -> dict[str, Any]:
         return self.publication.publication_check(template_id, payload)
@@ -458,6 +556,17 @@ class V2TemplateApi:
         audit["scan_version"] = str(scan.get("scan_version") or scan.get("version") or "")
         audit["template_sha256"] = self._scan_template_sha256(scan)
         config["audit"] = audit
+
+    @staticmethod
+    def _require_verified_pua_tail_profiles(config: Mapping[str, Any], scan: Mapping[str, Any]) -> None:
+        issues = tail_profile_issues(config, scan)
+        if not issues:
+            return
+        raise V2TemplateApiError(
+            "v2_tail_profile_unverified",
+            "尾巴字形缺少当前模板 AI 的完整字母表扫描证明，草稿未保存。",
+            suggestion="请重新扫描当前模板，使用自动识别到的 PUA 尾巴字形后再保存。",
+        )
 
     def _current_template_ai_asset(self, draft: Mapping[str, Any]) -> dict[str, Any]:
         manifest = dict(draft.get("manifest", {}))
@@ -532,6 +641,20 @@ class V2TemplateApi:
             "v2_scan_evidence_invalid",
             "扫描证据缺少可信协议字段，已拒绝保存。",
             suggestion="请通过本地网关重新调用 Illustrator 扫描，不要提交手写结构。",
+        )
+
+    @staticmethod
+    def _scan_worker_auth_error(exc: V2ScanWorkerAuthError) -> V2TemplateApiError:
+        if exc.code == "scan_worker_secret_missing":
+            return V2TemplateApiError(
+                "v2_scan_worker_unavailable",
+                "自动尾巴扫描服务尚未完成安全配置，请联系维护人员。",
+                status=HTTPStatus.SERVICE_UNAVAILABLE,
+            )
+        return V2TemplateApiError(
+            "v2_scan_worker_rejected",
+            "自动尾巴扫描凭证无效或已失效，请重新扫描。",
+            suggestion="请使用最新版客户端重新扫描当前模板。",
         )
 
     def _protocol_version_ok(self, value: Any) -> bool:

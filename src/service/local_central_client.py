@@ -138,11 +138,38 @@ class HttpCentralClient:
         self,
         template_id: str,
         evidence: Mapping[str, Any],
+        *,
+        expected_draft_revision: str = "",
+        worker_proof: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
+        payload: dict[str, Any] = {"evidence": dict(evidence)}
+        if expected_draft_revision:
+            payload["expected_draft_revision"] = str(expected_draft_revision)
+        if worker_proof is not None:
+            payload["worker_proof"] = dict(worker_proof)
         return self._post_json(
             f"/api/v2/templates/{_quote_segment(template_id)}/scan",
-            {"evidence": evidence},
+            payload,
         )
+
+    def request_v2_scan_challenge(
+        self,
+        template_id: str,
+        *,
+        expected_draft_revision: str,
+        worker_id: str,
+    ) -> dict[str, Any]:
+        response = self._post_json(
+            f"/api/v2/templates/{_quote_segment(template_id)}/scan-challenge",
+            {"expected_draft_revision": expected_draft_revision, "worker_id": worker_id},
+        )
+        challenge = response.get("challenge")
+        if not isinstance(challenge, Mapping):
+            raise LocalClientError(
+                "中央服务没有返回有效的自动尾巴扫描凭证，请稍后重试。",
+                code="v2_scan_challenge_invalid",
+            )
+        return dict(challenge)
 
     def get_v2_draft(self, template_id: str) -> dict[str, Any]:
         response = self._get_json(

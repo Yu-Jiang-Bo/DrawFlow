@@ -57,6 +57,32 @@ def validate_v2_template_configuration(payload: Any) -> Dict[str, Any]:
     }
 
 
+def block_validation_with_content_issues(
+    validation: Dict[str, Any],
+    issues: Iterable[Mapping[str, str]],
+) -> Dict[str, Any]:
+    """Attach trusted-scan failures that a pure JSON contract cannot prove."""
+
+    extra = [dict(item) for item in issues]
+    if not validation.get("ok") or not extra:
+        return validation
+    combined = list(validation.get("issues") or [])
+    for item in extra:
+        add_issue(
+            combined,
+            str(item.get("path") or "$.outputs"),
+            "content",
+            V2_STATUS_BLOCKED,
+            str(item.get("code") or "tail_glyph_coverage_missing"),
+            str(item.get("reason") or "尾巴字形缺少可验证的覆盖证明。"),
+        )
+    validation["issues"] = combined
+    validation["checks"] = _checks_from_issues(combined)
+    validation["can_save"] = False
+    validation["can_publish"] = False
+    return validation
+
+
 def _checks_from_issues(issues: Iterable[Mapping[str, str]]) -> Dict[str, Dict[str, Any]]:
     grouped: Dict[str, list[Dict[str, str]]] = {key: [] for key in V2_VERIFICATION_KEYS}
     for issue in issues:
@@ -179,5 +205,6 @@ __all__ = [
     "V2_STATUS_BLOCKED",
     "V2_STATUS_PASSED",
     "V2_STATUS_PENDING",
+    "block_validation_with_content_issues",
     "validate_v2_template_configuration",
 ]

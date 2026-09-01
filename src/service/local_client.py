@@ -56,6 +56,7 @@ class LocalDrawFlowClient:
         v2_renderer: Any | None = None,
         font_dirs: list[Path] | None = None,
         preview_worker_secret: str | bytes | None = None,
+        scan_worker_secret: str | bytes | None = None,
         preview_worker_id: str = "",
     ) -> None:
         self.central = central
@@ -76,6 +77,11 @@ class LocalDrawFlowClient:
             preview_worker_secret
             if preview_worker_secret is not None
             else os.environ.get("DRAWFLOW_PREVIEW_WORKER_SECRET", "")
+        )
+        self.scan_worker_secret = (
+            scan_worker_secret
+            if scan_worker_secret is not None
+            else os.environ.get("DRAWFLOW_SCAN_WORKER_SECRET", "")
         )
         configured_worker = preview_worker_id or os.environ.get(
             "DRAWFLOW_PREVIEW_WORKER_ID",

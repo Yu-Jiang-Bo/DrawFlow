@@ -1528,6 +1528,43 @@ if (!slot || slot.contents !== '__custo' + 'm__') throw new Error('decorated dir
     assert result.returncode == 0, result.stderr
 
 
+def test_v2_renderer_drops_placeholder_characters_around_pua_direct_text_tails():
+    tails = [
+        {
+            "key": "tail_name_first_m",
+            "position": "first",
+            "sample": "m",
+            "glyph_mode": "pua_contiguous",
+            "pua_base": TAIL_PUA_BASE,
+            "path": "Template/Output_main/Design/Design03/tail_name_first_m",
+        },
+        {
+            "key": "tail_name_last_a",
+            "position": "last",
+            "sample": "a",
+            "glyph_mode": "pua_contiguous",
+            "pua_base": TAIL_PUA_BASE + 26,
+            "path": "Template/Output_main/Design/Design03/tail_name_last_a",
+        },
+    ]
+    task = tail_text_task(tails, value="Custom")
+    task["render_task"]["outputs"][0]["actions"][1]["preset"] = "direct_text"
+    task["mock_first_tail_sample"] = "--m"
+    task["mock_last_tail_sample"] = "a--"
+    expected = chr(TAIL_PUA_BASE + 2) + "usto" + chr(TAIL_PUA_BASE + 26 + 12)
+    harness = node_mock_harness(task, f"""
+const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
+const slot = child(designCopy, 'slot_name');
+if (!slot || slot.contents !== {json.dumps(expected)}) {{
+  throw new Error('PUA tail placeholder leaked into output: ' + (slot && slot.contents));
+}}
+""")
+
+    result = run_node(harness)
+
+    assert result.returncode == 0, result.stderr
+
+
 def test_v2_renderer_reuses_decorated_tail_coverage_only_for_matching_sample_key():
     tails = [
         {

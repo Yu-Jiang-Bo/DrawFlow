@@ -9,6 +9,7 @@ from src.service.v2_template_api import V2TemplateApi, V2TemplateApiError, handl
 from src.service.v2_template_contract import V2_CONTRACT_SCHEMA, V2_CONTRACT_VERSION
 from src.service.v2_template_limits import V2TemplateLimitConfig, V2UploadConcurrencyGate
 from src.service.v2_template_store import V2TemplateStore
+from src.service.v2_scan_worker_auth import scan_evidence_sha256, sign_scan_worker_challenge
 
 
 def saveable_config(template_id="V2API001"):
@@ -38,6 +39,30 @@ def saveable_config(template_id="V2API001"):
     }
 
 
+def pua_tail_config(template_id="V2API001"):
+    config = saveable_config(template_id)
+    config["outputs"][0]["font"]["options"][0]["font_dependencies"] = ["TailFont"]
+    slot = config["outputs"][0]["font"]["options"][0]["slots"][0]
+    slot["tails"] = [{"key": "tail_name_last_m", "position": "last", "sample": "m", "pua_base": 0xE040}]
+    return config
+
+
+def pua_tail_scan():
+    scan = {"outputs": [{"design": {"options": []}, "font": {"options": [{"slots": [{"tails": [{
+        "key": "tail_name_last_m", "position": "last", "sample": "m", "pua_base": 0xE040,
+        "font_dependencies": ["TailFont"],
+        "tail_profile_status": "auto", "tail_profile_coverage": {
+            "version": 1, "alphabet": "abcdefghijklmnopqrstuvwxyz", "verified": True,
+        },
+    }]}]}]}}]}
+    scan["tail_profile_proof"] = {
+        "version": 1,
+        "worker_id": "test-worker",
+        "evidence_sha256": scan_evidence_sha256(scan),
+    }
+    return scan
+
+
 def scan_evidence(template_sha256):
     return {
         "$schema": "custom-renderer/v2-template-scan",
@@ -55,10 +80,35 @@ def scan_evidence(template_sha256):
     }
 
 
+def automatic_pua_scan_evidence(template_sha256):
+    evidence = scan_evidence(template_sha256)
+    evidence["outputs"][0]["font"] = {"options": [{"slots": [{"tails": [{
+        "key": "tail_name_last_m",
+        "position": "last",
+        "sample": "m",
+        "pua_base": 0xE040,
+        "font_dependencies": ["TailFont"],
+        "tail_profile_status": "auto",
+        "tail_profile_coverage": {
+            "version": 1,
+            "alphabet": "abcdefghijklmnopqrstuvwxyz",
+            "verified": True,
+        },
+    }]}]}]}
+    return evidence
+
+
 
 
 def api_for(tmp_path):
     return V2TemplateApi(V2TemplateStore(tmp_path / "v2"))
+
+
+def trusted_tail_api(tmp_path):
+    return V2TemplateApi(
+        V2TemplateStore(tmp_path / "v2"),
+        scan_worker_secret="test-scan-worker-secret-32-bytes-minimum---",
+    )
 
 
 def test_v2_api_creates_lists_and_reads_draft_with_optional_shop(tmp_path):
@@ -198,6 +248,83 @@ def test_v2_api_saves_draft_config_without_accepting_untrusted_scan(tmp_path):
     assert api.read_draft("V2API001")["scan"] == {}
 
 
+def test_v2_api_rejects_unproven_pua_tail_and_accepts_exact_auto_scan_proof(tmp_path):
+    api = api_for(tmp_path)
+    api.create_template({"template_id": "V2API001", "name": "API Demo"})
+
+    with pytest.raises(V2TemplateApiError, match="尾巴字形缺少"):
+        api.save_draft("V2API001", {"config": pua_tail_config()})
+    validation = api.validate_config({"config": pua_tail_config()})["validation"]
+    assert validation["can_save"] is False
+    assert any(issue["code"] == "tail_pua_profile_unverified" for issue in validation["issues"])
+
+    api.store.save_draft(
+        "V2API001",
+        metadata={"template_id": "V2API001", "name": "API Demo"},
+        scan=pua_tail_scan(),
+    )
+    saved = api.save_draft("V2API001", {"config": pua_tail_config()})
+
+    assert saved["validation"]["can_save"] is True
+    assert saved["draft"]["config"]["outputs"][0]["font"]["options"][0]["slots"][0]["tails"][0]["pua_base"] == 0xE040
+
+
+def test_v2_api_rejects_signed_tail_profile_when_render_font_is_changed(tmp_path):
+    api = api_for(tmp_path)
+    api.create_template({"template_id": "V2API001", "name": "API Demo"})
+    api.store.save_draft(
+        "V2API001",
+        metadata={"template_id": "V2API001", "name": "API Demo"},
+        scan=pua_tail_scan(),
+    )
+    config = pua_tail_config()
+    config["outputs"][0]["font"]["options"][0]["font_dependencies"] = ["UnrelatedFont"]
+
+    with pytest.raises(V2TemplateApiError, match="尾巴字形缺少"):
+        api.save_draft("V2API001", {"config": config})
+    validation = api.validate_config({"config": config})["validation"]
+    assert any(issue["code"] == "tail_font_dependency_unverified" for issue in validation["issues"])
+
+
+def test_v2_api_rejects_forged_auto_pua_scan_and_accepts_signed_current_scan(tmp_path):
+    api = trusted_tail_api(tmp_path)
+    api.create_template({"template_id": "V2API001", "name": "API Demo"})
+    uploaded = api.upload_asset("V2API001", "template.ai", TrackingStream(b"ai-bytes"), content_length=8, headers={})
+    evidence = automatic_pua_scan_evidence(uploaded["asset"]["sha256"])
+
+    with pytest.raises(V2TemplateApiError) as exc_info:
+        api.submit_scan("V2API001", {"evidence": evidence})
+    assert exc_info.value.problem.code == "v2_required_field_missing"
+    assert api.read_draft("V2API001")["scan"] == {}
+
+    revision = api.read_draft("V2API001")["manifest"]["draft_revision"]
+    challenge = api.scan_challenge(
+        "V2API001",
+        {"expected_draft_revision": revision, "worker_id": "windows-scanner-test"},
+    )["challenge"]
+    proof = sign_scan_worker_challenge(
+        "test-scan-worker-secret-32-bytes-minimum---",
+        challenge,
+        template_id="V2API001",
+        draft_revision=revision,
+        evidence=evidence,
+        worker_id="windows-scanner-test",
+    )
+    stored = api.submit_scan(
+        "V2API001",
+        {
+            "evidence": evidence,
+            "expected_draft_revision": revision,
+            "worker_proof": proof,
+        },
+    )
+    assert stored["scan"]["tail_profile_proof"]["worker_id"] == "windows-scanner-test"
+    assert stored["scan"]["tail_profile_proof"]["evidence_sha256"] == scan_evidence_sha256(evidence)
+
+    saved = api.save_draft("V2API001", {"config": pua_tail_config()})
+    assert saved["validation"]["can_save"] is True
+
+
 def test_v2_api_rebuilds_config_scan_audit_from_trusted_draft_scan(tmp_path):
     api = api_for(tmp_path)
     api.create_template({"template_id": "V2API001", "name": "API Demo"})
@@ -272,10 +399,11 @@ def test_v2_api_validation_advertises_current_workbench_capabilities(tmp_path):
         {"config": saveable_config()},
     ).payload
 
-    assert result["service_contract"]["version"] == 5
+    assert result["service_contract"]["version"] == 6
     assert "mixed_slot_processing" in result["service_contract"]["capabilities"]
     assert "editable_validation_targets" in result["service_contract"]["capabilities"]
     assert "trusted_preview_worker" in result["service_contract"]["capabilities"]
+    assert "trusted_tail_profile_scanner" in result["service_contract"]["capabilities"]
     assert "published_template_read" in result["service_contract"]["capabilities"]
 
 

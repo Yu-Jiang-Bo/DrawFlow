@@ -21,10 +21,12 @@ from src.service.local_client import LocalDrawFlowClient
 from src.service.runtime_templates import sha256_file
 from src.service.v2_font_inventory import missing_required_fonts
 from src.service.v2_template_api import V2TemplateApi
+from src.service.v2_scan_worker_auth import sign_scan_worker_challenge
 from src.service.v2_template_scanner import V2TemplateScanner
 from src.service.v2_template_store import V2TemplateStore
 from src.service.v2_template_store_utils import safe_segment
 from src.service.v2_template_validation import validate_v2_template_configuration
+from src.service.v2_tail_profile_proof import scan_needs_trusted_tail_profile_proof
 from src.service.v2_trial_render_support import required_fonts
 
 
@@ -116,8 +118,13 @@ def run_acceptance(source_ai: Path, source_config: Path, output_dir: Path, templ
     before, ai_sha = tree_summary(source_root), sha256_file(ai)
     output.mkdir(parents=True, exist_ok=True)
     source = json.loads(config_path.read_text(encoding="utf-8-sig"))
-    secret = secrets.token_urlsafe(48)
-    api = V2TemplateApi(V2TemplateStore(output / "central"), preview_worker_secret=secret)
+    preview_secret = secrets.token_urlsafe(48)
+    scan_secret = secrets.token_urlsafe(48)
+    api = V2TemplateApi(
+        V2TemplateStore(output / "central"),
+        preview_worker_secret=preview_secret,
+        scan_worker_secret=scan_secret,
+    )
     template_name = str(dict(source.get("template") or {}).get("name") or "V2 真实验收")
     api.create_template({"template_id": template_id, "name": template_name})
     with ai.open("rb") as stream:
@@ -128,7 +135,25 @@ def run_acceptance(source_ai: Path, source_config: Path, output_dir: Path, templ
     scan = V2TemplateScanner(work_dir=output / "scan-work").scan(
         ai, template_id=template_id, template_sha256=ai_sha,
     )
-    api.submit_scan(template_id, {"evidence": scan})
+    scan_payload: dict[str, Any] = {"evidence": scan}
+    if scan_needs_trusted_tail_profile_proof(scan):
+        scan_revision = api.read_draft(template_id)["manifest"]["draft_revision"]
+        challenge = api.scan_challenge(
+            template_id,
+            {"expected_draft_revision": scan_revision, "worker_id": "v2-acceptance-scanner"},
+        )["challenge"]
+        scan_payload.update({
+            "expected_draft_revision": scan_revision,
+            "worker_proof": sign_scan_worker_challenge(
+                scan_secret,
+                challenge,
+                template_id=template_id,
+                draft_revision=scan_revision,
+                evidence=scan,
+                worker_id="v2-acceptance-scanner",
+            ),
+        })
+    api.submit_scan(template_id, scan_payload)
     config = build_acceptance_config(source, scan, template_id)
     validation = validate_v2_template_configuration(config)
     if not validation.get("can_save"):
@@ -147,7 +172,8 @@ def run_acceptance(source_ai: Path, source_config: Path, output_dir: Path, templ
         bridge=IllustratorBridge(visible=False, fresh_instance=True, quit_after=True)
     )
     local = LocalDrawFlowClient(
-        api, output / "local", v2_renderer=renderer, preview_worker_secret=secret,
+        api, output / "local", v2_renderer=renderer, preview_worker_secret=preview_secret,
+        scan_worker_secret=scan_secret,
         preview_worker_id="v2-acceptance-worker",
     )
     trial_result = local.trial_render(template_id, {

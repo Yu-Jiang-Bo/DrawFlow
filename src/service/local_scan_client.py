@@ -19,6 +19,8 @@ from .local_scan_support import (
 from .local_template_cache import safe_segment
 from .template_onboarding import TemplateOnboardingStore
 from .template_registry import TemplateRegistry
+from .v2_scan_worker_auth import V2ScanWorkerAuthError, sign_scan_worker_challenge
+from .v2_tail_profile_proof import scan_needs_trusted_tail_profile_proof
 from .v2_template_scanner import V2TemplateScannerError
 
 
@@ -117,6 +119,8 @@ def _scan_v2_and_submit(
         "submit_v2_scan",
     ):
         client.central.upload_v2_asset(template_id, filename, ai_path)
+        if scan_needs_trusted_tail_profile_proof(scan):
+            return _submit_trusted_tail_profile_scan(client, template_id, scan)
         return client.central.submit_v2_scan(template_id, scan)
     return client.central.import_scan({
         "template_id": template_id,
@@ -126,6 +130,47 @@ def _scan_v2_and_submit(
         "scan": scan,
         "files": _encoded_uploads([first]),
     })
+
+
+def _submit_trusted_tail_profile_scan(client: Any, template_id: str, scan: Mapping[str, Any]) -> dict[str, Any]:
+    central = client.central
+    if not hasattr(central, "get_v2_draft") or not hasattr(central, "request_v2_scan_challenge"):
+        raise LocalClientError(
+            "中央服务版本过旧，无法验证自动尾巴字形；请先更新中央服务。",
+            code="v2_tail_profile_scan_not_supported",
+        )
+    draft = dict(central.get_v2_draft(template_id))
+    revision = str(dict(draft.get("manifest") or {}).get("draft_revision") or "").strip()
+    if not revision:
+        raise LocalClientError("中央草稿版本无效，请重新上传并扫描模板。", code="v2_scan_draft_invalid")
+    worker_id = str(getattr(client, "preview_worker_id", "") or "").strip()
+    secret = getattr(client, "scan_worker_secret", "")
+    try:
+        challenge = central.request_v2_scan_challenge(
+            template_id,
+            expected_draft_revision=revision,
+            worker_id=worker_id,
+        )
+        proof = sign_scan_worker_challenge(
+            secret,
+            challenge,
+            template_id=template_id,
+            draft_revision=revision,
+            evidence=scan,
+            worker_id=worker_id,
+        )
+    except V2ScanWorkerAuthError as exc:
+        raise LocalClientError(
+            "自动尾巴扫描服务尚未完成安全配置，请联系维护人员。",
+            code="v2_tail_profile_scanner_unavailable",
+            technical_message=f"{exc.code}: {exc}",
+        ) from exc
+    return central.submit_v2_scan(
+        template_id,
+        scan,
+        expected_draft_revision=revision,
+        worker_proof=proof,
+    )
 
 
 def _first_ai(uploads: list[dict[str, Any]]) -> dict[str, Any] | None:

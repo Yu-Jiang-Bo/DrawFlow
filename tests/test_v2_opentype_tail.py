@@ -1,5 +1,7 @@
 from types import SimpleNamespace
 
+import pytest
+
 from src.renderer import v2_opentype_tail as opentype_tail
 
 
@@ -39,6 +41,70 @@ def test_resolves_single_substitution_feature_for_template_tail_profile():
     }
 
     assert opentype_tail._alternate_glyph_name(font, "swsh", 1, "c") == "c.swash"
+
+
+def test_finds_only_pua_candidates_with_a_complete_contiguous_alphabet():
+    cmap = {0xE040 + index: f"{chr(ord('a') + index)}.tail" for index in range(26)}
+    cmap[0xE100] = "orphan"
+
+    assert opentype_tail._contiguous_pua_codepoints(cmap, "m") == [0xE04C]
+
+
+def test_finds_semantic_pua_glyph_map_when_codepoints_are_not_contiguous():
+    cmap = {
+        0xE104 + index * 2: f"{chr(ord('a') + index)}.swsh"
+        for index in range(26)
+    }
+
+    assert opentype_tail._semantic_pua_glyph_maps(cmap) == [
+        {chr(ord("a") + index): 0xE104 + index * 2 for index in range(26)}
+    ]
+
+
+def test_rejects_pua_profile_when_any_letter_is_an_invisible_or_base_glyph(monkeypatch):
+    cmap = {
+        **{ord(letter): letter for letter in "abcdefghijklmnopqrstuvwxyz"},
+        **{0xE040 + index: f"{chr(ord('a') + index)}.tail" for index in range(26)},
+    }
+    cmap[0xE040 + 25] = "z"
+    monkeypatch.setattr(opentype_tail, "_glyph_svg", lambda *_args: "<svg/>")
+
+    with pytest.raises(opentype_tail.OpenTypeTailError, match="未覆盖字母 z"):
+        opentype_tail._verify_pua_glyph_coverage(
+            object(),
+            cmap,
+            {letter: 0xE040 + index for index, letter in enumerate("abcdefghijklmnopqrstuvwxyz")},
+        )
+
+
+def test_does_not_materialize_pua_candidate_when_full_alphabet_outline_proof_fails(tmp_path, monkeypatch):
+    font_file = tmp_path / "demo.ttf"
+    font_file.write_bytes(b"demo-font")
+    cmap = {
+        **{ord(letter): letter for letter in "abcdefghijklmnopqrstuvwxyz"},
+        **{0xE040 + index: f"{chr(ord('a') + index)}.tail" for index in range(26)},
+    }
+
+    class FakeFont:
+        def getBestCmap(self):
+            return cmap
+
+        def close(self):
+            return None
+
+    def glyph_svg(_font, glyph_name):
+        if glyph_name == "z.tail":
+            raise opentype_tail.OpenTypeTailError("opentype_tail_glyph_missing", "无可见轮廓")
+        return "<svg/>"
+
+    monkeypatch.setattr(opentype_tail, "TTFont", lambda _path, lazy=False: FakeFont())
+    monkeypatch.setattr(opentype_tail, "_glyph_svg", glyph_svg)
+    resolver = opentype_tail.OpenTypeTailResolver(font_dirs=[])
+    monkeypatch.setattr(resolver, "find_font_file", lambda _name: font_file)
+
+    assert resolver.materialize_contiguous_pua_candidates(
+        font_postscript_name="DemoPS", letter="m", output_dir=tmp_path / "assets",
+    ) == []
 
 
 def test_reads_pairpos_kerning_x_advance_for_complete_word_layout():
@@ -99,6 +165,39 @@ def test_materializes_svg_with_template_profile_and_normalized_endpoint(tmp_path
     assert glyph.path.is_absolute()
     assert glyph.path.exists()
     assert glyph.task_payload()["opentype_alternate_index"] == 2
+
+
+def test_refuses_to_persist_an_opentype_profile_without_complete_letter_coverage(tmp_path, monkeypatch):
+    font_file = tmp_path / "demo.ttf"
+    font_file.write_bytes(b"demo-font")
+
+    class FakeFont:
+        def getBestCmap(self):
+            return {ord(letter): letter for letter in "abcdefghijklmnopqrstuvwxyz"}
+
+        def close(self):
+            return None
+
+    monkeypatch.setattr(opentype_tail, "TTFont", lambda _path, lazy=False: FakeFont())
+    monkeypatch.setattr(
+        opentype_tail,
+        "_alternate_glyph_name",
+        lambda _font, _feature, _index, letter: f"{letter}.tail" if letter != "z" else "z",
+    )
+    monkeypatch.setattr(
+        opentype_tail,
+        "_glyph_svg",
+        lambda *_args: '<svg xmlns="http://www.w3.org/2000/svg"><path d="M0 0"/></svg>\n',
+    )
+    resolver = opentype_tail.OpenTypeTailResolver(font_dirs=[])
+    monkeypatch.setattr(resolver, "find_font_file", lambda _name: font_file)
+
+    with pytest.raises(opentype_tail.OpenTypeTailError, match="未覆盖字母 z"):
+        resolver.verify_alternate_coverage(
+            font_postscript_name="DemoPS",
+            feature="aalt",
+            alternate_index=2,
+        )
 
 
 def test_materializes_one_complete_word_for_mixed_pua_and_opentype_tails(tmp_path):

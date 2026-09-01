@@ -421,7 +421,14 @@
             var tailFrame = firstTextFrame(tail);
             if (!tailFrame) throw new Error("V2 tail sample has no text frame: " + String(spec.key || ""));
             var glyph = directTailGlyph(tailFrame, endpoint, spec, position);
-            var segment = V2TailText.tailSampleSegment(String(tailFrame.contents || ""), glyph, position);
+            // A PUA or glyph-map tail is a complete glyph.  Text placed
+            // alongside its sample in the source (for example "--m" or
+            // "a--") is an Illustrator positioning placeholder, not part
+            // of the final character.  Only verified plain-text tails use
+            // that surrounding text as real decoration.
+            var segment = isPlainTextTailSpec(spec)
+                ? V2TailText.tailSampleSegment(String(tailFrame.contents || ""), glyph, position)
+                : { text: String(glyph || "") };
             replacements.push({
                 index: endpointIndex,
                 text: segment.text

@@ -247,6 +247,21 @@ def test_normalizes_template_scoped_opentype_tail_profile():
     assert normalized["opentype_alternate_index"] == 2
 
 
+def test_rejects_tail_presentation_metadata_from_persisted_config():
+    payload = pure_design_contract()
+    tail = payload["outputs"][0]["design"]["options"][1]["slots"][0]["tails"][0]
+    tail["opentype_feature"] = "aalt"
+    tail["opentype_alternate_index"] = 2
+    tail["tail_profile_status"] = "auto"
+    tail["tail_profile_message"] = "presentation only"
+
+    result = check_v2_template_contract(payload)
+
+    assert result["ok"] is False
+    assert any(error["path"].endswith("tail_profile_status") for error in result["errors"])
+    assert any(error["path"].endswith("tail_profile_message") for error in result["errors"])
+
+
 def test_rejects_multiple_tail_glyph_proof_mechanisms():
     payload = pure_design_contract()
     tail = payload["outputs"][0]["design"]["options"][1]["slots"][0]["tails"][0]

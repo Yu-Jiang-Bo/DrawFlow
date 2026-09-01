@@ -89,6 +89,62 @@ def test_v2_local_scan_prefers_streaming_v2_central_contract(tmp_path):
     assert central.submitted == {"template_id": "V2STREAM001", "evidence": scan}
 
 
+def test_v2_local_scan_signs_automatic_tail_profile_before_submit(tmp_path):
+    scan = {
+        "blocked": False,
+        "outputs": [{
+            "key": "Output_main",
+            "font": {"options": [{"slots": [{"tails": [{
+                "key": "tail_name_last_m",
+                "position": "last",
+                "sample": "m",
+                "pua_base": 0xE040,
+                "tail_profile_status": "auto",
+                "tail_profile_coverage": {
+                    "version": 1,
+                    "alphabet": "abcdefghijklmnopqrstuvwxyz",
+                    "verified": True,
+                },
+            }]}]}]},
+        }],
+    }
+
+    class TrustedTailCentral(V2CentralMethods):
+        def get_v2_draft(self, template_id):
+            return {"manifest": {"draft_revision": "d0002"}}
+
+        def request_v2_scan_challenge(self, template_id, *, expected_draft_revision, worker_id):
+            assert (template_id, expected_draft_revision, worker_id) == ("V2TAIL001", "d0002", "drawflow-local")
+            return {"challenge_id": "scan-c1", "nonce": "scan-n1", "worker_id": worker_id}
+
+        def submit_v2_scan(self, template_id, evidence, *, expected_draft_revision="", worker_proof=None):
+            self.submitted = {
+                "template_id": template_id,
+                "evidence": evidence,
+                "expected_draft_revision": expected_draft_revision,
+                "worker_proof": worker_proof,
+            }
+            return {"template_id": template_id, "draft": {"status": "draft"}, "scan": evidence}
+
+    central = TrustedTailCentral(scan)
+    client = LocalDrawFlowClient(
+        central,
+        tmp_path / "local",
+        v2_scanner=FakeV2Scanner(scan),
+        scan_worker_secret="test-scan-worker-secret-32-bytes-minimum---",
+    )
+
+    result = client.scan_and_import(
+        {"template_id": "V2TAIL001", "name": "Tail", "template_type": "v2_structured_ai"},
+        [{"filename": "template.ai", "content": b"ai-bytes"}],
+    )
+
+    assert result["template_id"] == "V2TAIL001"
+    assert central.submitted["expected_draft_revision"] == "d0002"
+    assert central.submitted["worker_proof"]["challenge_id"] == "scan-c1"
+    assert len(central.submitted["worker_proof"]["signature"]) == 64
+
+
 def test_v2_scan_multipart_parser_streams_ai_to_disk_without_content(tmp_path):
     boundary = "----drawflow-v2-streaming-parser-test"
     payload = b"ai-bytes-" * 64

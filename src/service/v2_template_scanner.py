@@ -13,6 +13,7 @@ from typing import Any, Dict, Iterable, Mapping
 from uuid import uuid4
 
 from ..renderer.illustrator_bridge import IllustratorBridge, IllustratorBridgeError
+from .v2_opentype_tail_profile import OpenTypeTailProfileInferer
 
 
 V2_SCAN_SCHEMA = "custom-renderer/v2-template-scan"
@@ -54,12 +55,14 @@ class V2TemplateScanner:
         bridge: Any | None = None,
         bridge_factory: Any | None = None,
         work_dir: str | Path | None = None,
+        tail_profile_inferer: Any | None = None,
     ) -> None:
         repo_root = Path(__file__).resolve().parents[2]
         self.script_path = Path(script_path or repo_root / "scripts" / "illustrator" / "scan_v2_template.jsx")
         self.bridge = bridge
         self.bridge_factory = bridge_factory
         self.work_dir = Path(work_dir) if work_dir is not None else None
+        self.tail_profile_inferer = tail_profile_inferer
 
     def scan(
         self,
@@ -108,6 +111,7 @@ class V2TemplateScanner:
                     technical_message=f"scan output missing: {output_path}",
                 )
             raw_scan = self._read_scan_json(output_path)
+            raw_scan = self._infer_opentype_tail_profiles(raw_scan, task_dir)
         raw_scan = _with_source_facts(raw_scan, source, template_sha256)
         result = normalize_v2_template_scan(raw_scan, ai_path=source)
         result["document"]["source_ai"] = source.name
@@ -123,6 +127,18 @@ class V2TemplateScanner:
 
     def _task_directory(self) -> Any:
         return _TaskDirectory(self.work_dir)
+
+    def _infer_opentype_tail_profiles(self, raw_scan: Dict[str, Any], task_dir: Path) -> Dict[str, Any]:
+        if not _scan_has_tail_outline_signature(raw_scan):
+            return raw_scan
+        inferer = self.tail_profile_inferer or OpenTypeTailProfileInferer(bridge=self._bridge())
+        try:
+            return inferer.apply(raw_scan, work_dir=task_dir)
+        except (OSError, RuntimeError, ValueError):
+            # The base template scan remains valid, but never let an internal
+            # probe error look like an ordinary, publishable text tail.
+            _mark_unresolved_tail_profiles(raw_scan, "自动识别尾巴字形时发生错误，未写入尾巴配置。")
+            return raw_scan
 
     @staticmethod
     def _read_scan_json(path: Path) -> Dict[str, Any]:
@@ -831,10 +847,42 @@ def _marker_record(item: Mapping[str, Any]) -> Dict[str, Any]:
         "type": str(item.get("type") or ""),
         **_geometry_facts(item),
     }
-    for key in ("position", "sample", "related_slot"):
+    for key in ("position", "sample", "related_slot", "opentype_feature", "tail_profile_status", "tail_profile_message"):
         value = str(item.get(key) or "").strip()
         if value:
             record[key] = value
+    alternate_index = item.get("opentype_alternate_index")
+    if isinstance(alternate_index, int) and not isinstance(alternate_index, bool) and alternate_index >= 1:
+        record["opentype_alternate_index"] = alternate_index
+    pua_base = item.get("pua_base")
+    if isinstance(pua_base, int) and not isinstance(pua_base, bool) and 0xE000 <= pua_base <= 0xF8FF:
+        record["pua_base"] = pua_base
+    glyph_map = item.get("glyph_map")
+    if isinstance(glyph_map, Mapping):
+        normalized_map = {
+            str(letter).casefold(): codepoint
+            for letter, codepoint in glyph_map.items()
+            if isinstance(codepoint, int)
+            and not isinstance(codepoint, bool)
+            and len(str(letter)) == 1
+            and str(letter).isalpha()
+            and 0xE000 <= codepoint <= 0xF8FF
+        }
+        if normalized_map:
+            record["glyph_map"] = normalized_map
+    coverage = item.get("tail_profile_coverage")
+    if isinstance(coverage, Mapping):
+        normalized_coverage = {
+            "version": coverage.get("version"),
+            "alphabet": str(coverage.get("alphabet") or ""),
+            "verified": coverage.get("verified") is True,
+        }
+        if (
+            isinstance(normalized_coverage["version"], int)
+            and not isinstance(normalized_coverage["version"], bool)
+            and normalized_coverage["alphabet"]
+        ):
+            record["tail_profile_coverage"] = normalized_coverage
     text = item.get("text")
     if isinstance(text, Mapping):
         sample_text = str(text.get("text") or "").strip()
@@ -848,7 +896,50 @@ def _marker_record(item: Mapping[str, Any]) -> Dict[str, Any]:
     font = _font_name(item)
     if font:
         record["font_dependencies"] = [font]
+    font_facts = _tail_font_facts(item)
+    if font_facts:
+        record["font_facts"] = font_facts
     return record
+
+
+def _tail_font_facts(item: Mapping[str, Any]) -> Dict[str, Any]:
+    """Keep the measurements needed to prove a scanned OpenType tail sample."""
+    raw = item.get("font")
+    if not isinstance(raw, Mapping):
+        return {}
+    result: Dict[str, Any] = {}
+    for key in ("size_pt", "horizontal_scale", "vertical_scale"):
+        value = raw.get(key)
+        if isinstance(value, (int, float)) and not isinstance(value, bool) and float(value) > 0:
+            result[key] = float(value)
+    opentype = raw.get("opentype")
+    if isinstance(opentype, Mapping):
+        result["opentype"] = {str(key): value for key, value in opentype.items() if isinstance(value, (str, bool))}
+    return result
+
+
+def _scan_has_tail_outline_signature(value: Any) -> bool:
+    if isinstance(value, Mapping):
+        name = str(value.get("key") or value.get("name") or "").strip()
+        if _TAIL_KEY_RE.match(name) and str(value.get("outline_signature") or "").strip():
+            return True
+        return any(_scan_has_tail_outline_signature(child) for child in value.values())
+    if isinstance(value, list):
+        return any(_scan_has_tail_outline_signature(child) for child in value)
+    return False
+
+
+def _mark_unresolved_tail_profiles(value: Any, message: str) -> None:
+    if isinstance(value, Mapping):
+        name = str(value.get("key") or value.get("name") or "").strip()
+        if _TAIL_KEY_RE.match(name) and str(value.get("outline_signature") or "").strip():
+            value["tail_profile_status"] = "unresolved"
+            value["tail_profile_message"] = message
+        for child in value.values():
+            _mark_unresolved_tail_profiles(child, message)
+    elif isinstance(value, list):
+        for child in value:
+            _mark_unresolved_tail_profiles(child, message)
 
 
 def _geometry_facts(item: Mapping[str, Any]) -> Dict[str, Any]:

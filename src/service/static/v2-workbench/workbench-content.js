@@ -428,6 +428,8 @@
       if (data.opentype_alternate_index !== undefined && data.opentype_alternate_index !== null && cleanText(data.opentype_alternate_index) !== "") {
         result.opentype_alternate_index = Number(data.opentype_alternate_index);
       }
+      if (cleanText(data.tail_profile_status || "")) result.tail_profile_status = cleanText(data.tail_profile_status);
+      if (cleanText(data.tail_profile_message || "")) result.tail_profile_message = cleanText(data.tail_profile_message);
       return result;
     }).filter(Boolean);
   }
@@ -437,9 +439,30 @@
     normalizedTailConfigs(scannedTails).forEach((tail) => merged.set(tail.key, tail));
     normalizedTailConfigs(configuredTails).forEach((tail) => {
       const scanned = merged.get(tail.key) || {};
-      merged.set(tail.key, { ...scanned, ...tail });
+      const configured = tailConfigFields(tail);
+      merged.set(tail.key, withTailPresentationStatus({ ...scanned, ...configured }, scanned, configured));
     });
     return Array.from(merged.values());
+  }
+
+  function tailConfigFields(tail) {
+    const result = { ...objectOf(tail) };
+    delete result.tail_profile_status;
+    delete result.tail_profile_message;
+    return result;
+  }
+
+  function withTailPresentationStatus(merged, scanned, configured) {
+    const result = { ...merged };
+    if (!tailHasGlyphProof(configured) || tailProfilesMatch(configured, scanned)) return result;
+    if (tailHasGlyphProof(result)) {
+      result.tail_profile_status = "manual";
+      result.tail_profile_message = "尾巴字形配置已由人工修改；请以试渲染结果确认。";
+      return result;
+    }
+    result.tail_profile_status = "unresolved";
+    result.tail_profile_message = "尾巴字形配置已由人工移除或改为无效规则，不能按普通文字发布。";
+    return result;
   }
 
   function parseTailKey(key) {
@@ -454,6 +477,7 @@
     return {
       detected: tails.length > 0,
       verified: tails.length > 0 && tails.every(tailHasGlyphProof),
+      automatic: tails.length > 0 && tails.every((tail) => cleanText(tail.tail_profile_status) === "auto"),
       positions
     };
   }
@@ -500,7 +524,13 @@
   function tailTreatmentDescription(presentation) {
     const positions = Array.isArray(objectOf(presentation).positions) ? presentation.positions : [];
     const endpoint = positions.includes("first") && positions.includes("last") ? "首字和尾字" : (positions.includes("first") ? "首字" : "尾字");
-    return `已识别尾巴样式，订单文字的${endpoint}会自动放入尾巴位置，无需手动填写样本。`;
+    if (objectOf(presentation).automatic) {
+      return `已按模板样本轮廓自动确认尾巴字形；订单文字的${endpoint}会按该字体的实际 OpenType 规则渲染。`;
+    }
+    if (objectOf(presentation).verified) {
+      return `尾巴样式已有可验证的字形规则；订单文字的${endpoint}会按模板配置渲染。`;
+    }
+    return `识别到了${endpoint}尾巴样本，但尚未确认可渲染的字形规则，不能按普通文字发布。`;
   }
 
   function contentTreatmentDescription(preset, presentation, group) {
@@ -538,6 +568,13 @@
       alternate.type = "number";
       alternate.min = "1";
       line.append(feature, alternate);
+      if (cleanText(tail.tail_profile_status)) {
+        const status = document.createElement("span");
+        status.className = `tail-profile-status ${tail.tail_profile_status}`;
+        status.textContent = tail.tail_profile_status === "auto" ? "自动匹配" : "待确认";
+        status.title = cleanText(tail.tail_profile_message);
+        line.appendChild(status);
+      }
       [mode, feature, alternate].forEach(bindTailProfileChange);
       cell.appendChild(line);
     });
@@ -562,7 +599,7 @@
   }
 
   function tailConfigWithProfile(row, tail) {
-    const result = { ...tail };
+    const result = tailConfigFields(tail);
     const mode = tailProfileValue(row, tail.key, "mode");
     if (mode !== "opentype") {
       delete result.opentype_feature;
@@ -580,6 +617,16 @@
     result.opentype_feature = feature;
     result.opentype_alternate_index = alternate;
     return result;
+  }
+
+  function tailProfilesMatch(first, second) {
+    const left = objectOf(first);
+    const right = objectOf(second);
+    return tailProfileMode(left) === tailProfileMode(right)
+      && cleanText(left.opentype_feature || "").toLowerCase() === cleanText(right.opentype_feature || "").toLowerCase()
+      && Number(left.opentype_alternate_index || 0) === Number(right.opentype_alternate_index || 0)
+      && cleanText(left.pua_base || "") === cleanText(right.pua_base || "")
+      && JSON.stringify(left.glyph_map || {}) === JSON.stringify(right.glyph_map || {});
   }
 
   function tailProfileValue(row, key, field) {
@@ -788,6 +835,8 @@
     splitOptionAvailable,
     tailPresentationForSlots,
     tailTreatmentDescription,
+    tailConfigWithProfile,
+    mergedTailConfigs,
     validOpenTypeTailProfile,
     hasActiveColorRules,
     displayDimension,

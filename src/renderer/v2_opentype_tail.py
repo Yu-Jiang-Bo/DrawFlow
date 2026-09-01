@@ -50,6 +50,9 @@ class OpenTypeTailGlyph:
     alternate_index: int
     letter: str
     unicode_codepoint: int | None = None
+    pua_base: int | None = None
+    glyph_map: Mapping[str, int] | None = None
+    outline_aspect_ratio: float | None = None
 
     def task_payload(self) -> dict[str, Any]:
         return {
@@ -61,6 +64,8 @@ class OpenTypeTailGlyph:
             "opentype_alternate_index": self.alternate_index,
             "letter": self.letter,
             **({"unicode_codepoint": self.unicode_codepoint} if self.unicode_codepoint is not None else {}),
+            **({"pua_base": self.pua_base} if self.pua_base is not None else {}),
+            **({"glyph_map": dict(self.glyph_map)} if self.glyph_map is not None else {}),
         }
 
 
@@ -312,6 +317,190 @@ class OpenTypeTailResolver:
             letter=str(letter).casefold(),
         )
 
+    def materialize_alternate_candidates(
+        self,
+        *,
+        font_postscript_name: str,
+        letter: str,
+        output_dir: Path | str,
+    ) -> list[OpenTypeTailGlyph]:
+        """Write every directly addressable GSUB alternate for one letter.
+
+        This is deliberately font-local.  The caller compares the resulting
+        outlines with a sample that came from the same template; it must never
+        assume that another font's ``aalt`` ordinal has the same meaning.
+        """
+
+        postscript_name = str(font_postscript_name or "").strip()
+        normalized_letter = str(letter or "").casefold()
+        if not postscript_name:
+            raise OpenTypeTailError("opentype_tail_font_missing", "OpenType 尾巴字形缺少字体 PostScript 名称。")
+        if not _LETTER_RE.match(normalized_letter):
+            raise OpenTypeTailError("opentype_tail_endpoint_missing", "OpenType 尾巴字形需要单个拉丁字母。")
+        font_path = self.find_font_file(postscript_name)
+        try:
+            font = TTFont(str(font_path), lazy=False)
+        except Exception as exc:
+            raise OpenTypeTailError("opentype_tail_font_invalid", f"无法读取 OpenType 字体：{postscript_name}") from exc
+        try:
+            records = _alternate_glyph_candidates(font, normalized_letter)
+            assets: list[OpenTypeTailGlyph] = []
+            for feature, alternate_index, glyph_name in records:
+                assets.append(
+                    self._write_glyph_asset(
+                        font_path=font_path,
+                        glyph_name=glyph_name,
+                        svg=_glyph_svg(font, glyph_name),
+                        output_dir=output_dir,
+                        filename_prefix=f"{feature}-{alternate_index}-{normalized_letter}",
+                        font_postscript_name=postscript_name,
+                        feature=feature,
+                        alternate_index=alternate_index,
+                        letter=normalized_letter,
+                    )
+                )
+            return assets
+        finally:
+            font.close()
+
+    def verify_alternate_coverage(
+        self,
+        *,
+        font_postscript_name: str,
+        feature: str,
+        alternate_index: int,
+        coverage: str = "abcdefghijklmnopqrstuvwxyz",
+    ) -> dict[str, str]:
+        """Prove that one GSUB profile can serve every declared endpoint.
+
+        A template sample establishes *which* alternate was selected, but it
+        does not establish that the same feature/ordinal exists for every
+        order endpoint.  This check is deliberately complete and fail-closed:
+        a missing, invisible, or base-glyph-only mapping prevents the profile
+        from being persisted, instead of deferring that discovery to a later
+        customer order.
+        """
+
+        postscript_name = str(font_postscript_name or "").strip()
+        tag = str(feature or "").strip().casefold()
+        if not postscript_name:
+            raise OpenTypeTailError("opentype_tail_font_missing", "OpenType 尾巴字形缺少字体 PostScript 名称。")
+        if not _FEATURE_TAG_RE.match(tag):
+            raise OpenTypeTailError("opentype_tail_profile_invalid", "OpenType 尾巴字形特性必须是四位标签。")
+        if isinstance(alternate_index, bool) or not isinstance(alternate_index, int) or alternate_index < 1:
+            raise OpenTypeTailError("opentype_tail_profile_invalid", "OpenType 尾巴字形替代序号必须是正整数。")
+        letters = [str(letter).casefold() for letter in str(coverage or "")]
+        if not letters or any(not _LETTER_RE.match(letter) for letter in letters):
+            raise OpenTypeTailError("tail_glyph_coverage_missing", "尾巴字形声明的字符范围无效。")
+
+        font_path = self.find_font_file(postscript_name)
+        try:
+            font = TTFont(str(font_path), lazy=False)
+        except Exception as exc:
+            raise OpenTypeTailError("opentype_tail_font_invalid", f"无法读取 OpenType 字体：{postscript_name}") from exc
+        try:
+            cmap = font.getBestCmap() or {}
+            result: dict[str, str] = {}
+            for letter in letters:
+                base_glyph = str(cmap.get(ord(letter)) or "")
+                glyph_name = _alternate_glyph_name(font, tag, alternate_index, letter)
+                if not base_glyph or glyph_name == base_glyph:
+                    raise OpenTypeTailError(
+                        "tail_glyph_coverage_missing",
+                        f"字体 {tag} 的第 {alternate_index} 个替代字形未覆盖字母 {letter}。",
+                    )
+                # The visible-outline requirement makes the stored rule safe
+                # for renderer materialization as well as for scan-time proof.
+                _glyph_svg(font, glyph_name)
+                result[letter] = glyph_name
+            return result
+        finally:
+            font.close()
+
+    def materialize_contiguous_pua_candidates(
+        self,
+        *,
+        font_postscript_name: str,
+        letter: str,
+        output_dir: Path | str,
+    ) -> list[OpenTypeTailGlyph]:
+        """Write PUA glyphs that prove a complete a-z mapping.
+
+        A template sample proves only one endpoint. A PUA profile is accepted
+        only when the font exposes every a-z endpoint, either through a
+        contiguous codepoint run or through a semantic glyph-name group.
+        """
+
+        postscript_name = str(font_postscript_name or "").strip()
+        normalized_letter = str(letter or "").casefold()
+        if not postscript_name:
+            raise OpenTypeTailError("opentype_tail_font_missing", "OpenType 尾巴字形缺少字体 PostScript 名称。")
+        if not _LETTER_RE.match(normalized_letter):
+            raise OpenTypeTailError("opentype_tail_endpoint_missing", "OpenType 尾巴字形需要单个拉丁字母。")
+        font_path = self.find_font_file(postscript_name)
+        try:
+            font = TTFont(str(font_path), lazy=False)
+        except Exception as exc:
+            raise OpenTypeTailError("opentype_tail_font_invalid", f"无法读取 OpenType 字体：{postscript_name}") from exc
+        try:
+            cmap = font.getBestCmap() or {}
+            assets: list[OpenTypeTailGlyph] = []
+            semantic_groups = _semantic_pua_glyph_maps(cmap)
+            mapped_codepoints: set[int] = set()
+            for glyph_map in semantic_groups:
+                try:
+                    _verify_pua_glyph_coverage(font, cmap, glyph_map)
+                    codepoint = glyph_map[normalized_letter]
+                    glyph_name = str(cmap[codepoint])
+                    svg = _glyph_svg(font, glyph_name)
+                except OpenTypeTailError:
+                    continue
+                assets.append(
+                    self._write_glyph_asset(
+                        font_path=font_path,
+                        glyph_name=glyph_name,
+                        svg=svg,
+                        output_dir=output_dir,
+                        filename_prefix=f"pua-map-{codepoint:04X}-{normalized_letter}",
+                        font_postscript_name=postscript_name,
+                        feature="pua",
+                        alternate_index=0,
+                        letter=normalized_letter,
+                        unicode_codepoint=codepoint,
+                        glyph_map=glyph_map,
+                    )
+                )
+                mapped_codepoints.add(codepoint)
+            for codepoint in _contiguous_pua_codepoints(cmap, normalized_letter):
+                if codepoint in mapped_codepoints:
+                    continue
+                pua_base = codepoint - (ord(normalized_letter) - ord("a"))
+                glyph_map = {letter: pua_base + (ord(letter) - ord("a")) for letter in "abcdefghijklmnopqrstuvwxyz"}
+                try:
+                    _verify_pua_glyph_coverage(font, cmap, glyph_map)
+                    glyph_name = str(cmap[codepoint])
+                    svg = _glyph_svg(font, glyph_name)
+                except OpenTypeTailError:
+                    continue
+                assets.append(
+                    self._write_glyph_asset(
+                        font_path=font_path,
+                        glyph_name=glyph_name,
+                        svg=svg,
+                        output_dir=output_dir,
+                        filename_prefix=f"pua-{codepoint:04X}-{normalized_letter}",
+                        font_postscript_name=postscript_name,
+                        feature="pua",
+                        alternate_index=0,
+                        letter=normalized_letter,
+                        unicode_codepoint=codepoint,
+                        pua_base=pua_base,
+                    )
+                )
+            return assets
+        finally:
+            font.close()
+
     def resolve_alternate_glyph_name(
         self,
         *,
@@ -450,6 +639,8 @@ class OpenTypeTailResolver:
         alternate_index: int,
         letter: str,
         unicode_codepoint: int | None = None,
+        pua_base: int | None = None,
+        glyph_map: Mapping[str, int] | None = None,
     ) -> OpenTypeTailGlyph:
         digest = _sha256_file(font_path)
         target_dir = Path(output_dir)
@@ -468,6 +659,9 @@ class OpenTypeTailResolver:
             alternate_index=alternate_index,
             letter=letter,
             unicode_codepoint=unicode_codepoint,
+            pua_base=pua_base,
+            glyph_map=dict(glyph_map) if glyph_map is not None else None,
+            outline_aspect_ratio=_svg_outline_aspect_ratio(svg),
         )
 
     def find_font_file(self, postscript_name: str) -> Path:
@@ -531,6 +725,108 @@ def _alternate_glyph_name(font: TTFont, feature: str, alternate_index: int, lett
     return alternates[alternate_index - 1]
 
 
+def _alternate_glyph_candidates(font: TTFont, letter: str) -> list[tuple[str, int, str]]:
+    """Return all simple GSUB alternate profiles, in stable preference order."""
+
+    if "GSUB" not in font or font["GSUB"].table.FeatureList is None:
+        return []
+    tags = {
+        str(record.FeatureTag or "").casefold()
+        for record in font["GSUB"].table.FeatureList.FeatureRecord or []
+        if _FEATURE_TAG_RE.match(str(record.FeatureTag or ""))
+    }
+    result: list[tuple[str, int, str]] = []
+    for feature in sorted(tags, key=_feature_sort_key):
+        index = 1
+        while True:
+            try:
+                glyph_name = _alternate_glyph_name(font, feature, index, letter)
+            except OpenTypeTailError as exc:
+                if exc.code == "opentype_tail_glyph_missing":
+                    break
+                raise
+            result.append((feature, index, glyph_name))
+            index += 1
+    return result
+
+
+def _contiguous_pua_codepoints(cmap: Mapping[int, str], letter: str) -> list[int]:
+    """Return PUA codepoints whose inferred a-z base has full coverage."""
+
+    normalized_letter = str(letter or "").casefold()
+    if not _LETTER_RE.match(normalized_letter):
+        return []
+    offset = ord(normalized_letter) - ord("a")
+    available = {
+        int(codepoint)
+        for codepoint in cmap
+        if isinstance(codepoint, int) and not isinstance(codepoint, bool) and 0xE000 <= codepoint <= 0xF8FF
+    }
+    return [
+        codepoint
+        for codepoint in sorted(available)
+        if all(codepoint - offset + index in available for index in range(26))
+    ]
+
+
+def _semantic_pua_glyph_maps(cmap: Mapping[int, str]) -> list[dict[str, int]]:
+    """Return complete a-z PUA groups identified by their glyph-name suffix."""
+
+    groups: dict[str, dict[str, int]] = {}
+    for codepoint, glyph_name in cmap.items():
+        if not isinstance(codepoint, int) or isinstance(codepoint, bool) or not 0xE000 <= codepoint <= 0xF8FF:
+            continue
+        match = re.fullmatch(r"([a-z])([._-].+)?", str(glyph_name or ""), re.I)
+        if not match:
+            continue
+        letter = match.group(1).casefold()
+        suffix = str(match.group(2) or "").casefold()
+        groups.setdefault(suffix, {})[letter] = codepoint
+    return [
+        dict(groups[suffix])
+        for suffix in sorted(groups)
+        if all(letter in groups[suffix] for letter in "abcdefghijklmnopqrstuvwxyz")
+    ]
+
+
+def _verify_pua_glyph_coverage(
+    font: TTFont,
+    cmap: Mapping[int, str],
+    glyph_map: Mapping[str, int],
+) -> dict[str, str]:
+    """Prove every PUA endpoint is visible and distinct from its base glyph.
+
+    A continuous codepoint range only proves that entries exist in ``cmap``.
+    It does not prove that all 26 entries draw ink, nor that they are tail
+    forms instead of aliases for the ordinary letters.  Scan-time acceptance
+    therefore uses the same full alphabet proof required for GSUB profiles.
+    """
+
+    result: dict[str, str] = {}
+    for letter in "abcdefghijklmnopqrstuvwxyz":
+        codepoint = glyph_map.get(letter)
+        if isinstance(codepoint, bool) or not isinstance(codepoint, int) or not 0xE000 <= codepoint <= 0xF8FF:
+            raise OpenTypeTailError("tail_glyph_coverage_missing", f"PUA 尾巴字形缺少字母 {letter} 的有效编码。")
+        glyph_name = str(cmap.get(codepoint) or "")
+        base_glyph = str(cmap.get(ord(letter)) or "")
+        if not glyph_name or not base_glyph or glyph_name == base_glyph:
+            raise OpenTypeTailError("tail_glyph_coverage_missing", f"PUA 尾巴字形未覆盖字母 {letter}。")
+        _glyph_svg(font, glyph_name)
+        result[letter] = glyph_name
+    return result
+
+
+def _feature_sort_key(feature: str) -> tuple[int, str]:
+    # If aliases expose the exact same glyph, prefer the profile users see in
+    # Illustrator's Glyphs panel, then fall back to other standard features.
+    preferred = {"aalt": 0, "salt": 1, "swsh": 2}
+    if feature in preferred:
+        return preferred[feature], feature
+    if re.fullmatch(r"ss\d\d", feature):
+        return 3, feature
+    return 4, feature
+
+
 def _glyph_svg(font: TTFont, glyph_name: str) -> str:
     glyph_set = font.getGlyphSet()
     if glyph_name not in glyph_set:
@@ -556,6 +852,22 @@ def _glyph_svg(font: TTFont, glyph_name: str) -> str:
         f'  <path d="{escape(commands, quote=True)}" transform="scale(1,-1)"/>\n'
         "</svg>\n"
     )
+
+
+def _svg_outline_aspect_ratio(svg: str) -> float | None:
+    """Read the visible outline ratio from our own one-glyph SVG output."""
+
+    match = re.search(r'\bviewBox="[-+0-9.eE]+\s+[-+0-9.eE]+\s+([-+0-9.eE]+)\s+([-+0-9.eE]+)"', svg)
+    if not match:
+        return None
+    try:
+        width = float(match.group(1))
+        height = float(match.group(2))
+    except (TypeError, ValueError):
+        return None
+    if width <= 0 or height <= 0:
+        return None
+    return width / height
 
 
 def _text_glyph_names(font: TTFont, text: str, endpoint_glyphs: Mapping[int, str]) -> list[str]:
