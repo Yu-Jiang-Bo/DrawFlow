@@ -595,12 +595,9 @@ def test_compiles_multiple_design_slots_with_design_group_dimensions():
     ]
 
 
-def test_compiles_primary_anchor_dimensions_when_design_has_optional_subtitle_slot():
+def test_compiles_primary_anchor_dimensions_when_design_has_optional_subtitle_slot_and_fixed_style():
     config = render_config()
-    config["outputs"][0].pop("style")
-    config["field_bindings"].pop("size")
     config["field_bindings"]["subtitle"] = "Subtitle"
-    config["option_mappings"] = [item for item in config["option_mappings"] if item["group"] != "style"]
     design_config = config["outputs"][0]["design"]["options"][0]
     design_config["content_preset"] = "mixed_slots"
     design_config["slots"] = [
@@ -636,8 +633,11 @@ def test_compiles_primary_anchor_dimensions_when_design_has_optional_subtitle_sl
 
     task = compile_task(config=config, scan=scan)
 
-    fit_action = next(action for action in task["outputs"][0]["actions"] if action["type"] == "fit_output_bounds")
+    fit_actions = [action for action in task["outputs"][0]["actions"] if action["type"] == "fit_output_bounds"]
+    assert any(action["group"] == "style" for action in fit_actions)
+    fit_action = next(action for action in fit_actions if action["group"] == "design")
     assert fit_action["dimensions"] == {"width_mm": 150.231, "height_mm": 47.231, "tolerance_mm": 0.007}
+    assert fit_action["layout_mode"] == "preserve_slot_anchors"
 
 
 def test_compiles_scanned_design_dimensions_when_style_metadata_has_no_fixed_size():

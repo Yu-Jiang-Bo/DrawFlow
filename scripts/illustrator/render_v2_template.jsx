@@ -54,6 +54,10 @@
         applyOutputTransforms(doc, execution.output || task.output || {});
         var finalFitAction = selectedFitAction(task, selectedOutputKey, selections);
         if (finalFitAction) fitRenderedOutput(renderedOutputItems, finalFitAction);
+        if (finalFitAction && preservesSlotAnchors(finalFitAction)) {
+            fitRenderedOptionalSlotAnchors(renderedOutputItems, task, selectedOutputKey, selections);
+        }
+        cleanupAuxiliaryObjects(renderedOutputItems);
         if (execution.pack_order_blocks === true) {
             renderedOutputItems = [groupRenderedOutputBlock(layer, renderedOutputItems, 0)];
         }
@@ -79,6 +83,7 @@
         var copied = {};
         var renderedItems = [];
         var actions = output.actions || [];
+        var preserveAnchors = selectedOutputPreservesSlotAnchors(actions, selected);
         for (var index = 0; index < actions.length; index++) {
             var action = actions[index] || {};
             if (action.type === "select_style" && isSelected(action, selected)) {
@@ -110,14 +115,15 @@
                 replaceSlotText(copied, outputKey, replaceAction, valuesByField, selected);
             }
         }
-        cleanupAuxiliaryObjects(renderedItems);
+        cleanupAuxiliaryObjects(renderedItems, preserveAnchors);
         for (var fitIndex = 0; fitIndex < actions.length; fitIndex++) {
             var fitAction = actions[fitIndex] || {};
             if (fitAction.type === "fit_output_bounds" && isSelected(fitAction, selected)) {
+                if (preserveAnchors && String(fitAction.group || "") === "style") continue;
                 fitRenderedOutput(renderedItems, fitAction);
             }
         }
-        cleanupAuxiliaryObjects(renderedItems);
+        cleanupAuxiliaryObjects(renderedItems, preserveAnchors);
         removeSourceOnlyCopies(copied);
         return renderedItems;
     }
@@ -125,6 +131,7 @@
     function selectedFitAction(taskData, outputKey, selectedValues) {
         var chosen = String(outputKey || "");
         var fallback = null;
+        var styleFallback = null;
         var outputs = taskData.outputs || [];
         for (var outputIndex = 0; outputIndex < outputs.length; outputIndex++) {
             var output = outputs[outputIndex] || {};
@@ -134,11 +141,24 @@
             for (var actionIndex = 0; actionIndex < actions.length; actionIndex++) {
                 var action = actions[actionIndex] || {};
                 if (action.type !== "fit_output_bounds" || !isSelected(action, selected)) continue;
-                if (String(action.group || "") === "style") return action;
+                if (preservesSlotAnchors(action)) return action;
+                if (String(action.group || "") === "style" && !styleFallback) styleFallback = action;
                 if (!fallback) fallback = action;
             }
         }
-        return fallback;
+        return styleFallback || fallback;
+    }
+
+    function preservesSlotAnchors(action) {
+        return String(action && action.layout_mode || "") === "preserve_slot_anchors";
+    }
+
+    function selectedOutputPreservesSlotAnchors(actions, selected) {
+        for (var index = 0; index < actions.length; index++) {
+            var action = actions[index] || {};
+            if (action.type === "fit_output_bounds" && isSelected(action, selected) && preservesSlotAnchors(action)) return true;
+        }
+        return false;
     }
 
     function applyOutputTransforms(doc, policy) {
@@ -151,8 +171,10 @@
         var frames = [];
         for (var layerIndex = 0; layerIndex < doc.layers.length; layerIndex++) collectTextFrames(doc.layers[layerIndex], frames);
         for (var index = frames.length - 1; index >= 0; index--) {
+            var frameName = String(frames[index].name || "");
             var outline = frames[index].createOutline();
             if (!outline) throw new Error("V2 text outline failed");
+            if (frameName) outline.name = frameName;
             if (pathfinderMerge) cleanupOutline(outline);
         }
     }
@@ -1136,6 +1158,10 @@
     }
 
     function fitRenderedOutput(items, action) {
+        // An independently anchored optional subtitle has its own physical
+        // delivery frame. Scaling the aggregate group here would distort both
+        // its size and the template-defined relation to the primary text.
+        if (preservesSlotAnchors(action)) return;
         var dimensions = action.dimensions || {};
         var targetWidth = mmToPt(Number(dimensions.width_mm || 0));
         var targetHeight = mmToPt(Number(dimensions.height_mm || 0));
@@ -1530,22 +1556,85 @@
         return false;
     }
 
-    function cleanupAuxiliaryObjects(items) {
-        for (var index = 0; index < items.length; index++) {
-            cleanupAuxiliaryIn(items[index]);
+    function fitRenderedOptionalSlotAnchors(items, taskData, outputKey, selectedValues) {
+        var chosen = String(outputKey || "");
+        var outputs = taskData.outputs || [];
+        for (var outputIndex = 0; outputIndex < outputs.length; outputIndex++) {
+            var output = outputs[outputIndex] || {};
+            if (chosen && String(output.key || "") !== chosen) continue;
+            var selected = selectedValues[String(output.key || "")] || {};
+            var actions = output.actions || [];
+            for (var actionIndex = 0; actionIndex < actions.length; actionIndex++) {
+                var action = actions[actionIndex] || {};
+                if (action.type !== "replace_slot_text" || !isSelected(action, selected)) continue;
+                if (action.required !== false || !String(action.anchor_path || "")) continue;
+                var root = renderedOptionRoot(items, action);
+                if (!root) throw new Error("V2 optional-slot design copy is missing: " + String(action.option_key || ""));
+                var slot = findOptionalPageItemByRelativePath(root, relativePath(String(action.object_path || ""), String(action.object_path || "").replace(/\/[^\/]+$/, "")));
+                if (!slot) continue;
+                var anchor = findPageItemByRelativePath(root, relativePath(String(action.anchor_path || ""), String(action.object_path || "").replace(/\/[^\/]+$/, "")));
+                fitOutlinedItemWithinBounds(slot, measuredBounds(anchor), action);
+            }
         }
     }
 
-    function cleanupAuxiliaryIn(item) {
+    function renderedOptionRoot(items, action) {
+        var optionKey = String(action && action.option_key || "");
+        for (var index = 0; index < items.length; index++) {
+            if (String(items[index].name || "") === optionKey) return items[index];
+        }
+        return null;
+    }
+
+    function findOptionalPageItemByRelativePath(root, path) {
+        try { return findPageItemByRelativePath(root, path); }
+        catch (missingOptionalSlot) { return null; }
+    }
+
+    function fitOutlinedItemWithinBounds(item, bounds, action) {
+        var targetWidth = Math.abs(Number(bounds[2]) - Number(bounds[0]));
+        var targetHeight = Math.abs(Number(bounds[1]) - Number(bounds[3]));
+        if (targetWidth <= 0 || targetHeight <= 0) throw new Error("V2 optional slot anchor is invalid");
+        for (var attempt = 0; attempt < 12; attempt++) {
+            var current = measuredBounds(item);
+            var width = Math.abs(Number(current[2]) - Number(current[0]));
+            var height = Math.abs(Number(current[1]) - Number(current[3]));
+            if (width <= 0 || height <= 0) throw new Error("V2 outlined optional slot is not measurable");
+            var scaleX = targetWidth / width;
+            var scaleY = targetHeight / height;
+            if (Math.abs(scaleX - 1) <= 0.00001 && Math.abs(scaleY - 1) <= 0.00001) break;
+            resizePageItem(item, scaleX * 100, scaleY * 100);
+            centerItemInBounds(item, bounds);
+        }
+        var fitted = measuredBounds(item);
+        var fittedWidth = Math.abs(Number(fitted[2]) - Number(fitted[0]));
+        var fittedHeight = Math.abs(Number(fitted[1]) - Number(fitted[3]));
+        var tolerance = mmToPt(0.007);
+        if (Math.abs(fittedWidth - targetWidth) > tolerance || Math.abs(fittedHeight - targetHeight) > tolerance) {
+            throw new Error("V2 optional slot does not match anchor bounds: " + String(action.slot_key || ""));
+        }
+    }
+
+    function cleanupAuxiliaryObjects(items, preserveAnchors) {
+        for (var index = 0; index < items.length; index++) {
+            cleanupAuxiliaryIn(items[index], preserveAnchors === true);
+        }
+    }
+
+    function cleanupAuxiliaryIn(item, preserveAnchors) {
         var children = item.pageItems || [];
         for (var index = children.length - 1; index >= 0; index--) {
             var child = children[index];
-            if (isAuxiliaryObject(child)) {
+            if (isAuxiliaryObject(child) && !(preserveAnchors && isAnchorObject(child))) {
                 removePageItem(child);
             } else {
-                cleanupAuxiliaryIn(child);
+                cleanupAuxiliaryIn(child, preserveAnchors);
             }
         }
+    }
+
+    function isAnchorObject(item) {
+        return String(item && item.name || "").indexOf("anchor_") === 0;
     }
 
     function isAuxiliaryObject(item) {
