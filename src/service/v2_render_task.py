@@ -196,7 +196,8 @@ def _compile_output(
                 )
             )
             actions.extend(_asset_actions(output_key, group, dict(option), scan_index))
-            if group == "design" and not has_fixed_dimensions_for_every_style:
+            preserves_slot_anchors = group == "design" and _design_preserves_independent_slot_anchors(dict(option))
+            if group == "design" and (preserves_slot_anchors or not has_fixed_dimensions_for_every_style):
                 dimensions = _scanned_design_dimensions(dict(option), option_scan)
                 if not dimensions:
                     raise V2RenderTaskError(
@@ -204,14 +205,15 @@ def _compile_output(
                         "当前模板缺少 Design 扫描尺寸，请重新扫描并发布模板后再出图。",
                         path=f"$.outputs.{output_key}.design.{option_key}.dimensions",
                     )
-                actions.append(
-                    _action(
-                        "fit_output_bounds",
-                        group=group,
-                        option_key=option_key,
-                        dimensions=dimensions,
-                    )
+                fit_action = _action(
+                    "fit_output_bounds",
+                    group=group,
+                    option_key=option_key,
+                    dimensions=dimensions,
                 )
+                if preserves_slot_anchors:
+                    fit_action["layout_mode"] = "preserve_slot_anchors"
+                actions.append(fit_action)
     return {
         "key": output_key,
         "order": order,
@@ -237,22 +239,41 @@ def _has_fixed_style_dimensions(dimensions: Mapping[str, Any]) -> bool:
     return math.isfinite(width) and math.isfinite(height) and width > 0 and height > 0
 
 
+def _design_preserves_independent_slot_anchors(configured_option: Mapping[str, Any]) -> bool:
+    """Keep individually-fitted subtitle anchors out of a later whole-group fit."""
+    text_slots = [
+        dict(slot)
+        for slot in configured_option.get("slots", [])
+        if isinstance(slot, Mapping) and str(dict(slot).get("preset") or "") != "asset_replace"
+    ]
+    required_slots = [slot for slot in text_slots if bool(slot.get("required", True))]
+    optional_slots = [slot for slot in text_slots if not bool(slot.get("required", True))]
+    return (
+        len(required_slots) == 1
+        and bool(required_slots[0].get("anchor"))
+        and any(bool(slot.get("anchor")) for slot in optional_slots)
+    )
+
+
 def _scanned_design_dimensions(configured_option: Mapping[str, Any], scanned_option: Mapping[str, Any]) -> dict[str, float]:
-    """Choose the configured single-slot frame as the final output frame.
+    """Choose the configured primary-slot frame used by the output policy.
 
     A Design group may include decorative objects outside its editable text slot.
-    For a design with exactly one non-asset slot, its configured anchor defines the
-    workbench's size boundary when an anchor is present. Otherwise, use that slot's
-    scanned dimensions. Multi-slot designs retain the group-level scan as their
-    final frame.
+    For a design with exactly one required non-asset slot, its configured anchor
+    defines the primary delivery boundary when an anchor is present. Optional
+    subtitle slots are independently fitted inside their own anchors. Their
+    designed offset may make the combined visible bounds larger than the primary
+    frame, so they must not trigger a later whole-group rescale. Designs with
+    multiple required slots retain the group-level scan as their final frame.
     """
     configured_slots = [
         dict(slot)
         for slot in configured_option.get("slots", [])
         if isinstance(slot, Mapping) and str(dict(slot).get("preset") or "") != "asset_replace"
     ]
-    if len(configured_slots) == 1:
-        slot = configured_slots[0]
+    required_slots = [slot for slot in configured_slots if bool(slot.get("required", True))]
+    if len(required_slots) == 1:
+        slot = required_slots[0]
         anchor_key = str(slot.get("anchor") or "")
         if anchor_key:
             for anchor in scanned_option.get("anchors", []):

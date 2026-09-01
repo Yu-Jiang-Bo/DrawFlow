@@ -100,6 +100,14 @@ def test_v2_jsx_contains_final_object_fit_and_policy_gates():
     color_source = Path("scripts/illustrator/compose_color_frames.jsx").read_text(encoding="utf-8")
     assert "applyOutputTransforms(doc, execution.output || task.output || {})" in render_source
     assert "fitRenderedOutput(renderedOutputItems, finalFitAction)" in render_source
+    assert 'String(action && action.layout_mode || "") === "preserve_slot_anchors"' in render_source
+    assert "fitRenderedOptionalSlotAnchors(renderedOutputItems, task, selectedOutputKey, selections);" in render_source
+    assert "if (preservesSlotAnchors(action)) return;" in render_source
+    assert "fitOutlinedItemWithinBounds(slot, measuredBounds(anchor), action);" in render_source
+    assert 'if (preserveAnchors && String(fitAction.group || "") === "style") continue;' in render_source
+    assert "if (preservesSlotAnchors(action)) return action;" in render_source
+    assert "var styleFallback = null;" in render_source
+    assert "return styleFallback || fallback;" in render_source
     assert "outputBoundsWithinTargetRange(fitted, targetWidth, targetHeight, dimensions)" in render_source
     assert "var fitSafety = outputFitSafetyPoints(dimensions);" in render_source
     assert "return Math.min(0.003, dimensionTolerancePoints(dimensions) / 2);" in render_source
