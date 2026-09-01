@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -62,7 +63,6 @@ def test_linux_central_package_excludes_windows_scan_client(tmp_path: Path) -> N
             str(project / "deploy" / "package-linux-central.ps1"),
             "-ReleaseName",
             "test-central-package",
-            "-NoArchive",
         ],
         cwd=project,
         capture_output=True,
@@ -78,3 +78,9 @@ def test_linux_central_package_excludes_windows_scan_client(tmp_path: Path) -> N
     assert not (release_root / "src" / "service" / "local_gateway.py").exists()
     assert not (release_root / "src" / "service" / "local_scan_client.py").exists()
     assert all(b"\r\n" not in script.read_bytes() for script in (release_root / "deploy" / "linux").glob("*.sh"))
+    with zipfile.ZipFile(project / "release" / "test-central-package.zip") as archive:
+        entry_names = set(archive.namelist())
+    assert all("\\" not in entry_name for entry_name in entry_names)
+    assert "deploy/linux/install.sh" in entry_names
+    assert "src/service/v2_scan_worker_auth.py" in entry_names
+    assert "src/service/local_scan_client.py" not in entry_names
