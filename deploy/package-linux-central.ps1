@@ -178,6 +178,36 @@ function Normalize-LinuxShellScripts {
     }
 }
 
+function New-LinuxReleaseArchive {
+    if (Test-Path -LiteralPath $ArchivePath) { Remove-Item -LiteralPath $ArchivePath -Force }
+    Add-Type -AssemblyName System.IO.Compression
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $Archive = [System.IO.Compression.ZipFile]::Open(
+        $ArchivePath,
+        [System.IO.Compression.ZipArchiveMode]::Create
+    )
+    try {
+        foreach ($File in (Get-ChildItem -LiteralPath $ReleaseRoot -Recurse -File)) {
+            $RelativePath = $File.FullName.Substring($ReleaseRoot.Length).TrimStart(
+                [System.IO.Path]::DirectorySeparatorChar,
+                [System.IO.Path]::AltDirectorySeparatorChar
+            )
+            $EntryName = $RelativePath.Replace([System.IO.Path]::DirectorySeparatorChar, "/").Replace(
+                [System.IO.Path]::AltDirectorySeparatorChar,
+                "/"
+            )
+            [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
+                $Archive,
+                $File.FullName,
+                $EntryName,
+                [System.IO.Compression.CompressionLevel]::Optimal
+            ) | Out-Null
+        }
+    } finally {
+        $Archive.Dispose()
+    }
+}
+
 function Copy-Tree {
     param(
         [Parameter(Mandatory = $true)][string]$RelativePath,
@@ -291,8 +321,7 @@ Sanitize-ReleaseJson
 Assert-CleanRelease
 
 if (-not $NoArchive) {
-    if (Test-Path $ArchivePath) { Remove-Item -LiteralPath $ArchivePath -Force }
-    Compress-Archive -Path (Join-Path $ReleaseRoot "*") -DestinationPath $ArchivePath -CompressionLevel Optimal
+    New-LinuxReleaseArchive
 }
 
 Write-Host "Linux release folder: $ReleaseRoot"
