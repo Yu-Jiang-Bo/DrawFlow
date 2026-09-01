@@ -43,6 +43,7 @@ from .v2_order_plan import (
     unit_stem,
 )
 from .v2_order_task_builder import (
+    V2OrderTaskBuilderError,
     create_v2_component_reuse_strategy,
     create_v2_order_task_builder,
 )
@@ -158,6 +159,12 @@ class V2OrderOutputRenderer:
             )
         except V2OrderRenderError:
             raise
+        except V2OrderTaskBuilderError as exc:
+            raise V2OrderRenderError(
+                str(exc),
+                code=exc.code,
+                technical_message=str(exc),
+            ) from exc
         except Exception as exc:
             raise V2OrderRenderError(
                 "Illustrator 未能完成生产出图，请确认 Illustrator 可以正常打开后重试。",

@@ -62,13 +62,16 @@ def create_v2_component_reuse_strategy(
 
     def build_order_column_task(**kwargs: Any) -> dict[str, Any]:
         units = tuple(kwargs.get("units") or ())
+        dimensions, _ = _stabilize_v2_unit_dimensions(
+            [_v2_unit_dimensions(render_task, unit) for unit in units]
+        )
         return build_v2_order_column_task(
             input_ai_files=kwargs["input_ai_files"],
             input_order_nos=kwargs["input_order_nos"],
             output_ai=kwargs["output_ai"],
             label_lines=kwargs.get("label_lines"),
             compatibility=str(kwargs.get("compatibility") or "Illustrator 8"),
-            target_dimensions_by_input=[_v2_unit_dimensions(render_task, unit) for unit in units],
+            target_dimensions_by_input=dimensions,
             output_policy=_v2_output_policy(render_task, kwargs.get("rule")),
         )
 
@@ -80,9 +83,16 @@ def create_v2_component_reuse_strategy(
             item = deepcopy(dict(raw))
             order_nos = [str(value or "").strip() for value in item.get("order_nos") or ()]
             group = unit_groups[len(inputs)] if len(inputs) < len(unit_groups) else units
-            item["order_dimensions"] = [_v2_unit_dimensions(render_task, unit) for unit in group]
-            if len(item["order_dimensions"]) < len(order_nos):
-                item["order_dimensions"].extend({} for _ in range(len(order_nos) - len(item["order_dimensions"])))
+            dimensions = [_v2_unit_dimensions(render_task, unit) for unit in group]
+            if len(dimensions) < len(order_nos):
+                dimensions.extend({} for _ in range(len(order_nos) - len(dimensions)))
+            dimensions, fallback = _stabilize_v2_unit_dimensions(
+                dimensions,
+                default=item.get("target_dimensions"),
+            )
+            item["order_dimensions"] = dimensions
+            if fallback and not _valid_v2_dimensions(item.get("target_dimensions")):
+                item["target_dimensions"] = fallback
             inputs.append(item)
         return build_v2_color_frames_task(
             inputs=inputs,
@@ -239,6 +249,54 @@ def _v2_unit_dimensions(render_task: Mapping[str, Any], unit: Any) -> dict[str, 
                 if width > 0 and height > 0:
                     return {"width_mm": width, "height_mm": height, "tolerance_mm": float(dimensions.get("tolerance_mm", 0.007) or 0.007)}
     return {}
+
+
+def _stabilize_v2_unit_dimensions(
+    dimensions: Sequence[Mapping[str, Any] | None],
+    *,
+    default: Mapping[str, Any] | None = None,
+) -> tuple[list[dict[str, float]], dict[str, float] | None]:
+    """Avoid falling back to tail-dependent visible bounds within a sized batch."""
+
+    normalized = [_normalized_v2_dimensions(item) for item in dimensions]
+    missing = [index for index, item in enumerate(normalized) if item is None]
+    configured = [item for item in normalized if item is not None]
+    fallback = _normalized_v2_dimensions(default)
+
+    if fallback is None and configured:
+        unique = {(item["width_mm"], item["height_mm"]) for item in configured}
+        if len(unique) == 1:
+            fallback = dict(configured[0])
+        elif missing:
+            raise V2OrderTaskBuilderError(
+                "当前模板部分设计缺少效果图尺寸，且同一批次存在多种尺寸，已停止生成以避免尾巴改变成品高度。",
+                code="v2_order_task_dimensions_ambiguous",
+            )
+
+    if fallback is None:
+        return [dict(item or {}) for item in normalized], None
+    return [dict(item or fallback) for item in normalized], dict(fallback)
+
+
+def _normalized_v2_dimensions(value: Mapping[str, Any] | None) -> dict[str, float] | None:
+    if not isinstance(value, Mapping):
+        return None
+    try:
+        width = float(value.get("width_mm"))
+        height = float(value.get("height_mm"))
+    except (TypeError, ValueError):
+        return None
+    if width <= 0 or height <= 0:
+        return None
+    try:
+        tolerance = float(value.get("tolerance_mm", 0.007) or 0.007)
+    except (TypeError, ValueError):
+        tolerance = 0.007
+    return {"width_mm": width, "height_mm": height, "tolerance_mm": tolerance}
+
+
+def _valid_v2_dimensions(value: Mapping[str, Any] | None) -> bool:
+    return _normalized_v2_dimensions(value) is not None
 
 
 def _unit_item(unit: Any, index: int) -> dict[str, Any]:

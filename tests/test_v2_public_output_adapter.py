@@ -8,6 +8,7 @@ from src.renderer.illustrator_bridge import IllustratorBridgeError
 from src.service.production_output import ProductionOutputError
 from src.service import v2_order_output
 from src.service.v2_order_output import V2OrderOutputRenderer
+from src.service.v2_order_task_builder import V2OrderTaskBuilderError
 
 
 def test_v2_department_output_routes_through_public_pipeline(monkeypatch, tmp_path):
@@ -147,6 +148,36 @@ def test_v2_public_pipeline_maps_bridge_failures_to_safe_render_error(monkeypatc
 
     assert exc_info.value.code == "v2_order_render_failed"
     assert "HRESULT -2146959355" in exc_info.value.technical_message
+
+
+def test_v2_public_pipeline_preserves_task_builder_dimension_error(monkeypatch, tmp_path):
+    message = "当前模板部分设计缺少效果图尺寸，且同一批次存在多种尺寸，已停止生成以避免尾巴改变成品高度。"
+    monkeypatch.setattr(v2_order_output, "build_v2_order_units", lambda *_args: [object()])
+    monkeypatch.setattr(v2_order_output, "has_department_delivery_context", lambda *_args: True)
+    monkeypatch.setattr(v2_order_output, "_require_v2_public_output_units", lambda *_args: ("public-unit",))
+    monkeypatch.setattr(
+        v2_order_output,
+        "run_production_output_pipeline",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            V2OrderTaskBuilderError(message, code="v2_order_task_dimensions_ambiguous")
+        ),
+    )
+
+    with pytest.raises(v2_order_output.V2OrderRenderError) as exc_info:
+        V2OrderOutputRenderer(renderer=object()).render_outputs(
+            {"job_id": "job-1", "job_dir": str(tmp_path), "request": {"dry_run": False}},
+            {"template": {"template_id": "V2"}},
+            {"outputs": [{"key": "Output_main"}]},
+            tmp_path / "template.ai",
+            [{"Order No": "ORDER-1"}],
+            {},
+            tmp_path / "render-task.json",
+            tmp_path / "manifest.json",
+        )
+
+    assert exc_info.value.code == "v2_order_task_dimensions_ambiguous"
+    assert str(exc_info.value) == message
+    assert exc_info.value.technical_message == message
 
 
 def test_v2_injected_renderer_batch_dispatches_execution_task_without_illustrator(tmp_path):
