@@ -24,8 +24,8 @@ V2_STATUS_PENDING = "pending"
 _PT_TO_MM = 25.4 / 72.0
 _GROUP_TYPES = {"group", "groupitem", "layer"}
 _OUTPUT_SIDE_RE = re.compile(r"^Output_Side([A-Z])$", re.I)
-_DESIGN_RE = re.compile(r"^Design\d{2,}$", re.I)
-_FONT_RE = re.compile(r"^F[1-9]\d*$", re.I)
+_DESIGN_RE = re.compile(r"^Design(?P<number>0*[1-9]\d*)$", re.I)
+_FONT_RE = re.compile(r"^F(?P<number>0*[1-9]\d*)$", re.I)
 _STYLE_RE = re.compile(r"^style[1-9]\d*$", re.I)
 _TAIL_KEY_RE = re.compile(r"^tail_(?P<field>[A-Za-z0-9_]+)_(?P<position>first|last)_(?P<sample>[A-Za-z])$", re.I)
 
@@ -275,9 +275,14 @@ def _normalize_outputs(
         item for item in items
         if _is_group(item) and len(_rel(item["path"], root_path)) == 1 and _is_output_name(item["name"])
     ]
-    _add_duplicate_issues(output_items, "$.template.outputs", "duplicate_output", issues)
+    _add_duplicate_issues(
+        [{"name": _canonical_output(item["name"]), "path": item["path"]} for item in output_items],
+        "$.template.outputs",
+        "duplicate_output",
+        issues,
+    )
     if not output_items:
-        _issue(issues, "$.template.outputs", "output_missing", "Template 下缺少 Output_main 或 Output_SideA/B/C。")
+        _issue(issues, "$.template.outputs", "output_missing", "Template 下缺少 Output、Output_main 或 Output_SideA/B/C。")
         return []
     keys = [_canonical_output(item["name"]) for item in _sort_outputs(output_items)]
     if len(keys) == 1 and keys[0] != "Output_main":
@@ -353,6 +358,13 @@ def _normalize_group(
         if _is_group(item) or kind == "style"
     ]
     options = [item for item in options if _valid_option_name(kind, item["name"], issues, group["path"])]
+    if kind in {"design", "font"}:
+        _add_duplicate_issues(
+            [{"name": _option_identity(kind, item["name"]), "path": item["path"]} for item in options],
+            group["path"],
+            f"duplicate_{kind}_option",
+            issues,
+        )
     return {
         "path": group["path"],
         "options": [_normalize_option(items, item, kind, source_ai, issues) for item in _sort_options(kind, options)],
@@ -407,7 +419,7 @@ def _normalize_option(
         fixed_count = _fixed_object_count(subtree, marker_items, asset_root_paths)
     fixed_object_type_counts = _raw_fixed_object_type_counts(item)
     normalized = {
-        "key": item["name"].strip(),
+        "key": _normalized_option_key(kind, item["name"]),
         "path": item["path"],
         **_geometry_facts(item),
         "slots": slots,
@@ -674,8 +686,7 @@ def _validate_marker_hierarchy(items: list[Dict[str, Any]], root_path: str, issu
 
 
 def _valid_option_name(kind: str, name: str, issues: list[Dict[str, Any]], scope_path: str) -> bool:
-    rules = {"style": _STYLE_RE, "design": _DESIGN_RE, "font": _FONT_RE}
-    if rules[kind].match(name.strip()):
+    if _is_option_name(kind, name):
         return True
     _issue(issues, f"{scope_path}/{name.strip()}", f"{kind}_option_name_invalid", f"{kind} 选项名称不符合 V2 规范。")
     return False
@@ -721,6 +732,34 @@ def _norm(value: str) -> str:
     return str(value or "").strip().lower()
 
 
+def _without_whitespace(value: str) -> str:
+    return re.sub(r"\s+", "", str(value or "").strip())
+
+
+def _option_name_match(kind: str, value: str) -> re.Match[str] | None:
+    rules = {"style": _STYLE_RE, "design": _DESIGN_RE, "font": _FONT_RE}
+    return rules[kind].match(_without_whitespace(value))
+
+
+def _is_option_name(kind: str, value: str) -> bool:
+    return _option_name_match(kind, value) is not None
+
+
+def _normalized_option_key(_kind: str, value: str) -> str:
+    raw = str(value or "").strip()
+    return _without_whitespace(raw) if any(char.isspace() for char in raw) else raw
+
+
+def _option_identity(kind: str, value: str) -> str:
+    match = _option_name_match(kind, value)
+    if match is None:
+        return _norm(_without_whitespace(value))
+    if kind == "style":
+        return _norm(value)
+    prefix = "design" if kind == "design" else "f"
+    return f"{prefix}{int(match.group('number'))}"
+
+
 def _is_group(item: Mapping[str, Any]) -> bool:
     return str(item.get("type") or "").strip().lower() in _GROUP_TYPES
 
@@ -734,7 +773,7 @@ def _is_real_group(item: Mapping[str, Any]) -> bool:
 
 
 def _is_output_name(value: str) -> bool:
-    return _norm(value) == "output_main" or _OUTPUT_SIDE_RE.match(str(value or "").strip()) is not None
+    return _norm(value) in {"output", "output_main"} or _OUTPUT_SIDE_RE.match(str(value or "").strip()) is not None
 
 
 def _canonical_output(value: str) -> str:
@@ -753,7 +792,7 @@ def _sort_outputs(items: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
 
 
 def _sort_options(kind: str, items: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
-    return sorted(items, key=lambda item: _natural_key(item["name"]))
+    return sorted(items, key=lambda item: _natural_key(_normalized_option_key(kind, item["name"])))
 
 
 def _sort_items(items: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
@@ -819,11 +858,21 @@ def _tail_field(name: str) -> str:
 
 
 def _inside_design_or_font_option(rel: list[str]) -> bool:
-    return len(rel) >= 4 and _is_output_name(rel[0]) and _norm(rel[1]) in {"design", "font"}
+    return (
+        len(rel) >= 4
+        and _is_output_name(rel[0])
+        and _norm(rel[1]) in {"design", "font"}
+        and _is_option_name(_norm(rel[1]), rel[2])
+    )
 
 
 def _inside_design_option_assets(rel: list[str]) -> bool:
-    return len(rel) == 4 and _is_output_name(rel[0]) and _norm(rel[1]) == "design" and _DESIGN_RE.match(rel[2]) is not None
+    return (
+        len(rel) == 4
+        and _is_output_name(rel[0])
+        and _norm(rel[1]) == "design"
+        and _is_option_name("design", rel[2])
+    )
 
 
 def _slot_record(item: Mapping[str, Any]) -> Dict[str, Any]:

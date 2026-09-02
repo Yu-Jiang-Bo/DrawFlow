@@ -66,7 +66,7 @@
             } else {
                 ignoredDirect += 1;
                 if (name && lowerStartsWith(normalized, "output")) {
-                    addIssue(output, "blocking", "invalid_output_name", "$.template.outputs", "Output 组名称必须是 Output_main 或 Output_SideA/B/C。", {
+                    addIssue(output, "blocking", "invalid_output_name", "$.template.outputs", "Output 组名称必须是 Output、Output_main 或 Output_SideA/B/C。", {
                         layer_path: itemPath(child),
                         name: name
                     });
@@ -904,7 +904,7 @@
     function outputKey(name) {
         var trimmed = trimName(name);
         var lower = normalizeName(trimmed);
-        if (lower === "output_main") return "Output_main";
+        if (lower === "output" || lower === "output_main") return "Output_main";
         var match = lower.match(/^output_side([a-z])$/);
         if (match) return "Output_Side" + match[1].toUpperCase();
         return "";

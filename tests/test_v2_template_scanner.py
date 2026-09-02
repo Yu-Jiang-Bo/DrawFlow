@@ -128,6 +128,63 @@ def test_normalizes_scan_with_stable_sorting_and_digest():
     assert a["evidence"]["scan_protocol_version"] == V2_SCAN_PROTOCOL_VERSION
 
 
+def test_accepts_single_output_alias_and_spaced_design_font_names():
+    result = normalize_v2_template_scan(
+        base_raw_scan(
+            group("Template", "Template"),
+            group("Template/Output", "Output"),
+            group("Template/Output/Design", "Design"),
+            group("Template/Output/Design/Design 1", "Design 1"),
+            text("Template/Output/Design/Design 1/slot_name", "slot_name"),
+            path_item("Template/Output/Design/Design 1/anchor_name", "anchor_name"),
+            text("Template/Output/Design/Design 1/slot_logo", "slot_logo"),
+            text("Template/Output/Design/Design 1/tail_name_last_m", "tail_name_last_m"),
+            group("Template/Output/Design/Design 1/Assets", "Assets"),
+            group("Template/Output/Design/Design 1/Assets/logo", "logo"),
+            group("Template/Output/Design/Design 1/Assets/logo/A", "A"),
+            group("Template/Output/Design/design19", "design19"),
+            text("Template/Output/Design/design19/slot_title", "slot_title"),
+            group("Template/Output/Font", "Font"),
+            group("Template/Output/Font/F 1", "F 1"),
+            text("Template/Output/Font/F 1/slot_name", "slot_name"),
+            group("Template/Output/Font/f2", "f2"),
+            text("Template/Output/Font/f2/slot_title", "slot_title"),
+        )
+    )
+
+    output = result["outputs"][0]
+    assert result["blocked"] is False
+    assert output["key"] == "Output_main"
+    assert [option["key"] for option in output["design"]["options"]] == ["Design1", "design19"]
+    assert [option["key"] for option in output["font"]["options"]] == ["F1", "f2"]
+
+
+def test_blocks_equivalent_output_and_option_names_after_normalization():
+    duplicate_output = normalize_v2_template_scan(
+        base_raw_scan(
+            group("Template", "Template"),
+            group("Template/Output", "Output"),
+            group("Template/Output_main", "Output_main"),
+        )
+    )
+    duplicate_design = normalize_v2_template_scan(
+        base_raw_scan(
+            group("Template", "Template"),
+            group("Template/Output", "Output"),
+            group("Template/Output/Design", "Design"),
+            group("Template/Output/Design/Design1", "Design1"),
+            text("Template/Output/Design/Design1/slot_name", "slot_name"),
+            group("Template/Output/Design/Design01", "Design01"),
+            text("Template/Output/Design/Design01/slot_title", "slot_title"),
+        )
+    )
+
+    assert duplicate_output["blocked"] is True
+    assert "duplicate_output" in issue_codes(duplicate_output)
+    assert duplicate_design["blocked"] is True
+    assert "duplicate_design_option" in issue_codes(duplicate_design)
+
+
 def test_single_text_font_without_slot_becomes_default_font_reference():
     items = valid_scan_items()
     for item in items:
@@ -238,7 +295,7 @@ def test_reports_wrong_hierarchy_and_bad_output_sequence():
             group("Template/Output_main", "Output_main"),
             text("Template/Output_main/slot_name", "slot_name"),
             group("Template/Output_main/Design", "Design"),
-            group("Template/Output_main/Design/Design3", "Design3"),
+            group("Template/Output_main/Design/Design-3", "Design-3"),
         )
     )
     bad_sides = normalize_v2_template_scan(
@@ -1309,14 +1366,15 @@ function link(parent) {{
   return parent;
 }}
 const fixed = {{ typename: 'PathItem', name: '', filled: true, closed: true, pathPoints: [1], visibleBounds: [0, 10, 10, 0], opacity: 100 }};
-const design = group('Design03', [
+const design = group('Design 1', [
   group('slot_logo', [text('slot_logo_text', TextType.PATHTEXT), pathItem('keep_ratio_heart', {{ typename: 'RGBColor', red: 0, green: 0, blue: 0 }}), pathItem('fixed', {{ typename: 'RGBColor', red: 0, green: 0, blue: 0 }})]),
   text(' slot_LOGO ', TextType.POINTTEXT),
   group('Assets', [group('logo', [group('A', [])])]),
   fixed
 ]);
+const font = group('F 1', [text('slot_title', TextType.POINTTEXT)]);
 const template = link(group('Template', [
-  group('Output_main', [group('Design', [design])]),
+  group('Output', [group('Design', [design]), group('Font', [font])]),
   group('Colors', [pathItem('Black', {{ typename: 'RGBColor', red: 0, green: 0, blue: 0 }})])
 ]));
 const doc = {{
@@ -1345,6 +1403,9 @@ new Function(source)();
 const scan = NativeJSON.parse(writes['scan.json']);
 const option = scan.outputs[0].designs[0];
 if (scan.status !== 'blocked') throw new Error('duplicate slot should block');
+if (scan.outputs[0].key !== 'Output_main') throw new Error('single Output alias was not normalized');
+if (option.key !== 'Design 1') throw new Error('spaced Design name was not scanned');
+if (scan.outputs[0].fonts[0].key !== 'F 1') throw new Error('spaced Font name was not scanned');
 if (option.fixed_object_count !== 1) throw new Error('fixed object count lost');
 if (scan.items.some(item => item.name === '' || item.layer_path.indexOf('/PathItem') >= 0)) throw new Error('fixed object leaked into items');
 if (!option.slots.some(slot => slot.text && slot.text.text_kind === 'path_text')) throw new Error('path text not detected');
