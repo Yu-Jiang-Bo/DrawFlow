@@ -443,9 +443,23 @@ def test_accepts_safe_output_planning_metadata():
     result = check_v2_template_contract(normalized)
 
     assert result["ok"] is True
-    assert normalized["multi_name_customization"] == {"enabled": True}
+    assert normalized["render_mode"] == "multi_customization"
+    assert "multi_name_customization" not in normalized
     assert normalized["render_layout"]["type"] == "name_columns"
     assert normalized["output"] == {"color_mode": "CMYK"}
+
+
+def test_normalizes_and_rejects_explicit_render_modes():
+    payload = base_contract()
+    payload["render_mode"] = "multi_customization"
+
+    assert normalize_v2_template_contract(payload)["render_mode"] == "multi_customization"
+
+    payload["render_mode"] = "based_on_order_data"
+    result = check_v2_template_contract(payload)
+
+    assert result["ok"] is False
+    assert any(error["path"] == "$.render_mode" for error in result["errors"])
 
 
 def test_rejects_camel_case_execution_field_aliases():

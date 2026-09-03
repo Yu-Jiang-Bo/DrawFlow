@@ -96,6 +96,7 @@ def compile_v2_render_task(
         },
         "field_bindings": deepcopy(contract.get("field_bindings") or {}),
         "option_mappings": _stable_option_mappings(contract.get("option_mappings") or []),
+        "render_mode": str(contract.get("render_mode") or ""),
         "outputs": outputs,
         "font_check": normalized_font_check,
     }

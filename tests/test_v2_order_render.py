@@ -368,6 +368,7 @@ def test_v2_single_name_template_splits_newline_names_into_one_order_column(tmp_
         b"template-ai",
         with_styles=True,
         config_updates={
+            "render_mode": "single_customization",
             "field_bindings": {
                 "order_no": "订单号",
                 "detail_id": "订单明细号",
@@ -416,6 +417,73 @@ def test_v2_single_name_template_splits_newline_names_into_one_order_column(tmp_
     assert color_component_compose["input_order_nos"] == ["ORDER-K", "ORDER-K", "ORDER-K"]
     assert color_component_compose["label_lines"] == []
     assert renderer.color_frame_calls[0]["inputs"][0]["order_nos"] == ["ORDER-K"]
+
+
+def test_v2_order_render_expands_x53_purchase_quantity_for_both_customization_modes(tmp_path):
+    names = [
+        "Samantha", "Kathi", "Sam", "Candice", "Bethany",
+        "Becca", "Brooke", "Jess", "Kayleigh", "Linda",
+    ]
+    headers = ["内部订单号", "订单明细id", "购买数量", "生产部门", "产品中文名称", "字体", "尺寸", "定制信息", "字体颜色"]
+    common_bindings = {
+        "order_no": "内部订单号",
+        "detail_id": "订单明细id",
+        "department": "生产部门",
+        "product_name": "产品中文名称",
+        "font": "字体",
+        "style": "尺寸",
+        "name": "定制信息",
+        "quantity": "购买数量",
+        "color": "字体颜色",
+    }
+
+    single_bundle = tmp_path / "single.zip"
+    _bundle(
+        single_bundle,
+        "V2ORDER001",
+        b"template-ai",
+        with_styles=True,
+        config_updates={"render_mode": "single_customization", "field_bindings": common_bindings},
+    )
+    single_orders = tmp_path / "x53-single.xlsx"
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(headers)
+    sheet.append(["4104846437", "2574703", 2, "K", "草编包", "F1", "M", "NASA Mom", "蓝色"])
+    sheet.append(["4102818044", "2574704", 10, "K", "草编包", "F1", "M", "\n".join(names), "黑色"])
+    workbook.save(single_orders)
+    single_renderer = CapturingRenderer()
+    single_client = LocalDrawFlowClient(V2PublishedCentral(single_bundle), tmp_path / "single", v2_renderer=single_renderer, font_dirs=[])
+
+    single_record = single_client.render({"template_id": "V2ORDER001", "order_file": str(single_orders)})
+
+    assert single_record["status"] == "completed"
+    assert single_record["stats"]["items"] == 12
+    assert [call["values"]["name"] for call in single_renderer.calls] == ["NASA Mom", "NASA Mom", *names]
+
+    multi_bundle = tmp_path / "multi.zip"
+    _bundle(
+        multi_bundle,
+        "V2ORDER001",
+        b"template-ai",
+        with_styles=True,
+        config_updates={"render_mode": "multi_customization", "field_bindings": common_bindings},
+    )
+    multi_orders = tmp_path / "x53-multi.xlsx"
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(headers)
+    group = "\n".join(names)
+    sheet.append(["4102818044", "2574704", 10, "K", "草编包", "F1", "M", group, "黑色"])
+    workbook.save(multi_orders)
+    multi_renderer = CapturingRenderer()
+    multi_client = LocalDrawFlowClient(V2PublishedCentral(multi_bundle), tmp_path / "multi", v2_renderer=multi_renderer, font_dirs=[])
+
+    multi_record = multi_client.render({"template_id": "V2ORDER001", "order_file": str(multi_orders)})
+
+    assert multi_record["status"] == "completed"
+    assert multi_record["stats"]["items"] == 10
+    assert [call["values"]["name"] for call in multi_renderer.calls] == [group] * 10
 
 
 def test_v2_order_render_preserves_technical_illustrator_error_in_job_and_gateway_result(tmp_path):

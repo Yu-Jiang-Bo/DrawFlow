@@ -13,7 +13,7 @@ const ids = [
   "uploadScanBadge", "scanSummaryMetrics", "scanSummaryWarning", "enterStructureBtn",
   "aiDropzone", "aiFile", "scanTemplateBtn", "rescanTemplateBtn", "scanProgress",
   "scanSummary", "scanEmptyState", "structureSearch", "structureTree", "toggleDesignsBtn",
-  "toggleFontsBtn", "outputConfigRows", "outlineTextToggle", "pathfinderMergeToggle", "fieldBindingRows", "optionMappingRows", "selectedNodeSummary",
+  "toggleFontsBtn", "outputConfigRows", "singleCustomizationTemplate", "multiCustomizationTemplate", "outlineTextToggle", "pathfinderMergeToggle", "fieldBindingRows", "optionMappingRows", "selectedNodeSummary",
   "styleDimensionRows", "contentOptionRows", "blockerList", "draftSummary", "saveDraftBtn", "trialRenderBtn", "publishVersionBtn",
   "publishBlockerText", "draftSaveStatusText", "scanRunningOverlay", "scanRunningMessage", "scanFailedOverlay", "scanFailedMessage", "retryScanBtn", "closeScanFailedBtn",
   "optionRuleSearch", "optionRuleList", "optionRuleStats", "optionRuleCount", "pendingOnlyBtn", "selectedOptionTitle",
@@ -132,7 +132,7 @@ function allDescendants(root) {
 function makeDocument() {
   const elements = {};
   ids.forEach((id) => { elements[id] = new Element("div", id); });
-  ["aiFile", "outlineTextToggle", "pathfinderMergeToggle"].forEach((id) => { elements[id].tagName = "INPUT"; });
+  ["aiFile", "singleCustomizationTemplate", "multiCustomizationTemplate", "outlineTextToggle", "pathfinderMergeToggle"].forEach((id) => { elements[id].tagName = "INPUT"; });
   ["templateSearch", "templateId", "templateName", "shopName", "structureSearch", "optionRuleSearch", "publishNotes"].forEach((id) => { elements[id].tagName = "INPUT"; });
   ["optionContentPreset"].forEach((id) => { elements[id].tagName = "SELECT"; });
   ["scanTemplateBtn", "rescanTemplateBtn", "saveDraftBtn", "trialRenderBtn", "publishVersionBtn", "retryScanBtn", "closeScanFailedBtn", "toggleDesignsBtn", "toggleFontsBtn", "pendingOnlyBtn", "confirmStageBtn", "saveAndNextOptionBtn", "rerunTrialRenderBtn", "closePreflightFailedBtn", "returnToSampleDataBtn", "refreshTemplatesBtn", "createDraftFromPublishedBtn"].forEach((id) => { elements[id].tagName = "BUTTON"; });
@@ -4629,6 +4629,91 @@ def test_v2_workbench_output_policy_toggles_round_trip_through_config():
           });
         })().catch((error) => { console.error(error); process.exit(1); });
         """
+    )
+
+
+def test_v2_workbench_customization_mode_round_trips_through_config():
+    run_node(
+        r"""
+        (async () => {
+          let draftSaveBody = null;
+          let currentDraft = {
+            metadata: { template_id: "V2CUSTOMMODE", name: "Customization mode", shop_name: "" },
+            manifest: { draft_revision: "d0001" },
+            config: { render_mode: "multi_customization" },
+            scan: { outputs: [{ key: "Output_main" }] }
+          };
+          async function fakeFetch(url, options = {}) {
+            const textUrl = String(url);
+            if (textUrl === "/api/v2/templates") return response({ templates: [{ template_id: "V2CUSTOMMODE", name: "Customization mode" }] });
+            if (textUrl.endsWith("/draft") && (!options.method || options.method === "GET")) return response({ draft: currentDraft });
+            if (textUrl.endsWith("/validate")) return response({ validation: { can_save: true, checks: {} } });
+            if (textUrl.endsWith("/draft") && options.method === "POST") {
+              draftSaveBody = JSON.parse(options.body);
+              currentDraft = { ...currentDraft, config: draftSaveBody.config, manifest: { draft_revision: "d0002" } };
+              return response({ draft: currentDraft });
+            }
+            return response({});
+          }
+          const app = createApp(fakeFetch);
+          await flush();
+          app.elements.templateList.children[0].dispatch("click");
+          await flush();
+          global.setWorkbenchStage("structure");
+          await flush();
+          assert.strictEqual(app.elements.multiCustomizationTemplate.checked, true);
+          assert.strictEqual(app.elements.singleCustomizationTemplate.checked, false);
+
+          app.elements.multiCustomizationTemplate.checked = false;
+          app.elements.singleCustomizationTemplate.checked = true;
+          await global.saveDraft();
+          assert(draftSaveBody, "保存草稿请求必须发送定制信息模式");
+          assert.strictEqual(draftSaveBody.config.render_mode, "single_customization");
+        })().catch((error) => { console.error(error); process.exit(1); });
+        """,
+        cwd=Path(__file__).resolve().parents[1],
+    )
+
+
+def test_v2_workbench_migrates_legacy_multi_name_mode_when_saved():
+    run_node(
+        r"""
+        (async () => {
+          let draftSaveBody = null;
+          let currentDraft = {
+            metadata: { template_id: "V2LEGACYMODE", name: "Legacy mode", shop_name: "" },
+            manifest: { draft_revision: "d0001" },
+            config: { multi_name_customization: { enabled: true } },
+            scan: { outputs: [{ key: "Output_main" }] }
+          };
+          async function fakeFetch(url, options = {}) {
+            const textUrl = String(url);
+            if (textUrl === "/api/v2/templates") return response({ templates: [{ template_id: "V2LEGACYMODE", name: "Legacy mode" }] });
+            if (textUrl.endsWith("/draft") && (!options.method || options.method === "GET")) return response({ draft: currentDraft });
+            if (textUrl.endsWith("/validate")) return response({ validation: { can_save: true, checks: {} } });
+            if (textUrl.endsWith("/draft") && options.method === "POST") {
+              draftSaveBody = JSON.parse(options.body);
+              currentDraft = { ...currentDraft, config: draftSaveBody.config, manifest: { draft_revision: "d0002" } };
+              return response({ draft: currentDraft });
+            }
+            return response({});
+          }
+          const app = createApp(fakeFetch);
+          await flush();
+          app.elements.templateList.children[0].dispatch("click");
+          await flush();
+          global.setWorkbenchStage("structure");
+          await flush();
+          assert.strictEqual(app.elements.multiCustomizationTemplate.checked, true);
+          assert.strictEqual(app.elements.singleCustomizationTemplate.checked, false);
+
+          await global.saveDraft();
+          assert(draftSaveBody, "保存旧草稿必须迁移定制信息模式");
+          assert.strictEqual(draftSaveBody.config.render_mode, "multi_customization");
+          assert.strictEqual(Object.hasOwn(draftSaveBody.config, "multi_name_customization"), false);
+        })().catch((error) => { console.error(error); process.exit(1); });
+        """,
+        cwd=Path(__file__).resolve().parents[1],
     )
 
 

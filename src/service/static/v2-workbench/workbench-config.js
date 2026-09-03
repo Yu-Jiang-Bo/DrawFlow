@@ -20,6 +20,7 @@
         scope: "local"
       },
       outputs: outputs.map((output) => withControlledGroups(output, mappings)),
+      render_mode: collectRenderMode(),
       output: collectOutputPolicy(),
       colors: collectControlledColors(),
       field_bindings: collectFieldBindings(),
@@ -28,6 +29,31 @@
       preview: { sample_rows: [], evidence: {} },
       audit: nextAudit()
     };
+  }
+
+  function collectRenderMode() {
+    const existing = objectOf(state.draft && state.draft.config);
+    const single = document.getElementById("singleCustomizationTemplate");
+    const multi = document.getElementById("multiCustomizationTemplate");
+    if (multi && multi.checked) return "multi_customization";
+    if (single && single.checked) return "single_customization";
+    return storedRenderMode(existing);
+  }
+
+  function syncRenderModeControls() {
+    const existing = objectOf(state.draft && state.draft.config);
+    const mode = storedRenderMode(existing);
+    const single = document.getElementById("singleCustomizationTemplate");
+    const multi = document.getElementById("multiCustomizationTemplate");
+    if (single) single.checked = mode === "single_customization";
+    if (multi) multi.checked = mode === "multi_customization";
+  }
+
+  function storedRenderMode(config) {
+    if (config.render_mode === "multi_customization") return "multi_customization";
+    if (config.render_mode === "single_customization") return "single_customization";
+    const legacy = objectOf(config.multi_name_customization);
+    return !config.render_mode && legacy.enabled === true ? "multi_customization" : "single_customization";
   }
 
   function collectOutputPolicy() {
@@ -490,6 +516,9 @@
 
   Object.assign(globalThis, {
     buildControlledConfig,
+    collectRenderMode,
+    syncRenderModeControls,
+    storedRenderMode,
     collectOutputRows,
     withControlledGroups,
     collectFieldBindings,

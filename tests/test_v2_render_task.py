@@ -366,6 +366,7 @@ def test_compiles_v2_render_task_with_stable_json_and_whitelisted_actions():
     assert stable_v2_render_task_json(first) == stable_v2_render_task_json(second)
     assert first["$schema"] == V2_RENDER_TASK_SCHEMA
     assert first["template"] == {"template_id": "V2RENDER001", "version": "v0007", "sha256": TEMPLATE_SHA}
+    assert first["render_mode"] == "single_customization"
     assert first["scan"]["object_path_digest"] == "b" * 64
     assert first["font_check"] == {"ok": True, "missing": []}
     assert len(first["task_sha256"]) == 64

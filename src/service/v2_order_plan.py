@@ -1,8 +1,8 @@
 """Order planning for published V2 render jobs.
 
 This module keeps renderer execution separate from production delivery policy.
-It mirrors the legacy rule renderer's quantity expansion rules without exposing
-legacy rule fields to the Illustrator execution contract.
+V2 templates persist an explicit render mode that governs quantity expansion;
+historical configurations retain their legacy behavior until re-saved.
 """
 
 from __future__ import annotations
@@ -14,6 +14,11 @@ from typing import Any, Iterable, Mapping
 from .department_output import resolve_department_output
 from .production_output import ProductionOutputUnit
 from .v2_order_render_support import V2OrderRenderError, row_selections
+from .v2_template_contract import (
+    V2_RENDER_MODE_MULTI_CUSTOMIZATION,
+    V2_RENDER_MODE_SINGLE_CUSTOMIZATION,
+    V2_RENDER_MODES,
+)
 from .v2_trial_render_support import logical_values
 
 
@@ -75,15 +80,23 @@ def build_v2_order_units(
         for item in render_task.get("outputs", [])
         if isinstance(item, Mapping) and str(item.get("key") or "").strip()
     ]
-    multi_name = multi_name_customization_enabled(config)
+    mode = render_mode(config, render_task)
+    legacy_multi_name = mode is None and multi_name_customization_enabled(config)
     units: list[V2OrderRenderUnit] = []
     for row_index, row in enumerate(row_list, start=1):
         row_preflight = preflight_by_row.get(row_index, {})
         values = logical_values(config, row)
-        quantity = _quantity(config, row, values, enabled=multi_name)
+        quantity = _quantity(config, row, values, enabled=mode is not None or legacy_multi_name)
         selections = row_selections(row_preflight)
-        split_single_name_lines = not multi_name and _single_name_line_split_enabled(render_task, selections)
-        value_variants = _value_variants(values, quantity if multi_name else 1, split_single_name_lines)
+        value_variants = (
+            _value_variants(values, quantity, mode)
+            if mode is not None
+            else _legacy_value_variants(
+                values,
+                quantity if legacy_multi_name else 1,
+                _single_name_line_split_enabled(render_task, selections) if not legacy_multi_name else False,
+            )
+        )
         order_id = _first_value(config, row, "order_no", ORDER_ALIASES) or str(row_preflight.get("order_id") or "")
         template_version = _template_version(render_task)
         render_warnings = tuple(_render_warnings(render_task))
@@ -150,12 +163,68 @@ def has_department_delivery_context(config: Mapping[str, Any], rows: Iterable[Ma
     return False
 
 
+def render_mode(config: Mapping[str, Any], render_task: Mapping[str, Any] | None = None) -> str | None:
+    """Read the template's explicit quantity strategy.
+
+    A missing field marks a historical configuration.  Those configurations
+    retain their old execution behavior until the workbench saves them, at
+    which point contract normalization persists an explicit mode.  A compiled
+    task must agree with an explicitly persisted configuration when present.
+    """
+
+    configured = str(config.get("render_mode") or "").strip()
+    if not configured:
+        return None
+    if configured not in V2_RENDER_MODES:
+        raise V2OrderRenderError(
+            "当前模板的渲染模式无效，请回到 V2 工作台重新保存模板后再试。",
+            code="v2_render_mode_invalid",
+        )
+    task_mode = (
+        str(render_task.get("render_mode") or "").strip()
+        if isinstance(render_task, Mapping)
+        else ""
+    )
+    if task_mode and task_mode != configured:
+        raise V2OrderRenderError(
+            "当前模板配置与渲染任务的渲染模式不一致，请重新下载已发布模板后再试。",
+            code="v2_render_mode_mismatch",
+        )
+    return configured
+
+
 def multi_name_customization_enabled(config: Mapping[str, Any]) -> bool:
+    """Compatibility helper for callers that still use the historical name."""
+
     policy = config.get("multi_name_customization")
     return bool(policy.get("enabled", False)) if isinstance(policy, Mapping) else False
 
 
 def _value_variants(
+    values: Mapping[str, str],
+    quantity: int,
+    mode: str,
+) -> list[tuple[Mapping[str, str], int, int]]:
+    if mode == V2_RENDER_MODE_MULTI_CUSTOMIZATION:
+        return [(values, quantity_index, quantity) for quantity_index in range(1, quantity + 1)]
+
+    name_parts = _split_name_lines(values.get("name", ""))
+    if len(name_parts) <= 1:
+        return [(values, quantity_index, quantity) for quantity_index in range(1, quantity + 1)]
+    if len(name_parts) != quantity:
+        raise V2OrderRenderError(
+            "单定制信息模板的定制信息条数必须为 1 条，或与购买数量一致。",
+            code="v2_order_customization_quantity_mismatch",
+        )
+    variants: list[tuple[Mapping[str, str], int, int]] = []
+    for index, name in enumerate(name_parts, start=1):
+        next_values = dict(values)
+        next_values["name"] = name
+        variants.append((next_values, index, quantity))
+    return variants
+
+
+def _legacy_value_variants(
     values: Mapping[str, str],
     quantity: int,
     split_single_name_lines: bool,
@@ -240,20 +309,17 @@ def _quantity(
         return 1
     raw = values.get("quantity") or _first_value(config, row, "quantity", QUANTITY_ALIASES)
     if raw is None or not str(raw).strip():
-        raise V2OrderRenderError(
-            "当前模板启用了多定制内容，订单表需要提供数量列，且数量必须是正整数。",
-            code="v2_order_quantity_missing",
-        )
+        return 1
     try:
         number = Decimal(str(raw).strip())
     except (InvalidOperation, ValueError):
         raise V2OrderRenderError(
-            "当前模板启用了多定制内容，订单数量必须是正整数。",
+            "订单购买数量必须是正整数。",
             code="v2_order_quantity_invalid",
         ) from None
     if not number.is_finite() or number != number.to_integral_value() or number < 1:
         raise V2OrderRenderError(
-            "当前模板启用了多定制内容，订单数量必须是正整数。",
+            "订单购买数量必须是正整数。",
             code="v2_order_quantity_invalid",
         )
     return int(number)
@@ -359,6 +425,7 @@ __all__ = [
     "build_v2_order_units",
     "has_department_delivery_context",
     "multi_name_customization_enabled",
+    "render_mode",
     "to_production_units",
     "unit_stem",
 ]

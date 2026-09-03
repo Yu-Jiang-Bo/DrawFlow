@@ -135,6 +135,13 @@ th { color: var(--v2-muted); background: #f7f9fc; font-size: 12px; font-weight: 
 .pane-header h2, .pane-header h3, .pane-header p { margin: 0; min-width: 0; overflow-wrap: anywhere; }
 .pane-header h2, .pane-header h3 { font-size: 15px; line-height: 1.3; }
 .pane-body { padding: 14px; }
+.customization-mode-body { padding: 14px; }
+.customization-mode-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); overflow: hidden; border: 1px solid var(--v2-border); border-radius: 5px; }
+.customization-mode-option { display: grid; place-items: center; min-height: 42px; padding: 8px 12px; border-right: 1px solid var(--v2-border); color: var(--v2-muted); font-size: 13px; font-weight: 700; cursor: pointer; }
+.customization-mode-option:last-child { border-right: 0; }
+.customization-mode-option input { position: absolute; opacity: 0; pointer-events: none; }
+.customization-mode-option:has(input:checked) { color: #ffffff; background: var(--v2-primary); }
+.customization-mode-option:has(input:focus-visible) { outline: 3px solid var(--v2-focus); outline-offset: -3px; }
 .output-policy-panel > .pane-header { background: var(--v2-surface); }
 .output-policy-badge { flex: 0 0 auto; }
 .output-policy-body { display: grid; gap: 10px; padding: 14px; }

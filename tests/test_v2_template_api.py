@@ -240,6 +240,7 @@ def test_v2_api_saves_draft_config_without_accepting_untrusted_scan(tmp_path):
 
     assert saved["validation"]["can_save"] is True
     assert saved["draft"]["config"]["template"]["template_id"] == "V2API001"
+    assert saved["draft"]["config"]["render_mode"] == "single_customization"
     assert scan == {"template_id": "V2API001", "draft_revision": "d0002", "scan": {}}
 
     with pytest.raises(V2TemplateApiError, match="未开放"):

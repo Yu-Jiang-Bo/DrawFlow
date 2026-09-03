@@ -15,6 +15,12 @@ V2_CONTRACT_SCHEMA = "custom-renderer/v2-template-contract"
 V2_CONTRACT_VERSION = 1
 
 V2_SCOPE_VALUES = {"local", "shared"}
+V2_RENDER_MODE_SINGLE_CUSTOMIZATION = "single_customization"
+V2_RENDER_MODE_MULTI_CUSTOMIZATION = "multi_customization"
+V2_RENDER_MODES = {
+    V2_RENDER_MODE_SINGLE_CUSTOMIZATION,
+    V2_RENDER_MODE_MULTI_CUSTOMIZATION,
+}
 V2_PROCESSING_PRESETS = {
     "direct_text",
     "split_by_pipe",
@@ -47,6 +53,7 @@ _TOP_LEVEL_FIELDS = {
     "colors",
     "field_bindings",
     "option_mappings",
+    "render_mode",
     "multi_name_customization",
     "render_layout",
     "output",
@@ -191,7 +198,8 @@ def normalize_v2_template_contract(payload: Any) -> Dict[str, Any]:
     colors = _normalize_colors(source.get("colors", []), issues)
     field_bindings = _normalize_string_map(source.get("field_bindings", {}), "$.field_bindings", issues)
     option_mappings = _normalize_option_mappings(source.get("option_mappings", []), output_keys, issues)
-    multi_name_customization = _normalize_metadata_object(
+    render_mode = _normalize_render_mode(source, issues)
+    _normalize_metadata_object(
         source.get("multi_name_customization", {}),
         "$.multi_name_customization",
         issues,
@@ -212,13 +220,40 @@ def normalize_v2_template_contract(payload: Any) -> Dict[str, Any]:
         "colors": colors,
         "field_bindings": field_bindings,
         "option_mappings": option_mappings,
-        "multi_name_customization": multi_name_customization,
+        "render_mode": render_mode,
         "render_layout": render_layout,
         "output": output,
         "checks": checks,
         "preview": preview,
         "audit": audit,
     }
+
+
+def _normalize_render_mode(source: Mapping[str, Any], issues: list[Dict[str, str]]) -> str:
+    """Persist a quantity strategy without deriving it from order contents.
+
+    Drafts created before the V2 mode selector existed only have the legacy
+    template-level multi-name flag.  Translate that flag once while saving so
+    the normalized contract always carries an explicit render mode.
+    """
+
+    value = source.get("render_mode")
+    if value in (None, ""):
+        legacy = source.get("multi_name_customization")
+        value = (
+            V2_RENDER_MODE_MULTI_CUSTOMIZATION
+            if isinstance(legacy, Mapping) and legacy.get("enabled") is True
+            else V2_RENDER_MODE_SINGLE_CUSTOMIZATION
+        )
+    mode = _optional_string({"render_mode": value}, "render_mode", "$.render_mode", issues)
+    if mode not in V2_RENDER_MODES:
+        _issue(
+            issues,
+            "$.render_mode",
+            "render_mode must be single_customization or multi_customization.",
+        )
+        return V2_RENDER_MODE_SINGLE_CUSTOMIZATION
+    return mode
 
 
 def _normalize_template(value: Any, issues: list[Dict[str, str]]) -> Dict[str, Any]:

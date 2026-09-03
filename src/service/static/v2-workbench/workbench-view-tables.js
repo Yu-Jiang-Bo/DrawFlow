@@ -69,6 +69,7 @@
   }
 
   function renderTables() {
+    if (typeof globalThis.syncRenderModeControls === "function") globalThis.syncRenderModeControls();
     if (typeof globalThis.syncOutputPolicyControls === "function") globalThis.syncOutputPolicyControls();
     renderOutputRows();
     renderFieldBindingRows();

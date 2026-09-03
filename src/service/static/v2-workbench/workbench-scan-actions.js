@@ -139,6 +139,8 @@
     setDisabled("templateName", readOnly);
     setDisabled("shopName", readOnly);
     setDisabled("aiFile", readOnly);
+    setDisabled("singleCustomizationTemplate", readOnly);
+    setDisabled("multiCustomizationTemplate", readOnly);
     setDisabled("outlineTextToggle", readOnly);
     setDisabled("pathfinderMergeToggle", readOnly);
     setDisabled("optionContentPreset", readOnly);

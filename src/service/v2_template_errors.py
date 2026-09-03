@@ -34,6 +34,7 @@ V2_CONFIG_TOP_LEVEL_FIELDS = frozenset(
         "colors",
         "field_bindings",
         "option_mappings",
+        "render_mode",
         "multi_name_customization",
         "render_layout",
         "output",
