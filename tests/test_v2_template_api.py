@@ -5,6 +5,7 @@ import io
 
 import pytest
 
+from src.service import v2_template_api
 from src.service.v2_template_api import V2TemplateApi, V2TemplateApiError, handle_v2_template_api
 from src.service.v2_template_contract import V2_CONTRACT_SCHEMA, V2_CONTRACT_VERSION
 from src.service.v2_template_limits import V2TemplateLimitConfig, V2UploadConcurrencyGate
@@ -740,6 +741,30 @@ def test_v2_api_uploads_ai_asset_as_stream_and_records_manifest_metadata(tmp_pat
     assert asset["scan_version"] == "scan-1"
     assert asset["draft_revision"] == result["state"]["draft"]["revision"]
     assert (tmp_path / "v2" / "audit.jsonl").read_text(encoding="utf-8")
+
+
+def test_v2_api_uses_a_short_upload_staging_path(tmp_path, monkeypatch):
+    store = V2TemplateStore(tmp_path / "central" / "v2-templates")
+    api = V2TemplateApi(store)
+    api.create_template({"template_id": "JJMB202511201110061195", "name": "API Demo"})
+    captured = {}
+
+    def record_destination(*args, **kwargs):
+        captured["directory"] = args[1]
+        raise V2TemplateStoreError("upload staging captured")
+
+    monkeypatch.setattr(v2_template_api, "receive_ai_stream", record_destination)
+    with pytest.raises(V2TemplateStoreError, match="upload staging captured"):
+        api.upload_asset(
+            "JJMB202511201110061195",
+            "JJMB202511201110061195.ai",
+            TrackingStream(b"ai-bytes"),
+            content_length=8,
+            headers={},
+        )
+
+    assert captured["directory"].parent == tmp_path / "central" / "_tmp"
+    assert "JJMB202511201110061195" not in {path.name for path in captured["directory"].parents}
 
 
 def test_v2_http_upload_reads_only_declared_content_length(tmp_path):
