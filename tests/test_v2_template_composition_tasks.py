@@ -40,6 +40,38 @@ def test_order_column_task_keeps_unannotated_components_distinct_from_final_labe
     assert final_task["label_lines"] == ["ORDER-1", "金色"]
 
 
+def test_order_column_task_carries_per_product_annotation_groups(tmp_path):
+    task = build_v2_order_column_task(
+        input_ai_files=[tmp_path / "component-a.ai", tmp_path / "component-b.ai", tmp_path / "component-c.ai"],
+        input_order_nos=["ORDER-1", "ORDER-1", "ORDER-1"],
+        output_ai=tmp_path / "single-order.ai",
+        input_annotation_groups=[
+            {"group_key": "product-1", "label_lines": ["ORDER-1", "礼盒"]},
+            {"group_key": "product-1", "label_lines": ["ORDER-1", "礼盒"]},
+            {"group_key": "product-2", "label_lines": ["收纳盒"]},
+        ],
+    )
+
+    assert "label_lines" not in task
+    assert task["inputs"] == [
+        {"path": str(tmp_path / "component-a.ai"), "order_no": "ORDER-1", "annotation_group": "product-1", "label_lines": ["ORDER-1", "礼盒"]},
+        {"path": str(tmp_path / "component-b.ai"), "order_no": "ORDER-1", "annotation_group": "product-1", "label_lines": ["ORDER-1", "礼盒"]},
+        {"path": str(tmp_path / "component-c.ai"), "order_no": "ORDER-1", "annotation_group": "product-2", "label_lines": ["收纳盒"]},
+    ]
+
+
+def test_order_column_composer_supports_per_product_annotation_blocks():
+    source = Path("scripts/illustrator/compose_v2_order_column.jsx").read_text(encoding="utf-8")
+
+    assert "input.annotation_group" in source
+    assert "input.label_lines" in source
+    assert "bucket.labelLines" in source
+    assert "layoutOrderBlocks(layer, orderBuckets, gap, labelHeight, labelGap, labelFontSize)" in source
+    assert "function addProductionLabelsAboveBlock" in source
+    assert "artworkTop = currentTop - labelSpace" in source
+    assert "addProductionLabelsAboveBlock(" in source
+
+
 def test_color_frame_task_preserves_public_packing_and_component_references(tmp_path):
     task = build_v2_color_frames_task(
         inputs=[{"path": str(tmp_path / "gold.ai"), "color_option": "金色", "order_nos": ["ORDER-1"]}],

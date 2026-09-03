@@ -106,6 +106,7 @@ class V2TemplateRenderer:
         task_file: Path | str,
         input_order_nos: Sequence[str] | None = None,
         label_lines: Sequence[str] | None = None,
+        input_annotation_groups: Sequence[Mapping[str, Any]] | None = None,
         gap_mm: float = 8.0,
         label_height_mm: float = 4.0,
         label_gap_mm: float = 0.8,
@@ -121,6 +122,7 @@ class V2TemplateRenderer:
             output_ai=output_ai,
             input_order_nos=input_order_nos,
             label_lines=label_lines,
+            input_annotation_groups=input_annotation_groups,
             gap_mm=gap_mm,
             label_height_mm=label_height_mm,
             label_gap_mm=label_gap_mm,
@@ -298,6 +300,7 @@ def build_v2_order_column_task(
     output_ai: Path | str,
     input_order_nos: Sequence[str] | None = None,
     label_lines: Sequence[str] | None = None,
+    input_annotation_groups: Sequence[Mapping[str, Any]] | None = None,
     gap_mm: float = 8.0,
     label_height_mm: float = 4.0,
     label_gap_mm: float = 0.8,
@@ -310,7 +313,8 @@ def build_v2_order_column_task(
     """Build a pure V2 order-column composition task for the shared batch executor."""
 
     order_nos = [str(item or "").strip() for item in (input_order_nos or [])]
-    inputs: list[dict[str, str]] = []
+    annotations = tuple(input_annotation_groups or ())
+    inputs: list[dict[str, Any]] = []
     for index, path in enumerate(input_ai_files):
         # Illustrator opens composition inputs from its own process directory,
         # not from this Python process. Relative paths fail in the real
@@ -324,6 +328,18 @@ def build_v2_order_column_task(
                 item["target_dimensions"] = deepcopy(dimensions)
         elif target_dimensions:
             item["target_dimensions"] = deepcopy(dict(target_dimensions))
+        if index < len(annotations) and isinstance(annotations[index], Mapping):
+            annotation = annotations[index]
+            group_key = str(annotation.get("group_key") or "").strip()
+            input_label_lines = [
+                str(value).strip()
+                for value in annotation.get("label_lines", [])
+                if str(value or "").strip()
+            ] if isinstance(annotation.get("label_lines"), Sequence) and not isinstance(annotation.get("label_lines"), str) else []
+            if group_key:
+                item["annotation_group"] = group_key
+            if input_label_lines:
+                item["label_lines"] = input_label_lines
         inputs.append(item)
     payload: dict[str, Any] = {
         "type": "compose_v2_order_column",
