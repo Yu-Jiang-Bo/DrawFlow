@@ -1,0 +1,240 @@
+{
+  "template_id": "JJMB202603021807354836",
+  "template_sha256": "508cf810293d644b7ff33095e4f6a70091f3b151865d685e6b1014f0e720a206",
+  "config": {
+    "$schema": "custom-renderer/v2-template-contract",
+    "schema_version": 1,
+    "template": {
+      "template_id": "JJMB202603021807354836",
+      "name": "JJMB202603021807354836 tail regression",
+      "shop_name": "A-80"
+    },
+    "outputs": [
+      {
+        "key": "Output_main",
+        "style": {
+          "field": "style",
+          "options": [
+            {
+              "key": "style1",
+              "dimensions": {
+                "mode": "fixed",
+                "width_mm": 80.0,
+                "height_mm": 20.0,
+                "tolerance_mm": 0.007
+              }
+            }
+          ]
+        },
+        "design": {
+          "field": "",
+          "options": []
+        },
+        "font": {
+          "field": "font",
+          "options": [
+            {
+              "key": "F1",
+              "content_preset": "direct_text",
+              "font_dependencies": ["TimesNewRomanPSMT"],
+              "slots": [
+                {"key": "slot_name", "source_field": "name", "preset": "direct_text", "font_dependencies": ["TimesNewRomanPSMT"]}
+              ]
+            },
+            {
+              "key": "F2",
+              "content_preset": "direct_text",
+              "font_dependencies": ["hellohoneyPersonalUse"],
+              "slots": [
+                {
+                  "key": "slot_name",
+                  "source_field": "name",
+                  "preset": "direct_text",
+                  "font_dependencies": ["hellohoneyPersonalUse"],
+                  "tails": [
+                    {"key": "tail_name_first_a", "position": "first", "sample": "a"},
+                    {"key": "tail_name_last_n", "position": "last", "sample": "n"}
+                  ]
+                }
+              ]
+            },
+            {
+              "key": "F3",
+              "content_preset": "direct_text",
+              "font_dependencies": ["BirdsofParadise-PersonaluseOnly"],
+              "slots": [
+                {"key": "slot_name", "source_field": "name", "preset": "direct_text", "font_dependencies": ["BirdsofParadise-PersonaluseOnly"]}
+              ]
+            },
+            {
+              "key": "F11",
+              "content_preset": "direct_text",
+              "font_dependencies": ["MalovelyScript"],
+              "slots": [
+                {
+                  "key": "slot_name",
+                  "source_field": "name",
+                  "preset": "direct_text",
+                  "font_dependencies": ["MalovelyScript"],
+                  "tails": [
+                    {"key": "tail_name_last_k", "position": "last", "sample": "k"}
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      }
+    ],
+    "field_bindings": {"style": "尺寸", "font": "字体", "name": "定制信息"},
+    "option_mappings": [
+      {"field": "style", "source_value": "style1", "target": "style1", "output": "Output_main", "group": "style"},
+      {"field": "font", "source_value": "F1", "target": "F1", "output": "Output_main", "group": "font"},
+      {"field": "font", "source_value": "F2", "target": "F2", "output": "Output_main", "group": "font"},
+      {"field": "font", "source_value": "F3", "target": "F3", "output": "Output_main", "group": "font"},
+      {"field": "font", "source_value": "F11", "target": "F11", "output": "Output_main", "group": "font"}
+    ],
+    "checks": {
+      "output": "confirmed",
+      "fields": "confirmed",
+      "options": "confirmed",
+      "slots": "confirmed",
+      "content": "confirmed",
+      "dimensions": "confirmed",
+      "colors": "confirmed",
+      "preview": "confirmed"
+    },
+    "audit": {
+      "template_sha256": "508cf810293d644b7ff33095e4f6a70091f3b151865d685e6b1014f0e720a206"
+    },
+    "output": {"outline_text": true, "pathfinder_merge": true}
+  },
+  "migration_evidence": {
+    "outputs": [
+      {
+        "font": {
+          "options": [
+            {"key": "F1", "slots": [{"tails": []}]},
+            {
+              "key": "F2",
+              "slots": [
+                {
+                  "tails": [
+                    {
+                      "key": "tail_name_first_a",
+                      "position": "first",
+                      "sample": "a",
+                      "tail_profile_status": "auto",
+                      "opentype_feature": "aalt",
+                      "opentype_alternate_index": 2,
+                      "tail_profile_coverage": {"version": 1, "alphabet": "abcdefghijklmnopqrstuvwxyz", "verified": true}
+                    },
+                    {
+                      "key": "tail_name_last_n",
+                      "position": "last",
+                      "sample": "n",
+                      "tail_profile_status": "auto",
+                      "opentype_feature": "aalt",
+                      "opentype_alternate_index": 3,
+                      "tail_profile_coverage": {"version": 1, "alphabet": "abcdefghijklmnopqrstuvwxyz", "verified": true}
+                    }
+                  ]
+                }
+              ]
+            },
+            {"key": "F3", "slots": [{"tails": []}]},
+            {
+              "key": "F11",
+              "slots": [
+                {
+                  "tails": [
+                    {
+                      "key": "tail_name_last_k",
+                      "position": "last",
+                      "sample": "k",
+                      "tail_profile_status": "auto",
+                      "opentype_feature": "aalt",
+                      "opentype_alternate_index": 5,
+                      "tail_profile_coverage": {"version": 1, "alphabet": "abcdefghijklmnopqrstuvwxyz", "verified": true}
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "render_scan": {
+    "$schema": "custom-renderer/v2-template-scan",
+    "scan_protocol_version": 1,
+    "evidence": {
+      "template_sha256": "508cf810293d644b7ff33095e4f6a70091f3b151865d685e6b1014f0e720a206",
+      "scan_protocol_version": 1,
+      "object_path_digest": "f899ef95fb5bea176b57987389931ca1dc96d8e3e88941113e4f4c42f4b44e2c"
+    },
+    "template": {"path": "图层/Template"},
+    "outputs": [
+      {
+        "key": "Output_main",
+        "path": "图层/Template/Output_main",
+        "styles": [{"key": "style1", "path": "图层/Template/Output_main/Style/style1"}],
+        "designs": [],
+        "fonts": [
+          {
+            "key": "F1",
+            "path": "图层/Template/Output_main/Font/F1",
+            "slots": [{"key": "slot_name", "path": "图层/Template/Output_main/Font/F1/slot_name", "font_dependencies": ["TimesNewRomanPSMT"]}],
+            "anchors": [],
+            "tails": []
+          },
+          {
+            "key": "F2",
+            "path": "图层/Template/Output_main/Font/F2",
+            "slots": [
+              {
+                "key": "slot_name",
+                "path": "图层/Template/Output_main/Font/F2/slot_name",
+                "font_dependencies": ["hellohoneyPersonalUse"],
+                "tails": [
+                  {"key": "tail_name_first_a", "path": "图层/Template/Output_main/Font/F2/tail_name_first_a", "position": "first", "sample": "a"},
+                  {"key": "tail_name_last_n", "path": "图层/Template/Output_main/Font/F2/tail_name_last_n", "position": "last", "sample": "n"}
+                ]
+              }
+            ],
+            "anchors": [],
+            "tails": [
+              {"key": "tail_name_first_a", "path": "图层/Template/Output_main/Font/F2/tail_name_first_a", "position": "first", "sample": "a"},
+              {"key": "tail_name_last_n", "path": "图层/Template/Output_main/Font/F2/tail_name_last_n", "position": "last", "sample": "n"}
+            ]
+          },
+          {
+            "key": "F3",
+            "path": "图层/Template/Output_main/Font/F3",
+            "slots": [{"key": "slot_name", "path": "图层/Template/Output_main/Font/F3/slot_name", "font_dependencies": ["BirdsofParadise-PersonaluseOnly"]}],
+            "anchors": [],
+            "tails": []
+          },
+          {
+            "key": "F11",
+            "path": "图层/Template/Output_main/Font/F11",
+            "slots": [
+              {
+                "key": "slot_name",
+                "path": "图层/Template/Output_main/Font/F11/slot_name",
+                "font_dependencies": ["MalovelyScript"],
+                "tails": [{"key": "tail_name_last_k", "path": "图层/Template/Output_main/Font/F11/tail_name_last_k", "position": "last", "sample": "k"}]
+              }
+            ],
+            "anchors": [],
+            "tails": [{"key": "tail_name_last_k", "path": "图层/Template/Output_main/Font/F11/tail_name_last_k", "position": "last", "sample": "k"}]
+          }
+        ]
+      }
+    ],
+    "dependencies": {"fonts": [], "colors": []},
+    "issues": [],
+    "blocked": false
+  }
+}

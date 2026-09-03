@@ -10,7 +10,7 @@ versioned workflow.
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Iterator, Mapping
+from typing import Any, Iterable, Iterator, Mapping
 
 
 PROFILE_KEYS = (
@@ -64,6 +64,8 @@ def proven_tail_profiles(evidence: Mapping[str, Any]) -> dict[TailLocator, dict[
 def merge_proven_tail_profiles(
     config: Mapping[str, Any],
     evidence: Mapping[str, Any],
+    *,
+    tail_keys: Iterable[str] | None = None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """Merge only proven profiles when the draft has identical tail identities.
 
@@ -75,6 +77,26 @@ def merge_proven_tail_profiles(
 
     merged = deepcopy(dict(config))
     profiles = proven_tail_profiles(evidence)
+    selected_keys = {str(key).strip() for key in (tail_keys or []) if str(key).strip()}
+    if tail_keys is not None:
+        if not selected_keys:
+            raise OpenTypeTailMigrationError("迁移白名单必须至少包含一个非空尾巴标注键。")
+        source_tails = dict(iter_slot_tails(evidence))
+        locators_by_key: dict[str, list[TailLocator]] = {}
+        for locator in profiles:
+            key = str(source_tails[locator].get("key") or "")
+            locators_by_key.setdefault(key, []).append(locator)
+        missing_keys = sorted(selected_keys.difference(locators_by_key))
+        if missing_keys:
+            raise OpenTypeTailMigrationError(f"扫描证据中没有指定的已验证尾巴字形：{missing_keys}")
+        ambiguous_keys = sorted(key for key in selected_keys if len(locators_by_key[key]) > 1)
+        if ambiguous_keys:
+            raise OpenTypeTailMigrationError(f"指定尾巴标注键匹配多个位置，拒绝扩大迁移范围：{ambiguous_keys}")
+        profiles = {
+            locator: profile
+            for locator, profile in profiles.items()
+            if str(source_tails[locator].get("key") or "") in selected_keys
+        }
     if not profiles:
         raise OpenTypeTailMigrationError("扫描证据中没有可迁移的已验证尾巴字形。")
     targets = dict(iter_slot_tails(merged))

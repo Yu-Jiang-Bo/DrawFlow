@@ -126,8 +126,17 @@ def main(argv: list[str] | None = None, *, request_json: RequestJson = _request_
     parser.add_argument("--central-url", required=True)
     parser.add_argument("--template-id", required=True)
     parser.add_argument("--raw-evidence", required=True, help="本机 Illustrator 扫描输出的 JSON 文件")
+    parser.add_argument(
+        "--tail-key",
+        action="append",
+        default=[],
+        help="仅迁移指定尾巴标注键；可重复传入。--apply 必须至少提供一个键，省略时只生成全量只读报告。",
+    )
     parser.add_argument("--apply", action="store_true", help="确认执行扫描证据写入和草稿保存")
     args = parser.parse_args(argv)
+    args.tail_key = [str(key).strip() for key in args.tail_key if str(key).strip()]
+    if args.apply and not args.tail_key:
+        raise OpenTypeTailMigrationError("--apply 必须至少显式指定一个 --tail-key，拒绝全量迁移已验证尾巴。")
 
     raw = json.loads(Path(args.raw_evidence).read_text(encoding="utf-8-sig"))
     evidence = normalize_v2_template_scan(raw)
@@ -143,7 +152,11 @@ def main(argv: list[str] | None = None, *, request_json: RequestJson = _request_
     if not evidence_sha or evidence_sha != asset_sha:
         raise OpenTypeTailMigrationError(f"模板 AI 校验不一致：扫描={evidence_sha or '<missing>'}，草稿={asset_sha}")
 
-    merged, changes = merge_proven_tail_profiles(dict(draft.get("config") or {}), evidence)
+    merged, changes = merge_proven_tail_profiles(
+        dict(draft.get("config") or {}),
+        evidence,
+        tail_keys=args.tail_key or None,
+    )
     digest = hashlib.sha256(
         json.dumps(merged, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
