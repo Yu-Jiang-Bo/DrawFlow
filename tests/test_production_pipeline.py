@@ -137,6 +137,7 @@ def test_v2_cross_department_single_orders_merge_but_summaries_stay_partitioned(
             "output_ai": str(kwargs["output_ai"]),
             "inputs": [{"path": str(path)} for path in kwargs["input_ai_files"]],
             "label_lines": list(kwargs.get("label_lines") or []),
+            "input_annotation_groups": list(kwargs.get("input_annotation_groups") or []),
         }
 
     def build_color_frames_task(**kwargs):
@@ -182,7 +183,11 @@ def test_v2_cross_department_single_orders_merge_but_summaries_stay_partitioned(
     order_tasks = [payload for path, payload in written if "single-order-tasks" in str(path)]
     assert len(order_tasks) == 1
     assert len(order_tasks[0]["inputs"]) == 2
-    assert order_tasks[0]["label_lines"] == ["ORDER-X", "红色", "Product"]
+    assert order_tasks[0]["label_lines"] == []
+    assert order_tasks[0]["input_annotation_groups"] == [
+        {"group_key": "annotation-0001", "label_lines": ["ORDER-X", "红色"]},
+        {"group_key": "annotation-0002", "label_lines": ["ORDER-X", "Product"]},
+    ]
 
     summary_tasks = [payload for path, payload in written if path.name.startswith("compose-color-frames-")]
     assert len(summary_tasks) == 1
@@ -211,6 +216,7 @@ def test_v2_cross_department_merge_keeps_pw_summary_labels_department_local(tmp_
             "output_ai": str(kwargs["output_ai"]),
             "inputs": [{"path": str(path)} for path in kwargs["input_ai_files"]],
             "label_lines": list(kwargs.get("label_lines") or []),
+            "input_annotation_groups": list(kwargs.get("input_annotation_groups") or []),
         }
 
     strategy = production_pipeline.ProductionComponentReuseStrategy(
@@ -242,9 +248,30 @@ def test_v2_cross_department_merge_keeps_pw_summary_labels_department_local(tmp_
     assert len(result["outputs"]["single_order_files"]) == 1
     summary_order_tasks = [payload for path, payload in written if "department-summary-order-tasks" in str(path)]
     assert len(summary_order_tasks) == 1
-    assert summary_order_tasks[0]["label_lines"] == ["ORDER-Y", "盒子"]
+    assert summary_order_tasks[0]["label_lines"] == []
+    assert summary_order_tasks[0]["input_annotation_groups"] == [
+        {"group_key": "annotation-0001", "label_lines": ["ORDER-Y", "盒子"]},
+    ]
     assert summary_order_tasks[0]["intermediate_component"] is True
     assert summary_order_tasks[0]["output"] == {"outline_text": False, "pathfinder_merge": False}
+
+
+def test_product_name_annotation_groups_dedupe_by_department_and_product_name():
+    units = [
+        _unit(department="PW", manufacturer="", order_no="ORDER-P", detail_id="PW-1", product_name="礼盒", rule=resolve_department_output("PW")),
+        _unit(department="PW", manufacturer="", order_no="ORDER-P", detail_id="PW-2", product_name="  礼盒 ", rule=resolve_department_output("PW")),
+        _unit(department="PW", manufacturer="", order_no="ORDER-P", detail_id="PW-3", product_name="收纳盒", rule=resolve_department_output("PW")),
+        _unit(department="EW", manufacturer="", order_no="ORDER-P", detail_id="EW-1", product_name="礼盒", rule=resolve_department_output("EW")),
+    ]
+
+    groups = production_pipeline._input_production_annotation_groups(units)
+
+    assert groups == (
+        {"group_key": "annotation-0001", "label_lines": ["ORDER-P", "礼盒"]},
+        {"group_key": "annotation-0001", "label_lines": ["ORDER-P", "礼盒"]},
+        {"group_key": "annotation-0002", "label_lines": ["收纳盒"]},
+        {"group_key": "annotation-0003", "label_lines": ["ORDER-P", "礼盒"]},
+    )
 
 
 def test_public_output_downstream_gate_rejects_template_copied_department_rule_conflict():

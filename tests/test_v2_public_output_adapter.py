@@ -180,6 +180,35 @@ def test_v2_injected_renderer_batch_dispatches_execution_task_without_illustrato
     assert calls[0]["output_ai"] == tmp_path / "component.ai"
 
 
+def test_v2_injected_order_composer_keeps_product_annotation_positions(tmp_path):
+    calls = []
+
+    class RendererDouble:
+        def compose_order_column(self, **kwargs):
+            calls.append(kwargs)
+
+    task = {
+        "type": "compose_v2_order_column",
+        "output_ai": str(tmp_path / "order.ai"),
+        "inputs": [
+            {"path": str(tmp_path / "color.ai"), "order_no": "ORDER-1"},
+            {
+                "path": str(tmp_path / "product.ai"),
+                "order_no": "ORDER-1",
+                "annotation_group": "product-1",
+                "label_lines": ["ORDER-1", "Gift Box"],
+            },
+        ],
+    }
+
+    V2OrderOutputRenderer(RendererDouble())._render_injected_task(task, tmp_path / "task.json")
+
+    assert calls[0]["input_annotation_groups"] == [
+        {"group_key": None, "label_lines": None},
+        {"group_key": "product-1", "label_lines": ["ORDER-1", "Gift Box"]},
+    ]
+
+
 def test_v2_renderer_with_bridge_keeps_public_batch_executor(tmp_path):
     renderer = V2OrderOutputRenderer(SimpleNamespace(bridge=object()))
 

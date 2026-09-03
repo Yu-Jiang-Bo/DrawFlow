@@ -338,6 +338,7 @@ def run_production_output_pipeline(
                     )
                 else:
                     components = _components_for_units(spec.units, components_by_identity, make_error)
+                    input_annotation_groups = _input_production_annotation_groups(spec.units)
                     task = component_reuse.build_order_column_task(
                         components=components,
                         input_ai_files=tuple(component.output_path for component in components),
@@ -346,10 +347,15 @@ def run_production_output_pipeline(
                         output_ai=spec.output_path,
                         rule=rule,
                         label_lines=(
-                            _merged_production_label_lines(spec.units)
-                            if single_order_merge_predicate is not None
-                            else _production_label_lines(rule, spec.units)
+                            ()
+                            if input_annotation_groups
+                            else (
+                                _merged_production_label_lines(spec.units)
+                                if single_order_merge_predicate is not None
+                                else _production_label_lines(rule, spec.units)
+                            )
                         ),
+                        input_annotation_groups=input_annotation_groups,
                         compatibility=rule.ai_compatibility,
                         progress=task_progress(record, rendered_items + single_index - 1, total_work, "生成单订单 AI 文件"),
                     )
@@ -885,6 +891,64 @@ def _merged_production_label_lines(units: Sequence[ProductionOutputUnit]) -> lis
     return lines
 
 
+def _input_production_annotation_groups(units: Sequence[ProductionOutputUnit]) -> tuple[dict[str, Any], ...]:
+    """Attach department-local labels to product-name artwork groups.
+
+    Product-name departments cannot use one shared order header: the first
+    product name would otherwise label unrelated artwork.  Keep the legacy
+    task shape for color-only orders and add per-input group metadata only
+    when a product-name department participates in the merged order file.
+    """
+
+    resolved_rules = tuple(
+        unit.rule or resolve_department_output(unit.department, unit.manufacturer)
+        for unit in units
+    )
+    if not any(rule.annotation_type == ANNOTATION_PRODUCT_NAME for rule in resolved_rules):
+        return ()
+
+    group_ids: dict[tuple[str, str, str], str] = {}
+    group_labels: dict[str, list[str]] = {}
+    department_has_order_label: set[str] = set()
+    annotations: list[dict[str, Any]] = []
+
+    for index, (unit, rule) in enumerate(zip(units, resolved_rules), start=1):
+        department = str(unit.department or "").strip()
+        department_key = department.casefold() or f"department-{index}"
+        order_no = str(unit.order_no or "").strip()
+        if rule.annotation_type == ANNOTATION_PRODUCT_NAME:
+            value = str(unit.product_name or "").strip()
+            value_key = " ".join(value.split()).casefold()
+            group_kind = "product"
+        elif rule.annotation_type == ANNOTATION_COLOR:
+            value = translate_color_to_chinese(str(unit.color_option or "").strip())
+            value_key = "color"
+            group_kind = "department"
+        else:
+            value = ""
+            value_key = ""
+            group_kind = "department"
+
+        identity = (department_key, group_kind, value_key)
+        group_id = group_ids.get(identity)
+        if group_id is None:
+            group_id = f"annotation-{len(group_ids) + 1:04d}"
+            group_ids[identity] = group_id
+            label_lines = [value] if value else []
+            if department_key not in department_has_order_label:
+                label_lines.insert(0, order_no)
+                department_has_order_label.add(department_key)
+            group_labels[group_id] = [line for line in label_lines if line]
+
+        annotations.append(
+            {
+                "group_key": group_id,
+                "label_lines": list(group_labels[group_id]),
+            }
+        )
+    return tuple(annotations)
+
+
 def _build_department_summary_order_tasks(
     *,
     batch: ProductionOutputBatch,
@@ -905,6 +969,7 @@ def _build_department_summary_order_tasks(
     specs = tuple(single_order_outputs(batch.units, output_dir, set()))
     for order_index, spec in enumerate(specs, start=1):
         components = _components_for_units(spec.units, components_by_identity, make_error)
+        input_annotation_groups = _input_production_annotation_groups(spec.units)
         task = component_reuse.build_order_column_task(
             components=components,
             input_ai_files=tuple(component.output_path for component in components),
@@ -912,7 +977,8 @@ def _build_department_summary_order_tasks(
             units=spec.units,
             output_ai=spec.output_path,
             rule=batch.rule,
-            label_lines=_production_label_lines(batch.rule, spec.units),
+            label_lines=() if input_annotation_groups else _production_label_lines(batch.rule, spec.units),
+            input_annotation_groups=input_annotation_groups,
             compatibility=batch.rule.ai_compatibility,
             progress=task_progress,
         )

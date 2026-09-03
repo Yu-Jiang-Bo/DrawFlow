@@ -40,7 +40,7 @@
                 try { source.close(SaveOptions.DONOTSAVECHANGES); } catch (closeSourceError) {}
             }
         }
-        var orderBlocks = layoutOrderBlocks(layer, orderBuckets, gap);
+        var orderBlocks = layoutOrderBlocks(layer, orderBuckets, gap, labelHeight, labelGap, labelFontSize);
         var allItems = orderBlocks.slice(0);
         if (labelLines.length) {
             var labelItems = addProductionLabels(layer, labelLines, orderBlocks, labelHeight, labelGap, labelFontSize);
@@ -133,34 +133,69 @@
 
     function orderBucketFor(input, inputIndex) {
         var orderNo = String(input.order_no || "").replace(/^\s+|\s+$/g, "");
-        var key = orderNo || "__input_" + inputIndex;
+        var annotationGroup = String(input.annotation_group || "").replace(/^\s+|\s+$/g, "");
+        var key = annotationGroup || orderNo || "__input_" + inputIndex;
+        var inputLabels = cleanLines(input.label_lines || []);
         if (!orderBucketByKey[key]) {
-            orderBucketByKey[key] = { key: key, orderNo: orderNo, items: [] };
+            orderBucketByKey[key] = { key: key, orderNo: orderNo, items: [], labelLines: inputLabels };
             orderBuckets.push(orderBucketByKey[key]);
+        } else if (!orderBucketByKey[key].labelLines.length && inputLabels.length) {
+            orderBucketByKey[key].labelLines = inputLabels;
         }
         return orderBucketByKey[key];
     }
 
-    function layoutOrderBlocks(layer, buckets, gap) {
+    function layoutOrderBlocks(layer, buckets, gap, labelHeight, labelGap, labelFontSize) {
         var currentTop = 0;
-        var blocks = [];
+        var composedItems = [];
         for (var orderIndex = 0; orderIndex < buckets.length; orderIndex++) {
             var bucket = buckets[orderIndex];
             for (var itemIndex = 0; itemIndex < bucket.items.length; itemIndex++) {
                 bucket.items[itemIndex].name = "ORDER_PACK_ITEM_" + orderIndex + "_" + itemIndex;
             }
             var block = groupPageItems(layer, bucket.items, "ORDER_PACK_BLOCK_" + orderIndex);
+            var labelSpace = bucket.labelLines.length
+                ? bucket.labelLines.length * labelHeight + Math.max(bucket.labelLines.length - 1, 0) * labelGap + labelGap
+                : 0;
+            var artworkTop = currentTop - labelSpace;
             for (var childIndex = 0; childIndex < bucket.items.length; childIndex++) {
                 var item = bucket.items[childIndex];
                 var bounds = unionBounds([item]);
-                translateItems([item], 0 - Number(bounds[0]), currentTop - Number(bounds[1]));
-                var placed = unionBounds([item]);
-                currentTop = Number(placed[3]) - gap;
+                translateItems([item], 0 - Number(bounds[0]), artworkTop - Number(bounds[1]));
+                var placedItem = unionBounds([item]);
+                artworkTop = Number(placedItem[3]) - gap;
             }
-            blocks.push(block);
+            var blockItems = [block];
+            if (bucket.labelLines.length) {
+                var localLabels = addProductionLabelsAboveBlock(
+                    layer,
+                    bucket.labelLines,
+                    block,
+                    labelHeight,
+                    labelGap,
+                    labelFontSize
+                );
+                blockItems = localLabels.concat([block]);
+            }
+            var placed = unionBounds(blockItems);
+            currentTop = Number(placed[3]) - gap;
+            composedItems = composedItems.concat(blockItems);
         }
-        if (!blocks.length) throw new Error("V2 compose produced no order blocks");
-        return blocks;
+        if (!composedItems.length) throw new Error("V2 compose produced no order blocks");
+        return composedItems;
+    }
+
+    function addProductionLabelsAboveBlock(layer, lines, block, labelHeight, labelGap, fontSize) {
+        var bounds = unionBounds([block]);
+        var width = Math.max(Number(bounds[2]) - Number(bounds[0]), mmToPt(30));
+        var totalLabelHeight = lines.length * labelHeight + Math.max(lines.length - 1, 0) * labelGap;
+        var labels = [];
+        for (var lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+            var top = Number(bounds[1]) + labelGap + totalLabelHeight - lineIndex * (labelHeight + labelGap);
+            var label = drawLabel(layer, lines[lineIndex], Number(bounds[0]), top, Number(bounds[0]) + width, top - labelHeight, fontSize);
+            if (label) labels.push(label);
+        }
+        return labels;
     }
 
     function translateItems(items, dx, dy) {

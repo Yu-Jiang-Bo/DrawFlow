@@ -67,6 +67,7 @@ def create_v2_component_reuse_strategy(
             input_order_nos=kwargs["input_order_nos"],
             output_ai=kwargs["output_ai"],
             label_lines=kwargs.get("label_lines"),
+            input_annotation_groups=kwargs.get("input_annotation_groups"),
             compatibility=str(kwargs.get("compatibility") or "Illustrator 8"),
             target_dimensions_by_input=[_v2_unit_dimensions(render_task, unit) for unit in units],
             output_policy=_v2_output_policy(render_task, kwargs.get("rule")),

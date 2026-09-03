@@ -258,6 +258,14 @@ class V2OrderOutputRenderer:
             composer(
                 input_ai_files=[Path(str(item.get("path") or "")) for item in inputs if isinstance(item, Mapping)],
                 input_order_nos=[str(item.get("order_no") or "") for item in inputs if isinstance(item, Mapping)],
+                input_annotation_groups=[
+                    {
+                        "group_key": item.get("annotation_group"),
+                        "label_lines": item.get("label_lines"),
+                    }
+                    for item in inputs
+                    if isinstance(item, Mapping)
+                ],
                 output_ai=output_ai,
                 task_file=task_file,
                 label_lines=task.get("label_lines") if isinstance(task.get("label_lines"), list) else [],
