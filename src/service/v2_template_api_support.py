@@ -232,7 +232,10 @@ def _log_v2_api_error(error: V2ApiError, exc: BaseException, method: str, path: 
     if error.status >= HTTPStatus.INTERNAL_SERVER_ERROR:
         LOGGER.exception("v2 api failed: %s", context)
     else:
-        LOGGER.warning("v2 api rejected: %s", context)
+        # Client-facing 4xx responses can still wrap an I/O failure while a
+        # streamed asset is being persisted. Preserve the chained traceback
+        # in the service log without exposing filesystem details to clients.
+        LOGGER.warning("v2 api rejected: %s", context, exc_info=exc)
 
 
 def _cause_chain(exc: BaseException) -> list[str]:

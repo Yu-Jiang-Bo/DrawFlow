@@ -8,7 +8,7 @@ import pytest
 from src.service.v2_template_api import V2TemplateApi, V2TemplateApiError, handle_v2_template_api
 from src.service.v2_template_contract import V2_CONTRACT_SCHEMA, V2_CONTRACT_VERSION
 from src.service.v2_template_limits import V2TemplateLimitConfig, V2UploadConcurrencyGate
-from src.service.v2_template_store import V2TemplateStore
+from src.service.v2_template_store import V2TemplateStore, V2TemplateStoreError
 from src.service.v2_scan_worker_auth import scan_evidence_sha256, sign_scan_worker_challenge
 
 
@@ -888,6 +888,28 @@ def test_v2_http_bridge_logs_internal_code_and_cause_chain(tmp_path, caplog):
     assert "v2_payload_rejected" in log_text
     assert "cause_chain" in log_text
     assert "V2TemplateApiError" in log_text
+
+
+def test_v2_http_bridge_logs_streamed_asset_io_cause_without_exposing_path(caplog):
+    private_path = r"C:\\private\\v2\\template.ai"
+
+    class FailingApi:
+        def handle(self, method, parts, payload):
+            try:
+                raise FileNotFoundError(private_path)
+            except FileNotFoundError as exc:
+                raise V2TemplateStoreError("V2 storage write failed") from exc
+
+    handler = FakeHandler(FailingApi(), {})
+
+    assert handle_v2_template_api(handler, "GET", "/api/v2/templates", ["api", "v2", "templates"])
+
+    error, status = handler.sent[-1]
+    assert status == HTTPStatus.BAD_REQUEST
+    assert error["error"]["code"] == "v2_invalid_request"
+    assert private_path not in str(error)
+    assert "FileNotFoundError" in caplog.text
+    assert private_path in caplog.text
 
 
 def test_v2_bundle_download_bridge_streams_zip_file(tmp_path):
