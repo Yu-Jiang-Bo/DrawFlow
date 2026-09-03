@@ -109,7 +109,7 @@ class V2TemplateApi:
     def handle(self, method: str, parts: list[str], payload: Mapping[str, Any] | None = None) -> V2ApiResult:
         if len(parts) == 3 and parts == ["api", "v2", "templates"]:
             if method == "GET":
-                return V2ApiResult({"templates": self.list_published_templates()})
+                return V2ApiResult({"templates": self.list_templates()})
             if method == "POST":
                 return V2ApiResult(self.create_template(payload or {}), HTTPStatus.CREATED)
         if len(parts) == 4 and parts == ["api", "v2", "templates", "maintenance"]:

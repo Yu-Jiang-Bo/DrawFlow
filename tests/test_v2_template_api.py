@@ -124,12 +124,14 @@ def test_v2_api_creates_lists_and_reads_draft_with_optional_shop(tmp_path):
 
     assert created.status == HTTPStatus.CREATED
     assert created.payload["template"] == {"template_id": "V2API001", "name": "API Demo", "shop_name": ""}
-    assert listed["templates"] == []
+    assert listed["templates"][0]["template"]["name"] == "API Demo"
+    assert listed["templates"][0]["publication"]["status"] == "draft"
     assert draft["metadata"]["shop_name"] == ""
     api.store.publish_draft("V2API001")
     published_listed = api.handle("GET", ["api", "v2", "templates"]).payload
 
     assert published_listed["templates"][0]["template"]["name"] == "API Demo"
+    assert published_listed["templates"][0]["publication"]["status"] == "active"
     assert not any("path" in key.lower() for key in published_listed["templates"][0])
 
 
@@ -916,7 +918,7 @@ def test_v2_maintenance_endpoint_does_not_pollute_template_list(tmp_path):
     listed = api.handle("GET", ["api", "v2", "templates"]).payload
     maintenance = api.handle("GET", ["api", "v2", "templates", "maintenance"]).payload["maintenance"]
 
-    assert listed["templates"] == []
+    assert [item["template_id"] for item in listed["templates"]] == ["V2API001"]
     assert maintenance["summary"]["total"] == 1
     assert not any(
         marker in str(maintenance).lower()
