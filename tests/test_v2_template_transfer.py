@@ -1,5 +1,6 @@
 import hashlib
 import io
+from pathlib import Path
 
 import pytest
 
@@ -120,6 +121,40 @@ def test_download_stream_verifies_sha256_and_atomically_switches(tmp_path):
     assert final.read_bytes() == payload
     assert stream.read_sizes == [4, 4, 4, 4, 4]
     assert record == {"path": str(final), "size_bytes": len(payload), "sha256": sha256_bytes(payload)}
+
+
+def test_download_uses_a_short_staging_name_for_deep_destinations(tmp_path, monkeypatch):
+    destination = tmp_path
+    # A 225-character final path is valid on legacy Windows, while the former
+    # staging convention pushed it beyond the 260-character path limit.
+    while len(str(destination / "template-bundle.zip")) < 225:
+        destination /= "deep-cache-segment"
+    final = destination / "template-bundle.zip"
+    final.parent.mkdir(parents=True)
+    final.write_bytes(b"old-bundle")
+    payload = b"new-bundle-bytes"
+    opened = []
+    original_open = Path.open
+
+    def record_staging_open(path, mode="r", *args, **kwargs):
+        if mode == "xb":
+            opened.append(path)
+        return original_open(path, mode, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", record_staging_open)
+
+    download_stream_to_file(
+        TrackingStream(payload),
+        final,
+        expected_sha256=sha256_bytes(payload),
+    )
+
+    legacy_staging = final.with_name(f".{final.name}.{'f' * 32}.tmp")
+    assert len(str(legacy_staging)) > 260
+    assert opened and opened[0].name.startswith(".df-")
+    assert len(opened[0].name) == len(".df-") + 16
+    assert len(str(opened[0])) < 260
+    assert final.read_bytes() == payload
 
 
 def test_file_chunk_iterator_and_atomic_switch_helper_are_bounded(tmp_path):

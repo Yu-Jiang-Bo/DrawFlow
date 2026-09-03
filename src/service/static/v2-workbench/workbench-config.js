@@ -454,7 +454,7 @@
 
   function isFontOptionSelfDependency(group, optionKey, value) {
     return group === "font"
-      && /^F[1-9]\d*$/i.test(String(optionKey || ""))
+      && /^F0*[1-9]\d*$/.test(String(optionKey || ""))
       && safeOptionKey(value, "font") === optionKey;
   }
 

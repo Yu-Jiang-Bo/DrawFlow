@@ -173,17 +173,15 @@
 
   function safeOptionKey(value, group) {
     const text = cleanText(value);
+    const compact = text.replace(/\s+/g, "");
     if (group === "style") {
-      const match = text.match(/(?:style|Style)?\s*0*([1-9]\d*)$/);
-      return match ? `style${Number(match[1])}` : "";
+      return /^style[1-9]\d*$/i.test(compact) ? compact : "";
     }
     if (group === "design") {
-      const match = text.match(/(?:Design)?\s*0*([1-9]\d*)$/i);
-      return match ? `Design${String(Number(match[1])).padStart(2, "0")}` : "";
+      return /^Design0*[1-9]\d*$/.test(compact) ? compact : "";
     }
     if (group === "font") {
-      const match = text.match(/^F\s*([1-9]\d*)$/i);
-      return match ? `F${Number(match[1])}` : "";
+      return /^F0*[1-9]\d*$/.test(compact) ? compact : "";
     }
     return safeIdentifier(text, "");
   }

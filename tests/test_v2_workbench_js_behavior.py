@@ -955,6 +955,107 @@ def test_v2_workbench_single_output_does_not_invent_style_or_font_fields():
     )
 
 
+def test_v2_workbench_keeps_the_scanned_design_key_without_padding():
+    run_node(
+        r"""
+        (async () => {
+          async function fakeFetch(url, options = {}) {
+            const textUrl = String(url);
+            if (textUrl === "/api/v2/templates") return response({ templates: [{ template_id: "V2DESIGN1", name: "Design1 Demo" }] });
+            if (textUrl.endsWith("/draft")) {
+              return response({ draft: {
+                metadata: { template_id: "V2DESIGN1", name: "Design1 Demo", shop_name: "" },
+                manifest: { draft_revision: "d0001" },
+                config: {},
+                scan: {
+                  "$schema": "custom-renderer/v2-template-scan",
+                  outputs: [{
+                    key: "Output_main",
+                    design: { options: [{ key: "Design1", slots: [{ key: "slot_name" }] }] },
+                    font: { options: [] },
+                    style: { options: [] },
+                    summary: { designs: 1, fonts: 0, styles: 0, slots: 1, anchors: 0, tails: 0, assets: 0, fixed_objects: 0 }
+                  }]
+                }
+              }});
+            }
+            if (textUrl.endsWith("/validate")) return response({ validation: { checks: {} } });
+            return response({});
+          }
+          const app = createApp(fakeFetch);
+          await flush();
+          app.elements.templateList.children[0].dispatch("click");
+          await flush();
+          global.setWorkbenchStage("structure");
+          await flush();
+
+          const config = buildControlledConfig();
+          assert.strictEqual(config.outputs[0].design.options[0].key, "Design1");
+          assert.strictEqual(config.option_mappings[0].target, "Design1");
+          assert.strictEqual(global.safeOptionKey("design1", "design"), "");
+          assert.strictEqual(global.safeOptionKey("f01", "font"), "");
+        })().catch((error) => { console.error(error); process.exit(1); });
+        """,
+        cwd=Path(__file__).resolve().parents[1],
+    )
+
+
+def test_v2_workbench_filters_zero_padded_font_option_self_dependencies():
+    run_node(
+        r"""
+        (async () => {
+          async function fakeFetch(url, options = {}) {
+            const textUrl = String(url);
+            if (textUrl === "/api/v2/templates") return response({ templates: [{ template_id: "V2FONT01", name: "F01 Demo" }] });
+            if (textUrl.endsWith("/draft")) {
+              return response({ draft: {
+                metadata: { template_id: "V2FONT01", name: "F01 Demo", shop_name: "" },
+                manifest: { draft_revision: "d0001" },
+                config: {
+                  field_bindings: { font: "Font", name: "Name" },
+                  option_mappings: [{ field: "font", source_value: "F01", target: "F01", output: "Output_main", group: "font" }],
+                  outputs: [{
+                    key: "Output_main", display_name: "主效果图", component_key: "main",
+                    style: { field: "", options: [] }, design: { field: "", options: [] },
+                    font: { field: "font", options: [{
+                      key: "F01", content_preset: "direct_text", font_dependencies: ["F01", "Adelia"],
+                      slots: [{ key: "slot_name", source_field: "name", preset: "direct_text", font_dependencies: ["F01", "Adelia"] }]
+                    }] }
+                  }]
+                },
+                scan: {
+                  outputs: [{ key: "Output_main", design: { options: [] }, font: { options: [{ key: "F01", slots: [{ key: "slot_name" }] }] }, style: { options: [] } }]
+                }
+              }});
+            }
+            if (textUrl.endsWith("/validate")) return response({ validation: { checks: {} } });
+            return response({});
+          }
+          const app = createApp(fakeFetch);
+          await flush();
+          app.elements.templateList.children[0].dispatch("click");
+          await flush();
+          global.setWorkbenchStage("structure");
+          await flush();
+
+          const font = buildControlledConfig().outputs[0].font.options[0];
+          assert.deepStrictEqual(font.font_dependencies, ["Adelia"]);
+          assert.deepStrictEqual(font.slots[0].font_dependencies, ["Adelia"]);
+
+          global.setWorkbenchStage("rules");
+          await flush();
+          const selected = global.ruleOptionItems().findIndex((item) => item.group === "font" && item.key === "F01");
+          assert(selected >= 0);
+          global.selectRuleOption(selected);
+          await flush();
+          assert(!app.elements.fontDependencyRows.textContent.includes("F01"));
+          assert(app.elements.fontDependencyRows.textContent.includes("Adelia"));
+        })().catch((error) => { console.error(error); process.exit(1); });
+        """,
+        cwd=Path(__file__).resolve().parents[1],
+    )
+
+
 def test_v2_workbench_existing_option_mappings_are_completed_from_scan():
     run_node(
         r"""

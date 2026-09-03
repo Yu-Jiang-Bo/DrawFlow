@@ -117,11 +117,13 @@ def make_multi_output_draft(template_digest):
     return draft
 
 
-def test_required_fonts_ignores_font_option_marker_self_dependencies():
+@pytest.mark.parametrize("font_option", ["F1", "F01"])
+def test_required_fonts_ignores_font_option_marker_self_dependencies(font_option):
     draft = make_draft("a" * 64)
     option = draft["config"]["outputs"][0]["font"]["options"][0]
-    option["font_dependencies"] = ["F1", "Adelia"]
-    option["slots"][0]["font_dependencies"] = ["F1", "Adelia"]
+    option["key"] = font_option
+    option["font_dependencies"] = [font_option, "Adelia"]
+    option["slots"][0]["font_dependencies"] = [font_option, "Adelia"]
 
     assert required_fonts(draft["config"], draft["scan"]) == ["Adelia"]
 

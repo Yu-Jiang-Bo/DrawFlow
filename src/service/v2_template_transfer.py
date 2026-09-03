@@ -125,7 +125,9 @@ def download_stream_to_file(
     chunk_size = _valid_chunk_size(chunk_size)
     expected = _valid_expected_sha256(expected_sha256)
     target = Path(final_path)
-    temporary = target.with_name(f".{target.name}.{uuid4().hex}.download")
+    # Keep staging names short: trial-render destinations can already approach
+    # Windows' legacy path limit before a UUID is appended.
+    temporary = target.with_name(f".df-{uuid4().hex[:16]}")
     target.parent.mkdir(parents=True, exist_ok=True)
 
     digest = hashlib.sha256()
