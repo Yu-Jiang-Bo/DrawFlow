@@ -113,6 +113,7 @@ def test_v2_jsx_contains_final_object_fit_and_policy_gates():
     assert "return Math.min(0.003, dimensionTolerancePoints(dimensions) / 2);" in render_source
     assert "width > targetWidth || height > targetHeight" in render_source
     assert "width < targetWidth - epsilon || height < targetHeight - epsilon" in render_source
+    assert "fitRenderedOutputWithFixedVisuals(" in render_source
     assert "if (!policy || policy.outline_text !== true) return;" in render_source
     assert "fitCopiedArtwork(copied, input.target_dimensions || {})" in order_source
     assert "if (!policy || policy.outline_text !== true) return;" in order_source
@@ -134,12 +135,18 @@ def test_v2_jsx_fixed_visuals_keep_the_original_design_position_reference():
         "for (var replaceIndex = 0; replaceIndex < actions.length; replaceIndex++)"
     )
     assert "root: root," in render_source
-    assert "sourceBounds: copyBounds(unionRenderableBounds([root]))" in render_source
-    assert "function unionRenderableBounds(items)" in render_source
+    assert "sourceBounds: copyBounds(fixedVisualReferenceBounds(root))" in render_source
+    assert "function fixedVisualReferenceBounds(root)" in render_source
     assert "function unionNonFixedRenderableBounds(items)" in render_source
+    assert "function collectAnchorBounds(item, bounds)" in render_source
     assert "function positionFixedVisualLayouts(layouts)" in render_source
     assert "positionFixedVisualStatesForOutput(" in render_source
-    assert "unionNonFixedRenderableBounds([layout.root])" in render_source
+    assert "validateFixedGraphicReferenceBounds(items, dimensions, targetWidth, targetHeight);" in render_source
+    assert "fixedVisualReferenceBounds(layout.root)" in render_source
+    assert "sourceItemBounds[1]) <= Number(sourceBounds[3])" in render_source
+    assert render_source.index("captureFixedVisualLayout(renderedItems);") < render_source.index(
+        "preserveAnchors = preserveAnchors || fixedVisualLayoutForItems(renderedItems) !== null;"
+    ) < render_source.index("cleanupAuxiliaryObjects(renderedItems, preserveAnchors);")
     assert "positionFixedVisualStatesForOutput(fixedStates, sourceBounds, unionBounds(items, true));" not in render_source
     assert render_source.index("if (execution.pack_order_blocks === true)") > render_source.index(
         "if (finalFitAction) fitRenderedOutput(renderedOutputItems, finalFitAction);"

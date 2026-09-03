@@ -103,6 +103,10 @@
         // before asset binding or any text replacement can change its bounds.
         // `fixed` art is later mapped only within its own immutable source group.
         captureFixedVisualLayout(renderedItems);
+        // A later Output-level fit needs the transformed anchor as well. Keep
+        // it through both local and final fits, then remove it from the saved
+        // artwork in the top-level cleanup.
+        preserveAnchors = preserveAnchors || fixedVisualLayoutForItems(renderedItems) !== null;
         for (var assetIndex = 0; assetIndex < actions.length; assetIndex++) {
             var assetAction = actions[assetIndex] || {};
             if (assetAction.type === "bind_asset_library" && isSelected(assetAction, selected)) {
@@ -1166,28 +1170,59 @@
         var targetWidth = mmToPt(Number(dimensions.width_mm || 0));
         var targetHeight = mmToPt(Number(dimensions.height_mm || 0));
         if (targetWidth <= 0 || targetHeight <= 0) throw new Error("V2 output target dimensions are invalid");
-        var bounds = unionBounds(items, true);
         var fixedLayout = fixedVisualLayoutForItems(items);
         var fixedLayouts = fixedLayout ? fixedLayout.layouts : [];
         var fixedStates = fixedVisualStatesForLayouts(fixedLayouts);
         var fitSafety = outputFitSafetyPoints(dimensions);
         var fitTargetWidth = targetWidth - fitSafety;
         var fitTargetHeight = targetHeight - fitSafety;
-        var targetLeft = Number(bounds[0]);
-        var targetTop = Number(bounds[1]);
         if (fixedStates.length) {
-            var fixedScaleX = fitTargetWidth / Math.abs(Number(bounds[2]) - Number(bounds[0])) * 100;
-            var fixedScaleY = fitTargetHeight / Math.abs(Number(bounds[1]) - Number(bounds[3])) * 100;
-            resizeItemsAroundBounds(items, bounds, fixedScaleX, fixedScaleY);
-            var fixedFitted = unionBounds(items, true);
-            translateItems(items, targetLeft - Number(fixedFitted[0]), targetTop - Number(fixedFitted[1]));
-            // Use the transformed ordinary artwork as the target coordinate
-            // system.  The fixed mark's own physical dimensions must not alter
-            // that coordinate system, otherwise a second fit can drift it.
-            positionFixedVisualLayouts(fixedLayouts);
-            validateOutputBounds(items, dimensions, targetWidth, targetHeight);
+            fitRenderedOutputWithFixedVisuals(
+                items,
+                fixedLayouts,
+                dimensions,
+                targetWidth,
+                targetHeight,
+                fitTargetWidth,
+                fitTargetHeight
+            );
             return;
         }
+        var bounds = unionBounds(items, true);
+        var targetLeft = Number(bounds[0]);
+        var targetTop = Number(bounds[1]);
+        fitRenderedOutputExactly(items, dimensions, targetWidth, targetHeight, targetLeft, targetTop);
+    }
+
+    function fitRenderedOutputWithFixedVisuals(items, fixedLayouts, dimensions, targetWidth, targetHeight, fitTargetWidth, fitTargetHeight) {
+        // The declared dimensions belong to the editable Design frame.  A
+        // `fixed` mark may deliberately sit outside that frame, so including
+        // it in the delivery fit would pull it back into the text artwork.
+        var reference = unionNonFixedRenderableBounds(items);
+        var targetLeft = Number(reference[0]);
+        var targetTop = Number(reference[1]);
+        for (var attempt = 0; attempt < 12; attempt++) {
+            var current = unionNonFixedRenderableBounds(items);
+            var width = Math.abs(Number(current[2]) - Number(current[0]));
+            var height = Math.abs(Number(current[1]) - Number(current[3]));
+            if (width <= 0 || height <= 0) throw new Error("V2 fixed-graphic reference bounds are not measurable");
+            var scaleX = fitTargetWidth / width * 100;
+            var scaleY = fitTargetHeight / height * 100;
+            if (Math.abs(scaleX - 100) <= 0.001 && Math.abs(scaleY - 100) <= 0.001
+                && outputBoundsWithinTargetRange(current, targetWidth, targetHeight, dimensions)) break;
+            resizeItemsAroundBounds(items, current, scaleX, scaleY);
+            var fitted = unionNonFixedRenderableBounds(items);
+            translateItems(items, targetLeft - Number(fitted[0]), targetTop - Number(fitted[1]));
+            if (outputBoundsWithinTargetRange(fitted, targetWidth, targetHeight, dimensions)) break;
+        }
+        validateFixedGraphicReferenceBounds(items, dimensions, targetWidth, targetHeight);
+        positionFixedVisualLayouts(fixedLayouts);
+    }
+
+    function fitRenderedOutputExactly(items, dimensions, targetWidth, targetHeight, targetLeft, targetTop) {
+        var fitSafety = outputFitSafetyPoints(dimensions);
+        var fitTargetWidth = targetWidth - fitSafety;
+        var fitTargetHeight = targetHeight - fitSafety;
         for (var attempt = 0; attempt < 12; attempt++) {
             var current = unionBounds(items, true);
             var width = Math.abs(Number(current[2]) - Number(current[0]));
@@ -1197,7 +1232,7 @@
             var scaleY = fitTargetHeight / height * 100;
             if (Math.abs(scaleX - 100) <= 0.001 && Math.abs(scaleY - 100) <= 0.001
                 && outputBoundsWithinTargetRange(current, targetWidth, targetHeight, dimensions)) break;
-            resizeItemsAroundBounds(items, current, scaleX, scaleY);
+            resizeItemsAroundBounds(items, current, scaleX, scaleY, false);
             var fitted = unionBounds(items, true);
             translateItems(items, targetLeft - Number(fitted[0]), targetTop - Number(fitted[1]));
             if (outputBoundsWithinTargetRange(fitted, targetWidth, targetHeight, dimensions)) break;
@@ -1205,13 +1240,13 @@
         validateOutputBounds(items, dimensions, targetWidth, targetHeight);
     }
 
-    function resizeItemsAroundBounds(items, bounds, scaleX, scaleY) {
+    function resizeItemsAroundBounds(items, bounds, scaleX, scaleY, preserveFixedVisuals) {
         var scaleXRatio = Number(scaleX) / 100;
         var scaleYRatio = Number(scaleY) / 100;
         var centerX = (Number(bounds[0]) + Number(bounds[2])) / 2;
         var centerY = (Number(bounds[1]) + Number(bounds[3])) / 2;
         for (var index = 0; index < items.length; index++) {
-            var fixedStates = fixedVisualStates(items[index]);
+            var fixedStates = preserveFixedVisuals === false ? [] : fixedVisualStates(items[index]);
             var itemBounds = visibleBoundsStrict(items[index]);
             var itemCenterX = (Number(itemBounds[0]) + Number(itemBounds[2])) / 2;
             var itemCenterY = (Number(itemBounds[1]) + Number(itemBounds[3])) / 2;
@@ -1235,6 +1270,7 @@
             var bounds = visibleBoundsStrict(item);
             states.push({
                 item: item,
+                bounds: copyBounds(bounds),
                 centerX: (Number(bounds[0]) + Number(bounds[2])) / 2,
                 centerY: (Number(bounds[1]) + Number(bounds[3])) / 2
             });
@@ -1260,7 +1296,7 @@
             if (!states.length) continue;
             layouts.push({
                 root: root,
-                sourceBounds: copyBounds(unionRenderableBounds([root])),
+                sourceBounds: copyBounds(fixedVisualReferenceBounds(root)),
                 states: states
             });
         }
@@ -1303,6 +1339,26 @@
         for (var index = 0; index < items.length; index++) collectNonFixedRenderableBounds(items[index], bounds);
         if (!bounds.length) throw new Error("Cannot measure V2 fixed-graphic reference bounds");
         return unionBoundsFromList(bounds);
+    }
+
+    function fixedVisualReferenceBounds(root) {
+        var anchorBounds = [];
+        collectAnchorBounds(root, anchorBounds);
+        if (anchorBounds.length) return unionBoundsFromList(anchorBounds);
+        return unionNonFixedRenderableBounds([root]);
+    }
+
+    function collectAnchorBounds(item, bounds) {
+        if (!item) return;
+        if (isAnchorObject(item)) {
+            bounds.push(visibleBoundsStrict(item));
+            return;
+        }
+        var children = item.pageItems || [];
+        for (var index = 0; index < children.length; index++) {
+            if (children[index].parent !== item) continue;
+            collectAnchorBounds(children[index], bounds);
+        }
     }
 
     function collectRenderableBounds(item, bounds) {
@@ -1350,7 +1406,7 @@
             positionFixedVisualStatesForOutput(
                 layout.states,
                 layout.sourceBounds,
-                unionNonFixedRenderableBounds([layout.root])
+                fixedVisualReferenceBounds(layout.root)
             );
         }
     }
@@ -1366,12 +1422,36 @@
         for (var index = 0; index < states.length; index++) {
             var state = states[index];
             var current = visibleBoundsStrict(state.item);
+            var currentWidth = Math.abs(Number(current[2]) - Number(current[0]));
+            var currentHeight = Math.abs(Number(current[1]) - Number(current[3]));
             var currentCenterX = (Number(current[0]) + Number(current[2])) / 2;
             var currentCenterY = (Number(current[1]) + Number(current[3])) / 2;
             var targetCenterX = Number(outputBounds[0])
                 + (state.centerX - Number(sourceBounds[0])) / sourceWidth * outputWidth;
             var targetCenterY = Number(outputBounds[1])
                 - (Number(sourceBounds[1]) - state.centerY) / sourceHeight * outputHeight;
+            var sourceItemBounds = state.bounds || current;
+            // Fixed artwork that was deliberately outside its anchor must stay
+            // outside after the editable frame is resized. Map the closest
+            // anchor edge and preserve the mark's original physical size.
+            if (Number(sourceItemBounds[0]) >= Number(sourceBounds[2])) {
+                targetCenterX = Number(outputBounds[2])
+                    + (Number(sourceItemBounds[0]) - Number(sourceBounds[2])) / sourceWidth * outputWidth
+                    + currentWidth / 2;
+            } else if (Number(sourceItemBounds[2]) <= Number(sourceBounds[0])) {
+                targetCenterX = Number(outputBounds[0])
+                    - (Number(sourceBounds[0]) - Number(sourceItemBounds[2])) / sourceWidth * outputWidth
+                    - currentWidth / 2;
+            }
+            if (Number(sourceItemBounds[1]) <= Number(sourceBounds[3])) {
+                targetCenterY = Number(outputBounds[3])
+                    - (Number(sourceBounds[3]) - Number(sourceItemBounds[1])) / sourceHeight * outputHeight
+                    - currentHeight / 2;
+            } else if (Number(sourceItemBounds[3]) >= Number(sourceBounds[1])) {
+                targetCenterY = Number(outputBounds[1])
+                    + (Number(sourceItemBounds[3]) - Number(sourceBounds[1])) / sourceHeight * outputHeight
+                    + currentHeight / 2;
+            }
             state.item.translate(targetCenterX - currentCenterX, targetCenterY - currentCenterY);
         }
     }
@@ -1418,7 +1498,14 @@
     }
 
     function validateOutputBounds(items, dimensions, targetWidth, targetHeight) {
-        var bounds = unionBounds(items, true);
+        validateMeasuredOutputBounds(unionBounds(items, true), dimensions, targetWidth, targetHeight);
+    }
+
+    function validateFixedGraphicReferenceBounds(items, dimensions, targetWidth, targetHeight) {
+        validateMeasuredOutputBounds(unionNonFixedRenderableBounds(items), dimensions, targetWidth, targetHeight);
+    }
+
+    function validateMeasuredOutputBounds(bounds, dimensions, targetWidth, targetHeight) {
         var width = Math.abs(Number(bounds[2]) - Number(bounds[0]));
         var height = Math.abs(Number(bounds[1]) - Number(bounds[3]));
         var epsilon = dimensionTolerancePoints(dimensions);
