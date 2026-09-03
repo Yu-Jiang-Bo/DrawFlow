@@ -477,17 +477,25 @@ def test_compiles_scanned_design_dimensions_when_output_has_no_style_dimension()
     ]
 
 
-def test_compiles_single_design_anchor_dimensions_as_final_output_frame():
+def test_compiles_asset_slot_dimensions_when_single_text_anchor_has_required_asset_library():
     config = render_config()
     config["outputs"][0].pop("style")
     config["field_bindings"].pop("size")
     config["option_mappings"] = [item for item in config["option_mappings"] if item["group"] != "style"]
+    design_config = config["outputs"][0]["design"]["options"][0]
+    design_config["slots"][1]["asset_key"] = "initial"
+    design_config["assets"][0]["asset_key"] = "initial"
     scan = scan_evidence()
     design = scan["outputs"][0]["designs"][0]
+    design["assets"][0]["asset_key"] = "initial"
     design["dimensions"] = {"width_mm": 165.15, "height_mm": 131.018}
     design["slots"][0]["dimensions"] = {"width_mm": 163.657, "height_mm": 85.03}
+    design["slots"][1]["dimensions"] = {"width_mm": 48.0, "height_mm": 40.0}
     design["anchors"][0]["dimensions"] = {"width_mm": 150.231, "height_mm": 47.231}
 
+    validation = validate_v2_template_configuration(config)
+    assert validation["can_save"] is True
+    assert all(issue["status"] != "blocked" for issue in validation["issues"])
     task = compile_task(config=config, scan=scan)
 
     fit_actions = [action for action in task["outputs"][0]["actions"] if action["type"] == "fit_output_bounds"]
@@ -496,9 +504,45 @@ def test_compiles_single_design_anchor_dimensions_as_final_output_frame():
             "type": "fit_output_bounds",
             "group": "design",
             "option_key": "Design03",
-            "dimensions": {"width_mm": 150.231, "height_mm": 47.231, "tolerance_mm": 0.007},
+            "dimensions": {"width_mm": 48.0, "height_mm": 40.0, "tolerance_mm": 0.007},
         }
     ]
+
+
+def test_compiles_design_group_dimensions_when_design_has_multiple_required_asset_library_slots():
+    config = render_config()
+    config["outputs"][0].pop("style")
+    config["field_bindings"].pop("size")
+    config["option_mappings"] = [item for item in config["option_mappings"] if item["group"] != "style"]
+    config["field_bindings"]["badge"] = "Badge"
+    design_config = config["outputs"][0]["design"]["options"][0]
+    design_config["slots"][1]["asset_key"] = "initial"
+    design_config["assets"][0]["asset_key"] = "initial"
+    design_config["slots"].append(
+        {"key": "slot_badge", "source_field": "badge", "preset": "asset_replace", "asset_key": "badge"}
+    )
+    design_config["assets"].append({"asset_key": "badge", "slot": "slot_badge", "supported_values": ["A", "B"]})
+    scan = scan_evidence()
+    design = scan["outputs"][0]["designs"][0]
+    design["dimensions"] = {"width_mm": 165.15, "height_mm": 131.018}
+    design["assets"][0]["asset_key"] = "initial"
+    design["slots"][1]["dimensions"] = {"width_mm": 48.0, "height_mm": 40.0}
+    design["slots"].append(
+        {
+            "key": "slot_badge",
+            "path": "Template/Output_main/Design/Design03/slot_badge",
+            "dimensions": {"width_mm": 30.0, "height_mm": 20.0},
+        }
+    )
+    design["assets"].append({"asset_key": "badge", "path": "Template/Output_main/Design/Design03/Assets/badge"})
+
+    validation = validate_v2_template_configuration(config)
+    assert validation["can_save"] is True
+    assert all(issue["status"] != "blocked" for issue in validation["issues"])
+    task = compile_task(config=config, scan=scan)
+
+    fit_action = next(action for action in task["outputs"][0]["actions"] if action["type"] == "fit_output_bounds")
+    assert fit_action["dimensions"] == {"width_mm": 165.15, "height_mm": 131.018, "tolerance_mm": 0.007}
 
 
 def test_falls_back_to_design_group_when_single_design_anchor_has_no_dimensions():
@@ -549,11 +593,22 @@ def test_compiles_single_design_slot_dimensions_when_slot_has_no_anchor():
     config["outputs"][0].pop("style")
     config["field_bindings"].pop("size")
     config["option_mappings"] = [item for item in config["option_mappings"] if item["group"] != "style"]
-    config["outputs"][0]["design"]["options"][0]["slots"][0].pop("anchor")
+    design_config = config["outputs"][0]["design"]["options"][0]
+    design_config["slots"] = [
+        {"key": "slot_name", "source_field": "name", "preset": "direct_text"},
+    ]
+    design_config["assets"] = []
     scan = scan_evidence()
     design = scan["outputs"][0]["designs"][0]
     design["dimensions"] = {"width_mm": 165.15, "height_mm": 131.018}
-    design["slots"][0]["dimensions"] = {"width_mm": 163.657, "height_mm": 85.03}
+    design["slots"] = [
+        {
+            "key": "slot_name",
+            "path": "Template/Output_main/Design/Design03/slot_name",
+            "dimensions": {"width_mm": 163.657, "height_mm": 85.03},
+        }
+    ]
+    design["assets"] = []
 
     task = compile_task(config=config, scan=scan)
 

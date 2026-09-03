@@ -259,13 +259,30 @@ def _scanned_design_dimensions(configured_option: Mapping[str, Any], scanned_opt
     """Choose the configured primary-slot frame used by the output policy.
 
     A Design group may include decorative objects outside its editable text slot.
-    For a design with exactly one required non-asset slot, its configured anchor
-    defines the primary delivery boundary when an anchor is present. Optional
-    subtitle slots are independently fitted inside their own anchors. Their
-    designed offset may make the combined visible bounds larger than the primary
-    frame, so they must not trigger a later whole-group rescale. Designs with
-    multiple required slots retain the group-level scan as their final frame.
+    A required asset-library slot is part of the delivered composition, even
+    though it is not a text slot. Its visual footprint can be much larger than
+    the primary text anchor. The Design group may also contain every candidate
+    from that library, so its scanned group bounds are not the delivery frame.
+    When there is one required asset-library slot, its scanned dimensions define
+    the final frame. Otherwise, for a design with exactly one required non-asset
+    slot, its configured anchor defines the primary delivery boundary when an
+    anchor is present. Optional subtitle slots are independently fitted inside
+    their own anchors. Their designed offset may make the combined visible
+    bounds larger than the primary frame, so they must not trigger a later
+    whole-group rescale. Designs with multiple required slots retain the
+    group-level scan as their final frame.
     """
+    required_asset_slots = _required_asset_library_slot_keys(configured_option)
+    if len(required_asset_slots) == 1:
+        required_slot_key = next(iter(required_asset_slots))
+        for scanned_slot in scanned_option.get("slots", []):
+            if isinstance(scanned_slot, Mapping) and str(scanned_slot.get("key") or "") == required_slot_key:
+                dimensions = _scanned_dimensions(scanned_slot)
+                if dimensions:
+                    return dimensions
+        return _scanned_dimensions(scanned_option)
+    elif required_asset_slots:
+        return _scanned_dimensions(scanned_option)
     configured_slots = [
         dict(slot)
         for slot in configured_option.get("slots", [])
@@ -290,6 +307,24 @@ def _scanned_design_dimensions(configured_option: Mapping[str, Any], scanned_opt
                 if dimensions:
                     return dimensions
     return _scanned_dimensions(scanned_option)
+
+
+def _required_asset_library_slot_keys(configured_option: Mapping[str, Any]) -> set[str]:
+    asset_slots = {
+        str(dict(asset).get("slot") or "")
+        for asset in configured_option.get("assets", [])
+        if isinstance(asset, Mapping) and str(dict(asset).get("slot") or "")
+    }
+    if not asset_slots:
+        return set()
+    return {
+        str(dict(slot).get("key") or "")
+        for slot in configured_option.get("slots", [])
+        if isinstance(slot, Mapping)
+        and str(dict(slot).get("key") or "") in asset_slots
+        and str(dict(slot).get("preset") or "") == "asset_replace"
+        and bool(dict(slot).get("required", True))
+    }
 
 
 def _scanned_dimensions(item: Mapping[str, Any]) -> dict[str, float]:
