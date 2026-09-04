@@ -418,6 +418,50 @@ def test_v2_single_name_template_splits_newline_names_into_one_order_column(tmp_
     assert renderer.color_frame_calls[0]["inputs"][0]["order_nos"] == ["ORDER-K"]
 
 
+def test_v2_single_tail_name_slot_splits_newlines_without_splitting_spaces():
+    config = {"field_bindings": {"name": "Name"}}
+    render_task = {
+        "outputs": [
+            {
+                "key": "Output_main",
+                "actions": [
+                    {
+                        "type": "replace_slot_text",
+                        "group": "font",
+                        "option_key": "F2",
+                        "source_field": "name",
+                        "source_part_index": 0,
+                        "tail_paths": ["Template/Output_main/Font/F2/tail_name_first_a"],
+                        "tails": [
+                            {"position": "first", "glyph_mode": "opentype_alternate"},
+                            {"position": "last", "glyph_mode": "opentype_alternate"},
+                        ],
+                    }
+                ],
+            }
+        ]
+    }
+    preflight = {
+        "preflight_rows": [
+            {
+                "row": 1,
+                "outputs": [{"output": "Output_main", "font": "F2"}],
+            }
+        ]
+    }
+
+    units = build_v2_order_units(
+        config,
+        render_task,
+        [{"Name": "Mary Jane\r\nAna Maria\nEve Adams\r"}],
+        preflight,
+    )
+
+    assert [unit.values["name"] for unit in units] == ["Mary Jane", "Ana Maria", "Eve Adams"]
+    assert [unit.quantity_index for unit in units] == [1, 2, 3]
+    assert [unit.quantity for unit in units] == [3, 3, 3]
+
+
 def test_v2_order_render_preserves_technical_illustrator_error_in_job_and_gateway_result(tmp_path):
     bundle_path = tmp_path / "published.zip"
     _bundle(

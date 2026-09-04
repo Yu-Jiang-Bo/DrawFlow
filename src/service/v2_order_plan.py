@@ -204,8 +204,6 @@ def _single_name_line_split_enabled(
                 continue
             if int(action.get("source_part_index") or 0) != 0:
                 return False
-            if action.get("tail_paths") or action.get("tails"):
-                return False
             active_name_actions += 1
             if active_name_actions > 1:
                 return False
