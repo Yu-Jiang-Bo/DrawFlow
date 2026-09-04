@@ -14,6 +14,7 @@ from typing import Any, Iterable, Mapping
 from .department_output import resolve_department_output
 from .production_output import ProductionOutputUnit
 from .v2_order_render_support import V2OrderRenderError, row_selections
+from .v2_order_preflight import selected_order_color_fields
 from .v2_trial_render_support import logical_values
 
 
@@ -286,13 +287,15 @@ def _unit_metadata(config: Mapping[str, Any], unit: V2OrderRenderUnit, sequence:
     detail_id = _first_unit_value(config, unit, "detail_id", DETAIL_ALIASES)
     order_no = str(unit.order_id or "").strip() or _first_unit_value(config, unit, "order_no", ORDER_ALIASES)
     output_index = max(int(getattr(unit, "output_index", 0) or 0), 1)
+    color_values = order_color_values_for_unit(config, unit)
     return {
         "order_no": order_no,
         "detail_id": detail_id,
         "department": _first_unit_value(config, unit, "department", DEPARTMENT_ALIASES),
         "manufacturer": _first_unit_value(config, unit, "manufacturer", MANUFACTURER_ALIASES),
         "product_name": _first_unit_value(config, unit, "product_name", PRODUCT_ALIASES),
-        "color_option": _first_unit_value(config, unit, "color", COLOR_ALIASES),
+        "color_option": _preferred_order_color_value(color_values)
+        or _first_unit_value(config, unit, "color", COLOR_ALIASES),
         "identity": f"{detail_id}|output:{output_index:03d}|qty:{unit.quantity_index:03d}|row:{unit.row_index:03d}",
     }
 
@@ -308,6 +311,43 @@ def _first_unit_value(
         if value:
             return value
     return _metadata_value(unit.row_preflight, logical, aliases)
+
+
+def order_color_values_for_unit(config: Mapping[str, Any], unit: V2OrderRenderUnit) -> dict[str, str]:
+    """Return every order color value that the selected output actually consumes."""
+    output = next(
+        (
+            item
+            for item in config.get("outputs", [])
+            if isinstance(item, Mapping) and str(item.get("key") or "").strip() == unit.output_key
+        ),
+        {},
+    )
+    selections = dict(unit.selections.get(unit.output_key) or {})
+    selected: dict[str, Mapping[str, Any]] = {}
+    for group_name in ("design", "font"):
+        option_key = str(selections.get(group_name) or "").strip()
+        options = dict(dict(output).get(group_name) or {}).get("options") or []
+        option = next(
+            (
+                item
+                for item in options
+                if isinstance(item, Mapping) and str(item.get("key") or "").strip() == option_key
+            ),
+            None,
+        )
+        if option is not None:
+            selected[group_name] = option
+    fields = selected_order_color_fields(config, unit.output_key, selected)
+    return {field: _first_unit_value(config, unit, field, ()) for field in sorted(fields)}
+
+
+def _preferred_order_color_value(color_values: Mapping[str, str]) -> str:
+    """Choose a custom color binding before the legacy generic color field."""
+    for field, value in color_values.items():
+        if field != "color" and value:
+            return value
+    return next((value for value in color_values.values() if value), "")
 
 
 def _metadata_value(source: Mapping[str, Any], logical: str, aliases: Iterable[str]) -> str:

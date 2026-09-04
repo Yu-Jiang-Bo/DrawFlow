@@ -104,6 +104,34 @@ def test_v2_order_preflight_allows_label_only_color_column_without_render_rules(
     assert result["issues"] == []
 
 
+def test_v2_order_preflight_only_requires_color_header_for_selected_color_binding():
+    config = deepcopy(complete_contract())
+    design_without_color = deepcopy(config["outputs"][0]["design"]["options"][0])
+    design_without_color["key"] = "Design04"
+    for slot in design_without_color["slots"]:
+        slot.pop("color_binding", None)
+    font_without_color = deepcopy(config["outputs"][0]["font"]["options"][0])
+    font_without_color["key"] = "F2"
+    for slot in font_without_color["slots"]:
+        slot.pop("color_binding", None)
+    config["outputs"][0]["design"]["options"].append(design_without_color)
+    config["outputs"][0]["font"]["options"].append(font_without_color)
+    config["option_mappings"].extend(
+        [
+            {"field": "design", "source_value": "04", "target": "Design04", "output": "Output_main", "group": "design"},
+            {"field": "font", "source_value": "F2", "target": "F2", "output": "Output_main", "group": "font"},
+        ]
+    )
+    rows = [dict(valid_rows()[0], Design="04", Font="F2")]
+    rows[0].pop("Color")
+
+    result = preflight_v2_order_rows(config, rows)
+
+    assert result["ok"] is True
+    assert result["can_render"] is True
+    assert result["issues"] == []
+
+
 def test_v2_order_preflight_requires_color_header_when_slot_uses_order_color():
     config = deepcopy(complete_contract())
     config["colors"] = []

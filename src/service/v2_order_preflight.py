@@ -52,12 +52,14 @@ def preflight_v2_order_rows(config: Mapping[str, Any], rows: Iterable[Mapping[st
         return {"ok": False, "can_render": False, "issues": issues, "preflight_rows": []}
 
     preflight_rows = []
+    selected_color_fields: set[str] = set()
     for index, row in enumerate(order_rows, start=1):
         row_order_id = _order_id(row)
         preflight_outputs = []
         for output_index, output in enumerate(contract["outputs"]):
             output_path = f"$.outputs[{output_index}]"
             selected = _selected_options(contract, output, row, index, row_order_id, output_path, issues)
+            selected_color_fields.update(selected_order_color_fields(contract, output["key"], selected))
             _check_required_slot_values(contract, output, selected, row, index, row_order_id, output_path, issues)
             preflight_outputs.append(
                 {
@@ -68,6 +70,8 @@ def preflight_v2_order_rows(config: Mapping[str, Any], rows: Iterable[Mapping[st
                 }
             )
         preflight_rows.append({"row": index, "order_id": row_order_id, "outputs": preflight_outputs})
+
+    _check_selected_color_headers(contract, headers, selected_color_fields, issues)
 
     return {
         "ok": not issues,
@@ -90,8 +94,6 @@ def _check_required_headers(contract: Mapping[str, Any], headers: set[str], issu
                 field = str(slot.get("source_field") or "").strip()
                 if field:
                     required_fields.add(field)
-    required_fields.update(_required_order_color_fields(contract))
-
     for field in sorted(required_fields):
         header = bindings.get(field)
         if not header or header not in headers:
@@ -106,6 +108,30 @@ def _check_required_headers(contract: Mapping[str, Any], headers: set[str], issu
                     expected_format=f"请在订单表中提供列：{header or field}。",
                 )
             )
+
+
+def _check_selected_color_headers(
+    contract: Mapping[str, Any],
+    headers: set[str],
+    selected_color_fields: set[str],
+    issues: list[Dict[str, Any]],
+) -> None:
+    bindings = dict(contract.get("field_bindings") or {})
+    for field in sorted(selected_color_fields):
+        header = str(bindings.get(field) or "").strip()
+        if header and header in headers:
+            continue
+        issues.append(
+            _issue(
+                contract=contract,
+                row=0,
+                order_id="",
+                path=f"$.field_bindings.{field}",
+                code="header_missing",
+                reason=f"订单表缺少字段“{header or field}”，请先补齐订单表头。",
+                expected_format=f"请在订单表中提供列：{header or field}。",
+            )
+        )
 
 
 def _selected_options(
@@ -269,28 +295,6 @@ def _matches_field_alias(raw_field: Any, aliases: set[str]) -> bool:
     return bool(candidate and candidate.casefold() in folded_aliases)
 
 
-def _required_order_color_fields(contract: Mapping[str, Any]) -> set[str]:
-    bindings = dict(contract.get("field_bindings") or {})
-    color_keys = {str(item.get("key") or "") for item in contract.get("colors") or []}
-    fields: set[str] = set()
-    if contract.get("colors") and bindings.get("color"):
-        fields.add("color")
-    for item in contract.get("option_mappings") or []:
-        mapping_item = dict(item or {})
-        if mapping_item.get("group") != "color":
-            continue
-        field = _order_color_field(contract, mapping_item.get("field"), color_keys)
-        if field:
-            fields.add(field)
-    for output in contract.get("outputs") or []:
-        for option in _all_options(dict(output or {})):
-            for slot in dict(option or {}).get("slots") or []:
-                field = _order_color_field(contract, dict(slot or {}).get("color_binding"), color_keys)
-                if field:
-                    fields.add(field)
-    return fields
-
-
 def _check_selected_nondefault_color_values(
     contract: Mapping[str, Any],
     output: Mapping[str, Any],
@@ -303,7 +307,7 @@ def _check_selected_nondefault_color_values(
 ) -> None:
     bindings = dict(contract.get("field_bindings") or {})
     output_key = str(dict(output or {}).get("key") or "")
-    for field in sorted(_selected_order_color_fields(contract, output_key, selected) - {"color"}):
+    for field in sorted(selected_order_color_fields(contract, output_key, selected) - {"color"}):
         value = _cell(row, str(bindings.get(field) or ""))
         if not value or _known_color(contract, output_key, field, value):
             continue
@@ -329,15 +333,34 @@ def _known_color(contract: Mapping[str, Any], output: str, field: str, source_va
 
 
 def _color_rules_active(contract: Mapping[str, Any], output: str, selected: Mapping[str, Mapping[str, Any]]) -> bool:
-    return "color" in _selected_order_color_fields(contract, output, selected)
+    if "color" in selected_order_color_fields(contract, output, selected):
+        return True
+    if selected:
+        return False
+
+    # When every selection is invalid, retain the useful unknown-color error
+    # for templates that declare a default color binding. This must not feed
+    # header requirements or the production-output gate.
+    color_keys = {str(item.get("key") or "") for item in contract.get("colors") or []}
+    configured_output = next(
+        (item for item in contract.get("outputs") or [] if dict(item or {}).get("key") == output),
+        {},
+    )
+    return any(
+        _order_color_field(contract, dict(slot or {}).get("color_binding"), color_keys) == "color"
+        for option in _all_options(dict(configured_output or {}))
+        for slot in dict(option or {}).get("slots") or []
+    )
 
 
-def _selected_order_color_fields(contract: Mapping[str, Any], output: str, selected: Mapping[str, Mapping[str, Any]]) -> set[str]:
-    bindings = dict(contract.get("field_bindings") or {})
+def selected_order_color_fields(
+    contract: Mapping[str, Any],
+    output: str,
+    selected: Mapping[str, Mapping[str, Any]],
+) -> set[str]:
+    """Return the order color fields used by one selected output."""
     color_keys = {str(item.get("key") or "") for item in contract.get("colors") or []}
     fields: set[str] = set()
-    if contract.get("colors") and bindings.get("color"):
-        fields.add("color")
     for mapping_item in contract.get("option_mappings") or []:
         item = dict(mapping_item or {})
         if item.get("group") == "color" and item.get("output") == output:

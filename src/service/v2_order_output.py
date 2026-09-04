@@ -39,6 +39,7 @@ from .v2_order_plan import (
     V2OrderRenderUnit,
     build_v2_order_units,
     has_department_delivery_context,
+    order_color_values_for_unit,
     to_production_units,
     unit_stem,
 )
@@ -149,6 +150,7 @@ class V2OrderOutputRenderer:
                 graphic_batch_dir="single-graphic-batch",
                 graphic_master_batch_dir="graphic-master-batch",
                 single_order_merge_predicate=_v2_cross_department_single_order,
+                require_public_output_metadata=False,
                 stats_extra={
                     "orders": len(rows),
                     "outputs": len([item for item in render_task.get("outputs", []) if isinstance(item, Mapping)]),
@@ -1122,7 +1124,12 @@ def _require_v2_public_output_units(
     units: Iterable[V2OrderRenderUnit],
 ) -> tuple[Any, ...]:
     try:
-        return validate_public_output_units(to_production_units(config, units))
+        production_units = to_production_units(config, units)
+        for index, production_unit in enumerate(production_units, start=1):
+            color_values = order_color_values_for_unit(config, production_unit.payload)
+            if color_values and any(not value for value in color_values.values()):
+                raise ProductionOutputError(f"第 {index} 个效果图缺少字体颜色，不能进入公共生产输出层")
+        return validate_public_output_units(production_units, require_color=False)
     except ProductionOutputError as exc:
         raise V2OrderRenderError(
             _v2_public_output_message(str(exc)),
