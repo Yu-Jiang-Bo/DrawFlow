@@ -1,7 +1,7 @@
 import pytest
 
 from src.service.production_output import ProductionOutputError, validate_public_output_units
-from src.service.v2_order_plan import build_v2_order_units, to_production_units
+from src.service.v2_order_plan import V2OrderRenderUnit, build_v2_order_units, to_production_units
 from src.service.v2_order_render_support import V2OrderRenderError
 
 
@@ -203,6 +203,105 @@ def test_v2_order_units_prefer_standard_jjmb_metadata_headers_when_aliases_overl
 
     assert [unit.detail_id for unit in production_units] == ["STANDARD-DETAIL", "STANDARD-DETAIL"]
     assert [unit.product_name for unit in production_units] == ["标准产品", "标准产品"]
+
+
+def test_v2_order_unit_uses_selected_custom_color_binding_for_public_metadata():
+    config = {
+        "field_bindings": {"front_color": "正面颜色"},
+        "outputs": [
+            {
+                "key": "Output_main",
+                "design": {"options": [{"key": "D1", "slots": [{"color_binding": "front_color"}]}]},
+                "font": {"options": [{"key": "F1", "slots": [{"color_binding": "color"}]}]},
+            }
+        ],
+    }
+    unit = V2OrderRenderUnit(
+        row_index=1,
+        row={},
+        row_preflight={},
+        output_key="Output_main",
+        values={
+            "detail_id": "DETAIL-1",
+            "department": "K",
+            "product_name": "Pendant",
+            "color": "Red",
+            "front_color": "Gold",
+        },
+        selections={"Output_main": {"design": "D1", "font": "F1"}},
+        order_id="ORDER-1",
+        template_version="v0001",
+    )
+
+    production_unit = to_production_units(config, [unit])[0]
+
+    assert production_unit.color_option == "Gold"
+
+
+def test_v2_order_unit_uses_selected_style_color_binding_for_public_metadata():
+    config = {
+        "field_bindings": {"style_color": "尺寸颜色"},
+        "outputs": [
+            {
+                "key": "Output_main",
+                "style": {"options": [{"key": "S1", "slots": [{"color_binding": "style_color"}]}]},
+                "design": {"options": [{"key": "D1", "slots": []}]},
+                "font": {"options": [{"key": "F1", "slots": []}]},
+            }
+        ],
+    }
+    unit = V2OrderRenderUnit(
+        row_index=1,
+        row={},
+        row_preflight={},
+        output_key="Output_main",
+        values={
+            "detail_id": "DETAIL-1",
+            "department": "K",
+            "product_name": "Pendant",
+            "style_color": "Gold",
+        },
+        selections={"Output_main": {"style": "S1", "design": "D1", "font": "F1"}},
+        order_id="ORDER-1",
+        template_version="v0001",
+    )
+
+    production_unit = to_production_units(config, [unit])[0]
+
+    assert production_unit.color_option == "Gold"
+
+
+def test_v2_order_unit_keeps_generic_color_for_color_dependent_delivery_without_color_binding():
+    config = {
+        "field_bindings": {"color": "字体颜色"},
+        "outputs": [
+            {
+                "key": "Output_main",
+                "design": {"options": [{"key": "D1", "slots": []}]},
+                "font": {"options": [{"key": "F1", "slots": []}]},
+            }
+        ],
+    }
+    unit = V2OrderRenderUnit(
+        row_index=1,
+        row={},
+        row_preflight={},
+        output_key="Output_main",
+        values={
+            "detail_id": "DETAIL-1",
+            "department": "K",
+            "product_name": "Pendant",
+            "color": "Gold",
+        },
+        selections={"Output_main": {"design": "D1", "font": "F1"}},
+        order_id="ORDER-1",
+        template_version="v0001",
+    )
+
+    production_unit = to_production_units(config, [unit])[0]
+
+    assert production_unit.rule.name == "K"
+    assert production_unit.color_option == "Gold"
 
 
 def test_v2_public_gate_rejects_missing_department_without_technical_trace():

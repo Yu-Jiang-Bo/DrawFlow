@@ -93,7 +93,11 @@ def partition_output_units(units: Iterable[ProductionOutputUnit]) -> list[Produc
     return [ProductionOutputBatch(rule=rules[key], units=tuple(bucket), scope=key[3]) for key, bucket in buckets.items()]
 
 
-def validate_public_output_units(units: Iterable[ProductionOutputUnit]) -> tuple[ProductionOutputUnit, ...]:
+def validate_public_output_units(
+    units: Iterable[ProductionOutputUnit],
+    *,
+    require_color: bool = True,
+) -> tuple[ProductionOutputUnit, ...]:
     """Reject production adapters that cannot be safely routed by the shared output layer."""
 
     unit_list = tuple(units)
@@ -115,7 +119,7 @@ def validate_public_output_units(units: Iterable[ProductionOutputUnit]) -> tuple
             raise ProductionOutputError(f"第 {index} 个效果图缺少生产部门，不能绕过公共生产输出层直接交付")
         if not product_name:
             raise ProductionOutputError(f"第 {index} 个效果图缺少产品名称，不能进入公共生产输出层")
-        if not color_option:
+        if require_color and not color_option:
             raise ProductionOutputError(f"第 {index} 个效果图缺少字体颜色，不能进入公共生产输出层")
         if unit.payload is None:
             raise ProductionOutputError(f"第 {index} 个效果图缺少出图内容，不能进入公共生产输出层")

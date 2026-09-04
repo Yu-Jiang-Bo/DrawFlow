@@ -115,6 +115,40 @@ def test_v2_units_keep_all_public_department_and_manufacturer_rules(tmp_path):
     assert all(len(task["inputs"]) == 2 for task in pw_ew_masters)
 
 
+def test_v2_pipeline_allows_blank_color_for_d_department_without_order_color_binding(tmp_path):
+    config = {"template": {"template_id": "V2-NO-COLOR"}, "colors": [], "field_bindings": {"name": "Name"}}
+    unit = _v2_unit(1, department="JD", manufacturer="")
+    unit.row["color"] = ""
+    production_units = to_production_units(config, (unit,))
+
+    assert production_units[0].color_option == ""
+    result = run_production_output_pipeline(
+        {
+            "job_id": "v2-no-color",
+            "job_dir": str(tmp_path / "v2-no-color"),
+            "request": {"dry_run": True, "visible": False, "columns": 1},
+        },
+        template_id="V2-NO-COLOR",
+        output_ai=tmp_path / "v2-no-color" / "delivery.ai",
+        units=production_units,
+        task_builder=create_v2_order_task_builder(_minimal_v2_render_task(), template_ai=tmp_path / "template.ai"),
+        component_reuse=create_v2_component_reuse_strategy(
+            _minimal_v2_render_task(),
+            template_ai=tmp_path / "template.ai",
+        ),
+        item_count=1,
+        render_script=Path("scripts/illustrator/render_v2_template.jsx"),
+        chunk_size=20,
+        update_progress=lambda *_args: None,
+        task_progress=lambda *_args: {},
+        write_json=_write_json,
+        write_render_task_json=_write_json,
+        require_public_output_metadata=False,
+    )
+
+    assert result["outputs"]["render_task_files"]
+
+
 def _v2_unit(index: int, *, department: str, manufacturer: str) -> V2OrderRenderUnit:
     row = {
         "order_no": f"ORDER-{index:02d}",

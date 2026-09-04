@@ -87,15 +87,52 @@ def test_v2_order_preflight_reports_unknown_design_font_style_and_color_values()
     assert result["issues"][0]["expected_format"]
 
 
-def test_v2_order_preflight_allows_label_only_color_column_without_render_rules():
+def test_v2_order_preflight_ignores_color_option_mapping_without_selected_color_binding():
     config = deepcopy(complete_contract())
-    config["colors"] = []
     for output in config["outputs"]:
         for group_name in ("design", "font"):
             for option in output[group_name]["options"]:
                 for slot in option["slots"]:
                     slot.pop("color_binding", None)
-    rows = [dict(valid_rows()[0], Color="Blue")]
+    config["option_mappings"].append(
+        {
+            "field": "color",
+            "source_value": "Pink",
+            "target": "Pink",
+            "output": "Output_main",
+            "group": "color",
+        }
+    )
+    rows = [dict(valid_rows()[0])]
+    rows[0].pop("Color")
+
+    result = preflight_v2_order_rows(config, rows)
+
+    assert result["ok"] is True
+    assert result["can_render"] is True
+    assert result["issues"] == []
+
+
+def test_v2_order_preflight_only_requires_color_header_for_selected_color_binding():
+    config = deepcopy(complete_contract())
+    design_without_color = deepcopy(config["outputs"][0]["design"]["options"][0])
+    design_without_color["key"] = "Design04"
+    for slot in design_without_color["slots"]:
+        slot.pop("color_binding", None)
+    font_without_color = deepcopy(config["outputs"][0]["font"]["options"][0])
+    font_without_color["key"] = "F2"
+    for slot in font_without_color["slots"]:
+        slot.pop("color_binding", None)
+    config["outputs"][0]["design"]["options"].append(design_without_color)
+    config["outputs"][0]["font"]["options"].append(font_without_color)
+    config["option_mappings"].extend(
+        [
+            {"field": "design", "source_value": "04", "target": "Design04", "output": "Output_main", "group": "design"},
+            {"field": "font", "source_value": "F2", "target": "F2", "output": "Output_main", "group": "font"},
+        ]
+    )
+    rows = [dict(valid_rows()[0], Design="04", Font="F2")]
+    rows[0].pop("Color")
 
     result = preflight_v2_order_rows(config, rows)
 
@@ -115,6 +152,17 @@ def test_v2_order_preflight_requires_color_header_when_slot_uses_order_color():
     assert result["ok"] is False
     assert result["can_render"] is False
     assert _has_issue(result, row=0, code="header_missing", reason="Color")
+
+
+def test_v2_order_preflight_requires_nonempty_color_value_when_selected_slot_uses_order_color():
+    config = deepcopy(complete_contract())
+    rows = [dict(valid_rows()[0], Color="")]
+
+    result = preflight_v2_order_rows(config, rows)
+
+    assert result["ok"] is False
+    assert result["can_render"] is False
+    assert _has_issue(result, row=1, reason="Color")
 
 
 def test_v2_order_preflight_checks_nondefault_color_binding_values():
