@@ -353,6 +353,103 @@ def test_v2_workbench_opens_the_published_shared_template_requested_by_direct_li
     )
 
 
+def test_v2_workbench_reopens_the_editable_draft_for_the_current_published_version():
+    run_node(
+        r"""
+        (async () => {
+          const requests = [];
+          const editableDraft = {
+            metadata: { template_id: "SHARED001", name: "同事共享模板", shop_name: "Demo Shop" },
+            manifest: { draft_revision: "d0008", source_version: "v0003" },
+            config: {
+              template: { template_id: "SHARED001" },
+              outputs: [{ key: "Output_main", display_name: "主效果图" }],
+              field_bindings: { slot_name: "Personalization" },
+              option_mappings: [],
+              checks: {}
+            },
+            scan: { outputs: [{ key: "Output_main" }] }
+          };
+          const summary = {
+            template_id: "SHARED001",
+            name: "同事共享模板",
+            publication: { status: "active", current_version: "v0003" },
+            draft: { revision: "d0008", source_version: "v0003" }
+          };
+          async function fakeFetch(url, options = {}) {
+            const textUrl = String(url);
+            requests.push({ url: textUrl, method: options.method || "GET" });
+            if (textUrl === "/api/v2/templates") return response({ templates: [summary] });
+            if (textUrl === "/api/v2/templates/SHARED001/draft") return response({ draft: editableDraft });
+            throw new Error(`unexpected request ${textUrl}`);
+          }
+          const app = createApp(fakeFetch, undefined, "?template_id=SHARED001");
+          const state = global.DrawFlowV2WorkbenchContext.state;
+          for (let index = 0; index < 4 && state.stage !== "structure"; index += 1) await flush();
+          assert.strictEqual(state.isPublishedView, false);
+          assert.strictEqual(state.draft.manifest.draft_revision, "d0008");
+          assert.strictEqual(app.elements.templateName.disabled, false);
+          assert.strictEqual(app.elements.saveDraftBtn.disabled, false);
+          assert.strictEqual(app.elements.createDraftFromPublishedBtn.hidden, true);
+          assert(requests.some((item) => item.url === "/api/v2/templates/SHARED001/draft" && item.method === "GET"));
+          assert(!requests.some((item) => item.url === "/api/v2/templates/SHARED001/published"));
+          await global.refreshSharedTemplates();
+          assert.strictEqual(state.isPublishedView, false);
+          assert.strictEqual(app.elements.templateName.disabled, false);
+          assert.strictEqual(requests.filter((item) => item.url === "/api/v2/templates/SHARED001/draft").length, 2);
+          assert(!requests.some((item) => item.url === "/api/v2/templates/SHARED001/published"));
+        })().catch((error) => { console.error(error); process.exit(1); });
+        """,
+        cwd=Path(__file__).resolve().parents[1],
+    )
+
+
+def test_v2_workbench_keeps_an_outdated_published_draft_read_only():
+    run_node(
+        r"""
+        (async () => {
+          const requests = [];
+          const sharedTemplate = {
+            metadata: { template_id: "SHARED001", name: "同事共享模板", shop_name: "Demo Shop" },
+            manifest: { version: "v0002" },
+            config: {
+              template: { template_id: "SHARED001" },
+              outputs: [{ key: "Output_main", display_name: "主效果图" }],
+              field_bindings: { slot_name: "Personalization" },
+              option_mappings: [],
+              checks: {}
+            },
+            scan: { outputs: [{ key: "Output_main" }] }
+          };
+          const summary = {
+            template_id: "SHARED001",
+            name: "同事共享模板",
+            publication: { status: "active", current_version: "v0002" },
+            draft: { revision: "d0008", source_version: "v0001" }
+          };
+          async function fakeFetch(url, options = {}) {
+            const textUrl = String(url);
+            requests.push({ url: textUrl, method: options.method || "GET" });
+            if (textUrl === "/api/v2/templates") return response({ templates: [summary] });
+            if (textUrl === "/api/v2/templates/SHARED001/published") return response({ published: sharedTemplate });
+            throw new Error(`unexpected request ${textUrl}`);
+          }
+          const app = createApp(fakeFetch, undefined, "?template_id=SHARED001");
+          const state = global.DrawFlowV2WorkbenchContext.state;
+          for (let index = 0; index < 4 && state.stage !== "structure"; index += 1) await flush();
+          assert.strictEqual(state.isPublishedView, true);
+          assert.strictEqual(state.draft.manifest.version, "v0002");
+          assert.strictEqual(app.elements.templateName.disabled, true);
+          assert.strictEqual(app.elements.saveDraftBtn.disabled, true);
+          assert.strictEqual(app.elements.createDraftFromPublishedBtn.hidden, false);
+          assert(requests.some((item) => item.url === "/api/v2/templates/SHARED001/published" && item.method === "GET"));
+          assert(!requests.some((item) => item.url === "/api/v2/templates/SHARED001/draft"));
+        })().catch((error) => { console.error(error); process.exit(1); });
+        """,
+        cwd=Path(__file__).resolve().parents[1],
+    )
+
+
 def test_v2_workbench_keeps_the_upload_stage_when_the_shared_configuration_cannot_be_read():
     run_node(
         r"""

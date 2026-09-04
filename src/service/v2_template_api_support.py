@@ -107,6 +107,11 @@ def optional_draft(store: V2TemplateStore, template_id: str) -> dict[str, Any] |
         return None
 
 
+def draft_source_version(draft: Mapping[str, Any] | None) -> str:
+    manifest = draft.get("manifest") if isinstance(draft, Mapping) else None
+    return str(manifest.get("source_version") or "").strip() if isinstance(manifest, Mapping) else ""
+
+
 def current_asset_sources(
     store: V2TemplateStore,
     template_id: str,

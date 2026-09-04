@@ -60,6 +60,13 @@ def test_trusted_worker_registers_proof_and_publish_retry_is_idempotent(tmp_path
     )
     assert version_manifest["source_draft_revision"] == proof_draft["manifest"]["draft_revision"]
 
+    copied = api.create_draft_from_published("V2API001")["draft"]
+    previewed_copy = api.register_preview_proof(
+        "V2API001",
+        signed_preview_payload(api, copied, ROWS),
+    )
+    assert previewed_copy["draft"]["manifest"]["source_version"] == "v0001"
+
 
 def test_preview_evidence_hashes_explicit_ai_and_png_bytes(tmp_path):
     api = publication_api(tmp_path)

@@ -25,6 +25,7 @@ from .v2_preview_worker_auth import V2PreviewWorkerAuthError
 from .v2_template_api_support import (
     V2TemplateApiError,
     current_asset_sources,
+    draft_source_version,
     ensure_payload_fields,
     metadata_from_state,
     optional_mapping,
@@ -131,6 +132,7 @@ class V2TemplatePublicationService:
                 config=confirmed,
                 scan=dict(draft.get("scan") or {}),
                 assets=assets,
+                source_version=draft_source_version(draft),
             )
             next_draft = self.api.store.read_draft(template_id)
             result = self.publication_validation(template_id, next_draft)

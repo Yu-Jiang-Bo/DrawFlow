@@ -83,16 +83,19 @@
     const template = state.templates.find((item) => templateIdOf(item) === templateId);
     const publication = objectOf(template && template.publication);
     const sharedVersion = publication.status === "active" ? cleanText(publication.current_version) : "";
-    const viewAction = sharedVersion ? "published" : "draft";
-    const viewLabel = sharedVersion ? "已发布配置" : "草稿";
+    const draft = objectOf(template && template.draft);
+    const hasEditablePublishedDraft = Boolean(sharedVersion && cleanText(draft.source_version) === sharedVersion);
+    const isPublishedView = Boolean(sharedVersion && !hasEditablePublishedDraft);
+    const viewAction = isPublishedView ? "published" : "draft";
+    const viewLabel = isPublishedView ? "已发布配置" : "草稿";
     setDraftStatus(`读取${viewLabel}中`, "pending");
     try {
       const payload = await getJson(
         `${API_ROOT}/${encodeURIComponent(templateId)}/${viewAction}`,
-        sharedVersion ? "共享配置读取失败，请确认模板已发布后重试。" : "草稿读取失败，请确认模板是否已创建。"
+        isPublishedView ? "共享配置读取失败，请确认模板已发布后重试。" : "草稿读取失败，请确认模板是否已创建。"
       );
       if (draftLoadRequestId !== state.draftLoadRequestId || state.selectedTemplateId !== templateId) return false;
-      state.isPublishedView = Boolean(sharedVersion);
+      state.isPublishedView = isPublishedView;
       state.draft = payload[viewAction] || null;
       state.scan = normalizeScanFromDraft(state.draft);
       fillDraftFields(state.draft, templateId);
@@ -104,7 +107,7 @@
       state.scan = {};
       fillDraftFields(null, templateId);
       renderAll();
-      showScanFailure(friendlyError(error, sharedVersion ? "共享配置读取失败，请确认模板已发布后重试。" : "草稿读取失败，请确认模板是否已创建。"));
+      showScanFailure(friendlyError(error, isPublishedView ? "共享配置读取失败，请确认模板已发布后重试。" : "草稿读取失败，请确认模板是否已创建。"));
       return false;
     }
   }

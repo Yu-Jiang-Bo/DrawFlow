@@ -155,7 +155,7 @@ def test_v2_api_reads_published_template_configuration_without_reading_the_local
     assert "published_template_read" in V2TemplateApi(api.store)._service_contract()["capabilities"]
 
 
-def test_v2_api_creates_an_editable_draft_from_a_published_version(tmp_path):
+def test_v2_api_preserves_source_version_for_writes_to_a_published_draft(tmp_path):
     api = api_for(tmp_path)
     api.create_template({"template_id": "V2SHARED001", "name": "Shared demo"})
     api.store.save_draft(
@@ -173,6 +173,24 @@ def test_v2_api_creates_an_editable_draft_from_a_published_version(tmp_path):
     assert response.payload["draft"]["manifest"]["source_version"] == "v0001"
     assert response.payload["draft"]["config"]["template"]["template_id"] == "V2SHARED001"
     assert response.payload["draft"]["manifest"]["assets"][0]["file_name"] == "template.ai"
+
+    saved = api.save_draft("V2SHARED001", {"config": response.payload["draft"]["config"]})
+    assert saved["draft"]["manifest"]["source_version"] == "v0001"
+
+    uploaded = api.upload_asset(
+        "V2SHARED001",
+        "template.ai",
+        TrackingStream(b"updated-ai-bytes"),
+        content_length=len(b"updated-ai-bytes"),
+        headers={},
+    )
+    assert uploaded["draft"]["manifest"]["source_version"] == "v0001"
+
+    scanned = api.submit_scan(
+        "V2SHARED001",
+        {"evidence": scan_evidence(uploaded["asset"]["sha256"])},
+    )
+    assert scanned["draft"]["manifest"]["source_version"] == "v0001"
 
 
 def test_v2_api_returns_a_public_error_when_shared_version_is_unavailable(tmp_path):

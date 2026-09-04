@@ -15,6 +15,7 @@ from .paths import V2_TEMPLATE_DATA_DIR
 from .v2_template_api_support import (
     V2TemplateApiError,
     current_asset_sources,
+    draft_source_version,
     ensure_payload_fields,
     find_asset,
     handle_v2_template_api,
@@ -207,7 +208,14 @@ class V2TemplateApi:
             config = preview_config_payload(config)
         config, validation = self._prepare_saveable_config(config)
         self._ensure_config_template_matches(template_id, validation)
-        state = self.store.save_draft(template_id, metadata=metadata, config=config, scan=scan, assets=assets)
+        state = self.store.save_draft(
+            template_id,
+            metadata=metadata,
+            config=config,
+            scan=scan,
+            assets=assets,
+            source_version=draft_source_version(current_draft),
+        )
         draft = self.store.read_draft(template_id)
         self._record_audit("draft_saved", state, draft)
         return {
@@ -267,7 +275,14 @@ class V2TemplateApi:
                         "source_path": upload_dir / upload_record["file_name"],
                     },
                 ]
-                next_state = self.store.save_draft(template_id, metadata=metadata, config=config, scan=scan, assets=assets)
+                next_state = self.store.save_draft(
+                    template_id,
+                    metadata=metadata,
+                    config=config,
+                    scan=scan,
+                    assets=assets,
+                    source_version=draft_source_version(draft),
+                )
                 next_draft = self.store.read_draft(template_id)
                 self._record_audit("asset_uploaded", next_state, next_draft, details={"file_name": upload_record["file_name"]})
                 return {
@@ -424,7 +439,14 @@ class V2TemplateApi:
             self._apply_trusted_scan_audit(config, evidence)
             self._require_verified_pua_tail_profiles(config, evidence)
         assets = current_asset_sources(self.store, template_id, draft, replace_file_name="")
-        state = self.store.save_draft(template_id, metadata=metadata, config=config, scan=evidence, assets=assets)
+        state = self.store.save_draft(
+            template_id,
+            metadata=metadata,
+            config=config,
+            scan=evidence,
+            assets=assets,
+            source_version=draft_source_version(draft),
+        )
         next_draft = self.store.read_draft(template_id)
         self._record_audit("scan_submitted", state, next_draft, details={"template_sha256": evidence_sha})
         return {"state": state_summary(state), "draft": next_draft, "scan": next_draft["scan"]}
