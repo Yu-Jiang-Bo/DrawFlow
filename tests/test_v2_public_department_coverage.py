@@ -115,9 +115,9 @@ def test_v2_units_keep_all_public_department_and_manufacturer_rules(tmp_path):
     assert all(len(task["inputs"]) == 2 for task in pw_ew_masters)
 
 
-def test_v2_pipeline_allows_blank_color_after_v2_template_validation(tmp_path):
+def test_v2_pipeline_allows_blank_color_for_d_department_without_order_color_binding(tmp_path):
     config = {"template": {"template_id": "V2-NO-COLOR"}, "colors": [], "field_bindings": {"name": "Name"}}
-    unit = _v2_unit(1, department="K", manufacturer="")
+    unit = _v2_unit(1, department="JD", manufacturer="")
     unit.row["color"] = ""
     production_units = to_production_units(config, (unit,))
 

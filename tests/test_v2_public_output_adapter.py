@@ -5,6 +5,7 @@ import json
 import pytest
 
 from src.renderer.illustrator_bridge import IllustratorBridgeError
+from src.service.department_output import resolve_department_output
 from src.service.production_output import ProductionOutputError, ProductionOutputUnit
 from src.service import v2_order_output
 from src.service.v2_order_plan import V2OrderRenderUnit
@@ -81,11 +82,11 @@ def test_v2_public_metadata_error_does_not_expose_technical_message(monkeypatch)
     assert "公共生产输出层" not in str(exc_info.value)
 
 
-def test_v2_public_gate_allows_blank_color_when_template_does_not_use_order_color(monkeypatch):
+def test_v2_public_gate_allows_blank_color_for_d_department_without_order_color_binding(monkeypatch):
     unit = ProductionOutputUnit(
         order_no="ORDER-1",
         detail_id="DETAIL-1",
-        department="K",
+        department="JD",
         manufacturer="",
         product_name="Pendant",
         color_option="",
@@ -109,6 +110,38 @@ def test_v2_public_gate_allows_blank_color_when_template_does_not_use_order_colo
 
     assert len(actual) == 1
     assert actual[0].order_no == "ORDER-1"
+    assert actual[0].color_option == ""
+
+
+@pytest.mark.parametrize("department", ["JD", "PW", "EW", "ZW", "X"])
+def test_v2_public_gate_allows_blank_color_when_department_delivery_does_not_consume_color(monkeypatch, department):
+    unit = ProductionOutputUnit(
+        order_no="ORDER-1",
+        detail_id="DETAIL-1",
+        department=department,
+        manufacturer="",
+        product_name="Pendant",
+        color_option="",
+        payload=V2OrderRenderUnit(
+            row_index=1,
+            row={},
+            row_preflight={},
+            output_key="Output_main",
+            values={},
+            selections={"Output_main": {}},
+            order_id="ORDER-1",
+            template_version="v0001",
+        ),
+    )
+    monkeypatch.setattr(v2_order_output, "to_production_units", lambda *_args: (unit,))
+
+    actual = v2_order_output._require_v2_public_output_units(
+        {"colors": [], "field_bindings": {"name": "定制信息"}},
+        (),
+    )
+
+    assert len(actual) == 1
+    assert actual[0].department == department
     assert actual[0].color_option == ""
 
 
@@ -149,7 +182,54 @@ def test_v2_public_gate_requires_color_when_template_binds_order_color(monkeypat
         )
 
 
-def test_v2_public_gate_allows_blank_color_when_palette_has_no_order_binding(monkeypatch):
+def test_v2_public_gate_requires_every_selected_order_color_field(monkeypatch):
+    payload = V2OrderRenderUnit(
+        row_index=1,
+        row={},
+        row_preflight={},
+        output_key="Output_main",
+        values={"front_color": "Gold", "back_color": ""},
+        selections={"Output_main": {"design": "D1"}},
+        order_id="ORDER-1",
+        template_version="v0001",
+    )
+    unit = ProductionOutputUnit(
+        order_no="ORDER-1",
+        detail_id="DETAIL-1",
+        department="JD",
+        manufacturer="",
+        product_name="Pendant",
+        color_option="Gold",
+        payload=payload,
+    )
+    monkeypatch.setattr(v2_order_output, "to_production_units", lambda *_args: (unit,))
+
+    with pytest.raises(v2_order_output.V2OrderRenderError, match="订单缺少字体颜色"):
+        v2_order_output._require_v2_public_output_units(
+            {
+                "field_bindings": {"front_color": "正面颜色", "back_color": "背面颜色"},
+                "outputs": [
+                    {
+                        "key": "Output_main",
+                        "design": {
+                            "options": [
+                                {
+                                    "key": "D1",
+                                    "slots": [
+                                        {"color_binding": "front_color"},
+                                        {"color_binding": "back_color"},
+                                    ],
+                                }
+                            ]
+                        },
+                    }
+                ],
+            },
+            (),
+        )
+
+
+def test_v2_public_gate_allows_blank_color_for_d_department_when_palette_has_no_order_binding(monkeypatch):
     payload = V2OrderRenderUnit(
         row_index=1,
         row={},
@@ -163,7 +243,7 @@ def test_v2_public_gate_allows_blank_color_when_palette_has_no_order_binding(mon
     unit = ProductionOutputUnit(
         order_no="ORDER-1",
         detail_id="DETAIL-1",
-        department="K",
+        department="JD",
         manufacturer="",
         product_name="Pendant",
         color_option="",
@@ -180,6 +260,47 @@ def test_v2_public_gate_allows_blank_color_when_palette_has_no_order_binding(mon
 
     assert len(actual) == 1
     assert actual[0].color_option == ""
+
+
+@pytest.mark.parametrize(
+    ("department", "manufacturer"),
+    [
+        ("T", ""),
+        ("K", ""),
+        ("ZK", ""),
+        ("FK", ""),
+        ("H", ""),
+        ("W", "MY-W196"),
+        ("W", "MY-W120"),
+    ],
+)
+def test_v2_public_gate_requires_color_when_department_delivery_consumes_color(monkeypatch, department, manufacturer):
+    unit = ProductionOutputUnit(
+        order_no="ORDER-1",
+        detail_id="DETAIL-1",
+        department=department,
+        manufacturer=manufacturer,
+        product_name="Pendant",
+        color_option="",
+        rule=resolve_department_output(department, manufacturer),
+        payload=V2OrderRenderUnit(
+            row_index=1,
+            row={},
+            row_preflight={},
+            output_key="Output_main",
+            values={},
+            selections={"Output_main": {}},
+            order_id="ORDER-1",
+            template_version="v0001",
+        ),
+    )
+    monkeypatch.setattr(v2_order_output, "to_production_units", lambda *_args: (unit,))
+
+    with pytest.raises(v2_order_output.V2OrderRenderError, match="订单缺少字体颜色"):
+        v2_order_output._require_v2_public_output_units(
+            {"colors": [], "field_bindings": {"name": "定制信息"}},
+            (),
+        )
 
 
 def test_v2_public_gate_uses_the_selected_custom_order_color_field(monkeypatch):

@@ -325,7 +325,7 @@ def order_color_values_for_unit(config: Mapping[str, Any], unit: V2OrderRenderUn
     )
     selections = dict(unit.selections.get(unit.output_key) or {})
     selected: dict[str, Mapping[str, Any]] = {}
-    for group_name in ("design", "font"):
+    for group_name in ("style", "design", "font"):
         option_key = str(selections.get(group_name) or "").strip()
         options = dict(dict(output).get(group_name) or {}).get("options") or []
         option = next(

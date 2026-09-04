@@ -17,6 +17,7 @@ from .department_output import (
     ANNOTATION_PRODUCT_NAME,
     DepartmentOutputError,
     finalize_cmyk_png,
+    resolve_department_output,
     translate_color_to_chinese,
 )
 from .production_output import (
@@ -1129,12 +1130,26 @@ def _require_v2_public_output_units(
             color_values = order_color_values_for_unit(config, production_unit.payload)
             if color_values and any(not value for value in color_values.values()):
                 raise ProductionOutputError(f"第 {index} 个效果图缺少字体颜色，不能进入公共生产输出层")
+            if _v2_delivery_requires_color(production_unit) and not str(production_unit.color_option or "").strip():
+                raise ProductionOutputError(f"第 {index} 个效果图缺少字体颜色，不能进入公共生产输出层")
         return validate_public_output_units(production_units, require_color=False)
     except ProductionOutputError as exc:
         raise V2OrderRenderError(
             _v2_public_output_message(str(exc)),
             code="v2_public_output_metadata_missing",
         ) from exc
+
+
+def _v2_delivery_requires_color(unit: Any) -> bool:
+    """Keep color-required production routes strict even for colorless artwork."""
+    rule = getattr(unit, "rule", None) or resolve_department_output(
+        getattr(unit, "department", ""),
+        getattr(unit, "manufacturer", ""),
+    )
+    return bool(
+        getattr(rule, "fill_actual_color", False)
+        or getattr(rule, "master_group_by_color", False)
+    )
 
 
 def _v2_public_output_message(message: str) -> str:

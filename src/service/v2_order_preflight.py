@@ -59,7 +59,19 @@ def preflight_v2_order_rows(config: Mapping[str, Any], rows: Iterable[Mapping[st
         for output_index, output in enumerate(contract["outputs"]):
             output_path = f"$.outputs[{output_index}]"
             selected = _selected_options(contract, output, row, index, row_order_id, output_path, issues)
-            selected_color_fields.update(selected_order_color_fields(contract, output["key"], selected))
+            color_fields = selected_order_color_fields(contract, output["key"], selected)
+            selected_color_fields.update(color_fields)
+            _check_selected_order_color_values(
+                contract,
+                output,
+                color_fields,
+                headers,
+                row,
+                index,
+                row_order_id,
+                output_path,
+                issues,
+            )
             _check_required_slot_values(contract, output, selected, row, index, row_order_id, output_path, issues)
             preflight_outputs.append(
                 {
@@ -170,7 +182,12 @@ def _selected_options(
             )
             continue
         selected[group_name] = option
-    _check_selected_nondefault_color_values(contract, output, selected, row, row_index, order_id, output_path, issues)
+    if selected:
+        return selected
+
+    # A selection error remains the primary failure. When no selection could
+    # be resolved, retain the useful generic unknown-color diagnostic without
+    # turning color into a header or cell requirement.
     color_value = _cell(row, str(dict(contract.get("field_bindings") or {}).get("color") or ""))
     if color_value and _color_rules_active(contract, output["key"], selected) and not _known_color(contract, output["key"], "color", color_value):
         issues.append(
@@ -295,10 +312,11 @@ def _matches_field_alias(raw_field: Any, aliases: set[str]) -> bool:
     return bool(candidate and candidate.casefold() in folded_aliases)
 
 
-def _check_selected_nondefault_color_values(
+def _check_selected_order_color_values(
     contract: Mapping[str, Any],
     output: Mapping[str, Any],
-    selected: Mapping[str, Mapping[str, Any]],
+    color_fields: set[str],
+    headers: set[str],
     row: Mapping[str, Any],
     row_index: int,
     order_id: str,
@@ -307,9 +325,26 @@ def _check_selected_nondefault_color_values(
 ) -> None:
     bindings = dict(contract.get("field_bindings") or {})
     output_key = str(dict(output or {}).get("key") or "")
-    for field in sorted(selected_order_color_fields(contract, output_key, selected) - {"color"}):
-        value = _cell(row, str(bindings.get(field) or ""))
-        if not value or _known_color(contract, output_key, field, value):
+    for field in sorted(color_fields):
+        header = str(bindings.get(field) or field).strip()
+        if not header or header not in headers:
+            continue
+        value = _cell(row, header)
+        if not value:
+            issues.append(
+                _issue(
+                    contract=contract,
+                    row=row_index,
+                    order_id=order_id,
+                    path=f"{output_path}.color",
+                    code="required_color_missing",
+                    reason=f"第 {row_index} 行缺少订单颜色“{header}”，当前选项需要该颜色才能生成完整效果图。",
+                    output=output,
+                    expected_format=f"请填写 {header}。",
+                )
+            )
+            continue
+        if _known_color(contract, output_key, field, value):
             continue
         issues.append(
             _issue(
@@ -361,12 +396,6 @@ def selected_order_color_fields(
     """Return the order color fields used by one selected output."""
     color_keys = {str(item.get("key") or "") for item in contract.get("colors") or []}
     fields: set[str] = set()
-    for mapping_item in contract.get("option_mappings") or []:
-        item = dict(mapping_item or {})
-        if item.get("group") == "color" and item.get("output") == output:
-            field = _order_color_field(contract, item.get("field"), color_keys)
-            if field:
-                fields.add(field)
     for option in selected.values():
         for slot in dict(option or {}).get("slots") or []:
             field = _order_color_field(contract, dict(slot or {}).get("color_binding"), color_keys)

@@ -238,6 +238,72 @@ def test_v2_order_unit_uses_selected_custom_color_binding_for_public_metadata():
     assert production_unit.color_option == "Gold"
 
 
+def test_v2_order_unit_uses_selected_style_color_binding_for_public_metadata():
+    config = {
+        "field_bindings": {"style_color": "尺寸颜色"},
+        "outputs": [
+            {
+                "key": "Output_main",
+                "style": {"options": [{"key": "S1", "slots": [{"color_binding": "style_color"}]}]},
+                "design": {"options": [{"key": "D1", "slots": []}]},
+                "font": {"options": [{"key": "F1", "slots": []}]},
+            }
+        ],
+    }
+    unit = V2OrderRenderUnit(
+        row_index=1,
+        row={},
+        row_preflight={},
+        output_key="Output_main",
+        values={
+            "detail_id": "DETAIL-1",
+            "department": "K",
+            "product_name": "Pendant",
+            "style_color": "Gold",
+        },
+        selections={"Output_main": {"style": "S1", "design": "D1", "font": "F1"}},
+        order_id="ORDER-1",
+        template_version="v0001",
+    )
+
+    production_unit = to_production_units(config, [unit])[0]
+
+    assert production_unit.color_option == "Gold"
+
+
+def test_v2_order_unit_keeps_generic_color_for_color_dependent_delivery_without_color_binding():
+    config = {
+        "field_bindings": {"color": "字体颜色"},
+        "outputs": [
+            {
+                "key": "Output_main",
+                "design": {"options": [{"key": "D1", "slots": []}]},
+                "font": {"options": [{"key": "F1", "slots": []}]},
+            }
+        ],
+    }
+    unit = V2OrderRenderUnit(
+        row_index=1,
+        row={},
+        row_preflight={},
+        output_key="Output_main",
+        values={
+            "detail_id": "DETAIL-1",
+            "department": "K",
+            "product_name": "Pendant",
+            "color": "Gold",
+        },
+        selections={"Output_main": {"design": "D1", "font": "F1"}},
+        order_id="ORDER-1",
+        template_version="v0001",
+    )
+
+    production_unit = to_production_units(config, [unit])[0]
+
+    assert production_unit.rule.name == "K"
+    assert production_unit.color_option == "Gold"
+
+
 def test_v2_public_gate_rejects_missing_department_without_technical_trace():
     units = to_production_units(_config(), build_v2_order_units(_config(), _render_task(), [_row("")], _preflight()))
 
