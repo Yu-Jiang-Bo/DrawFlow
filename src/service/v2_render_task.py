@@ -28,6 +28,7 @@ _TAIL_KEY_RE = re.compile(r"^tail_(?P<field>[A-Za-z0-9_]+)_(?P<position>first|la
 _LATIN_LETTERS = "abcdefghijklmnopqrstuvwxyz"
 _PUA_MIN = 0xE000
 _PUA_MAX = 0xF8FF
+_PT_TO_MM = 25.4 / 72.0
 
 
 class V2RenderTaskError(ValueError):
@@ -261,13 +262,21 @@ def _scanned_design_dimensions(configured_option: Mapping[str, Any], scanned_opt
     """Choose the configured primary-slot frame used by the output policy.
 
     A Design group may include decorative objects outside its editable text slot.
-    For a design with exactly one required non-asset slot, its configured anchor
-    defines the primary delivery boundary when an anchor is present. Optional
-    subtitle slots are independently fitted inside their own anchors. Their
-    designed offset may make the combined visible bounds larger than the primary
-    frame, so they must not trigger a later whole-group rescale. Designs with
-    multiple required slots retain the group-level scan as their final frame.
+    A required asset-library slot is part of the delivered composition, even
+    though it is not a text slot. Its visual footprint can sit outside the
+    primary text anchor. The Design group may also contain every candidate from
+    that library, so its scanned group bounds are not the delivery frame. When
+    there is one required asset-library slot, the final frame is the union of
+    that slot and every required text slot or anchor. Otherwise, a single
+    required text slot uses its configured anchor when present. Optional
+    subtitles are fitted independently and do not expand the primary frame.
+    Designs with multiple required asset slots retain the group-level scan.
     """
+    required_asset_slots = _required_asset_library_slot_keys(configured_option)
+    if len(required_asset_slots) == 1:
+        return _required_content_frame_dimensions(configured_option, scanned_option, required_asset_slots)
+    elif required_asset_slots:
+        return _scanned_dimensions(scanned_option)
     configured_slots = [
         dict(slot)
         for slot in configured_option.get("slots", [])
@@ -292,6 +301,88 @@ def _scanned_design_dimensions(configured_option: Mapping[str, Any], scanned_opt
                 if dimensions:
                     return dimensions
     return _scanned_dimensions(scanned_option)
+
+
+def _required_asset_library_slot_keys(configured_option: Mapping[str, Any]) -> set[str]:
+    asset_slots = {
+        str(dict(asset).get("slot") or "")
+        for asset in configured_option.get("assets", [])
+        if isinstance(asset, Mapping) and str(dict(asset).get("slot") or "")
+    }
+    if not asset_slots:
+        return set()
+    return {
+        str(dict(slot).get("key") or "")
+        for slot in configured_option.get("slots", [])
+        if isinstance(slot, Mapping)
+        and str(dict(slot).get("key") or "") in asset_slots
+        and str(dict(slot).get("preset") or "") == "asset_replace"
+        and bool(dict(slot).get("required", True))
+    }
+
+
+def _required_content_frame_dimensions(
+    configured_option: Mapping[str, Any],
+    scanned_option: Mapping[str, Any],
+    required_asset_slots: set[str],
+) -> dict[str, float]:
+    scanned_slots = {
+        str(item.get("key") or ""): item
+        for item in scanned_option.get("slots", [])
+        if isinstance(item, Mapping) and str(item.get("key") or "")
+    }
+    scanned_anchors = {
+        str(item.get("key") or ""): item
+        for item in scanned_option.get("anchors", [])
+        if isinstance(item, Mapping) and str(item.get("key") or "")
+    }
+    frames: list[tuple[float, float, float, float]] = []
+    for raw_slot in configured_option.get("slots", []):
+        if not isinstance(raw_slot, Mapping) or not bool(raw_slot.get("required", True)):
+            continue
+        slot = dict(raw_slot)
+        slot_key = str(slot.get("key") or "")
+        if str(slot.get("preset") or "") == "asset_replace":
+            if slot_key not in required_asset_slots:
+                continue
+            scanned_item = scanned_slots.get(slot_key)
+        else:
+            anchor_key = str(slot.get("anchor") or "")
+            scanned_item = scanned_anchors.get(anchor_key) if anchor_key else scanned_slots.get(slot_key)
+        bounds = _scanned_visible_bounds(scanned_item)
+        if not bounds:
+            return {}
+        frames.append(bounds)
+    if not frames:
+        return {}
+    left = min(frame[0] for frame in frames)
+    top = max(frame[1] for frame in frames)
+    right = max(frame[2] for frame in frames)
+    bottom = min(frame[3] for frame in frames)
+    width = (right - left) * _PT_TO_MM
+    height = (top - bottom) * _PT_TO_MM
+    if width <= 0 or height <= 0:
+        return {}
+    return {"width_mm": round(width, 3), "height_mm": round(height, 3), "tolerance_mm": 0.007}
+
+
+def _scanned_visible_bounds(item: Mapping[str, Any] | None) -> tuple[float, float, float, float] | None:
+    if not isinstance(item, Mapping):
+        return None
+    raw = item.get("visible_bounds") or item.get("visibleBounds")
+    if not isinstance(raw, (list, tuple)) or len(raw) != 4 or any(isinstance(value, bool) for value in raw):
+        return None
+    try:
+        values = tuple(float(value) for value in raw)
+    except (TypeError, ValueError):
+        return None
+    if not all(math.isfinite(value) for value in values):
+        return None
+    left, right = sorted((values[0], values[2]))
+    bottom, top = sorted((values[1], values[3]))
+    if right <= left or top <= bottom:
+        return None
+    return left, top, right, bottom
 
 
 def _scanned_dimensions(item: Mapping[str, Any]) -> dict[str, float]:

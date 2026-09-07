@@ -173,6 +173,93 @@ if (names.includes('Assets')) throw new Error('asset library was not cleaned up'
     assert result.returncode == 0, result.stderr
 
 
+def test_v2_renderer_keeps_required_asset_and_text_at_union_frame_scale():
+    task = {
+        "mock_group_asset": True,
+        "mock_asset_text_only": True,
+        "$schema": "custom-renderer/v2-render-execution",
+        "template_ai": "template.ai",
+        "output_ai": "out.ai",
+        "layout_warning_file": "warnings.json",
+        "values": {"initial": "A", "name": "Design sample"},
+        "resolved_values": {"Output_main|design|Design03|asset|initial_top": "A"},
+        "selections": {"Output_main": {"design": "Design03"}},
+        "render_task": {
+            "$schema": "custom-renderer/v2-render-task",
+            "outputs": [
+                {
+                    "key": "Output_main",
+                    "actions": [
+                        {
+                            "type": "copy_option_group",
+                            "group": "design",
+                            "option_key": "Design03",
+                            "object_path": "Template/Output_main/Design/Design03",
+                        },
+                        {
+                            "type": "bind_asset_library",
+                            "group": "design",
+                            "option_key": "Design03",
+                            "asset_key": "initial_top",
+                            "slot_key": "slot_initial",
+                            "slot_path": "Template/Output_main/Design/Design03/slot_initial",
+                            "object_path": "Template/Output_main/Design/Design03/Assets/initial_top",
+                            "source_field": "initial",
+                            "supported_values": ["A"],
+                            "value_key": "Output_main|design|Design03|asset|initial_top",
+                        },
+                        {
+                            "type": "replace_slot_text",
+                            "group": "design",
+                            "option_key": "Design03",
+                            "object_path": "Template/Output_main/Design/Design03/slot_name",
+                            "source_field": "name",
+                            "required": True,
+                            "tail_paths": [],
+                        },
+                        {
+                            "type": "fit_output_bounds",
+                            "group": "design",
+                            "option_key": "Design03",
+                            "dimensions": {
+                                "width_mm": 52.9166666667,
+                                "height_mm": 14.1111111111,
+                                "tolerance_mm": 0.007,
+                            },
+                        },
+                    ],
+                }
+            ],
+        },
+    }
+    harness = node_mock_harness(task, """
+const design = outputLayer.pageItems.find(item => item.name === 'Design03');
+const asset = child(design, 'A');
+const slot = child(design, 'slot_name');
+const assetWidth = asset.visibleBounds[2] - asset.visibleBounds[0];
+const assetHeight = asset.visibleBounds[1] - asset.visibleBounds[3];
+const textWidth = slot.visibleBounds[2] - slot.visibleBounds[0];
+const textHeight = slot.visibleBounds[1] - slot.visibleBounds[3];
+if (assetWidth < 19.8 || assetHeight < 19.8) {
+  throw new Error('required asset was shrunk below its slot: ' + assetWidth + 'x' + assetHeight);
+}
+if (textWidth < 99.8 || textHeight < 29.8) {
+  throw new Error('required text was shrunk below its anchor: ' + textWidth + 'x' + textHeight);
+}
+const contract = JSON.parse(writtenFiles['warnings.json']);
+const frame = contract.component_frames && contract.component_frames[0];
+const frameWidth = frame.frame_bounds[2] - frame.frame_bounds[0];
+const frameHeight = frame.frame_bounds[1] - frame.frame_bounds[3];
+if (Math.abs(frameWidth - 150) > 0.001 || Math.abs(frameHeight - 40) > 0.001) {
+  throw new Error('asset/text union frame drifted: ' + frameWidth + 'x' + frameHeight);
+}
+""")
+
+    result = run_node(harness)
+
+    assert result.returncode == 0, result.stderr
+
+
 def test_v2_renderer_copies_selected_groups_and_preserves_pipe_in_direct_text():
     task = {
         "$schema": "custom-renderer/v2-render-execution",
@@ -3276,6 +3363,12 @@ const design03 = item('GroupItem', 'Design03', '', [
   ]),
   item('PathItem', '', '', [])
 ]);
+if (task.mock_asset_text_only) {{
+  design03.pageItems = design03.pageItems.filter(childNode =>
+    childNode.name === 'slot_initial' || childNode.name === 'slot_name' || childNode.name === 'Assets'
+  );
+  for (const childNode of design03.pageItems) childNode.parent = design03;
+}}
 if (task.mock_fixed_parent === 'F1') {{
   attach(f1, item('PathItem', task.mock_fixed_annotation_name || 'fixed', '', [], '', task.mock_fixed_bounds));
 }}
