@@ -22,6 +22,7 @@
     var resolvedValues = execution.resolved_values || {};
     var selections = execution.selections || {};
     var layoutWarnings = [];
+    var componentFrames = [];
     var selectedOutputKey = String(execution.output_key || "");
     var renderedOutputItems = [];
     var renderedOutputCount = 0;
@@ -54,13 +55,16 @@
         // enumerate through doc.textFrames.
         applyOutputTransforms(doc, execution.output || task.output || {});
         var finalFitAction = selectedFitAction(task, selectedOutputKey, selections);
-        if (finalFitAction) fitRenderedOutput(renderedOutputItems, finalFitAction);
+        var fittedComponentFrame = finalFitAction ? fitRenderedOutput(renderedOutputItems, finalFitAction) : null;
         if (finalFitAction && preservesSlotAnchors(finalFitAction)) {
             fitRenderedOptionalSlotAnchors(renderedOutputItems, task, selectedOutputKey, selections);
         }
         cleanupAuxiliaryObjects(renderedOutputItems);
         if (execution.pack_order_blocks === true) {
             renderedOutputItems = [groupRenderedOutputBlock(layer, renderedOutputItems, 0)];
+        }
+        if (renderedOutputItems.length) {
+            componentFrames.push(buildComponentFrame(renderedOutputItems, fittedComponentFrame, selectedOutputKey));
         }
         if (execution.preview_png) fitArtboardToVisibleContent(doc, renderedOutputItems, 0);
         var output = File(String(execution.output_ai));
@@ -71,7 +75,7 @@
             fitArtboardToVisibleContent(doc, renderedOutputItems, 12);
             exportPreviewPNG(doc, File(String(execution.preview_png)), execution.preview_dpi);
         }
-        writeLayoutWarnings(execution.layout_warning_file, layoutWarnings);
+        writeLayoutWarnings(execution.layout_warning_file, layoutWarnings, componentFrames);
         return output.fsName;
     } finally {
         try { templateDoc.close(SaveOptions.DONOTSAVECHANGES); } catch (closeTemplateError) {}
@@ -1292,24 +1296,43 @@
         return bounds && bounds.length >= 4 && isFinite(Number(bounds[0])) && isFinite(Number(bounds[1])) && isFinite(Number(bounds[2])) && isFinite(Number(bounds[3]));
     }
 
+    function buildComponentFrame(items, fittedFrame, outputKey) {
+        var artworkBounds = copyBounds(unionBounds(items, true));
+        var frameBounds = fittedFrame && validBounds(fittedFrame.frame_bounds)
+            ? copyBounds(fittedFrame.frame_bounds)
+            : copyBounds(artworkBounds);
+        return {
+            key: String(outputKey || "component"),
+            output_key: String(outputKey || ""),
+            frame_bounds: frameBounds,
+            artwork_bounds_after: artworkBounds,
+            tracked_slots: [],
+            source: String(fittedFrame && fittedFrame.source || "visible_bounds")
+        };
+    }
+
     function fitRenderedOutput(items, action) {
-        // An independently anchored optional subtitle has its own physical
-        // delivery frame. Scaling the aggregate group here would distort both
-        // its size and the template-defined relation to the primary text.
-        if (preservesSlotAnchors(action)) return;
         var dimensions = action.dimensions || {};
         var targetWidth = mmToPt(Number(dimensions.width_mm || 0));
         var targetHeight = mmToPt(Number(dimensions.height_mm || 0));
         if (targetWidth <= 0 || targetHeight <= 0) throw new Error("V2 output target dimensions are invalid");
         var bounds = unionBounds(items, true);
+        var targetLeft = Number(bounds[0]);
+        var targetTop = Number(bounds[1]);
+        var fittedFrame = {
+            frame_bounds: [targetLeft, targetTop, targetLeft + targetWidth, targetTop - targetHeight],
+            source: "fit_output_bounds"
+        };
+        // An independently anchored optional subtitle has its own physical
+        // delivery frame. Scaling the aggregate group here would distort both
+        // its size and the template-defined relation to the primary text.
+        if (preservesSlotAnchors(action)) return fittedFrame;
         var fixedLayout = fixedVisualLayoutForItems(items);
         var fixedLayouts = fixedLayout ? fixedLayout.layouts : [];
         var fixedStates = fixedVisualStatesForLayouts(fixedLayouts);
         var fitSafety = outputFitSafetyPoints(dimensions);
         var fitTargetWidth = targetWidth - fitSafety;
         var fitTargetHeight = targetHeight - fitSafety;
-        var targetLeft = Number(bounds[0]);
-        var targetTop = Number(bounds[1]);
         if (fixedStates.length) {
             var fixedScaleX = fitTargetWidth / Math.abs(Number(bounds[2]) - Number(bounds[0])) * 100;
             var fixedScaleY = fitTargetHeight / Math.abs(Number(bounds[1]) - Number(bounds[3])) * 100;
@@ -1321,7 +1344,7 @@
             // that coordinate system, otherwise a second fit can drift it.
             positionFixedVisualLayouts(fixedLayouts);
             validateOutputBounds(items, dimensions, targetWidth, targetHeight);
-            return;
+            return fittedFrame;
         }
         for (var attempt = 0; attempt < 12; attempt++) {
             var current = unionBounds(items, true);
@@ -1338,6 +1361,7 @@
             if (outputBoundsWithinTargetRange(fitted, targetWidth, targetHeight, dimensions)) break;
         }
         validateOutputBounds(items, dimensions, targetWidth, targetHeight);
+        return fittedFrame;
     }
 
     function resizeItemsAroundBounds(items, bounds, scaleX, scaleY) {
@@ -2067,13 +2091,18 @@
         folder.create();
     }
 
-    function writeLayoutWarnings(path, warnings) {
+    function writeLayoutWarnings(path, warnings, frames) {
         if (!path) return;
         var file = File(String(path));
         ensureFolder(file.parent);
         file.encoding = "UTF-8";
         if (!file.open("w")) throw new Error("Cannot write V2 layout warnings: " + file.fsName);
-        file.write(stringifyJson({warnings: warnings || []}));
+        var payload = {warnings: warnings || []};
+        if (frames && frames.length) {
+            payload.component_contract_version = 1;
+            payload.component_frames = frames;
+        }
+        file.write(stringifyJson(payload));
         file.close();
     }
 }());

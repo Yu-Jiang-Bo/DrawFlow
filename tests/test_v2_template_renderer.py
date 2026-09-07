@@ -7,6 +7,7 @@ from src.renderer.v2_template_renderer import (
     V2_RENDER_EXECUTION_SCHEMA,
     V2TemplateRenderer,
     V2TemplateRendererError,
+    build_v2_color_frames_task,
     build_v2_execution_task,
     build_v2_order_column_task,
 )
@@ -247,9 +248,19 @@ def test_compose_order_column_writes_order_metadata_and_labels(tmp_path):
     payload = json.loads(task_file.read_text(encoding="utf-8"))
     assert result == "done.ai"
     assert payload["inputs"] == [
-        {"path": str(tmp_path / "a.ai"), "order_no": "ORDER1"},
-        {"path": str(tmp_path / "b.ai"), "order_no": "ORDER1"},
+        {
+            "path": str(tmp_path / "a.ai"),
+            "component_contract_file": str(tmp_path / "a.warnings.json"),
+            "order_no": "ORDER1",
+        },
+        {
+            "path": str(tmp_path / "b.ai"),
+            "component_contract_file": str(tmp_path / "b.warnings.json"),
+            "order_no": "ORDER1",
+        },
     ]
+    assert payload["component_contract_version"] == 1
+    assert payload["component_contract_file"] == str(tmp_path / "out.warnings.json")
     assert payload["label_lines"] == ["ORDER1", "\u767d\u8272"]
     assert bridge.calls[0]["script_path"].name == "compose_v2_order_column.jsx"
 
@@ -262,8 +273,29 @@ def test_order_column_resolves_relative_paths_for_illustrator(tmp_path, monkeypa
         output_ai="output.ai",
     )
 
-    assert task["inputs"] == [{"path": str((tmp_path / "input.ai").resolve())}]
+    assert task["inputs"] == [{
+        "path": str((tmp_path / "input.ai").resolve()),
+        "component_contract_file": str((tmp_path / "input.warnings.json").resolve()),
+    }]
     assert task["output_ai"] == str((tmp_path / "output.ai").resolve())
+    assert task["component_contract_file"] == str((tmp_path / "output.warnings.json").resolve())
+
+
+def test_v2_composers_transport_component_frame_contract_paths(tmp_path):
+    order_payload = build_v2_order_column_task(
+        input_ai_files=[tmp_path / "component.ai"],
+        output_ai=tmp_path / "order.ai",
+    )
+    assert order_payload["component_contract_version"] == 1
+    assert order_payload["inputs"][0]["component_contract_file"] == str(tmp_path / "component.warnings.json")
+
+    color_payload = build_v2_color_frames_task(
+        inputs=[{"path": str(tmp_path / "order.ai"), "color_option": "Red"}],
+        output_ai=tmp_path / "master.ai",
+        master_packing={"target_width_mm": 300},
+    )
+    assert color_payload["component_contract_version"] == 1
+    assert color_payload["inputs"][0]["component_contract_file"] == str(tmp_path / "order.warnings.json")
 
 
 def test_missing_style_selection_for_final_fit_does_not_enter_illustrator(tmp_path):

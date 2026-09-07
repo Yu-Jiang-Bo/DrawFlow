@@ -795,7 +795,8 @@ def test_compose_v2_order_column_runs_without_native_json_parser(tmp_path):
         pytest.skip("Node.js is unavailable")
     task = {
         "type": "compose_v2_order_column",
-        "inputs": [{"path": "input.ai"}],
+        "component_contract_file": "out.warnings.json",
+        "inputs": [{"path": "input.ai", "component_contract_file": "input.warnings.json"}],
         "output_ai": "out.ai",
         "gap_mm": 8,
         "compatibility": "Illustrator 8",
@@ -809,18 +810,20 @@ def test_compose_v2_order_column_runs_without_native_json_parser(tmp_path):
 const NativeJSON = JSON;
 const source = {json.dumps(source)};
 const taskText = NativeJSON.stringify({json.dumps(task)});
+const componentContractText = NativeJSON.stringify({{component_contract_version: 1, component_frames: [{{frame_bounds: [10, 40, 60, 0], artwork_bounds_after: [10, 40, 60, 0], tracked_slots: []}}]}});
 const folder = {{ exists: true, parent: null, create: () => true }};
 let savedAs = '';
 global.$ = {{ getenv: () => 'task.json' }};
 global.File = function(path) {{
   return {{
     fsName: path,
-    exists: path === 'task.json' || path === 'input.ai',
+    exists: path === 'task.json' || path === 'input.ai' || path === 'input.warnings.json',
     parent: folder,
     encoding: '',
     open: () => true,
-    read: () => taskText,
+    read: () => path === 'input.warnings.json' ? componentContractText : taskText,
     close: () => undefined,
+    write: () => undefined,
     remove: () => undefined
   }};
 }};
@@ -908,7 +911,9 @@ global.JSON = NativeJSON;
   }}));
 """
 
-    result = subprocess.run([node, "-e", script], capture_output=True, text=True, check=False)
+    runner = tmp_path / "compose-v2-order-column-runner.js"
+    runner.write_text(script, encoding="utf-8")
+    result = subprocess.run([node, str(runner)], capture_output=True, text=True, check=False)
 
     assert result.returncode == 0, result.stderr
     payload = json.loads(result.stdout)

@@ -102,7 +102,7 @@ def test_v2_jsx_contains_final_object_fit_and_policy_gates():
     assert "fitRenderedOutput(renderedOutputItems, finalFitAction)" in render_source
     assert 'String(action && action.layout_mode || "") === "preserve_slot_anchors"' in render_source
     assert "fitRenderedOptionalSlotAnchors(renderedOutputItems, task, selectedOutputKey, selections);" in render_source
-    assert "if (preservesSlotAnchors(action)) return;" in render_source
+    assert "if (preservesSlotAnchors(action)) return fittedFrame;" in render_source
     assert "fitOutlinedItemWithinBounds(slot, measuredBounds(anchor), action);" in render_source
     assert 'if (preserveAnchors && String(fitAction.group || "") === "style") continue;' in render_source
     assert "if (preservesSlotAnchors(action)) return action;" in render_source
@@ -114,11 +114,14 @@ def test_v2_jsx_contains_final_object_fit_and_policy_gates():
     assert "width > targetWidth || height > targetHeight" in render_source
     assert "width < targetWidth - epsilon || height < targetHeight - epsilon" in render_source
     assert "if (!policy || policy.outline_text !== true) return;" in render_source
-    assert "fitCopiedArtwork(copied, input.target_dimensions || {})" in order_source
+    assert "readSingleComponentFrame" in order_source
+    assert "refusing resize" in order_source
+    assert ".resize(" not in order_source
     assert "if (!policy || policy.outline_text !== true) return;" in order_source
-    assert "fitCopiedArtwork(copy, item.target_dimensions || {})" in color_source
+    assert "readComponentFrameMap" in color_source
+    assert "refusing resize" in color_source
+    assert ".resize(" not in color_source
     assert "hasDimensionFields(requestedDimensions)" in color_source
-    assert "if (targetWidth <= 0 || targetHeight <= 0) return;" in color_source
     assert "outputPolicy.outline_text !== false" in color_source
 
 
@@ -142,7 +145,7 @@ def test_v2_jsx_fixed_visuals_keep_the_original_design_position_reference():
     assert "unionNonFixedRenderableBounds([layout.root])" in render_source
     assert "positionFixedVisualStatesForOutput(fixedStates, sourceBounds, unionBounds(items, true));" not in render_source
     assert render_source.index("if (execution.pack_order_blocks === true)") > render_source.index(
-        "if (finalFitAction) fitRenderedOutput(renderedOutputItems, finalFitAction);"
+        "var fittedComponentFrame = finalFitAction ? fitRenderedOutput(renderedOutputItems, finalFitAction) : null;"
     )
 
 

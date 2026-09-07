@@ -8,6 +8,8 @@ import pytest
 
 SCRIPT = Path("scripts/illustrator/render_v2_template.jsx")
 TAIL_INCLUDE = Path("scripts/illustrator/v2_tail_text.jsxinc")
+ORDER_COMPOSER = Path("scripts/illustrator/compose_v2_order_column.jsx")
+COLOR_COMPOSER = Path("scripts/illustrator/compose_color_frames.jsx")
 TAIL_PUA_BASE = 0xF000
 
 
@@ -73,6 +75,23 @@ def test_v2_renderer_outlines_components_even_when_final_layout_is_deferred():
     )
     assert "function collectTextFrames(container, result)" in source
     assert "assertNoTextFrames(doc, \"V2 render output\");" in source
+
+
+def test_v2_component_frame_contract_prevents_composer_resizes():
+    renderer = SCRIPT.read_text(encoding="utf-8")
+    order_composer = ORDER_COMPOSER.read_text(encoding="utf-8")
+    color_composer = COLOR_COMPOSER.read_text(encoding="utf-8")
+
+    assert "component_contract_version = 1" in renderer
+    assert "component_frames" in renderer
+    assert "var fittedComponentFrame = finalFitAction ? fitRenderedOutput" in renderer
+    assert "copyBounds(fittedFrame.frame_bounds)" in renderer
+    assert "readSingleComponentFrame" in order_composer
+    assert "refusing resize" in order_composer
+    assert ".resize(" not in order_composer
+    assert "readComponentFrameMap" in color_composer
+    assert "refusing resize" in color_composer
+    assert ".resize(" not in color_composer
 
 
 def test_v2_renderer_jsx_runs_without_native_json_parser():
@@ -929,6 +948,7 @@ def test_v2_renderer_preserves_fixed_art_size_during_non_uniform_output_fit(
         "$schema": "custom-renderer/v2-render-execution",
         "template_ai": "template.ai",
         "output_ai": "out.ai",
+        "layout_warning_file": "warnings.json",
         "pack_order_blocks": pack_order_blocks,
         "values": {"design": "03", "name": "Design sample"},
         "selections": {"Output_main": {"design": "Design03"}},
@@ -987,6 +1007,17 @@ if (fixed.resizeCalls < 2 || fixed.translateCalls < 1) {
 }
 const slot = child(designCopy, 'slot_name');
 if (slot.resizeCalls < 1) throw new Error('ordinary slot content did not participate in output fit');
+const contract = JSON.parse(writtenFiles['warnings.json']);
+const frame = contract.component_frames && contract.component_frames[0];
+if (!frame) throw new Error('component frame contract missing');
+const frameWidth = frame.frame_bounds[2] - frame.frame_bounds[0];
+const frameHeight = frame.frame_bounds[1] - frame.frame_bounds[3];
+if (Math.abs(frameWidth - 100.00062992125984) > 0.001 || Math.abs(frameHeight - 39.99968503937008) > 0.001) {
+  throw new Error('component logical frame dimensions drifted: ' + JSON.stringify(frame));
+}
+if (Math.abs(frame.frame_bounds[0]) > 0.001 || Math.abs(frame.frame_bounds[1] - 40) > 0.001) {
+  throw new Error('component logical frame origin drifted: ' + JSON.stringify(frame));
+}
 """.replace("__FIXED_MARKER__", json.dumps(fixed_marker)).replace(
         "__PACK_ORDER_BLOCKS__", json.dumps(pack_order_blocks)
     ))
