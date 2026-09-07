@@ -13,6 +13,11 @@ from src.service.v2_render_task import (
     compile_v2_render_task,
     stable_v2_render_task_json,
 )
+from src.renderer.v2_template_renderer import (
+    V2TemplateRenderer,
+    V2TemplateRendererError,
+    build_v2_execution_task,
+)
 from src.service.v2_order_plan import build_v2_order_units
 from src.service.v2_template_contract import V2_CONTRACT_SCHEMA, V2_CONTRACT_VERSION
 from src.service.v2_template_store import V2TemplateStore
@@ -386,6 +391,118 @@ def test_compiles_v2_render_task_with_stable_json_and_whitelisted_actions():
     assert asset_action["slot_path"] == "Template/Output_main/Design/Design03/slot_initial"
     assert asset_action["source_field"] == "initial"
     assert asset_action["supported_values"] == ["A", "B"]
+    assert asset_action["value_key"] == "Output_main|design|Design03|asset|initial_top"
+    name_action = next(
+        action
+        for action in actions
+        if action["type"] == "replace_slot_text"
+        and action["group"] == "design"
+        and action["slot_key"] == "slot_name"
+    )
+    assert name_action["value_key"] == "Output_main|design|Design03|slot|slot_name"
+
+
+def test_compiles_and_resolves_combined_initial_content(tmp_path):
+    config = render_config()
+    design = config["outputs"][0]["design"]["options"][0]
+    design["slots"][1]["source_field"] = "name"
+    design["assets"][0]["supported_values"].append("K")
+    config["field_bindings"].pop("initial")
+
+    task = compile_task(config=config)
+    execution = build_v2_execution_task(
+        task,
+        template_ai=tmp_path / "template.ai",
+        output_ai=tmp_path / "output.ai",
+        values={"size": "small", "design": "03", "font": "F10", "name": "Back|K"},
+    )
+
+    assert execution["resolved_values"] == {
+        "Output_main|design|Design03|asset|initial_top": "K",
+        "Output_main|design|Design03|slot|slot_name": "Back",
+    }
+
+
+@pytest.mark.parametrize(
+    ("personalization", "error_code"),
+    [("A|B", "initial_content_ambiguous"), ("Zelda", "asset_value_missing")],
+)
+def test_invalid_initial_content_never_enters_illustrator(tmp_path, personalization, error_code):
+    config = render_config()
+    design = config["outputs"][0]["design"]["options"][0]
+    design["slots"][1]["source_field"] = "name"
+    config["field_bindings"].pop("initial")
+    task = compile_task(config=config)
+
+    class RecordingBridge:
+        def __init__(self):
+            self.calls = []
+
+        def render(self, script_path, task_path):
+            self.calls.append((script_path, task_path))
+
+    bridge = RecordingBridge()
+    renderer = V2TemplateRenderer(bridge=bridge, script_path=tmp_path / "render_v2_template.jsx")
+    task_file = tmp_path / "execution.json"
+
+    with pytest.raises(V2TemplateRendererError) as exc_info:
+        renderer.render(
+            task,
+            template_ai=tmp_path / "template.ai",
+            output_ai=tmp_path / "output.ai",
+            values={"size": "small", "design": "03", "font": "F10", "name": personalization},
+            task_file=task_file,
+        )
+
+    assert exc_info.value.code == error_code
+    assert bridge.calls == []
+    assert not task_file.exists()
+
+
+def test_compiles_multi_initial_assets_in_slot_order_and_resolves_values(tmp_path):
+    config = render_config()
+    design = config["outputs"][0]["design"]["options"][0]
+    design["content_preset"] = "multi_initials"
+    design["slots"] = [
+        {"key": "slot_initial_top", "source_field": "names", "preset": "asset_replace", "asset_key": "initial_top"},
+        {"key": "slot_initial_bottom", "source_field": "names", "preset": "asset_replace", "asset_key": "initial_bottom"},
+    ]
+    design["assets"] = [
+        {"asset_key": "initial_bottom", "slot": "slot_initial_bottom", "supported_values": ["B"]},
+        {"asset_key": "initial_top", "slot": "slot_initial_top", "supported_values": ["A"]},
+    ]
+    config["field_bindings"]["names"] = "Names"
+    scan = scan_evidence()
+    scan_design = scan["outputs"][0]["designs"][0]
+    scan_design["slots"] = [
+        {"key": "slot_initial_top", "path": "Template/Output_main/Design/Design03/slot_initial_top"},
+        {"key": "slot_initial_bottom", "path": "Template/Output_main/Design/Design03/slot_initial_bottom"},
+    ]
+    scan_design["anchors"] = []
+    scan_design["assets"] = [
+        {"asset_key": "initial_bottom", "path": "Template/Output_main/Design/Design03/Assets/initial_bottom"},
+        {"asset_key": "initial_top", "path": "Template/Output_main/Design/Design03/Assets/initial_top"},
+    ]
+
+    task = compile_task(config=config, scan=scan)
+    asset_actions = [
+        action for action in task["outputs"][0]["actions"] if action["type"] == "bind_asset_library"
+    ]
+    execution = build_v2_execution_task(
+        task,
+        template_ai=tmp_path / "template.ai",
+        output_ai=tmp_path / "output.ai",
+        values={"size": "small", "design": "03", "font": "F10", "name": "Label", "names": "Amy|Bob"},
+    )
+
+    assert [(action["asset_key"], action["slot_key"]) for action in asset_actions] == [
+        ("initial_top", "slot_initial_top"),
+        ("initial_bottom", "slot_initial_bottom"),
+    ]
+    assert execution["resolved_values"] == {
+        "Output_main|design|Design03|asset|initial_top": "A",
+        "Output_main|design|Design03|asset|initial_bottom": "B",
+    }
 
 
 def test_compiled_preview_warnings_flow_into_v2_production_units():

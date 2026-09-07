@@ -19,6 +19,7 @@
     var layer = doc.layers[0];
     layer.name = "V2_OUTPUT";
     var values = execution.values || {};
+    var resolvedValues = execution.resolved_values || {};
     var selections = execution.selections || {};
     var layoutWarnings = [];
     var selectedOutputKey = String(execution.output_key || "");
@@ -43,7 +44,7 @@
         for (var outputIndex = 0; outputIndex < (task.outputs || []).length; outputIndex++) {
             var taskOutput = task.outputs[outputIndex] || {};
             if (selectedOutputKey && String(taskOutput.key || "") !== selectedOutputKey) continue;
-            renderedOutputItems = renderedOutputItems.concat(renderOutput(templateDoc, layer, taskOutput, values, selections));
+            renderedOutputItems = renderedOutputItems.concat(renderOutput(templateDoc, layer, taskOutput, values, resolvedValues, selections));
             renderedOutputCount += 1;
         }
         if (selectedOutputKey && renderedOutputCount !== 1) throw new Error("Selected V2 output was not rendered: " + selectedOutputKey);
@@ -77,7 +78,7 @@
         try { doc.close(SaveOptions.DONOTSAVECHANGES); } catch (closeOutputError) {}
     }
 
-    function renderOutput(sourceDoc, targetLayer, output, valuesByField, selectionsByOutput) {
+    function renderOutput(sourceDoc, targetLayer, output, valuesByField, resolvedValuesByKey, selectionsByOutput) {
         var outputKey = String(output.key || "");
         var selected = selectionsByOutput[outputKey] || {};
         var copied = {};
@@ -106,13 +107,13 @@
         for (var assetIndex = 0; assetIndex < actions.length; assetIndex++) {
             var assetAction = actions[assetIndex] || {};
             if (assetAction.type === "bind_asset_library" && isSelected(assetAction, selected)) {
-                bindAssetLibrary(copied, outputKey, assetAction, valuesByField);
+                bindAssetLibrary(copied, outputKey, assetAction, valuesByField, resolvedValuesByKey);
             }
         }
         for (var replaceIndex = 0; replaceIndex < actions.length; replaceIndex++) {
             var replaceAction = actions[replaceIndex] || {};
             if (replaceAction.type === "replace_slot_text" && isSelected(replaceAction, selected)) {
-                replaceSlotText(copied, outputKey, replaceAction, valuesByField, selected);
+                replaceSlotText(copied, outputKey, replaceAction, valuesByField, resolvedValuesByKey, selected);
             }
         }
         cleanupAuxiliaryObjects(renderedItems, preserveAnchors);
@@ -216,13 +217,13 @@
         return { item: copy, source_path: String(objectPath || ""), source_only: sourceOnly === true };
     }
 
-    function replaceSlotText(copied, outputKey, action, valuesByField, selected) {
+    function replaceSlotText(copied, outputKey, action, valuesByField, resolvedValuesByKey, selected) {
         var holder = copied[copyKey(outputKey, action)];
         if (!holder || !holder.item) throw new Error("Selected option was not copied: " + copyKey(outputKey, action));
         var slot = findPageItemByRelativePath(holder.item, relativePath(String(action.object_path || ""), holder.source_path));
         var fitBounds = localFitBounds(holder.item, holder.source_path, action, slot);
         fitBounds = selectedStyleFitBoundsForFont(copied, outputKey, action, selected, fitBounds);
-        var value = String(valuesByField[String(action.source_field || "")] || "");
+        var value = resolvedActionValue(action, valuesByField, resolvedValuesByKey);
         var parts = splitPipeValue(value);
         var preset = String(action.preset || "");
         var slotValue = preset === "split_by_pipe" ? splitPart(parts, action.source_part_index) : value;
@@ -282,11 +283,11 @@
         }
     }
 
-    function bindAssetLibrary(copied, outputKey, action, valuesByField) {
+    function bindAssetLibrary(copied, outputKey, action, valuesByField, resolvedValuesByKey) {
         var holder = copied[copyKey(outputKey, action)];
         if (!holder || !holder.item) throw new Error("Selected option was not copied: " + copyKey(outputKey, action));
         var sourceField = String(action.source_field || "");
-        var rawValue = String(valuesByField[sourceField] || "");
+        var rawValue = resolvedActionValue(action, valuesByField, resolvedValuesByKey);
         var targetKey = assetTargetKey(rawValue, action.supported_values || []);
         if (!targetKey) {
             if (action.required !== false) throw new Error("Required V2 asset slot has no value: " + sourceField);
@@ -302,6 +303,14 @@
         alignItemToItem(replacement, slot);
         removePageItem(slot);
         removePageItem(library);
+    }
+
+    function resolvedActionValue(action, valuesByField, resolvedValuesByKey) {
+        var valueKey = String(action.value_key || "");
+        if (valueKey && resolvedValuesByKey && resolvedValuesByKey.hasOwnProperty(valueKey)) {
+            return String(resolvedValuesByKey[valueKey] || "");
+        }
+        return String(valuesByField[String(action.source_field || "")] || "");
     }
 
     function assetTargetKey(rawValue, supportedValues) {

@@ -1,5 +1,7 @@
 from copy import deepcopy
 
+import pytest
+
 from src.service.v2_order_preflight import preflight_v2_order_rows
 from tests.test_v2_template_validation import complete_contract
 
@@ -292,6 +294,57 @@ def test_v2_order_preflight_reports_extra_pipe_content_for_selected_option():
     assert _has_issue(result, row=1, code="slot_content_extra", reason="最多配置了 3 个槽位")
 
 
+@pytest.mark.parametrize("name_value", ["K|Kenneth", "Back|K", "Kenneth"])
+def test_v2_order_preflight_accepts_initial_with_text_variants(name_value):
+    config = _combined_initial_config()
+    rows = [dict(valid_rows()[0], Name=name_value)]
+
+    result = preflight_v2_order_rows(config, rows)
+
+    assert result["ok"] is True
+    assert result["issues"] == []
+
+
+def test_v2_order_preflight_derives_initial_when_separate_initial_field_is_empty():
+    rows = [dict(valid_rows()[0], Name="Amy", Initial="")]
+
+    result = preflight_v2_order_rows(complete_contract(), rows)
+
+    assert result["ok"] is True
+    assert result["issues"] == []
+
+
+def test_v2_order_preflight_blocks_ambiguous_initial_with_text():
+    config = _combined_initial_config()
+    rows = [dict(valid_rows()[0], Name="A|B")]
+
+    result = preflight_v2_order_rows(config, rows)
+
+    assert result["ok"] is False
+    assert _has_issue(result, row=1, code="initial_content_ambiguous", reason="无法用于当前素材库")
+
+
+@pytest.mark.parametrize("name_value", ["Amy|Bob|Chris", "A|B|C", "ABC", "Amy|B|Chris"])
+def test_v2_order_preflight_accepts_multi_initials_variants(name_value):
+    config = _multi_initial_config()
+    rows = [dict(valid_rows()[0], Name=name_value)]
+
+    result = preflight_v2_order_rows(config, rows)
+
+    assert result["ok"] is True
+    assert result["issues"] == []
+
+
+def test_v2_order_preflight_blocks_multi_initial_count_and_missing_asset_value():
+    count_result = preflight_v2_order_rows(_multi_initial_config(), [dict(valid_rows()[0], Name="Amy|Bob")])
+    missing_result = preflight_v2_order_rows(_multi_initial_config(), [dict(valid_rows()[0], Name="Amy|Zed|Chris")])
+
+    assert count_result["ok"] is False
+    assert _has_issue(count_result, row=1, code="multi_initial_count_mismatch", reason="数量")
+    assert missing_result["ok"] is False
+    assert _has_issue(missing_result, row=1, code="asset_value_missing", reason="缺少字母 Z")
+
+
 def test_v2_order_preflight_collects_all_row_issues_before_blocking_batch():
     rows = [dict(valid_rows()[0]), {**valid_rows()[0], "Order": "A1002", "Design": "88", "Name": ""}]
 
@@ -340,4 +393,53 @@ def _split_pipe_config():
             "preset": "direct_text",
         }
     )
+    return config
+
+
+def _combined_initial_config():
+    config = complete_contract()
+    design = config["outputs"][0]["design"]["options"][0]
+    design["slots"][0]["source_field"] = "name"
+    design["slots"][1]["source_field"] = "name"
+    design["assets"][0]["supported_values"] = ["A", "B", "K"]
+    config["field_bindings"].pop("initial", None)
+    return config
+
+
+def _multi_initial_config():
+    config = complete_contract()
+    design = config["outputs"][0]["design"]["options"][0]
+    design["content_preset"] = "multi_initials"
+    design["slots"] = [
+        {
+            "key": "slot_initial_top",
+            "source_field": "name",
+            "preset": "asset_replace",
+            "asset_key": "initial_top",
+            "dimension_rule": {"mode": "anchor", "tolerance_mm": 0.007},
+            "font_dependencies": ["Milkshake"],
+        },
+        {
+            "key": "slot_initial_middle",
+            "source_field": "name",
+            "preset": "asset_replace",
+            "asset_key": "initial_middle",
+            "dimension_rule": {"mode": "anchor", "tolerance_mm": 0.007},
+            "font_dependencies": ["Milkshake"],
+        },
+        {
+            "key": "slot_initial_bottom",
+            "source_field": "name",
+            "preset": "asset_replace",
+            "asset_key": "initial_bottom",
+            "dimension_rule": {"mode": "anchor", "tolerance_mm": 0.007},
+            "font_dependencies": ["Milkshake"],
+        },
+    ]
+    design["assets"] = [
+        {"asset_key": "initial_top", "slot": "slot_initial_top", "supported_values": ["A", "B", "C"]},
+        {"asset_key": "initial_middle", "slot": "slot_initial_middle", "supported_values": ["A", "B", "C"]},
+        {"asset_key": "initial_bottom", "slot": "slot_initial_bottom", "supported_values": ["A", "B", "C"]},
+    ]
+    config["field_bindings"].pop("initial", None)
     return config

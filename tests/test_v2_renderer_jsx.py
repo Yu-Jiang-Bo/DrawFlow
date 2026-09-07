@@ -95,12 +95,14 @@ if (writtenFiles['warnings.json'] !== '{"warnings":[]}') throw new Error('warnin
     assert result.returncode == 0, result.stderr
 
 
-def test_v2_renderer_binds_asset_library_from_source_field_initial():
+def test_v2_renderer_binds_asset_library_from_resolved_initial_value():
     task = {
+        "mock_group_asset": True,
         "$schema": "custom-renderer/v2-render-execution",
         "template_ai": "template.ai",
         "output_ai": "out.ai",
         "values": {"initial": "Tom"},
+        "resolved_values": {"Output_main|design|Design03|asset|initial_top": "A"},
         "selections": {"Output_main": {"design": "Design03"}},
         "render_task": {
             "$schema": "custom-renderer/v2-render-task",
@@ -124,6 +126,7 @@ def test_v2_renderer_binds_asset_library_from_source_field_initial():
                             "object_path": "Template/Output_main/Design/Design03/Assets/initial_top",
                             "source_field": "initial",
                             "supported_values": ["A", "T"],
+                            "value_key": "Output_main|design|Design03|asset|initial_top",
                         },
                     ],
                 }
@@ -133,7 +136,12 @@ def test_v2_renderer_binds_asset_library_from_source_field_initial():
     harness = node_mock_harness(task, """
 const design = outputLayer.pageItems[0];
 const names = design.pageItems.map(item => item.name);
-if (!names.includes('T')) throw new Error('initial asset T was not inserted: ' + names.join(','));
+if (!names.includes('A')) throw new Error('resolved initial asset A was not inserted: ' + names.join(','));
+const inserted = design.pageItems.find(item => item.name === 'A');
+if (inserted.typename !== 'GroupItem') throw new Error('complete grouped asset was not preserved');
+if (inserted.pageItems.map(item => item.name).join(',') !== 'letter,decoration') throw new Error('asset children were lost');
+const bounds = inserted.visibleBounds.map(value => Math.round(value * 1000) / 1000);
+if (bounds.join(',') !== '130,40,150,20') throw new Error('asset was not fitted to slot bounds: ' + bounds.join(','));
 if (names.includes('slot_initial')) throw new Error('placeholder slot was not removed');
 if (names.includes('Assets')) throw new Error('asset library was not cleaned up');
 """)
@@ -275,12 +283,13 @@ if (slot.styleToken !== 'F1-style') throw new Error('F1 style was not preserved'
     assert result.returncode == 0, result.stderr
 
 
-def test_v2_renderer_replaces_pure_design_direct_text_slot():
+def test_v2_renderer_replaces_design_text_slot_from_resolved_value():
     task = {
         "$schema": "custom-renderer/v2-render-execution",
         "template_ai": "template.ai",
         "output_ai": "out.ai",
-        "values": {"design": "03", "year": "2027"},
+        "values": {"design": "03", "year": "Full|Y"},
+        "resolved_values": {"Output_main|design|Design03|slot|slot_year": "Full"},
         "selections": {"Output_main": {"design": "Design03"}},
         "render_task": {
             "$schema": "custom-renderer/v2-render-task",
@@ -300,6 +309,7 @@ def test_v2_renderer_replaces_pure_design_direct_text_slot():
                             "option_key": "Design03",
                             "object_path": "Template/Output_main/Design/Design03/slot_year",
                             "source_field": "year",
+                            "value_key": "Output_main|design|Design03|slot|slot_year",
                             "required": True,
                             "tail_paths": [],
                         },
@@ -312,7 +322,7 @@ def test_v2_renderer_replaces_pure_design_direct_text_slot():
 const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
 if (!designCopy) throw new Error('Design03 was not copied');
 const slot = child(designCopy, 'slot_year');
-if (slot.contents !== '2027') throw new Error('design slot not replaced: ' + slot.contents);
+if (slot.contents !== 'Full') throw new Error('resolved design slot was not used: ' + slot.contents);
 if (slot.styleToken !== 'Year-style') throw new Error('design slot style was not preserved');
 """)
 
@@ -3166,7 +3176,12 @@ const design03 = item('GroupItem', 'Design03', '', [
   item('PathItem', task.mock_fixed_parent === 'F1' ? '' : (task.mock_fixed_annotation_name || ''), '', [], '', task.mock_fixed_bounds),
   item('GroupItem', 'Assets', '', [
     item('GroupItem', 'initial_top', '', [
-      item('PathItem', 'A', '', []),
+      task.mock_group_asset
+        ? item('GroupItem', 'A', '', [
+            item('PathItem', 'letter', '', [], '', [0, 40, 20, 0]),
+            item('PathItem', 'decoration', '', [], '', [20, 40, 40, 0])
+          ])
+        : item('PathItem', 'A', '', []),
       item('PathItem', 'T', '', [])
     ])
   ]),

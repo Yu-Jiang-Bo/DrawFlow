@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from typing import Any, Dict, Iterable, Mapping
 
-from .v2_order_preflight_content import check_split_by_pipe_values
+from .v2_order_preflight_content import (
+    check_initial_with_text_values,
+    check_multi_initial_values,
+    check_split_by_pipe_values,
+)
 from .v2_template_contract import check_v2_template_contract
 from .v2_order_preflight_issues import preflight_issue as _issue
 
@@ -222,6 +226,7 @@ def _check_required_slot_values(
         if not option:
             continue
         slots = [dict(slot) for slot in option.get("slots") or []]
+        option_preset = str(option.get("content_preset") or "")
         for slot_index, slot in enumerate(slots):
             field = str(slot.get("source_field") or "").strip()
             if not field:
@@ -229,7 +234,11 @@ def _check_required_slot_values(
             header = str(bindings.get(field) or field).strip()
             value = _cell(row, header)
             path = f"{output_path}.{group_name}.options.{option.get('key')}.slots[{slot_index}]"
-            if slot.get("required", True) and not value:
+            initial_asset_falls_back_to_text = (
+                option_preset == "initial_with_text"
+                and bool(str(slot.get("asset_key") or "").strip())
+            )
+            if slot.get("required", True) and not value and not initial_asset_falls_back_to_text:
                 issues.append(
                     _issue(
                         contract=contract,
@@ -243,7 +252,6 @@ def _check_required_slot_values(
                         expected_format=f"请填写 {header}。",
                     )
                 )
-        option_preset = str(option.get("content_preset") or "")
         split_slots = [slot for slot in slots if str(slot.get("preset") or "") == "split_by_pipe"]
         if option_preset == "split_by_pipe":
             check_split_by_pipe_values(
@@ -265,6 +273,32 @@ def _check_required_slot_values(
                 option,
                 group_name,
                 split_slots,
+                row,
+                row_index,
+                order_id,
+                output_path,
+                issues,
+            )
+        if option_preset == "initial_with_text":
+            check_initial_with_text_values(
+                contract,
+                output,
+                option,
+                group_name,
+                slots,
+                row,
+                row_index,
+                order_id,
+                output_path,
+                issues,
+            )
+        if option_preset == "multi_initials":
+            check_multi_initial_values(
+                contract,
+                output,
+                option,
+                group_name,
+                slots,
                 row,
                 row_index,
                 order_id,

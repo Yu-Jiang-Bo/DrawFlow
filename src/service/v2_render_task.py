@@ -342,7 +342,7 @@ def _slot_actions(
         anchor_key = str(slot_data.get("anchor") or "")
         tail_keys = [str(tail.get("key") or "") for tail in slot_data.get("tails", []) if isinstance(tail, Mapping)]
         preset = str(slot_data.get("preset") or slot_scan.get("preset") or "direct_text")
-        if preset == "asset_replace":
+        if preset == "asset_replace" or slot_data.get("asset_key"):
             continue
         text_kind = str(slot_scan.get("text_kind") or slot_scan.get("textKind") or "")
         source_field = str(slot_data.get("source_field") or "")
@@ -404,6 +404,7 @@ def _slot_actions(
             "color_binding": str(slot_data.get("color_binding") or ""),
             "preserve_composition": bool(slot_data.get("preserve_composition") is True or slot_scan.get("preserve_composition") is True),
             "fit_mode": str(slot_data.get("fit_mode") or "fill_both"),
+            "value_key": _value_key(output_key, group, option_key, "slot", slot_key),
         }
         if group == "design" and slot_key in font_style_sources:
             action["style_source"] = {
@@ -433,20 +434,25 @@ def _asset_actions(
         return []
     actions = []
     option_key = str(option.get("key") or "")
-    for asset in option.get("assets", []):
-        asset_data = dict(asset)
-        asset_key = str(asset_data.get("asset_key") or "")
-        slot_key = str(asset_data.get("slot") or "")
+    consumed_assets: set[tuple[str, str]] = set()
+    for slot in option.get("slots", []):
+        if not isinstance(slot, Mapping):
+            continue
+        slot_config = dict(slot)
+        slot_key = str(slot_config.get("key") or "")
+        asset_key = str(slot_config.get("asset_key") or "")
+        if not asset_key:
+            continue
+        asset_data = _asset_for_slot(option, asset_key, slot_key)
+        if not asset_data:
+            raise V2RenderTaskError(
+                "asset_slot_missing",
+                f"素材库 {asset_key} 缺少对应槽位 {slot_key}。",
+                path=f"$.{output_key}.design.{option_key}.assets.{asset_key}.slot",
+            )
+        consumed_assets.add((asset_key, slot_key))
         asset_scan = _scan_ref(scan_index, ("asset", output_key, option_key, asset_key), f"$.{output_key}.design.{option_key}.assets.{asset_key}")
         slot_scan = _scan_ref(scan_index, ("slot", output_key, group, option_key, slot_key), f"$.{output_key}.design.{option_key}.assets.{asset_key}.slot")
-        slot_config = next(
-            (
-                dict(slot)
-                for slot in option.get("slots", [])
-                if isinstance(slot, Mapping) and str(slot.get("key") or "") == slot_key
-            ),
-            {},
-        )
         actions.append(
             _action(
                 "bind_asset_library",
@@ -459,9 +465,34 @@ def _asset_actions(
                 source_field=str(slot_config.get("source_field") or ""),
                 required=bool(slot_config.get("required", True)),
                 supported_values=list(asset_data.get("supported_values") or []),
+                value_key=_value_key(output_key, group, option_key, "asset", asset_key),
             )
         )
+    for asset in option.get("assets", []):
+        if not isinstance(asset, Mapping):
+            continue
+        asset_key = str(asset.get("asset_key") or "")
+        slot_key = str(asset.get("slot") or "")
+        if (asset_key, slot_key) not in consumed_assets:
+            raise V2RenderTaskError(
+                "asset_slot_missing",
+                f"素材库 {asset_key} 没有匹配的素材槽位 {slot_key}。",
+                path=f"$.{output_key}.design.{option_key}.assets.{asset_key}.slot",
+            )
     return actions
+
+
+def _asset_for_slot(option: Mapping[str, Any], asset_key: str, slot_key: str) -> dict[str, Any]:
+    for asset in option.get("assets", []):
+        if not isinstance(asset, Mapping):
+            continue
+        if str(asset.get("asset_key") or "") == asset_key and str(asset.get("slot") or "") == slot_key:
+            return dict(asset)
+    return {}
+
+
+def _value_key(output_key: str, group: str, option_key: str, kind: str, key: str) -> str:
+    return "|".join([output_key, group, option_key, kind, key])
 
 
 def _font_style_sources(
