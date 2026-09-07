@@ -1,5 +1,9 @@
 import json
 from pathlib import Path
+import shutil
+import subprocess
+
+import pytest
 
 from src.renderer.v2_template_renderer import (
     V2TemplateRenderer,
@@ -163,19 +167,225 @@ def test_png_master_composer_outlines_final_labels_only_after_layout():
     ) < source.index("saveAsAI(doc, aiFile, String(task.compatibility || \"CS5\"));")
 
 
-def test_v2_output_composers_recursively_outline_and_gate_all_text_frames():
+def test_v2_terminal_output_composers_reacquire_and_gate_all_text_frames():
     scripts = (
         Path("scripts/illustrator/compose_v2_order_column.jsx"),
-        Path("scripts/illustrator/compose_png_master_pages.jsx"),
-        Path("scripts/illustrator/render_v2_template.jsx"),
         Path("scripts/illustrator/compose_color_frames.jsx"),
+        Path("scripts/illustrator/compose_png_master_pages.jsx"),
     )
 
     for script in scripts:
         source = script.read_text(encoding="utf-8")
+        assert "doc.textFrames.length" in source
+        assert "while (doc.textFrames.length > 0)" in source
+        assert "var frame = doc.textFrames[beforeCount - 1];" in source
         assert "function collectTextFrames(container, result)" in source
         assert "createOutline();" in source
         assert "function assertNoTextFrames(doc, stage)" in source
+        assert "frames[index].createOutline();" not in source
+
+
+def test_v2_template_renderer_recursively_outlines_and_gates_all_text_frames():
+    source = Path("scripts/illustrator/render_v2_template.jsx").read_text(encoding="utf-8")
+
+    assert "function collectTextFrames(container, result)" in source
+    assert "createOutline();" in source
+    assert "function assertNoTextFrames(doc, stage)" in source
+
+
+def test_v2_terminal_output_composers_only_merge_overlapping_compatible_text_outlines():
+    scripts = (
+        Path("scripts/illustrator/compose_v2_order_column.jsx"),
+        Path("scripts/illustrator/compose_color_frames.jsx"),
+        Path("scripts/illustrator/compose_png_master_pages.jsx"),
+    )
+
+    for script in scripts:
+        source = script.read_text(encoding="utf-8")
+        assert "function mergeOverlappingTextOutlines(outlines, context)" in source
+        assert "if (consumed[candidate] || !sameMergeStyle(current, outlines[candidate])) continue;" in source
+        assert "if (!boundsOverlap(current.bounds, outlines[candidate].bounds)) continue;" in source
+        assert "return left.styleKey !== null && right.styleKey !== null && left.styleKey === right.styleKey;" in source
+        assert "app.executeMenuCommand(\"Live Pathfinder Add\");" in source
+        assert "app.executeMenuCommand(\"expandStyle\");" in source
+        assert "if (items.length < 2) return;" in source
+        assert "outline.selected = true;" not in source
+
+
+def test_v2_terminal_output_composers_skip_ineligible_pathfinder_clusters():
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node.js is unavailable")
+
+    scripts = (
+        Path("scripts/illustrator/compose_v2_order_column.jsx"),
+        Path("scripts/illustrator/compose_color_frames.jsx"),
+        Path("scripts/illustrator/compose_png_master_pages.jsx"),
+    )
+    functions = (
+        "mergeOverlappingTextOutlines",
+        "sameMergeStyle",
+        "boundsOverlap",
+        "mergeOutlineItems",
+    )
+    cases = (
+        ([{"bounds": [0, 10, 10, 0], "styleKey": "A"}], []),
+        (
+            [
+                {"bounds": [0, 10, 10, 0], "styleKey": "A"},
+                {"bounds": [20, 10, 30, 0], "styleKey": "A"},
+            ],
+            [],
+        ),
+        (
+            [
+                {"bounds": [0, 10, 10, 0], "styleKey": None},
+                {"bounds": [5, 10, 15, 0], "styleKey": None},
+            ],
+            [],
+        ),
+        (
+            [
+                {"bounds": [0, 10, 10, 0], "styleKey": "A"},
+                {"bounds": [5, 10, 15, 0], "styleKey": "A"},
+            ],
+            ["Live Pathfinder Add", "expandStyle"],
+        ),
+    )
+
+    for script in scripts:
+        source = script.read_text(encoding="utf-8")
+        executable = "\n".join(_extract_js_function(source, name) for name in functions)
+        for outlines, expected in cases:
+            payload = [dict(outline, item={"selected": False}) for outline in outlines]
+            harness = f"""
+const calls = [];
+global.app = {{ executeMenuCommand: command => calls.push(command) }};
+{executable}
+mergeOverlappingTextOutlines({json.dumps(payload)}, "test");
+const pathfinderCalls = calls.filter(command => command !== "deselectall");
+const expected = {json.dumps(expected)};
+if (JSON.stringify(pathfinderCalls) !== JSON.stringify(expected)) {{
+  throw new Error(JSON.stringify(pathfinderCalls));
+}}
+"""
+            result = subprocess.run([node, "-e", harness], capture_output=True, text=True, check=False)
+            assert result.returncode == 0, f"{script}: {result.stderr}"
+
+
+def _extract_js_function(source, name):
+    start = source.index(f"function {name}(")
+    brace = source.index("{", start)
+    depth = 0
+    for index in range(brace, len(source)):
+        if source[index] == "{":
+            depth += 1
+        elif source[index] == "}":
+            depth -= 1
+            if depth == 0:
+                return source[start : index + 1]
+    raise AssertionError(f"Unclosed JavaScript function: {name}")
+
+
+def test_v2_terminal_cross_frame_dedupe_refuses_unverifiable_or_visually_different_styles():
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node.js is unavailable")
+
+    scripts = (
+        Path("scripts/illustrator/compose_v2_order_column.jsx"),
+        Path("scripts/illustrator/compose_color_frames.jsx"),
+        Path("scripts/illustrator/compose_png_master_pages.jsx"),
+    )
+    functions = (
+        "uniformTextStyleKey",
+        "characterStyleKey",
+        "stylePropertyValues",
+        "colorStyleKey",
+        "mergeOverlappingTextOutlines",
+        "sameMergeStyle",
+        "boundsOverlap",
+        "mergeOutlineItems",
+    )
+
+    for script in scripts:
+        source = script.read_text(encoding="utf-8")
+        assert "if (font === null || fill === null || stroke === null) return null;" in source
+        assert "if (type[0] === \"NoColor\") return \"NoColor\";" in source
+        assert "if (typeof value === \"undefined\") return null;" in source
+        assert "Gradient and pattern transforms are object-level state." in source
+        executable = "\n".join(_extract_js_function(source, name) for name in functions)
+        harness = f"""
+const calls = [];
+global.app = {{ executeMenuCommand: command => calls.push(command) }};
+{executable}
+
+function attributes(fontName, red) {{
+  return {{
+    textFont: {{ name: fontName }},
+    fillColor: {{ typename: "RGBColor", red: red, green: 20, blue: 30 }},
+    strokeColor: {{ typename: "NoColor" }},
+    strokeWeight: 0,
+    size: 10,
+    horizontalScale: 100,
+    verticalScale: 100,
+    baselineShift: 0,
+    tracking: 0,
+    overprintFill: false,
+    overprintStroke: false
+  }};
+}}
+
+function frame(fontName, red, opacity) {{
+  return {{
+    textRange: {{ characters: [{{ characterAttributes: attributes(fontName, red) }}] }},
+    opacity: opacity,
+    blendingMode: "NORMAL"
+  }};
+}}
+
+const base = uniformTextStyleKey(frame("FontA", 10, 100));
+const differentColor = uniformTextStyleKey(frame("FontA", 11, 100));
+const differentFont = uniformTextStyleKey(frame("FontB", 10, 100));
+const differentOpacity = uniformTextStyleKey(frame("FontA", 10, 90));
+const cmykFrame = frame("FontA", 10, 100);
+cmykFrame.textRange.characters[0].characterAttributes.fillColor = {{
+  typename: "CMYKColor", cyan: 0, magenta: 10, yellow: 20, black: 30
+}};
+const cmyk = uniformTextStyleKey(cmykFrame);
+const unreadableOpacity = frame("FontA", 10, 100);
+Object.defineProperty(unreadableOpacity, "opacity", {{ get: () => {{ throw new Error("blocked"); }} }});
+const unreadableFill = frame("FontA", 10, 100);
+Object.defineProperty(unreadableFill.textRange.characters[0].characterAttributes, "fillColor", {{ get: () => {{ throw new Error("blocked"); }} }});
+
+if (base === null || cmyk === null || base === differentColor || base === differentFont || base === differentOpacity) {{
+  throw new Error("distinct readable styles produced the same key");
+}}
+if (uniformTextStyleKey(unreadableOpacity) !== null || uniformTextStyleKey(unreadableFill) !== null) {{
+  throw new Error("unreadable style property produced a mergeable key");
+}}
+
+for (const candidate of [differentColor, differentFont, differentOpacity, null]) {{
+  calls.length = 0;
+  mergeOverlappingTextOutlines([
+    {{ item: {{ selected: false }}, bounds: [0, 10, 10, 0], styleKey: base }},
+    {{ item: {{ selected: false }}, bounds: [5, 10, 15, 0], styleKey: candidate }}
+  ], "test");
+  if (calls.some(command => command !== "deselectall")) throw new Error("different or unreadable styles merged");
+}}
+
+calls.length = 0;
+mergeOverlappingTextOutlines([
+  {{ item: {{ selected: false }}, bounds: [0, 10, 10, 0], styleKey: base }},
+  {{ item: {{ selected: false }}, bounds: [5, 10, 15, 0], styleKey: base }}
+], "test");
+const computedStyleCalls = calls.filter(command => command !== "deselectall");
+if (JSON.stringify(computedStyleCalls) !== JSON.stringify(["Live Pathfinder Add", "expandStyle"])) {{
+  throw new Error("matching readable styles did not merge");
+}}
+"""
+        result = subprocess.run([node, "-e", harness], capture_output=True, text=True, check=False)
+        assert result.returncode == 0, f"{script}: {result.stderr}"
 
 
 def test_composition_task_builders_do_not_share_nested_input_values(tmp_path):
