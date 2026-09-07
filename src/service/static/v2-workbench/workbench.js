@@ -34,6 +34,7 @@
     selectedTemplateId: "",
     draft: null,
     isPublishedView: false,
+    publishedDraftCompatibility: false,
     scan: {},
     validation: null,
     lastValidatedConfig: null,

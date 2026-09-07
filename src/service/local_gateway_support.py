@@ -38,6 +38,7 @@ V2_STATIC_FILES = {
     "workbench-validation-blockers.js",
     "workbench-structure-tree.js",
     "workbench-draft-actions.js",
+    "workbench-published-actions.js",
     "workbench-scan-actions.js",
 }
 

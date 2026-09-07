@@ -198,7 +198,7 @@ function createApp(fetchImpl, fileNames, locationSearch) {
   global.window.location = { search: locationSearch || "" };
   global.FormData = FakeFormData;
   global.fetch = fetchImpl;
-  (fileNames || [
+  const workbenchFiles = [...(fileNames || [
     "workbench.js",
     "workbench-dom.js",
     "workbench-api.js",
@@ -223,7 +223,16 @@ function createApp(fetchImpl, fileNames, locationSearch) {
     "workbench-structure-tree.js",
     "workbench-draft-actions.js",
     "workbench-scan-actions.js"
-  ]).forEach((fileName) => {
+  ])];
+  const publishedActionIndex = workbenchFiles.indexOf("workbench-draft-actions.js");
+  if (
+    publishedActionIndex >= 0 &&
+    !workbenchFiles.includes("workbench-published-actions.js") &&
+    fs.existsSync("src/service/static/v2-workbench/workbench-published-actions.js")
+  ) {
+    workbenchFiles.splice(publishedActionIndex + 1, 0, "workbench-published-actions.js");
+  }
+  workbenchFiles.forEach((fileName) => {
     eval(fs.readFileSync(`src/service/static/v2-workbench/${fileName}`, "utf8"));
   });
   document.fireReady();
@@ -477,12 +486,15 @@ def test_v2_workbench_loads_the_draft_when_an_older_central_service_lacks_publis
           const state = global.DrawFlowV2WorkbenchContext.state;
           for (let index = 0; index < 5 && !state.draft; index += 1) await flush();
           assert.strictEqual(state.selectedTemplateId, "LEGACY001");
-          assert.strictEqual(state.isPublishedView, false);
+          assert.strictEqual(state.isPublishedView, true);
+          assert.strictEqual(state.publishedDraftCompatibility, true);
           assert.strictEqual(state.draft.manifest.draft_revision, "d0007");
           assert.strictEqual(state.scan.outputs[0].key, "Output_main");
+          assert.strictEqual(app.elements.templateName.disabled, true);
+          assert.strictEqual(app.elements.createDraftFromPublishedBtn.hidden, true);
           assert(requests.includes("/api/v2/templates/LEGACY001/published"));
           assert(requests.includes("/api/v2/templates/LEGACY001/draft"));
-          assert(app.elements.draftStatusBadge.textContent.includes("中央服务未提供已发布版本读取"));
+          assert(app.elements.draftStatusBadge.textContent.includes("兼容只读"));
         })().catch((error) => { console.error(error); process.exit(1); });
         """,
         cwd=Path(__file__).resolve().parents[1],

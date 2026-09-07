@@ -31,6 +31,7 @@ PAGE_HEAD = """<!doctype html>
   <script src="/static/v2-workbench/workbench-view.js" defer></script>
   <script src="/static/v2-workbench/workbench-structure-tree.js" defer></script>
   <script src="/static/v2-workbench/workbench-draft-actions.js" defer></script>
+  <script src="/static/v2-workbench/workbench-published-actions.js" defer></script>
   <script src="/static/v2-workbench/workbench-scan-actions.js" defer></script>
 </head>
 <body>

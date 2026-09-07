@@ -1725,6 +1725,7 @@ def _safe_static_name(value: str) -> str:
         "workbench-view.js",
         "workbench-structure-tree.js",
         "workbench-draft-actions.js",
+        "workbench-published-actions.js",
         "workbench-scan-actions.js",
     }
     return name if name in allowed else ""
