@@ -50,6 +50,9 @@ def test_v2_renderer_static_contract_uses_paths_and_safe_actions():
     assert '#include "v2_tail_text.jsxinc"' in source
     assert TAIL_INCLUDE.exists()
     assert "function saveAsAI8" in source
+    assert "function fitUnstyledSlotExactlyToAnchor" in source
+    assert "function resizeTextIndependently" in source
+    assert "scaleX * 100, scaleY * 100" in source
     assert "findPageItemsByName" not in source
     assert "app.doScript" not in source
     assert "eval(" not in source
@@ -812,6 +815,7 @@ def test_v2_renderer_uses_anchor_bounds_without_moving_fixed_art():
         "$schema": "custom-renderer/v2-render-execution",
         "template_ai": "template.ai",
         "output_ai": "out.ai",
+        "layout_warning_file": "warnings.json",
         "values": {"design": "03", "name": "Anchored-Long-Name"},
         "selections": {"Output_main": {"design": "Design03"}},
         "mock_fixed_annotation_name": "fixed",
@@ -848,12 +852,13 @@ const slot = child(designCopy, 'slot_name');
 const fixed = child(designCopy, 'fixed');
 const width = slot.visibleBounds[2] - slot.visibleBounds[0];
 const height = slot.visibleBounds[1] - slot.visibleBounds[3];
-if (width > 60.01) throw new Error('anchored text escaped anchor width: ' + width);
-if (height > 20.01) throw new Error('anchored text escaped anchor height: ' + height);
-const centerX = (slot.visibleBounds[0] + slot.visibleBounds[2]) / 2;
-const centerY = (slot.visibleBounds[1] + slot.visibleBounds[3]) / 2;
-if (Math.abs(centerX - 230) > 0.1 || Math.abs(centerY - 110) > 0.1) throw new Error('text not centered in anchor');
+if (Math.abs(width - 60) > 0.01) throw new Error('anchored text did not match anchor width: ' + width);
+if (Math.abs(height - 20) > 0.01) throw new Error('anchored text did not match anchor height: ' + height);
+if (Math.abs(slot.visibleBounds[0] - 200) > 0.01 || Math.abs(slot.visibleBounds[1] - 120) > 0.01) throw new Error('text did not match anchor origin');
 if (fixed.translateCalls !== 0 || fixed.resizeCalls !== 0) throw new Error('fixed art moved or resized');
+const warning = JSON.parse(writtenFiles['warnings.json']);
+const audit = warning.warnings && warning.warnings.find(entry => entry.code === 'slot_anchor_exact_fit');
+if (!audit || Math.abs(audit.anchor_width - 60) > 0.01 || Math.abs(audit.anchor_height - 20) > 0.01) throw new Error('exact anchor audit missing or invalid');
 """)
 
     result = run_node(harness)
@@ -1476,6 +1481,59 @@ if (child(designCopy, 'slot_name').contents.indexOf('S') < 0) throw new Error('m
     result = run_node(harness)
 
     assert result.returncode == 0, result.stderr
+
+
+def test_v2_renderer_exact_anchor_audit_applies_only_to_tail_text_main_slot():
+    tails = [{
+        "key": "tail_name_first_a",
+        "position": "first",
+        "sample": "a",
+        "pua_base": TAIL_PUA_BASE,
+        "path": "Template/Output_main/Design/Design03/tail_name_first_a",
+    }]
+    task = tail_text_task(tails, value="Alice")
+    task["layout_warning_file"] = "warnings.json"
+    task["render_task"]["outputs"][0]["actions"][1]["anchor_path"] = (
+        "Template/Output_main/Design/Design03/anchor_name"
+    )
+    harness = node_mock_harness(task, """
+const warnings = JSON.parse(writtenFiles['warnings.json']).warnings || [];
+const audits = warnings.filter(entry => entry.code === 'slot_anchor_exact_fit');
+if (audits.length !== 1) throw new Error('tail text produced non-slot exact-fit audits: ' + JSON.stringify(audits));
+if (audits[0].anchor_path !== 'Template/Output_main/Design/Design03/anchor_name') throw new Error('main slot anchor audit is incorrect');
+""")
+
+    result = run_node(harness)
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_v2_renderer_exact_anchor_audit_excludes_direct_tail_paths():
+    task = tail_text_task([], value="Main|Tail")
+    task["layout_warning_file"] = "warnings.json"
+    action = task["render_task"]["outputs"][0]["actions"][1]
+    action["preset"] = "split_by_pipe"
+    action["anchor_path"] = "Template/Output_main/Design/Design03/anchor_name"
+    action["tail_paths"] = ["Template/Output_main/Design/Design03/tail_name_1"]
+    harness = node_mock_harness(task, """
+const warnings = JSON.parse(writtenFiles['warnings.json']).warnings || [];
+const audits = warnings.filter(entry => entry.code === 'slot_anchor_exact_fit');
+if (audits.length !== 1) throw new Error('direct tail path produced non-slot exact-fit audits: ' + JSON.stringify(audits));
+""")
+
+    result = run_node(harness)
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_v2_renderer_labels_opentype_word_and_tail_glyph_fit_roles():
+    source = SCRIPT.read_text(encoding="utf-8")
+    tail_source = TAIL_INCLUDE.read_text(encoding="utf-8")
+
+    assert 'fitItemWithinBounds(replacement, fitBounds, action, shouldPreserveSlotComposition(target, action), "slot")' in source
+    assert 'fitItemWithinBounds(replacement, tailBounds, action, shouldPreserveSlotComposition(tail, action), "tail")' in source
+    assert 'env.fitItemWithinBounds(textFrame, fitBounds, action, false, "slot")' in tail_source
+    assert 'env.fitItemWithinBounds(tailFrame, tailBounds, action, false, "tail")' in tail_source
 
 
 @pytest.mark.parametrize("fit_mode", ["fill_width", "fill_height"])

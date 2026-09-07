@@ -4,7 +4,7 @@ var V2TailText = (function () {
         if (!tailSpecs.length) throw new Error("V2 tail text has no tail samples: " + String(action.slot_key || ""));
         var parsed = tailEndpointParts(String(value || ""), tailSpecs);
         var textFrame = env.writeTextToItem(target, parsed.main_text);
-        env.fitItemWithinBounds(textFrame, fitBounds, action);
+        env.fitItemWithinBounds(textFrame, fitBounds, action, false, "slot");
         for (var index = 0; index < tailSpecs.length; index++) {
             var spec = tailSpecs[index] || {};
             var position = String(spec.position || "");
@@ -16,7 +16,7 @@ var V2TailText = (function () {
                     env.replaceOpenTypeTailGlyph(tail, spec, tailBounds, action);
                 } else {
                     var tailFrame = env.writeTextToItem(tail, tailGlyphForSpec(text, spec));
-                    env.fitItemWithinBounds(tailFrame, tailBounds, action);
+                    env.fitItemWithinBounds(tailFrame, tailBounds, action, false, "tail");
                 }
             } else {
                 env.removePageItem(tail);

@@ -1465,6 +1465,42 @@ def test_carries_slot_fit_mode_to_illustrator_action():
     assert design_slot["fit_mode"] == "fill_width"
 
 
+def test_carries_title_and_date_anchor_bounds_to_the_illustrator_task():
+    config = render_config()
+    config["field_bindings"].update({"title": "Title", "date": "Date"})
+    font_option = config["outputs"][0]["font"]["options"][0]
+    font_option["slots"].extend(
+        [
+            {"key": "slot_title", "source_field": "title", "preset": "direct_text", "anchor": "anchor_title"},
+            {"key": "slot_date", "source_field": "date", "preset": "direct_text", "anchor": "anchor_date"},
+        ]
+    )
+    scan = scan_evidence()
+    font_scan = scan["outputs"][0]["fonts"][0]
+    font_scan["slots"].extend(
+        [
+            {"key": "slot_title", "path": "Template/Output_main/Font/F10/slot_title"},
+            {"key": "slot_date", "path": "Template/Output_main/Font/F10/slot_date"},
+        ]
+    )
+    font_scan["anchors"].extend(
+        [
+            {"key": "anchor_title", "path": "Template/Output_main/Font/F10/anchor_title"},
+            {"key": "anchor_date", "path": "Template/Output_main/Font/F10/anchor_date"},
+        ]
+    )
+
+    task = compile_task(config=config, scan=scan)
+    actions = {
+        action["slot_key"]: action
+        for action in task["outputs"][0]["actions"]
+        if action["type"] == "replace_slot_text" and action["group"] == "font"
+    }
+
+    assert actions["slot_title"]["anchor_path"] == "Template/Output_main/Font/F10/anchor_title"
+    assert actions["slot_date"]["anchor_path"] == "Template/Output_main/Font/F10/anchor_date"
+
+
 def test_rejects_duplicate_scan_object_keys_in_same_scope():
     scan = scan_evidence()
     scan["outputs"][0]["fonts"][0]["slots"].append({"key": "slot_name", "path": "Template/other"})
