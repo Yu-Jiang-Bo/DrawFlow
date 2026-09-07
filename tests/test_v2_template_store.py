@@ -34,6 +34,40 @@ def test_save_draft_persists_v2_state_without_touching_legacy_files(tmp_path):
     assert onboarding.read_bytes() == b'{"legacy":true}'
 
 
+def test_render_mode_provenance_distinguishes_new_and_historical_drafts(tmp_path):
+    store = V2TemplateStore(tmp_path / "v2")
+
+    store.save_draft("V2NEWMODE", metadata={"name": "New"}, config={})
+    new_draft = store.read_draft("V2NEWMODE")
+    assert new_draft["manifest"]["legacy_render_mode_allowed"] is False
+
+    store.save_draft(
+        "V2EXPLICIT",
+        metadata={"name": "Explicit"},
+        config={"render_mode": "single_customization"},
+    )
+    explicit_draft = store.read_draft("V2EXPLICIT")
+    assert explicit_draft["manifest"]["legacy_render_mode_allowed"] is False
+
+    store.save_draft("V2LEGACY", metadata={"name": "Legacy"}, config={})
+    legacy_manifest_path = tmp_path / "v2/V2LEGACY/drafts/d0001/manifest.json"
+    legacy_manifest = json.loads(legacy_manifest_path.read_text(encoding="utf-8"))
+    legacy_manifest.pop("legacy_render_mode_allowed")
+    legacy_manifest_path.write_text(json.dumps(legacy_manifest), encoding="utf-8")
+
+    store.save_draft("V2LEGACY", metadata={"name": "Legacy"}, config={})
+    migrated_legacy_draft = store.read_draft("V2LEGACY")
+    assert migrated_legacy_draft["manifest"]["legacy_render_mode_allowed"] is True
+
+    store.save_draft(
+        "V2LEGACY",
+        metadata={"name": "Legacy"},
+        config={"render_mode": "multi_customization"},
+    )
+    migrated_explicit_draft = store.read_draft("V2LEGACY")
+    assert migrated_explicit_draft["manifest"]["legacy_render_mode_allowed"] is False
+
+
 def test_failed_draft_state_write_keeps_previous_complete_draft(tmp_path, monkeypatch):
     store = V2TemplateStore(tmp_path / "v2")
     store.save_draft("V2DEMO001", metadata={"name": "Demo"}, config={"version": 1})

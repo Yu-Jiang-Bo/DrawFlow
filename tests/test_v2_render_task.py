@@ -19,7 +19,12 @@ from src.renderer.v2_template_renderer import (
     build_v2_execution_task,
 )
 from src.service.v2_order_plan import build_v2_order_units
-from src.service.v2_template_contract import V2_CONTRACT_SCHEMA, V2_CONTRACT_VERSION
+from src.service.v2_order_render_support import V2OrderRenderError
+from src.service.v2_template_contract import (
+    V2_CONTRACT_SCHEMA,
+    V2_CONTRACT_VERSION,
+    normalize_v2_template_contract,
+)
 from src.service.v2_template_store import V2TemplateStore
 from src.service.v2_template_validation import validate_v2_template_configuration
 from tests.test_v2_workbench_js_behavior import HARNESS
@@ -371,6 +376,7 @@ def test_compiles_v2_render_task_with_stable_json_and_whitelisted_actions():
     assert stable_v2_render_task_json(first) == stable_v2_render_task_json(second)
     assert first["$schema"] == V2_RENDER_TASK_SCHEMA
     assert first["template"] == {"template_id": "V2RENDER001", "version": "v0007", "sha256": TEMPLATE_SHA}
+    assert "render_mode" not in first
     assert first["scan"]["object_path_digest"] == "b" * 64
     assert first["font_check"] == {"ok": True, "missing": []}
     assert len(first["task_sha256"]) == 64
@@ -400,6 +406,73 @@ def test_compiles_v2_render_task_with_stable_json_and_whitelisted_actions():
         and action["slot_key"] == "slot_name"
     )
     assert name_action["value_key"] == "Output_main|design|Design03|slot|slot_name"
+
+
+def test_legacy_multi_customization_migration_keeps_blank_quantity_blocked():
+    config = render_config()
+    config["multi_name_customization"] = {"enabled": True}
+    config["field_bindings"]["quantity"] = "Qty"
+    normalized = normalize_v2_template_contract(config)
+    task = compile_task(config=normalized)
+
+    assert normalized["render_mode"] == "multi_customization"
+    assert task["render_mode"] == "multi_customization"
+    with pytest.raises(V2OrderRenderError) as exc_info:
+        build_v2_order_units(
+            normalized,
+            task,
+            [{"Name": "Alice\nBob", "Qty": ""}],
+            {},
+        )
+
+    assert exc_info.value.code == "v2_order_quantity_missing"
+
+
+@pytest.mark.parametrize("legacy_policy", [None, {"enabled": False}])
+@pytest.mark.parametrize(
+    ("name", "expected_names"),
+    [("Alice", ["Alice"]), ("Alice\nBob", ["Alice", "Bob"])],
+)
+def test_legacy_disabled_save_compile_keeps_quantity_and_name_expansion_behavior(
+    legacy_policy,
+    name,
+    expected_names,
+):
+    config = render_config()
+    config["outputs"][0]["design"]["options"][0]["slots"][0]["source_field"] = "initial"
+    config["field_bindings"]["quantity"] = "Qty"
+    if legacy_policy is not None:
+        config["multi_name_customization"] = legacy_policy
+    normalized = normalize_v2_template_contract(config)
+    task = compile_task(config=normalized)
+    row = {
+        "Name": name,
+        "Qty": "5",
+        "Initial": "A",
+        "Size": "small",
+        "Design": "03",
+        "Font": "F10",
+    }
+    preflight = {
+        "preflight_rows": [{
+            "row": 1,
+            "outputs": [{
+                "output": "Output_main",
+                "style": "style1",
+                "design": "Design03",
+                "font": "F10",
+            }],
+        }],
+    }
+
+    before_save = build_v2_order_units(config, task, [row], preflight)
+    after_save = build_v2_order_units(normalized, task, [row], preflight)
+
+    assert "render_mode" not in normalized
+    assert "render_mode" not in task
+    assert [unit.values["name"] for unit in before_save] == expected_names
+    assert [unit.values["name"] for unit in after_save] == expected_names
+    assert [unit.quantity_index for unit in after_save] == list(range(1, len(expected_names) + 1))
 
 
 def test_compiles_and_resolves_combined_initial_content(tmp_path):

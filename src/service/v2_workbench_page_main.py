@@ -94,6 +94,12 @@ PAGE_MAIN = """
 
       <section class="center-pane" data-stage-panel="structure" aria-label="结构与字段配置">
         <section class="pane"><div class="pane-header"><h3>Output 配置</h3></div><div class="pane-body"><div class="config-table" id="outputConfigRows" aria-live="polite"></div></div></section>
+        <section class="pane customization-mode-panel"><div class="pane-header"><h3>定制信息模式</h3></div><div class="pane-body customization-mode-body">
+          <div class="customization-mode-options" role="radiogroup" aria-label="定制信息模式">
+            <label class="customization-mode-option"><input id="singleCustomizationTemplate" type="radio" name="customizationMode" value="single_customization" /><span>单定制信息模板</span></label>
+            <label class="customization-mode-option"><input id="multiCustomizationTemplate" type="radio" name="customizationMode" value="multi_customization" /><span>多定制信息模板</span></label>
+          </div>
+        </div></section>
         <section class="pane output-policy-panel"><div class="pane-header"><h3>输出处理</h3><span class="v2-badge output-policy-badge">模板输出设置</span></div><div class="pane-body output-policy-body">
           <p class="output-policy-description">对定制内容和生产标注生效</p>
           <label class="output-policy-row">

@@ -32,6 +32,14 @@ class V2TemplatePublishConflict(V2TemplateStoreError):
     """Raised when a draft revision cannot be published again."""
 
 
+def _manifest_allows_legacy_render_mode(manifest: Mapping[str, Any]) -> bool:
+    if not manifest:
+        return False
+    if "legacy_render_mode_allowed" not in manifest:
+        return True
+    return manifest.get("legacy_render_mode_allowed") is True
+
+
 class V2TemplateStore:
     _write_json_atomic = staticmethod(write_json_atomic)
 
@@ -51,11 +59,21 @@ class V2TemplateStore:
         template = self._normalize_metadata(template_id, metadata)
         with TEMPLATE_STATE_LOCK:
             state = self.get_state(template_id)
+            legacy_render_mode_allowed = self._legacy_render_mode_allowed(template_id, state)
+            if config and str(config.get("render_mode") or "").strip():
+                legacy_render_mode_allowed = False
             revision = self._next_child_name(self._drafts_dir(template_id), "d")
             final_dir = self._drafts_dir(template_id) / revision
             staging = self._staging_dir(template_id, "draft")
             try:
-                manifest = self._stage_payload(staging, template, config or {}, scan or {}, assets or [])
+                manifest = self._stage_payload(
+                    staging,
+                    template,
+                    config or {},
+                    scan or {},
+                    assets or [],
+                    legacy_render_mode_allowed=legacy_render_mode_allowed,
+                )
                 manifest.update({"draft_revision": revision, "source_version": source_version})
                 for asset_record in manifest["assets"]:
                     asset_record["draft_version"] = revision
@@ -245,6 +263,8 @@ class V2TemplateStore:
         config: Mapping[str, Any],
         scan: Mapping[str, Any],
         assets: list[Mapping[str, Any]],
+        *,
+        legacy_render_mode_allowed: bool,
     ) -> dict[str, Any]:
         directory.mkdir(parents=True, exist_ok=True)
         self._write_json_atomic(directory / "metadata.json", template)
@@ -256,10 +276,23 @@ class V2TemplateStore:
             "schema_version": V2_TEMPLATE_STORE_VERSION,
             "template": dict(template),
             "created_at": utc_now(),
+            "legacy_render_mode_allowed": legacy_render_mode_allowed,
             "config_sha256": sha256_file(directory / "config.json"),
             "scan_sha256": sha256_file(directory / "scan.json"),
             "assets": asset_records,
         }
+
+    def _legacy_render_mode_allowed(self, template_id: str, state: Mapping[str, Any]) -> bool:
+        draft = state.get("draft")
+        if isinstance(draft, Mapping) and str(draft.get("revision") or "").strip():
+            manifest_path = self._draft_dir(template_id, str(draft["revision"])) / "manifest.json"
+            return _manifest_allows_legacy_render_mode(read_json(manifest_path))
+        publication = state.get("publication")
+        version = str(dict(publication).get("current_version") or "").strip() if isinstance(publication, Mapping) else ""
+        if version:
+            manifest_path = self._version_dir(template_id, version) / "manifest.json"
+            return _manifest_allows_legacy_render_mode(read_json(manifest_path))
+        return False
 
     def _draft_record(self, revision: str, source_version: str, manifest: Mapping[str, Any]) -> dict[str, Any]:
         template_id = str(dict(manifest.get("template", {})).get("template_id") or "")

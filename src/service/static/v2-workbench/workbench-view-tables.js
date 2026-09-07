@@ -30,6 +30,7 @@
   }
 
   function fillDraftFields(draft, fallbackId) {
+    state.pendingRenderMode = "";
     const template = objectOf(draft && (draft.metadata || draft.template || objectOf(draft.manifest).template));
     setValue("templateId", fallbackId || template.template_id || "");
     setValue("templateName", template.name || "");
@@ -69,6 +70,7 @@
   }
 
   function renderTables() {
+    if (typeof globalThis.syncRenderModeControls === "function") globalThis.syncRenderModeControls();
     if (typeof globalThis.syncOutputPolicyControls === "function") globalThis.syncOutputPolicyControls();
     renderOutputRows();
     renderFieldBindingRows();

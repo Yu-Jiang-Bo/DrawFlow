@@ -69,6 +69,7 @@ def renderable_scan_evidence(template_sha256: str) -> dict[str, Any]:
 
 def publishable_config(template_id: str = "V2API001") -> dict[str, Any]:
     config = saveable_config(template_id)
+    config["render_mode"] = "single_customization"
     config["outputs"][0]["style"] = {
         "field": "style",
         "options": [

@@ -9,7 +9,7 @@
     const outputs = collectOutputRows();
     const mappings = collectOptionMappingRows();
     const checks = collectChecks();
-    return {
+    const config = {
       "$schema": "custom-renderer/v2-template-contract",
       schema_version: 1,
       template: {
@@ -28,6 +28,40 @@
       preview: { sample_rows: [], evidence: {} },
       audit: nextAudit()
     };
+    const renderMode = collectRenderMode();
+    if (renderMode) config.render_mode = renderMode;
+    return config;
+  }
+
+  function collectRenderMode() {
+    const existing = objectOf(state.draft && state.draft.config);
+    if (["single_customization", "multi_customization"].includes(state.pendingRenderMode)) {
+      return state.pendingRenderMode;
+    }
+    const single = document.getElementById("singleCustomizationTemplate");
+    const multi = document.getElementById("multiCustomizationTemplate");
+    if (multi && multi.checked) return "multi_customization";
+    if (single && single.checked) return "single_customization";
+    return storedRenderMode(existing);
+  }
+
+  function syncRenderModeControls() {
+    const existing = objectOf(state.draft && state.draft.config);
+    const mode = ["single_customization", "multi_customization"].includes(state.pendingRenderMode)
+      ? state.pendingRenderMode
+      : storedRenderMode(existing);
+    const single = document.getElementById("singleCustomizationTemplate");
+    const multi = document.getElementById("multiCustomizationTemplate");
+    if (single) single.checked = mode === "single_customization";
+    if (multi) multi.checked = mode === "multi_customization";
+  }
+
+  function storedRenderMode(config) {
+    if (config.render_mode === "multi_customization") return "multi_customization";
+    if (config.render_mode === "single_customization") return "single_customization";
+    const legacy = objectOf(config.multi_name_customization);
+    if (!config.render_mode && legacy.enabled === true) return "multi_customization";
+    return !state.draft && !Object.keys(config).length ? "single_customization" : "";
   }
 
   function collectOutputPolicy() {
@@ -490,6 +524,9 @@
 
   Object.assign(globalThis, {
     buildControlledConfig,
+    collectRenderMode,
+    syncRenderModeControls,
+    storedRenderMode,
     collectOutputRows,
     withControlledGroups,
     collectFieldBindings,

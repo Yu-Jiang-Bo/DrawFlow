@@ -72,7 +72,7 @@
 
   function inferredFields() {
     const model = scanModel(state.scan, state.draft && state.draft.config);
-    const fields = ["name"];
+    const fields = ["name", "quantity"];
     if (model.designs.length) fields.push("design");
     if (model.fonts.length) fields.push("font");
     if (model.styles.length) fields.push("style");

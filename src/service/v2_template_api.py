@@ -15,6 +15,7 @@ from .paths import V2_TEMPLATE_DATA_DIR
 from .v2_template_api_support import (
     V2TemplateApiError,
     current_asset_sources,
+    draft_allows_legacy_render_mode,
     draft_source_version,
     ensure_payload_fields,
     find_asset,
@@ -206,7 +207,10 @@ class V2TemplateApi:
         self._require_verified_pua_tail_profiles(config, scan)
         if config:
             config = preview_config_payload(config)
-        config, validation = self._prepare_saveable_config(config)
+        config, validation = self._prepare_saveable_config(
+            config,
+            legacy_render_mode_allowed=draft_allows_legacy_render_mode(current_draft),
+        )
         self._ensure_config_template_matches(template_id, validation)
         state = self.store.save_draft(
             template_id,
@@ -456,9 +460,16 @@ class V2TemplateApi:
         if not isinstance(config, Mapping):
             raise V2TemplateApiError("v2_config_invalid", "校验内容格式不正确，请刷新页面后重试。")
         controlled_config = self._validation_config(config)
-        validation = validate_v2_template_configuration(controlled_config)
+        template_id = str(dict(controlled_config.get("template") or {}).get("template_id") or "").strip()
+        try:
+            current_draft = self.read_draft(template_id) if template_id else None
+        except V2TemplateApiError:
+            current_draft = None
+        validation = validate_v2_template_configuration(
+            controlled_config,
+            legacy_render_mode_allowed=draft_allows_legacy_render_mode(current_draft),
+        )
         if validation.get("ok"):
-            template_id = str(dict(controlled_config.get("template") or {}).get("template_id") or "").strip()
             if template_id:
                 try:
                     draft = self.read_draft(template_id)
@@ -531,7 +542,12 @@ class V2TemplateApi:
             "capabilities": list(V2_WORKBENCH_SERVICE_CONTRACT["capabilities"]),
         }
 
-    def _prepare_saveable_config(self, config: Mapping[str, Any]) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    def _prepare_saveable_config(
+        self,
+        config: Mapping[str, Any],
+        *,
+        legacy_render_mode_allowed: bool = False,
+    ) -> tuple[dict[str, Any], dict[str, Any] | None]:
         if not config:
             return {}, None
         try:
@@ -543,7 +559,10 @@ class V2TemplateApi:
                 suggestion="请删除脚本内容、自然语言规则、未知字段或错误类型后再保存。",
                 cause=exc,
             ) from exc
-        validation = validate_v2_template_configuration(controlled_config)
+        validation = validate_v2_template_configuration(
+            controlled_config,
+            legacy_render_mode_allowed=legacy_render_mode_allowed,
+        )
         if not validation["can_save"]:
             raise V2TemplateApiError(
                 "v2_config_rejected",

@@ -16,7 +16,11 @@ from .v2_template_validation_publish import collect_publication_gate_issues
 from .v2_template_validation_structure import collect_structure_validation_issues
 
 
-def validate_v2_template_configuration(payload: Any) -> Dict[str, Any]:
+def validate_v2_template_configuration(
+    payload: Any,
+    *,
+    legacy_render_mode_allowed: bool = False,
+) -> Dict[str, Any]:
     """Validate one V2 draft and report whether it may be saved or published."""
 
     contract_result = check_v2_template_contract(payload)
@@ -41,10 +45,18 @@ def validate_v2_template_configuration(payload: Any) -> Dict[str, Any]:
         }
 
     contract = contract_result["contract"]
-    issues = [
-        *collect_structure_validation_issues(contract),
-        *collect_publication_gate_issues(contract),
-    ]
+    issues: list[Dict[str, str]] = []
+    if not contract.get("render_mode") and not legacy_render_mode_allowed:
+        add_issue(
+            issues,
+            "$.render_mode",
+            "fields",
+            V2_STATUS_PENDING,
+            "render_mode_pending",
+            "请选择单定制信息模板或多定制信息模板后再发布。",
+        )
+    issues.extend(collect_structure_validation_issues(contract))
+    issues.extend(collect_publication_gate_issues(contract))
     checks = _checks_from_issues(issues)
     can_publish = all(item["status"] == V2_STATUS_PASSED for item in checks.values())
     return {

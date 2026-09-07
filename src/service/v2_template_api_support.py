@@ -112,6 +112,15 @@ def draft_source_version(draft: Mapping[str, Any] | None) -> str:
     return str(manifest.get("source_version") or "").strip() if isinstance(manifest, Mapping) else ""
 
 
+def draft_allows_legacy_render_mode(draft: Mapping[str, Any] | None) -> bool:
+    manifest = draft.get("manifest") if isinstance(draft, Mapping) else None
+    if not isinstance(manifest, Mapping) or not manifest:
+        return False
+    if "legacy_render_mode_allowed" not in manifest:
+        return True
+    return manifest.get("legacy_render_mode_allowed") is True
+
+
 def current_asset_sources(
     store: V2TemplateStore,
     template_id: str,

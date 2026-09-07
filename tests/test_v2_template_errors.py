@@ -95,13 +95,13 @@ def test_sanitize_v2_config_returns_normalized_whitelist_dict_without_mutating_s
         "colors",
         "field_bindings",
         "option_mappings",
-        "multi_name_customization",
         "render_layout",
         "output",
         "checks",
         "preview",
         "audit",
     }
+    assert "render_mode" not in sanitized
     assert "component_scope_executable" not in source["template"]
 
 
@@ -120,7 +120,8 @@ def test_sanitize_v2_config_accepts_preview_rows_with_chinese_headers_and_planni
 
     assert sanitized["field_bindings"]["name"] == "定制信息"
     assert sanitized["preview"]["sample_rows"] == [{"尺寸": "M", "字体": "F2", "定制信息": "Meiyi", "字体颜色": ""}]
-    assert sanitized["multi_name_customization"] == {"enabled": False}
+    assert "render_mode" not in sanitized
+    assert "multi_name_customization" not in sanitized
     assert sanitized["render_layout"] == {"type": "single_output"}
     assert sanitized["output"] == {"color_mode": "CMYK"}
 

@@ -25,6 +25,7 @@ from .v2_preview_worker_auth import V2PreviewWorkerAuthError
 from .v2_template_api_support import (
     V2TemplateApiError,
     current_asset_sources,
+    draft_allows_legacy_render_mode,
     draft_source_version,
     ensure_payload_fields,
     metadata_from_state,
@@ -203,7 +204,10 @@ class V2TemplatePublicationService:
 
     def publication_validation(self, template_id: str, draft: Mapping[str, Any]) -> dict[str, Any]:
         config = dict(draft.get("config") or {})
-        validation = validate_v2_template_configuration(config)
+        validation = validate_v2_template_configuration(
+            config,
+            legacy_render_mode_allowed=draft_allows_legacy_render_mode(draft),
+        )
         validation = block_validation_with_content_issues(
             validation,
             tail_profile_issues(config, dict(draft.get("scan") or {})),

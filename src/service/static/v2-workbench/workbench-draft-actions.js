@@ -128,6 +128,7 @@
       state.draft = payload.draft
         ? { ...responseDraft, ...(hasScanEvidence(retainedScan) ? { scan: retainedScan } : {}) }
         : state.draft;
+      state.pendingRenderMode = "";
       const savedDraft = state.draft;
       state.scan = hasScanEvidence(retainedScan) ? retainedScan : normalizeScanFromDraft(state.draft);
       await refreshTemplateList();

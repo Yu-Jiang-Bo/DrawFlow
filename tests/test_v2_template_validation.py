@@ -97,6 +97,7 @@ def complete_contract():
             {"field": "design", "source_value": "03", "target": "Design03", "output": "Output_main", "group": "design"},
             {"field": "font", "source_value": "F1", "target": "F1", "output": "Output_main", "group": "font"},
         ],
+        "render_mode": "single_customization",
         "checks": {key: "confirmed" for key in V2_VERIFICATION_KEYS},
         "preview": {
             "sample_rows": [{"Name": "Amy", "Initial": "A", "Design": "03", "Font": "F1", "Size": "small", "Color": "Pink"}],
@@ -120,6 +121,27 @@ def test_complete_contract_can_publish_with_all_checks_passed():
     assert {key: item["status"] for key, item in result["checks"].items()} == {
         key: V2_STATUS_PASSED for key in V2_VERIFICATION_KEYS
     }
+
+
+def test_new_template_without_render_mode_can_save_but_cannot_publish():
+    payload = complete_contract()
+    payload.pop("render_mode")
+
+    result = validate_v2_template_configuration(payload)
+
+    assert result["can_save"] is True
+    assert result["can_publish"] is False
+    assert _has_issue(result, path="$.render_mode", code="render_mode_pending", reason="请选择")
+
+
+def test_historical_template_without_render_mode_keeps_publication_compatibility():
+    payload = complete_contract()
+    payload.pop("render_mode")
+
+    result = validate_v2_template_configuration(payload, legacy_render_mode_allowed=True)
+
+    assert result["can_publish"] is True
+    assert not _has_issue(result, path="$.render_mode", code="render_mode_pending")
 
 
 def test_missing_manual_confirmation_can_save_but_not_publish():

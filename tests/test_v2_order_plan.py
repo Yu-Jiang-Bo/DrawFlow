@@ -121,6 +121,16 @@ def test_v2_order_unit_identity_keeps_output_order_and_quantity_sequence_stable(
     ]
 
 
+def test_legacy_multi_customization_rejects_blank_purchase_quantity():
+    config = _config(multi_quantity=True)
+    row = {**_row("T"), "Qty": ""}
+
+    with pytest.raises(V2OrderRenderError) as exc_info:
+        build_v2_order_units(config, _render_task(), [row], _preflight())
+
+    assert exc_info.value.code == "v2_order_quantity_missing"
+
+
 def test_v2_preflight_row_metrics_uses_expanded_outputs_and_rendered_text_fields():
     config = _config(multi_quantity=True)
     config["outputs"] = [{
@@ -167,6 +177,184 @@ def test_v2_preflight_row_metrics_ignores_actions_for_unselected_options():
     assert v2_preflight_row_metrics(render_task, units) == {
         "1": {"planned_output_units": 1, "variable_text_length": 1},
     }
+
+def test_single_customization_template_copies_one_customization_by_purchase_quantity():
+    config = _config()
+    config["render_mode"] = "single_customization"
+    config["field_bindings"]["quantity"] = "Qty"
+    row = {**_row("K", order_no="X53-ONE"), "Name": "NASA Mom", "Qty": "2"}
+    render_task = {
+        **_render_task(),
+        "render_mode": "single_customization",
+        "outputs": [{"key": "Output_main"}],
+    }
+
+    units = build_v2_order_units(config, render_task, [row], _preflight())
+
+    assert [unit.order_id for unit in units] == ["X53-ONE", "X53-ONE"]
+    assert [unit.quantity_index for unit in units] == [1, 2]
+    assert [unit.values["name"] for unit in units] == ["NASA Mom", "NASA Mom"]
+
+
+def test_single_customization_template_renders_each_newline_customization_once():
+    names = [
+        "Samantha",
+        "Kathi",
+        "Sam",
+        "Candice",
+        "Bethany",
+        "Becca",
+        "Brooke",
+        "Jess",
+        "Kayleigh",
+        "Linda",
+    ]
+    config = _config()
+    config["render_mode"] = "single_customization"
+    config["field_bindings"]["quantity"] = "Qty"
+    row = {**_row("K", order_no="X53-TEN"), "Name": "\n".join(names), "Qty": "10"}
+    render_task = {
+        **_render_task(),
+        "render_mode": "single_customization",
+        "outputs": [{"key": "Output_main"}],
+    }
+
+    units = build_v2_order_units(config, render_task, [row], _preflight())
+
+    assert len(units) == 10
+    assert [unit.order_id for unit in units] == ["X53-TEN"] * 10
+    assert [unit.quantity_index for unit in units] == list(range(1, 11))
+    assert [unit.values["name"] for unit in units] == names
+
+
+def test_multi_customization_template_copies_the_complete_effect_set_by_quantity():
+    names = [
+        "Samantha",
+        "Kathi",
+        "Sam",
+        "Candice",
+        "Bethany",
+        "Becca",
+        "Brooke",
+        "Jess",
+        "Kayleigh",
+        "Linda",
+    ]
+    customization = "\n".join(names)
+    config = _config()
+    config["render_mode"] = "multi_customization"
+    config["field_bindings"]["quantity"] = "Qty"
+    row = {**_row("K", order_no="X53-MULTI"), "Name": customization, "Qty": "10"}
+    render_task = {**_render_task(), "render_mode": "multi_customization"}
+
+    units = build_v2_order_units(config, render_task, [row], _preflight())
+
+    assert len(units) == 20
+    assert [unit.order_id for unit in units] == ["X53-MULTI"] * 20
+    assert [unit.quantity_index for unit in units] == [index for index in range(1, 11) for _ in range(2)]
+    assert [unit.output_key for unit in units] == ["Output_front", "Output_back"] * 10
+    assert all(unit.values["name"] == customization for unit in units)
+
+
+def test_multi_customization_template_copies_one_complete_group_per_purchase():
+    customization = "Samantha\nKathi\nSam\nCandice\nBethany\nBecca\nBrooke\nJess\nKayleigh\nLinda"
+    config = _config()
+    config["render_mode"] = "multi_customization"
+    config["field_bindings"]["quantity"] = "Qty"
+    row = {**_row("K", order_no="X53-MULTI"), "Name": customization, "Qty": "10"}
+    render_task = {
+        **_render_task(),
+        "render_mode": "multi_customization",
+        "outputs": [{"key": "Output_main"}],
+    }
+
+    units = build_v2_order_units(config, render_task, [row], _preflight())
+
+    assert len(units) == 10
+    assert [unit.order_id for unit in units] == ["X53-MULTI"] * 10
+    assert [unit.quantity_index for unit in units] == list(range(1, 11))
+    assert [unit.values["name"] for unit in units] == [customization] * 10
+
+
+def test_single_customization_template_rejects_name_count_that_differs_from_quantity():
+    config = _config()
+    config["render_mode"] = "single_customization"
+    config["field_bindings"]["quantity"] = "Qty"
+    row = {**_row("K"), "Name": "Samantha\nKathi", "Qty": "10"}
+    render_task = {
+        **_render_task(),
+        "render_mode": "single_customization",
+        "outputs": [{"key": "Output_main"}],
+    }
+
+    with pytest.raises(V2OrderRenderError, match="条数必须为 1 条，或与购买数量一致"):
+        build_v2_order_units(config, render_task, [row], _preflight())
+
+
+@pytest.mark.parametrize("mode", ["single_customization", "multi_customization"])
+def test_explicit_customization_mode_rejects_blank_purchase_quantity(mode):
+    config = _config()
+    config["render_mode"] = mode
+    config["field_bindings"]["quantity"] = "Qty"
+    row = {**_row("K", order_no="X53-BLANK"), "Name": "NASA Mom", "Qty": ""}
+    render_task = {**_render_task(), "render_mode": mode, "outputs": [{"key": "Output_main"}]}
+
+    with pytest.raises(V2OrderRenderError) as exc_info:
+        build_v2_order_units(config, render_task, [row], _preflight())
+
+    assert exc_info.value.code == "v2_order_quantity_missing"
+
+
+def test_explicit_customization_mode_uses_custom_purchase_quantity_binding():
+    config = _config()
+    config["render_mode"] = "single_customization"
+    config["field_bindings"]["quantity"] = "Count Purchased"
+    row = {**_row("K"), "Name": "NASA Mom", "Count Purchased": "3"}
+    render_task = {
+        **_render_task(),
+        "render_mode": "single_customization",
+        "outputs": [{"key": "Output_main"}],
+    }
+
+    units = build_v2_order_units(config, render_task, [row], _preflight())
+
+    assert [unit.quantity_index for unit in units] == [1, 2, 3]
+
+
+def test_explicit_customization_mode_rejects_render_task_without_mode():
+    config = _config()
+    config["render_mode"] = "single_customization"
+
+    with pytest.raises(V2OrderRenderError) as exc_info:
+        build_v2_order_units(config, _render_task(), [_row("K")], _preflight())
+
+    assert exc_info.value.code == "v2_render_mode_mismatch"
+
+
+def test_explicit_customization_mode_rejects_mismatched_render_task_mode():
+    config = _config()
+    config["render_mode"] = "single_customization"
+    render_task = {**_render_task(), "render_mode": "multi_customization"}
+
+    with pytest.raises(V2OrderRenderError) as exc_info:
+        build_v2_order_units(config, render_task, [_row("K")], _preflight())
+
+    assert exc_info.value.code == "v2_render_mode_mismatch"
+
+
+@pytest.mark.parametrize("mode", ["single_customization", "multi_customization"])
+@pytest.mark.parametrize("quantity", ["0", "-1", "1.5", "ten"])
+def test_explicit_customization_mode_rejects_invalid_purchase_quantity(mode, quantity):
+    config = _config()
+    config["render_mode"] = mode
+    config["field_bindings"]["quantity"] = "Qty"
+    row = {**_row("K"), "Name": "NASA Mom", "Qty": quantity}
+    render_task = {**_render_task(), "render_mode": mode, "outputs": [{"key": "Output_main"}]}
+
+    with pytest.raises(V2OrderRenderError) as exc_info:
+        build_v2_order_units(config, render_task, [row], _preflight())
+
+    assert exc_info.value.code == "v2_order_quantity_invalid"
 
 
 def test_v2_order_unit_metadata_can_fall_back_to_preflight_metadata():

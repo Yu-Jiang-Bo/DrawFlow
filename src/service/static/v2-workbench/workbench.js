@@ -61,6 +61,7 @@
     previewOutputIndex: 0,
     previewSampleValues: {},
     previewMessage: "",
+    pendingRenderMode: "",
     stage: "upload",
     optionRules: { pendingOnly: false, selectedIndex: 0 }
   };
@@ -117,6 +118,8 @@
     on("structureSearch", "input", renderStructureTree);
     on("toggleDesignsBtn", "click", () => toggleSection("designs"));
     on("toggleFontsBtn", "click", () => toggleSection("fonts"));
+    on("singleCustomizationTemplate", "change", handleRenderModeChange);
+    on("multiCustomizationTemplate", "change", handleRenderModeChange);
     on("saveDraftBtn", "click", saveDraft);
     on("trialRenderBtn", "click", () => globalThis.trialRenderCurrentDraft());
     on("publishVersionBtn", "click", () => globalThis.publishCurrentDraft());
@@ -164,6 +167,14 @@
   function handleDraftFieldInput() {
     invalidatePreviewIfAvailable("模板信息已修改，请重新试渲染。");
     updateDraftButtons();
+  }
+
+  function handleRenderModeChange(event) {
+    const value = String(event && event.target && event.target.value || "");
+    if (!event || !event.target || !event.target.checked) return;
+    state.pendingRenderMode = value;
+    invalidatePreviewIfAvailable("定制信息模式已修改，请重新试渲染。");
+    globalThis.validateCurrentConfig(false);
   }
 
   function invalidatePreviewIfAvailable(message) {

@@ -99,6 +99,8 @@ def compile_v2_render_task(
         "outputs": outputs,
         "font_check": normalized_font_check,
     }
+    if contract.get("render_mode"):
+        task["render_mode"] = str(contract["render_mode"])
     configured_output = contract.get("output")
     if isinstance(configured_output, Mapping) and any(key in configured_output for key in ("outline_text", "pathfinder_merge")):
         task["output"] = _normalize_output_policy(configured_output)

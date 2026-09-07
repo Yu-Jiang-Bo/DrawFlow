@@ -259,7 +259,10 @@ def test_v2_api_saves_draft_config_without_accepting_untrusted_scan(tmp_path):
     scan = api.handle("GET", ["api", "v2", "templates", "V2API001", "scan"]).payload
 
     assert saved["validation"]["can_save"] is True
+    assert saved["validation"]["can_publish"] is False
+    assert any(issue["code"] == "render_mode_pending" for issue in saved["validation"]["issues"])
     assert saved["draft"]["config"]["template"]["template_id"] == "V2API001"
+    assert "render_mode" not in saved["draft"]["config"]
     assert scan == {"template_id": "V2API001", "draft_revision": "d0002", "scan": {}}
 
     with pytest.raises(V2TemplateApiError, match="未开放"):
