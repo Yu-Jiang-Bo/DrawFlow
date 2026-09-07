@@ -103,6 +103,94 @@ def test_order_column_composer_supports_per_product_annotation_blocks():
     assert "addProductionLabelsAboveBlock(" in source
 
 
+def test_order_column_composer_round_trips_multi_frame_aggregate_contract():
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node.js is unavailable")
+
+    source = Path("scripts/illustrator/compose_v2_order_column.jsx").read_text(encoding="utf-8")
+    functions = (
+        "writeComponentContract",
+        "readComponentFrame",
+        "readSingleComponentFrame",
+        "readAggregateComponentFrame",
+        "translateTrackedSlots",
+        "translateBounds",
+        "copyBounds",
+        "validBounds",
+        "stringifyJson",
+    )
+    executable = "\n".join(_extract_js_function(source, name) for name in functions)
+    harness = f"""
+let written = "";
+function File(path) {{
+  return {{
+    fsName: path,
+    parent: {{}},
+    open: () => true,
+    write: value => {{ written = value; }},
+    close: () => true
+  }};
+}}
+function ensureFolder() {{}}
+let parsedContract = null;
+function readJSON() {{ return parsedContract; }}
+{executable}
+
+const entries = [
+  {{
+    key: "component-a",
+    final_frame_bounds: [0, 100, 80, 50],
+    translation: {{x: 0, y: 0}},
+    frame: {{frame_bounds: [0, 50, 80, 0], artwork_bounds_after: [2, 48, 78, 2], tracked_slots: []}},
+    actual_artwork_bounds: [2, 98, 78, 52]
+  }},
+  {{
+    key: "component-b",
+    final_frame_bounds: [0, 42, 120, -18],
+    translation: {{x: 0, y: -58}},
+    frame: {{frame_bounds: [0, 60, 120, 0], artwork_bounds_after: [1, 59, 119, 1], tracked_slots: []}},
+    actual_artwork_bounds: [1, 41, 119, -17]
+  }}
+];
+writeComponentContract(
+  {{component_contract_file: "order.warnings.json"}},
+  entries,
+  [-10, 112, 120, -18],
+  [-8, 110, 119, -17]
+);
+parsedContract = JSON.parse(written);
+if (parsedContract.component_frames.length !== 2) throw new Error("first-level frames were lost");
+const frame = readComponentFrame({{
+  component_contract_file: "order.warnings.json",
+  component_frame_mode: "aggregate"
+}});
+if (JSON.stringify(frame.frame_bounds) !== JSON.stringify([-10, 112, 120, -18])) throw new Error("aggregate frame mismatch");
+if (JSON.stringify(frame.artwork_bounds_after) !== JSON.stringify([-8, 110, 119, -17])) throw new Error("aggregate artwork mismatch");
+"""
+
+    result = subprocess.run([node, "-e", harness], capture_output=True, text=True, check=False)
+
+    assert result.returncode == 0, result.stderr
+    assert ".resize(" not in source
+    assert "readComponentFrame(input)" in source
+    assert "unionBounds(layer.pageItems)" in source
+
+
+def _extract_js_function(source, name):
+    start = source.index(f"function {name}(")
+    brace = source.index("{", start)
+    depth = 0
+    for index in range(brace, len(source)):
+        if source[index] == "{":
+            depth += 1
+        elif source[index] == "}":
+            depth -= 1
+            if depth == 0:
+                return source[start : index + 1]
+    raise AssertionError(f"Unclosed JavaScript function: {name}")
+
+
 def test_color_frame_task_preserves_public_packing_and_component_references(tmp_path):
     task = build_v2_color_frames_task(
         inputs=[{"path": str(tmp_path / "gold.ai"), "color_option": "金色", "order_nos": ["ORDER-1"]}],

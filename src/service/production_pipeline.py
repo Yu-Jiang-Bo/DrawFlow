@@ -638,6 +638,7 @@ def run_production_output_pipeline(
                     input_ai_files=tuple(spec.output_path for spec in summary_specs),
                     input_order_nos=tuple(spec.unit.order_no for spec in summary_specs),
                     units=batch.units,
+                    aggregate_inputs=True,
                     output_ai=target_path,
                     rule=rule,
                     label_lines=(),

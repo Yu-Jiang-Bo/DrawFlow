@@ -28,7 +28,7 @@
             var input = inputs[inputIndex] || {};
             var sourcePath = String(input.path || "");
             if (!sourcePath) throw new Error("V2 compose input path missing");
-            var componentFrame = readSingleComponentFrame(input);
+            var componentFrame = readComponentFrame(input);
             var source = app.open(File(sourcePath));
             try {
                 var copied = duplicateVisibleArtwork(source, layer);
@@ -51,7 +51,12 @@
         }
         fitArtboard(doc, allItems);
         applyOutputTransforms(doc, task.output || {});
-        writeComponentContract(task, composedItems);
+        writeComponentContract(
+            task,
+            composedItems,
+            copyBounds(doc.artboards[0].artboardRect),
+            unionBounds(layer.pageItems)
+        );
         var output = File(String(task.output_ai || ""));
         ensureFolder(output.parent);
         if (output.exists) output.remove();
@@ -439,6 +444,13 @@
         } catch (colorError) {}
     }
 
+    function readComponentFrame(input) {
+        var mode = String(input.component_frame_mode || "single");
+        if (mode === "aggregate") return readAggregateComponentFrame(input);
+        if (mode !== "single") throw new Error("Unsupported V2 component frame mode: " + mode);
+        return readSingleComponentFrame(input);
+    }
+
     function readSingleComponentFrame(input) {
         var path = String(input.component_contract_file || "");
         if (!path) throw new Error("V2 component frame contract path missing");
@@ -449,6 +461,23 @@
         var frame = frames[0] || {};
         if (!validBounds(frame.frame_bounds)) throw new Error("V2 component frame bounds missing");
         if (!validBounds(frame.artwork_bounds_after)) throw new Error("V2 component artwork audit bounds missing");
+        return {
+            frame_bounds: copyBounds(frame.frame_bounds),
+            artwork_bounds_after: copyBounds(frame.artwork_bounds_after),
+            tracked_slots: frame.tracked_slots || [],
+            source: String(frame.source || ""),
+            output_key: String(frame.output_key || "")
+        };
+    }
+
+    function readAggregateComponentFrame(input) {
+        var path = String(input.component_contract_file || "");
+        if (!path) throw new Error("V2 aggregate frame contract path missing");
+        var contract = readJSON(path);
+        if (Number(contract.component_contract_version || 0) !== 1) throw new Error("Unsupported V2 component frame contract");
+        var frame = contract.aggregate_frame || {};
+        if (!validBounds(frame.frame_bounds)) throw new Error("V2 aggregate frame bounds missing");
+        if (!validBounds(frame.artwork_bounds_after)) throw new Error("V2 aggregate artwork audit bounds missing");
         return {
             frame_bounds: copyBounds(frame.frame_bounds),
             artwork_bounds_after: copyBounds(frame.artwork_bounds_after),
@@ -526,9 +555,11 @@
         return result;
     }
 
-    function writeComponentContract(task, entries) {
+    function writeComponentContract(task, entries, aggregateFrameBounds, aggregateArtworkBounds) {
         var path = String(task.component_contract_file || "");
         if (!path) throw new Error("V2 composed output contract path missing");
+        if (!validBounds(aggregateFrameBounds)) throw new Error("V2 composed aggregate frame bounds missing");
+        if (!validBounds(aggregateArtworkBounds)) throw new Error("V2 composed aggregate artwork bounds missing");
         var frames = [];
         for (var index = 0; index < entries.length; index++) {
             var entry = entries[index];
@@ -548,7 +579,16 @@
         ensureFolder(file.parent);
         file.encoding = "UTF-8";
         if (!file.open("w")) throw new Error("Cannot write V2 composed component contract: " + file.fsName);
-        file.write(stringifyJson({component_contract_version: 1, component_frames: frames}));
+        file.write(stringifyJson({
+            component_contract_version: 1,
+            component_frames: frames,
+            aggregate_frame: {
+                frame_bounds: copyBounds(aggregateFrameBounds),
+                artwork_bounds_after: copyBounds(aggregateArtworkBounds),
+                tracked_slots: [],
+                source: "compose_v2_order_column_aggregate"
+            }
+        }));
         file.close();
     }
 

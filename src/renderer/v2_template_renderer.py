@@ -309,6 +309,7 @@ def build_v2_order_column_task(
     compatibility: str = "Illustrator 8",
     target_dimensions: Mapping[str, Any] | None = None,
     target_dimensions_by_input: Sequence[Mapping[str, Any]] | None = None,
+    aggregate_inputs: bool = False,
     output_policy: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build a pure V2 order-column composition task for the shared batch executor."""
@@ -327,6 +328,8 @@ def build_v2_order_column_task(
         }
         if index < len(order_nos) and order_nos[index]:
             item["order_no"] = order_nos[index]
+        if aggregate_inputs:
+            item["component_frame_mode"] = "aggregate"
         if target_dimensions_by_input is not None and index < len(target_dimensions_by_input):
             dimensions = dict(target_dimensions_by_input[index] or {})
             if dimensions:

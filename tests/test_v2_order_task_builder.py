@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -8,6 +8,7 @@ import pytest
 
 from src.service.department_output import FILE_FORMAT_PNG_CMYK, resolve_department_output
 from src.service.production_output import ProductionOutputUnit
+from src.service.production_pipeline import ReusableProductionComponent
 from src.service.v2_order_task_builder import (
     V2OrderTaskBuilderError,
     build_v2_order_task,
@@ -187,6 +188,7 @@ def test_component_reuse_strategy_builds_unannotated_v2_component_and_composers(
     )
     order = strategy.build_order_column_task(
         input_ai_files=[tmp_path / "component.ai"], input_order_nos=["ORDER-6"],
+        components=[_component(unit, tmp_path / "component.ai")],
         output_ai=tmp_path / "order.ai", label_lines=["ORDER-6", "金色"], compatibility="Illustrator 8",
     )
 
@@ -280,6 +282,15 @@ def _production_unit(
         color_option=color_option,
         payload=payload,
         rule=rule,
+    )
+
+
+def _component(unit: ProductionOutputUnit, output_path: Path) -> ReusableProductionComponent:
+    identified = replace(unit, identity=unit.identity or f"{unit.order_no}:{unit.detail_id}:{unit.quantity_index}")
+    return ReusableProductionComponent(
+        identity=identified.identity,
+        unit=identified,
+        output_path=output_path,
     )
 
 

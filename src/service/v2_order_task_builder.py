@@ -61,39 +61,58 @@ def create_v2_component_reuse_strategy(
         return task
 
     def build_order_column_task(**kwargs: Any) -> dict[str, Any]:
-        units = tuple(kwargs.get("units") or ())
-        dimensions, _ = _stabilize_v2_unit_dimensions(
-            [_v2_unit_dimensions(render_task, unit) for unit in units]
-        )
+        input_ai_files = tuple(kwargs["input_ai_files"])
+        components = tuple(kwargs.get("components") or ())
+        aggregate_inputs = bool(kwargs.get("aggregate_inputs", False))
+        if aggregate_inputs:
+            if components:
+                raise V2OrderTaskBuilderError(
+                    "订单汇总文件不能同时声明原始效果图组件。",
+                    code="v2_order_task_component_alignment_invalid",
+                )
+            dimensions = None
+        else:
+            dimensions = _v2_component_dimensions_by_input(
+                render_task,
+                input_ai_files=input_ai_files,
+                components=components,
+            )
         return build_v2_order_column_task(
-            input_ai_files=kwargs["input_ai_files"],
+            input_ai_files=input_ai_files,
             input_order_nos=kwargs["input_order_nos"],
             output_ai=kwargs["output_ai"],
             label_lines=kwargs.get("label_lines"),
             input_annotation_groups=kwargs.get("input_annotation_groups"),
             compatibility=str(kwargs.get("compatibility") or "Illustrator 8"),
             target_dimensions_by_input=dimensions,
+            aggregate_inputs=aggregate_inputs,
             output_policy=_v2_output_policy(render_task, kwargs.get("rule")),
         )
 
     def build_color_frames_task(**kwargs: Any) -> dict[str, Any]:
         units = tuple(kwargs.get("units") or ())
         unit_groups = tuple(kwargs.get("unit_groups") or ())
-        inputs = []
-        for raw in kwargs.get("inputs") or ():
-            item = deepcopy(dict(raw))
-            order_nos = [str(value or "").strip() for value in item.get("order_nos") or ()]
-            group = unit_groups[len(inputs)] if len(inputs) < len(unit_groups) else units
-            dimensions = [_v2_unit_dimensions(render_task, unit) for unit in group]
-            if len(dimensions) < len(order_nos):
-                dimensions.extend({} for _ in range(len(order_nos) - len(dimensions)))
-            dimensions, fallback = _stabilize_v2_unit_dimensions(
-                dimensions,
-                default=item.get("target_dimensions"),
+        raw_inputs = tuple(kwargs.get("inputs") or ())
+        if unit_groups:
+            if len(unit_groups) != len(raw_inputs):
+                raise V2OrderTaskBuilderError(
+                    "颜色汇总文件与效果图分组数量不一致，已停止生成。",
+                    code="v2_order_task_component_alignment_invalid",
+                )
+            aligned_unit_groups = unit_groups
+        elif len(raw_inputs) == 1 and units:
+            aligned_unit_groups = (units,)
+        elif raw_inputs:
+            raise V2OrderTaskBuilderError(
+                "颜色汇总文件缺少对应的效果图分组，已停止生成。",
+                code="v2_order_task_component_alignment_invalid",
             )
-            item["order_dimensions"] = dimensions
-            if fallback and not _valid_v2_dimensions(item.get("target_dimensions")):
-                item["target_dimensions"] = fallback
+        else:
+            aligned_unit_groups = ()
+        inputs = []
+        for raw, group in zip(raw_inputs, aligned_unit_groups):
+            item = deepcopy(dict(raw))
+            item["order_dimensions"] = _v2_dimensions_for_aligned_units(render_task, group)
             inputs.append(item)
         return build_v2_color_frames_task(
             inputs=inputs,
@@ -251,31 +270,53 @@ def _v2_unit_dimensions(render_task: Mapping[str, Any], unit: Any) -> dict[str, 
     return {}
 
 
-def _stabilize_v2_unit_dimensions(
-    dimensions: Sequence[Mapping[str, Any] | None],
+def _v2_component_dimensions_by_input(
+    render_task: Mapping[str, Any],
     *,
-    default: Mapping[str, Any] | None = None,
-) -> tuple[list[dict[str, float]], dict[str, float] | None]:
-    """Avoid falling back to tail-dependent visible bounds within a sized batch."""
+    input_ai_files: Sequence[Path | str],
+    components: Sequence[Any],
+) -> list[dict[str, float]]:
+    if len(components) != len(input_ai_files):
+        raise V2OrderTaskBuilderError(
+            "效果图文件缺少稳定的组件身份，已停止生成以避免尺寸错配。",
+            code="v2_order_task_component_alignment_invalid",
+        )
 
-    normalized = [_normalized_v2_dimensions(item) for item in dimensions]
-    missing = [index for index, item in enumerate(normalized) if item is None]
-    configured = [item for item in normalized if item is not None]
-    fallback = _normalized_v2_dimensions(default)
-
-    if fallback is None and configured:
-        unique = {(item["width_mm"], item["height_mm"]) for item in configured}
-        if len(unique) == 1:
-            fallback = dict(configured[0])
-        elif missing:
+    units = []
+    for index, (input_ai, component) in enumerate(zip(input_ai_files, components), start=1):
+        component_path = getattr(component, "output_path", None)
+        component_unit = getattr(component, "unit", None)
+        component_identity = str(getattr(component, "identity", "") or "").strip()
+        unit_identity = str(getattr(component_unit, "identity", "") or "").strip()
+        if (
+            component_path is None
+            or Path(component_path).resolve() != Path(input_ai).resolve()
+            or not component_identity
+            or component_identity != unit_identity
+        ):
             raise V2OrderTaskBuilderError(
-                "当前模板部分设计缺少效果图尺寸，且同一批次存在多种尺寸，已停止生成以避免尾巴改变成品高度。",
-                code="v2_order_task_dimensions_ambiguous",
+                f"第 {index} 个效果图文件与组件身份不一致，已停止生成。",
+                code="v2_order_task_component_alignment_invalid",
             )
+        units.append(component_unit)
+    return _v2_dimensions_for_aligned_units(render_task, units)
 
-    if fallback is None:
-        return [dict(item or {}) for item in normalized], None
-    return [dict(item or fallback) for item in normalized], dict(fallback)
+
+def _v2_dimensions_for_aligned_units(
+    render_task: Mapping[str, Any],
+    units: Sequence[Any],
+) -> list[dict[str, float]]:
+    """Keep dimensions aligned without borrowing a different component's size.
+
+    An empty item is intentional: the composer then uses that exact input
+    component's warnings contract instead of a dimension inferred from a peer.
+    """
+
+    dimensions: list[dict[str, float]] = []
+    for unit in units:
+        normalized = _normalized_v2_dimensions(_v2_unit_dimensions(render_task, unit))
+        dimensions.append(normalized or {})
+    return dimensions
 
 
 def _normalized_v2_dimensions(value: Mapping[str, Any] | None) -> dict[str, float] | None:
@@ -293,10 +334,6 @@ def _normalized_v2_dimensions(value: Mapping[str, Any] | None) -> dict[str, floa
     except (TypeError, ValueError):
         tolerance = 0.007
     return {"width_mm": width, "height_mm": height, "tolerance_mm": tolerance}
-
-
-def _valid_v2_dimensions(value: Mapping[str, Any] | None) -> bool:
-    return _normalized_v2_dimensions(value) is not None
 
 
 def _unit_item(unit: Any, index: int) -> dict[str, Any]:

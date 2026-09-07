@@ -198,6 +198,7 @@ def test_v2_cross_department_merge_keeps_pw_summary_labels_department_local(tmp_
     record = _record(tmp_path, "job-cross-pw")
     record["request"]["dry_run"] = True
     written: list[tuple[Path, dict]] = []
+    order_column_calls: list[dict] = []
 
     def write_json(path: Path, payload):
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -211,6 +212,7 @@ def test_v2_cross_department_merge_keeps_pw_summary_labels_department_local(tmp_
         return {"type": "unit_render", "output_ai": str(kwargs["output_ai"]), "layout": {"suppress_labels": True}, "output": {"format": "ai"}, "production": {"component_reuse": True}}
 
     def build_order_column_task(**kwargs):
+        order_column_calls.append(dict(kwargs))
         return {
             "type": "compose_v2_order_column",
             "output_ai": str(kwargs["output_ai"]),
@@ -254,6 +256,9 @@ def test_v2_cross_department_merge_keeps_pw_summary_labels_department_local(tmp_
     ]
     assert summary_order_tasks[0]["intermediate_component"] is True
     assert "output" not in summary_order_tasks[0]
+    aggregate_calls = [call for call in order_column_calls if call.get("aggregate_inputs")]
+    assert len(aggregate_calls) == 1
+    assert [Path(path).name for path in aggregate_calls[0]["input_ai_files"]] == ["ORDER-Y.ai"]
 
 
 def test_product_name_annotation_groups_dedupe_by_department_and_product_name():

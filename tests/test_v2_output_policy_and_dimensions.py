@@ -6,7 +6,7 @@ from src.service.v2_template_contract import V2ContractError, normalize_v2_templ
 from src.service.v2_order_task_builder import V2OrderTaskBuilderError, build_v2_order_task, create_v2_component_reuse_strategy
 from src.service.department_output import resolve_department_output
 from tests.test_v2_render_task import compile_task, render_config, scan_evidence
-from tests.test_v2_order_task_builder import V2Payload, _production_unit
+from tests.test_v2_order_task_builder import V2Payload, _component, _production_unit
 
 
 def test_compiled_and_execution_tasks_carry_template_output_policy(tmp_path):
@@ -173,6 +173,7 @@ def test_public_component_strategy_uses_each_unit_style_and_department_fallback(
     order_task = strategy.build_order_column_task(
         input_ai_files=[tmp_path / "component.ai"],
         input_order_nos=["ORDER-2"],
+        components=[_component(unit, tmp_path / "component.ai")],
         units=(unit,),
         output_ai=tmp_path / "order.ai",
         rule=rule,
@@ -205,7 +206,7 @@ def test_color_inputs_keep_dimensions_in_unit_order_for_duplicate_order_numbers(
     assert len(task["inputs"][0]["order_dimensions"]) == 2
 
 
-def test_component_reuse_fills_missing_dimension_from_the_batch_target(tmp_path):
+def test_component_reuse_keeps_missing_dimension_on_its_own_component_contract(tmp_path):
     rule = resolve_department_output("K")
     compiled = compile_task()
     sized = _production_unit(
@@ -235,6 +236,7 @@ def test_component_reuse_fills_missing_dimension_from_the_batch_target(tmp_path)
     order_task = strategy.build_order_column_task(
         input_ai_files=[tmp_path / "sized.ai", tmp_path / "tail.ai"],
         input_order_nos=["ORDER-SIZED", "ORDER-MISSING"],
+        components=[_component(sized, tmp_path / "sized.ai"), _component(missing, tmp_path / "tail.ai")],
         units=(sized, missing),
         output_ai=tmp_path / "order.ai",
         rule=rule,
@@ -242,19 +244,18 @@ def test_component_reuse_fills_missing_dimension_from_the_batch_target(tmp_path)
     color_task = strategy.build_color_frames_task(
         inputs=[{"path": str(tmp_path / "order.ai"), "order_nos": ["ORDER-SIZED", "ORDER-MISSING"]}],
         unit_groups=((sized, missing),),
-        units=(sized, missing),
         output_ai=tmp_path / "summary.ai",
         master_packing={"target_width_mm": 480},
         rule=rule,
     )
 
     expected = {"width_mm": 80.0, "height_mm": 50.0, "tolerance_mm": 0.007}
-    assert [item["target_dimensions"] for item in order_task["inputs"]] == [expected, expected]
-    assert color_task["inputs"][0]["order_dimensions"] == [expected, expected]
-    assert color_task["inputs"][0]["target_dimensions"] == expected
+    assert order_task["inputs"][0]["target_dimensions"] == expected
+    assert "target_dimensions" not in order_task["inputs"][1]
+    assert color_task["inputs"][0]["order_dimensions"] == [expected, None]
 
 
-def test_component_reuse_rejects_missing_dimension_when_the_batch_has_multiple_sizes(tmp_path):
+def test_component_reuse_never_fills_missing_dimension_from_mixed_batch(tmp_path):
     rule = resolve_department_output("K")
     compiled = compile_task()
     compiled["outputs"][0]["actions"].append({
@@ -300,16 +301,68 @@ def test_component_reuse_rejects_missing_dimension_when_the_batch_has_multiple_s
     )
     strategy = create_v2_component_reuse_strategy(compiled, template_ai=tmp_path / "template.ai")
 
+    task = strategy.build_order_column_task(
+        input_ai_files=[tmp_path / "small.ai", tmp_path / "large.ai", tmp_path / "tail.ai"],
+        input_order_nos=[unit.order_no for unit in units],
+        components=[
+            _component(units[0], tmp_path / "small.ai"),
+            _component(units[1], tmp_path / "large.ai"),
+            _component(units[2], tmp_path / "tail.ai"),
+        ],
+        units=units,
+        output_ai=tmp_path / "order.ai",
+        rule=rule,
+    )
+
+    assert task["inputs"][0]["target_dimensions"]["width_mm"] == 80.0
+    assert task["inputs"][1]["target_dimensions"]["width_mm"] == 120.0
+    assert "target_dimensions" not in task["inputs"][2]
+
+
+def test_order_column_rejects_raw_inputs_without_aligned_component_identity(tmp_path):
+    rule = resolve_department_output("K")
+    unit = _production_unit(
+        order_no="ORDER-X",
+        detail_id="X1",
+        color_option="White",
+        rule=rule,
+        payload=V2Payload("Output_main", {"name": "X"}, {"Output_main": {"style": "style1"}}),
+    )
+    strategy = create_v2_component_reuse_strategy(compile_task(), template_ai=tmp_path / "template.ai")
+
     with __import__("pytest").raises(V2OrderTaskBuilderError) as exc_info:
         strategy.build_order_column_task(
-            input_ai_files=[tmp_path / "small.ai", tmp_path / "large.ai", tmp_path / "tail.ai"],
-            input_order_nos=[unit.order_no for unit in units],
-            units=units,
+            input_ai_files=[tmp_path / "component.ai"],
+            input_order_nos=["ORDER-X"],
+            units=(unit,),
             output_ai=tmp_path / "order.ai",
             rule=rule,
         )
 
-    assert exc_info.value.code == "v2_order_task_dimensions_ambiguous"
+    assert exc_info.value.code == "v2_order_task_component_alignment_invalid"
+
+
+def test_aggregate_order_column_does_not_map_effect_units_onto_order_files(tmp_path):
+    rule = resolve_department_output("K")
+    compiled = compile_task()
+    units = (
+        _production_unit(order_no="ORDER-A", detail_id="A1", color_option="White", rule=rule, payload=V2Payload("Output_main", {"name": "A1"}, {"Output_main": {"style": "style1"}})),
+        _production_unit(order_no="ORDER-A", detail_id="A2", color_option="White", rule=rule, payload=V2Payload("Output_main", {"name": "A2"}, {"Output_main": {"style": "style1"}})),
+        _production_unit(order_no="ORDER-B", detail_id="B1", color_option="White", rule=rule, payload=V2Payload("Output_main", {"name": "B1"}, {"Output_main": {"style": "style1"}})),
+    )
+    strategy = create_v2_component_reuse_strategy(compiled, template_ai=tmp_path / "template.ai")
+
+    task = strategy.build_order_column_task(
+        input_ai_files=[tmp_path / "ORDER-A.ai", tmp_path / "ORDER-B.ai"],
+        input_order_nos=["ORDER-A", "ORDER-B"],
+        units=units,
+        aggregate_inputs=True,
+        output_ai=tmp_path / "summary.ai",
+        rule=rule,
+    )
+
+    assert all("target_dimensions" not in item for item in task["inputs"])
+    assert all(item["component_frame_mode"] == "aggregate" for item in task["inputs"])
 
 
 def test_component_reuse_uses_selected_design_dimensions_when_template_has_no_style_dimensions(tmp_path):
@@ -331,6 +384,7 @@ def test_component_reuse_uses_selected_design_dimensions_when_template_has_no_st
     order_task = strategy.build_order_column_task(
         input_ai_files=[tmp_path / "component.ai"],
         input_order_nos=["ORDER-NO-SIZE"],
+        components=[_component(unit, tmp_path / "component.ai")],
         units=(unit,),
         output_ai=tmp_path / "order.ai",
         rule=rule,
@@ -373,6 +427,7 @@ def test_component_reuse_uses_selected_design_dimensions_without_styles(tmp_path
     task = strategy.build_order_column_task(
         input_ai_files=[tmp_path / "component.ai"],
         input_order_nos=["ORDER-DESIGN-SIZE"],
+        components=[_component(unit, tmp_path / "component.ai")],
         units=(unit,),
         output_ai=tmp_path / "order.ai",
         rule=rule,
