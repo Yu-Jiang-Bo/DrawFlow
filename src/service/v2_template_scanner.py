@@ -106,7 +106,7 @@ class V2TemplateScanner:
                 ) from exc
             if not output_path.is_file():
                 raise V2TemplateScannerError(
-                    "本地 Illustrator 没有生成扫描结果，请重新启动 DrawFlowClient.exe 后重试。",
+                    "本地 Illustrator 没有生成扫描结果，请重新启动 DrawFlow 后重试。",
                     code="v2_scan_output_missing",
                     technical_message=f"scan output missing: {output_path}",
                 )

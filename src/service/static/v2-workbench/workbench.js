@@ -79,6 +79,7 @@
     $
   };
   globalThis.$ = $;
+  globalThis.setV2RuntimeStatus = setV2RuntimeStatus;
   globalThis.renderStructureTree = globalThis.renderStructureTree || renderStructureTreeFallback;
 
   document.addEventListener("DOMContentLoaded", initWorkbench);
@@ -169,6 +170,8 @@
   }
 
   function renderInitialState() {
+    setV2RuntimeStatus("v2LocalHealthText", "本机检查中", "busy");
+    setV2RuntimeStatus("v2CentralHealthText", "中央服务连接中", "busy");
     setText("draftStatusBadge", "未选择模板");
     setText("draftVersion", "-");
     renderScanProgress("等待选择 .ai 文件", "idle");
@@ -180,6 +183,15 @@
     globalThis.setWorkbenchStage("upload");
     updateCheckRail(defaultChecks());
     updateDraftButtons();
+  }
+
+
+  function setV2RuntimeStatus(id, text, tone = "ready") {
+    const label = $(id);
+    if (!label) return;
+    label.textContent = text;
+    label.classList.toggle("is-busy", tone === "busy");
+    label.classList.toggle("is-error", tone === "error");
   }
 
 

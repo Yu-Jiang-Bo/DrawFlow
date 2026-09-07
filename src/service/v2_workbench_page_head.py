@@ -34,18 +34,31 @@ PAGE_HEAD = """<!doctype html>
   <script src="/static/v2-workbench/workbench-scan-actions.js" defer></script>
 </head>
 <body>
-  <header class="v2-header">
-    <div class="v2-header-inner">
-      <div class="v2-brand">
-        <h1>DrawFlow</h1>
-        <p>订单效果图与 V2 模板工作台</p>
-      </div>
-      <nav class="v2-nav" aria-label="主导航">
-      <a href="/" data-nav-target="render-tasks">出图任务</a>
-      <a href="/v2/templates/workbench" data-nav-target="v2-workbench" aria-current="page">V2 工作台</a>
-      <a href="/jobs" data-nav-target="jobs">任务记录</a>
+  <div class="v2-desktop-frame">
+    <aside class="v2-desktop-sidebar" aria-label="DrawFlow 主导航">
+      <a class="v2-sidebar-brand" href="/" aria-label="返回 DrawFlow 出图任务">
+        <strong>DrawFlow</strong>
+        <span>订单效果图与 V2 工作台</span>
+      </a>
+      <p class="v2-sidebar-label">工作台</p>
+      <nav class="v2-nav v2-desktop-nav" aria-label="主导航">
+        <a href="/" data-nav-target="render-tasks">出图任务</a>
+        <a href="/v2/templates/workbench" data-nav-target="v2-workbench" aria-current="page">V2 工作台</a>
+        <a href="/?page=jobs" data-nav-target="jobs">任务记录</a>
       </nav>
-      <span class="v2-service-status">服务就绪</span>
-    </div>
-  </header>
+      <div class="v2-sidebar-note"><span></span>模板与渲染均受控处理</div>
+    </aside>
+    <div class="v2-desktop-main">
+      <header class="v2-header">
+        <div class="v2-header-inner">
+          <div class="v2-brand">
+            <h1>V2 工作台</h1>
+            <p>模板配置与发布流程</p>
+          </div>
+          <div class="v2-health-group" aria-live="polite" aria-label="服务状态">
+            <span id="v2LocalHealthText" class="v2-service-status is-busy">本机检查中</span>
+            <span id="v2CentralHealthText" class="v2-service-status is-busy">中央服务连接中</span>
+          </div>
+        </div>
+      </header>
 """

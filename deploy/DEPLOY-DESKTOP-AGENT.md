@@ -38,15 +38,21 @@ powershell -ExecutionPolicy Bypass -File .\deploy\package-release.ps1
 本地客户端包：
 
 ```powershell
+powershell -ExecutionPolicy Bypass -File .\deploy\package-setup.ps1 `
+  -ClientVersion <x.y.z> `
+  -CentralUrl http://<central-host>:8765 `
+  -UpdateBaseUrl https://<central-host>
+
 powershell -ExecutionPolicy Bypass -File .\deploy\package-client.ps1 -ClientVersion <x.y.z>
 ```
 
 产物：
 
+- `release\DrawFlow-Setup-<version>.exe`（带自动更新启动器的首次安装包）
 - `release\drawflow-client-<x.y.z>.payload.zip`（仅供发布到中央服务）
-- `release\.client-payload-<x.y.z>\`（构建暂存目录，包含且仅包含 `DrawFlowClient.exe` 和 `_internal`）
+- `release\.client-payload-<x.y.z>\`（构建暂存目录，包含 `DrawFlowClient.exe`、`_internal` 和来源记录）
 
-版本化更新载荷使用 PyInstaller onedir，仅包含 `DrawFlowClient.exe` 与 `_internal`。它不是用户安装包，不能直接分发或解压运行；同事只使用 `DrawFlow-Setup-<version>.exe`。用户电脑不需要单独安装 Python，但必须安装并激活 Adobe Illustrator 和模板字体。
+版本化更新载荷使用 PyInstaller onedir，内含 `DrawFlowClient.exe` 与 `_internal`。载荷 ZIP 不是用户安装包，不能直接分发或解压运行；同事只使用 `DrawFlow-Setup-<version>.exe`。用户电脑不需要单独安装 Python，但必须安装并激活 Adobe Illustrator 和模板字体。
 
 ## 3. 中央服务部署
 
@@ -77,13 +83,7 @@ C:\DrawFlowData\templates\<id>\active.json
 DrawFlow.exe
 ```
 
-客户端会打开：
-
-```text
-http://127.0.0.1:8766/
-```
-
-不要把 `8766` 绑定到公网或局域网地址。程序启动时会拒绝非 loopback host。管理员仅在中央地址变化时更新安装目录的 `drawflow-launcher.json`；该文件不保存 API Key、密码或私钥。用户不得手工替换或直接运行 `DrawFlowClient.exe`。
+客户端会打开 `http://127.0.0.1:8766/`。不要把 `8766` 绑定到公网或局域网地址。程序启动时会拒绝非 loopback host。管理员仅在中央地址变化时更新安装目录的 `drawflow-launcher.json`；该文件不保存 API Key、密码或私钥。用户不得手工替换或直接运行 `DrawFlowClient.exe`。
 
 本地数据默认位置：
 
@@ -149,7 +149,7 @@ http://127.0.0.1:8766/
 - DeepSeek 留在中央。
 - 选中模板按需同步、版本校验和 SHA256 校验。
 - 字体缺失可读提示。
-- 中央 zip 包、版本化客户端载荷、一次性安装包和启动时自动更新。
+- 中央 zip 包、版本化客户端载荷、首次安装包和启动时自动更新。
 - 单机单渲染锁。
 
 暂不做：

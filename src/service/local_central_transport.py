@@ -11,6 +11,16 @@ from urllib.parse import urlsplit
 from .local_client_errors import LocalClientError
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Keep central redirect responses on the loopback gateway boundary."""
+
+    def redirect_request(self, request, fp, code, msg, headers, newurl):  # type: ignore[no-untyped-def]
+        return None
+
+
+_NO_REDIRECT_OPENER = urllib.request.build_opener(_NoRedirect())
+
+
 def proxy_request(
     base_url: str,
     method: str,
@@ -30,7 +40,7 @@ def proxy_request(
         },
     )
     try:
-        with urllib.request.urlopen(request, timeout=30) as response:
+        with _NO_REDIRECT_OPENER.open(request, timeout=30) as response:
             return response.status, dict(response.headers.items()), response.read()
     except urllib.error.HTTPError as exc:
         return exc.code, dict(exc.headers.items()), exc.read()

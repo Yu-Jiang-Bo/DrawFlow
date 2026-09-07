@@ -52,7 +52,12 @@ class LocalGatewayRequestHandler(
     def do_GET(self) -> None:
         path = urlparse(self.path).path
         if path in {"/health", "/local/health"}:
-            self._send_json(self.drawflow_client.health())
+            self._send_json(
+                {
+                    **self.drawflow_client.health(),
+                    "render_in_progress": self.render_lock.locked(),
+                }
+            )
         elif path == "/":
             self._send_central_or_fallback("/")
         elif path == "/v2/templates/workbench":

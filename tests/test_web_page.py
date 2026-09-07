@@ -1,7 +1,41 @@
+import subprocess
 from pathlib import Path
 
 from src.service.job_store import JobStore
 from src.service.web_page import INDEX_HTML, workbench_html
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+def embedded_page_function(name: str) -> str:
+    script = INDEX_HTML.rsplit("<script>", 1)[1].split("</script>", 1)[0]
+    start = script.find(f"async function {name}(")
+    if start < 0:
+        start = script.index(f"function {name}(")
+    brace = script.index("{", start)
+    depth = 0
+    for index in range(brace, len(script)):
+        if script[index] == "{":
+            depth += 1
+        elif script[index] == "}":
+            depth -= 1
+            if depth == 0:
+                return script[start:index + 1]
+    raise AssertionError(f"unable to extract embedded function: {name}")
+
+
+def run_page_behavior(script: str) -> None:
+    completed = subprocess.run(
+        ["node", "-e", script],
+        cwd=PROJECT_ROOT,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        capture_output=True,
+        timeout=30,
+    )
+    assert completed.returncode == 0, completed.stderr + completed.stdout
 
 
 def test_page_uses_drawflow_branding():
@@ -11,10 +45,119 @@ def test_page_uses_drawflow_branding():
     assert "制图渲染工作台" not in INDEX_HTML
 
 
+def test_page_uses_the_desktop_production_workbench_shell_without_changing_business_entries():
+    assert 'class="app-sidebar"' in INDEX_HTML
+    assert 'class="tabs app-navigation"' in INDEX_HTML
+    assert 'class="app-main"' in INDEX_HTML
+    assert "min-width: 1180px" in INDEX_HTML
+    assert "生产工作台 / 新建任务" in INDEX_HTML
+    assert 'id="centralHealthText"' in INDEX_HTML
+    assert "function setHealthLabel" in INDEX_HTML
+    assert 'new URLSearchParams(window.location.search).get("page")' in INDEX_HTML
+    assert 'switchPage(requestedPage === "jobs" ? "jobs" : "render")' in INDEX_HTML
+    assert "中央服务已连接" in INDEX_HTML
+    assert "中央服务不可达" in INDEX_HTML
+    assert 'id="renderTemplate"' in INDEX_HTML
+    assert 'id="orderFile"' in INDEX_HTML
+    assert 'id="renderBtn"' in INDEX_HTML
+    assert 'id="renderTemplateContext"' not in INDEX_HTML
+    assert 'id="renderRecentJobs"' not in INDEX_HTML
+    assert "function renderRenderContext" not in INDEX_HTML
+
+
 def test_main_tabs_link_to_v2_template_workbench():
     assert '<a class="tab" href="/v2/templates/workbench">V2 工作台</a>' in INDEX_HTML
     assert 'data-page-tab="templates">模板管理</button>' not in INDEX_HTML
     assert 'data-page-tab="rules">规则配置</button>' not in INDEX_HTML
+    assert 'href="/?page=templates"' not in INDEX_HTML
+    assert 'href="/?page=rules"' not in INDEX_HTML
+
+
+def test_main_tabs_open_task_history_inside_the_desktop_root_page():
+    assert 'data-page-tab="jobs"' in INDEX_HTML
+    assert 'href="/?page=jobs"' in INDEX_HTML
+
+
+def test_desktop_root_page_updates_navigation_health_and_progress_at_runtime():
+    functions = "\n\n".join(
+        embedded_page_function(name)
+        for name in ["switchPage", "setHealthLabel", "checkHealth", "loadTemplates", "showProgress"]
+    )
+    run_page_behavior(
+        """
+        const assert = require("assert");
+        function classList() {
+          const values = new Set();
+          return {
+            add: (...names) => names.forEach((name) => values.add(name)),
+            contains: (name) => values.has(name),
+            toggle: (name, force) => { if (force) values.add(name); else values.delete(name); }
+          };
+        }
+        function node(id = "") {
+          return {
+            id, textContent: "", dataset: {}, classList: classList(), attributes: {},
+            setAttribute(name, value) { this.attributes[name] = String(value); },
+            closest() { return this.container || null; }
+          };
+        }
+        const renderTab = node(); renderTab.dataset.pageTab = "render";
+        const jobsTab = node(); jobsTab.dataset.pageTab = "jobs";
+        const renderPage = node("page-render");
+        const jobsPage = node("page-jobs");
+        const title = node(); const subtitle = node();
+        const healthChip = node(); const centralChip = node();
+        const healthText = node("healthText"); healthText.container = healthChip;
+        const centralHealthText = node("centralHealthText"); centralHealthText.container = centralChip;
+        const nodes = {
+          healthText, centralHealthText,
+          renderProgressOverlay: node("renderProgressOverlay"),
+          progressTitle: node("progressTitle"), progressSubtitle: node("progressSubtitle"), progressStage: node("progressStage")
+        };
+        const document = {
+          getElementById: (id) => nodes[id] || node(id),
+          querySelectorAll: (selector) => selector === "[data-page-tab]" ? [renderTab, jobsTab] : selector === ".page" ? [renderPage, jobsPage] : [],
+          querySelector: (selector) => selector === ".page-heading h2" ? title : subtitle
+        };
+        const state = { templates: [], selectedTemplateId: "" };
+        let progressMode = "render";
+        let renderedProgressStage = "";
+        function renderTemplateOptions() {}
+        function renderTemplateList() {}
+        function syncSelectedTemplate() {}
+        function progressTitle() { return "正在生成效果图"; }
+        function progressSubtitle() { return "正在调用本机渲染"; }
+        function activeProgressStage() { return "调用 Illustrator"; }
+        function renderProgressSteps(stage) { renderedProgressStage = stage; }
+        let getJson = async () => ({ role: "local-client", render_in_progress: true });
+        """
+        + functions
+        + """
+        (async () => {
+          switchPage("jobs");
+          assert(jobsTab.classList.contains("active"));
+          assert(jobsPage.classList.contains("active"));
+          assert.strictEqual(title.textContent, "任务记录");
+          assert.strictEqual(subtitle.textContent, "生产工作台 / 本机历史任务");
+
+          await checkHealth();
+          assert.strictEqual(healthText.textContent, "本机正在渲染");
+          assert(healthChip.classList.contains("is-busy"));
+          assert.strictEqual(centralHealthText.textContent, "中央服务等待验证");
+
+          getJson = async () => { throw new Error("central unavailable"); };
+          await assert.rejects(() => loadTemplates());
+          assert.strictEqual(centralHealthText.textContent, "中央服务不可达");
+          assert(centralChip.classList.contains("is-error"));
+
+          showProgress("render");
+          assert(healthChip.classList.contains("is-busy"));
+          assert(nodes.renderProgressOverlay.classList.contains("active"));
+          assert.strictEqual(nodes.progressTitle.textContent, "正在生成效果图");
+          assert.strictEqual(renderedProgressStage, "调用 Illustrator");
+        })().catch((error) => { console.error(error); process.exit(1); });
+        """
+    )
 
 
 def test_render_page_exposes_single_render_action():
@@ -85,7 +228,9 @@ def test_render_page_preserves_gateway_error_codes_and_explains_browser_fetch_fa
     assert 'code === "template_not_published"' in INDEX_HTML
     assert 'code === "central_unreachable"' in INDEX_HTML
     assert "failed to fetch" in INDEX_HTML
-    assert "127.0.0.1:8766" in INDEX_HTML
+    assert "无法连接中央服务。请确认网络连接正常后重试。" in INDEX_HTML
+    assert "无法连接本机 DrawFlow 客户端。请确认 DrawFlow 已启动后再试。" in INDEX_HTML
+    assert "127.0.0.1:8766" not in INDEX_HTML
     assert "await loadJobs().catch(() => {})" in INDEX_HTML
     assert "String(error && error.message ? error.message : error || \"\")" not in INDEX_HTML
 

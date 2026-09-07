@@ -900,26 +900,304 @@ INDEX_HTML = """<!doctype html>
         grid-template-columns: 1fr;
       }
     }
+
+    /* DrawFlow production shell: present the existing pages as one work surface. */
+    :root {
+      --bg: #f3f5f8;
+      --ink: #192433;
+      --muted: #69778a;
+      --soft: #f8fafc;
+      --surface: #ffffff;
+      --line: #e0e6ee;
+      --line-strong: #c9d3e0;
+      --primary: #1456d9;
+      --primary-dark: #2466ce;
+      --success: #167a56;
+      --warning: #a55f00;
+      --danger: #c13d4b;
+      --shadow: 0 8px 20px rgba(25, 36, 51, 0.05);
+    }
+    body {
+      display: flex;
+      min-width: 1180px;
+      min-height: 100vh;
+      background: #111c2c;
+      font-family: "Segoe UI", "Microsoft YaHei", Arial, sans-serif;
+    }
+    .app-sidebar {
+      position: sticky;
+      top: 0;
+      flex: 0 0 254px;
+      width: 254px;
+      min-height: 100vh;
+      padding: 28px 18px 22px;
+      color: #f7f9fc;
+      background: #111c2c;
+      border-right: 1px solid #24354d;
+    }
+    .sidebar-brand {
+      display: grid;
+      gap: 3px;
+      padding: 0 10px 24px;
+      border-bottom: 1px solid #283b55;
+    }
+    .sidebar-brand h1 {
+      margin: 0;
+      color: #f7f9fc;
+      font-size: 21px;
+      letter-spacing: 0.1px;
+    }
+    .sidebar-brand p {
+      margin: 0;
+      color: #9eb0c7;
+      font-size: 12px;
+    }
+    .sidebar-label {
+      display: block;
+      margin: 26px 10px 9px;
+      color: #8293a8;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+    }
+    .tabs.app-navigation {
+      display: grid;
+      gap: 5px;
+      margin: 0;
+      padding: 0;
+      border: 0;
+      border-radius: 0;
+      background: transparent;
+      box-shadow: none;
+    }
+    .app-navigation .tab {
+      width: 100%;
+      min-height: 42px;
+      justify-content: flex-start;
+      padding: 9px 12px;
+      color: #b9c7d9;
+      border: 1px solid transparent;
+      border-radius: 7px;
+      background: transparent;
+      font-weight: 600;
+      text-align: left;
+    }
+    .app-navigation .tab:hover {
+      color: #f7f9fc;
+      background: #172b45;
+    }
+    .app-navigation .tab.active {
+      color: #f7f9fc;
+      border-color: #28528a;
+      background: #1e3d65;
+      box-shadow: inset 3px 0 0 #75abff;
+    }
+    .sidebar-runtime {
+      position: absolute;
+      right: 18px;
+      bottom: 26px;
+      left: 18px;
+      padding: 14px;
+      border: 1px solid #29405e;
+      border-radius: 9px;
+      background: #16263b;
+    }
+    .sidebar-runtime strong,
+    .sidebar-runtime span {
+      display: block;
+    }
+    .sidebar-runtime strong {
+      margin-bottom: 4px;
+      color: #ecf6ff;
+      font-size: 12px;
+    }
+    .sidebar-runtime span {
+      color: #94a9c3;
+      font-size: 11px;
+      line-height: 1.55;
+    }
+    .sidebar-runtime::before {
+      content: "";
+      display: inline-block;
+      width: 7px;
+      height: 7px;
+      margin: 0 7px 1px 0;
+      border-radius: 50%;
+      background: #41bd82;
+      vertical-align: middle;
+    }
+    .app-main {
+      flex: 1 1 auto;
+      min-width: 0;
+      min-height: 100vh;
+      background: var(--bg);
+    }
+    .app-header {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      color: var(--ink);
+      background: rgba(255, 255, 255, 0.96);
+      border-bottom: 1px solid var(--line);
+      backdrop-filter: blur(12px);
+    }
+    .header-inner {
+      width: auto;
+      min-height: 76px;
+      margin: 0;
+      padding: 0 34px;
+    }
+    .page-heading {
+      display: grid;
+      gap: 2px;
+    }
+    .page-heading h2 {
+      margin: 0;
+      color: var(--ink);
+      font-size: 21px;
+      line-height: 1.15;
+    }
+    .page-heading p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .health-group {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .health {
+      gap: 7px;
+      padding: 7px 10px;
+      color: #276348;
+      border: 1px solid #ccebd9;
+      border-radius: 16px;
+      background: #eff9f3;
+      font-size: 12px;
+    }
+    .health.central-health {
+      color: #2d68c2;
+      border-color: #d4e4fc;
+      background: #f0f6ff;
+    }
+    .health-dot { width: 7px; height: 7px; background: #2aaa70; }
+    .central-health .health-dot { background: #4d8ced; }
+    .health.is-busy { color: #8d5a07; border-color: #f2ddae; background: #fff8e8; }
+    .health.is-busy .health-dot { background: #d5a039; }
+    .health.is-error { color: #ae3945; border-color: #f3c9cf; background: #fff1f2; }
+    .health.is-error .health-dot { background: #d64d5c; }
+    .shell {
+      width: auto;
+      max-width: 1440px;
+      margin: 0;
+      padding: 30px 34px 44px;
+    }
+    .render-layout {
+      max-width: 860px;
+      margin: 0 auto;
+    }
+    .grid { gap: 18px; }
+    .grid.two { grid-template-columns: minmax(0, 1.4fr) minmax(340px, 0.86fr); }
+    .grid.template-layout { grid-template-columns: minmax(276px, 0.62fr) minmax(0, 1.72fr); }
+    .grid.rule-layout { grid-template-columns: minmax(250px, 0.52fr) minmax(0, 1.8fr); }
+    .panel {
+      border-color: var(--line);
+      border-radius: 10px;
+      box-shadow: var(--shadow);
+    }
+    .panel-header {
+      min-height: 64px;
+      padding: 17px 20px;
+      background: #fff;
+    }
+    .panel-title { font-size: 16px; }
+    .panel-body { padding: 20px; }
+    .render-task-panel { border-color: #d8e3f1; }
+    .render-task-panel .panel-header { background: #fbfdff; }
+    input, select, textarea {
+      min-height: 42px;
+      border-color: var(--line-strong);
+      border-radius: 7px;
+    }
+    label { margin-bottom: 7px; color: #3b4a5e; }
+    .task-upload {
+      min-height: 142px;
+      padding: 20px;
+      border-color: #9fc0f6;
+      border-radius: 9px;
+      background: #f8fbff;
+    }
+    .task-upload input[type="file"] {
+      padding: 8px;
+      border: 0;
+      background: transparent;
+    }
+    .task-upload input[type="file"]::file-selector-button {
+      margin-right: 12px;
+      padding: 8px 12px;
+      color: #fff;
+      border: 0;
+      border-radius: 6px;
+      background: var(--primary);
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .actions {
+      margin-top: 22px;
+      padding-top: 18px;
+    }
+    .render-task-panel .actions { margin-top: 20px; padding-top: 18px; }
+    .render-task-panel .btn-primary { min-width: 168px; min-height: 44px; }
+    button { border-radius: 7px; }
+    .btn-primary { background: var(--primary); border-color: var(--primary); }
+    .btn-primary:hover { background: var(--primary-dark); }
+    .btn-primary:disabled { color: #f6f9fd; border-color: #9cbde9; background: #9cbde9; cursor: not-allowed; }
+    .btn-secondary, .btn-subtle { border-color: var(--line-strong); border-radius: 7px; }
+    .status-badge { min-height: 25px; padding: 3px 9px; border-radius: 13px; }
+    .template-row, .list-item, .preview-chip { border-radius: 8px; }
+    .template-row { background: #fbfcfe; }
+    .template-row.active { border-color: #75a9f2; box-shadow: 0 0 0 3px rgba(52, 120, 229, 0.11); }
+    th { background: #f6f8fb; }
+    .progress-dialog, .error-dialog, .confirm-dialog { border-radius: 12px; }
+    .progress-head { background: #f7faff; }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
+    }
   </style>
 </head>
 <body data-multi-template-render-enabled="false">
+  <aside class="app-sidebar" aria-label="DrawFlow 主导航">
+    <div class="sidebar-brand">
+      <h1>DrawFlow</h1>
+      <p>订单效果图与 V2 工作台</p>
+    </div>
+    <span class="sidebar-label">工作台</span>
+    <nav class="tabs app-navigation" aria-label="主导航">
+      <button class="tab active" data-page-tab="render">出图任务</button>
+      <a class="tab" href="/v2/templates/workbench">V2 工作台</a>
+      <a class="tab" href="/?page=jobs" data-page-tab="jobs">任务记录</a>
+    </nav>
+    <div class="sidebar-runtime" aria-live="polite">
+      <strong>本机生产环境</strong>
+      <span>渲染与成品文件均在本机处理</span>
+    </div>
+  </aside>
+  <div class="app-main">
   <header class="app-header">
     <div class="header-inner">
-      <div class="brand">
-        <h1>DrawFlow</h1>
-        <p>订单效果图与 V2 工作台</p>
+      <div class="page-heading">
+        <h2>出图任务</h2>
+        <p>生产工作台 / 新建任务</p>
       </div>
-      <div class="health"><span class="health-dot"></span><span id="healthText">服务检查中</span></div>
+      <div class="health-group">
+        <div class="health"><span class="health-dot"></span><span id="healthText">本机检查中</span></div>
+        <div class="health central-health"><span class="health-dot"></span><span id="centralHealthText">中央服务检查中</span></div>
+      </div>
     </div>
   </header>
 
   <main class="shell">
-    <nav class="tabs" aria-label="主导航">
-      <button class="tab active" data-page-tab="render">出图任务</button>
-      <a class="tab" href="/v2/templates/workbench">V2 工作台</a>
-      <button class="tab" data-page-tab="jobs">任务记录</button>
-    </nav>
-
     <section class="page active" id="page-render">
       <div class="render-layout">
         <section class="panel render-task-panel">
@@ -1360,6 +1638,7 @@ INDEX_HTML = """<!doctype html>
       </section>
     </section>
   </main>
+  </div>
 
   <div class="progress-overlay" id="renderProgressOverlay" aria-hidden="true">
     <div class="progress-dialog" role="status" aria-live="polite">
@@ -1469,6 +1748,8 @@ INDEX_HTML = """<!doctype html>
     async function init() {
       prepareBusinessRuleEditor();
       bindEvents();
+      const requestedPage = new URLSearchParams(window.location.search).get("page");
+      switchPage(requestedPage === "jobs" ? "jobs" : "render");
       await checkHealth();
       await Promise.all([loadTemplates(), loadRules(), loadJobs()]);
       syncMultiTemplateMode();
@@ -1886,6 +2167,25 @@ INDEX_HTML = """<!doctype html>
       document.querySelectorAll(".page").forEach(page => {
         page.classList.toggle("active", page.id === `page-${name}`);
       });
+      const headings = {
+        render: ["出图任务", "生产工作台 / 新建任务"],
+        jobs: ["任务记录", "生产工作台 / 本机历史任务"]
+      };
+      const heading = headings[name];
+      if (heading) {
+        document.querySelector(".page-heading h2").textContent = heading[0];
+        document.querySelector(".page-heading p").textContent = heading[1];
+      }
+    }
+
+    function setHealthLabel(id, text, tone = "ready") {
+      const label = document.getElementById(id);
+      if (!label) return;
+      label.textContent = text;
+      const chip = label.closest(".health");
+      if (!chip) return;
+      chip.classList.toggle("is-busy", tone === "busy");
+      chip.classList.toggle("is-error", tone === "error");
     }
 
     function newTemplate() {
@@ -1906,26 +2206,41 @@ INDEX_HTML = """<!doctype html>
       try {
         const health = await getJson("/health").catch(() => getJson("/api/health"));
         state.runtimeRole = health.role || "central";
-        document.getElementById("healthText").textContent = state.runtimeRole === "local-client"
-          ? "本地网关在线"
-          : "中央服务在线，请通过 DrawFlowClient 出图";
+        setHealthLabel(
+          "healthText",
+          state.runtimeRole === "local-client"
+            ? (health.render_in_progress ? "本机正在渲染" : "本机已就绪")
+            : "当前服务已就绪",
+          health.render_in_progress ? "busy" : "ready"
+        );
+        setHealthLabel(
+          "centralHealthText",
+          state.runtimeRole === "local-client" ? "中央服务等待验证" : "中央服务已连接"
+        );
       } catch (error) {
-        document.getElementById("healthText").textContent = "服务异常";
+        setHealthLabel("healthText", "本机服务异常", "error");
+        setHealthLabel("centralHealthText", "中央服务不可达", "error");
         throw error;
       }
     }
 
     async function loadTemplates(selectedId) {
-      const payload = await getJson("/api/templates");
-      state.templates = payload.templates || [];
-      if (selectedId) {
-        state.selectedTemplateId = selectedId;
-      } else if (!state.selectedTemplateId && state.templates.length) {
-        state.selectedTemplateId = state.templates[0].template_id;
+      try {
+        const payload = await getJson("/api/templates");
+        state.templates = payload.templates || [];
+        if (selectedId) {
+          state.selectedTemplateId = selectedId;
+        } else if (!state.selectedTemplateId && state.templates.length) {
+          state.selectedTemplateId = state.templates[0].template_id;
+        }
+        renderTemplateOptions();
+        renderTemplateList();
+        syncSelectedTemplate();
+        setHealthLabel("centralHealthText", "中央服务已连接");
+      } catch (error) {
+        setHealthLabel("centralHealthText", "中央服务不可达", "error");
+        throw error;
       }
-      renderTemplateOptions();
-      renderTemplateList();
-      syncSelectedTemplate();
     }
 
     async function loadRules() {
@@ -3622,6 +3937,7 @@ INDEX_HTML = """<!doctype html>
 
     function showProgress(mode) {
       progressMode = mode;
+      setHealthLabel("healthText", "本机正在渲染", "busy");
       const overlay = document.getElementById("renderProgressOverlay");
       overlay.classList.add("active");
       overlay.setAttribute("aria-hidden", "false");
@@ -3696,6 +4012,7 @@ INDEX_HTML = """<!doctype html>
       const overlay = document.getElementById("renderProgressOverlay");
       overlay.classList.remove("active");
       overlay.setAttribute("aria-hidden", "true");
+      checkHealth().catch(() => {});
     }
 
     function showRenderError(error) {
@@ -3719,10 +4036,12 @@ INDEX_HTML = """<!doctype html>
       const code = details.code.toLowerCase();
       if (code === "template_not_published") return cleanErrorText(raw);
       if (code === "template_bundle_unavailable") return cleanErrorText(raw);
-      if (code === "central_unreachable" || code.startsWith("central_http_")) return cleanErrorText(raw);
+      if (code === "central_unreachable" || code.startsWith("central_http_")) {
+        return "无法连接中央服务。请确认网络连接正常后重试。";
+      }
       if (code === "local_render_unexpected") return cleanErrorText(raw);
       if (/failed to fetch|networkerror|load failed/.test(text)) {
-        return "无法连接本地 DrawFlow 客户端（127.0.0.1:8766）。请确认 DrawFlowClient.exe 仍在运行后再试。";
+        return "无法连接本机 DrawFlow 客户端。请确认 DrawFlow 已启动后再试。";
       }
       if (raw) return cleanErrorText(raw);
       if (!raw) {

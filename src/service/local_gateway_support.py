@@ -42,6 +42,10 @@ V2_STATIC_FILES = {
 }
 
 
+def _normalized_log_path(path: Path | str) -> str:
+    return os.path.normcase(os.path.abspath(os.fspath(path)))
+
+
 def safe_static_name(value: str) -> str:
     name = Path(value).name
     return name if name == value and name in V2_STATIC_FILES else ""
@@ -75,13 +79,36 @@ def client_config_candidates() -> list[Path]:
 
 def configure_local_logging(data_dir: Path) -> None:
     log_path = data_dir / "logs" / "drawflow-client.log"
-    log_path.parent.mkdir(parents=True, exist_ok=True)
+    fallback_log_path = log_path.with_name(f"drawflow-client-{os.getpid()}.log")
+    normalized_log_paths = {
+        _normalized_log_path(log_path),
+        _normalized_log_path(fallback_log_path),
+    }
     if any(
-        getattr(handler, "baseFilename", "") == str(log_path)
+        _normalized_log_path(getattr(handler, "baseFilename", "")) in normalized_log_paths
         for handler in LOGGER.handlers
+        if getattr(handler, "baseFilename", "")
     ):
         return
-    handler = logging.FileHandler(log_path, encoding="utf-8")
+    try:
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        handler = logging.FileHandler(log_path, encoding="utf-8")
+    except OSError:
+        # A previously started client can briefly retain the shared log file on
+        # Windows. Logging must not prevent a new local gateway from starting.
+        try:
+            handler = logging.FileHandler(
+                fallback_log_path,
+                encoding="utf-8",
+            )
+        except OSError:
+            if not any(
+                isinstance(existing, logging.NullHandler) for existing in LOGGER.handlers
+            ):
+                LOGGER.addHandler(logging.NullHandler())
+            LOGGER.setLevel(logging.INFO)
+            LOGGER.propagate = False
+            return
     handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
     LOGGER.addHandler(handler)
     LOGGER.setLevel(logging.INFO)

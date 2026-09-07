@@ -165,11 +165,11 @@ cd /opt/drawflow-central-r10
 
 ## 5. Windows 客户端部署
 
-### 5.1 安装和启动前检查
+### 5.1 安装与启动前检查
 
 生产同事只接收 `DrawFlow-Setup-<version>.exe`。校验其发布时登记的 SHA256 后双击安装；不要向同事发送内部 `drawflow-client-<version>.payload.zip`，也不要手工解压或替换 `DrawFlowClient.exe`。
 
-安装完成后确认电脑已安装并激活 Adobe Illustrator，且已安装模板需要的字体。客户端不需要安装 Python，也不需要 DeepSeek API Key。若网络策略需要预检，可执行：
+安装完成后确认电脑已安装并激活 Adobe Illustrator，且已安装模板需要的字体。客户端不需要安装 Python、Node.js 或 DeepSeek API Key。若网络策略需要预检，可执行：
 
 ```powershell
 Test-NetConnection 162.14.120.240 -Port 8765
@@ -178,17 +178,7 @@ Invoke-RestMethod http://162.14.120.240:8765/api/health
 
 ### 5.2 启动和验收
 
-从开始菜单或桌面快捷方式启动：
-
-```text
-DrawFlow.exe
-```
-
-程序应自动打开：
-
-```text
-http://127.0.0.1:8766/
-```
+从开始菜单或桌面快捷方式启动 `DrawFlow.exe`。程序应自动打开 `http://127.0.0.1:8766/`，后台网关只在该 loopback 地址监听。
 
 PowerShell 验证：
 
@@ -197,21 +187,11 @@ Invoke-RestMethod http://127.0.0.1:8766/health | ConvertTo-Json
 Invoke-RestMethod http://127.0.0.1:8766/api/templates | ConvertTo-Json -Depth 5
 ```
 
-`/health` 中必须包含：
-
-```json
-{
-  "ok": true,
-  "role": "local-client",
-  "central": "http://162.14.120.240:8765"
-}
-```
-
-选择模板并渲染时，客户端会按 manifest 下载当前活动 bundle，校验所有 SHA256 后缓存到 `%LOCALAPPDATA%\DrawFlow\templates`。同一版本再次使用时直接命中缓存；版本变化时才下载新版本。
+`/health` 必须包含 `ok: true`、`role: local-client` 和构建时配置的 `central` 地址；`render_in_progress` 用于显示本机是否正在执行渲染任务。选择模板并渲染时，客户端会按 manifest 下载当前活动 bundle，校验所有 SHA256 后缓存到 `%LOCALAPPDATA%\DrawFlow\templates`。
 
 ## 6. 在开发机做干净客户端测试
 
-使用 `DrawFlow-Setup-<version>.exe` 在一个无源码的 Windows 用户目录安装，再从 `DrawFlow.exe` 启动；不要以内部 payload ZIP 代替安装器。为了排除旧缓存和旧进程干扰，建议先确认端口没有残留监听，并将测试数据目录设为独立路径：
+在无源码的 Windows 用户目录安装 `DrawFlow-Setup-<version>.exe`，从 `DrawFlow` 快捷方式启动；不要以内部 payload ZIP 代替安装器。为了排除旧缓存和旧进程干扰，可先执行：
 
 ```powershell
 Get-NetTCPConnection -LocalPort 8766 -State Listen -ErrorAction SilentlyContinue
@@ -226,7 +206,8 @@ $env:DRAWFLOW_LOCAL_DATA_DIR = "$env:LOCALAPPDATA\DrawFlow-Package-Test"
 - `/health` 的 `central` 是安装器配置的中央地址；
 - 页面能列出中央模板；
 - 首次渲染在 `DrawFlow-Package-Test\templates` 生成模板缓存；
-- Illustrator 生成 AI8 输出，第二次渲染同版本不重复下载。
+- Illustrator 生成 AI8 输出，第二次渲染同版本不重复下载；
+- 覆盖安装新版 Setup 后测试数据目录保持完整。
 
 ## 7. 后续模板更新
 
@@ -283,7 +264,7 @@ Invoke-RestMethod http://127.0.0.1:8766/health
 Invoke-RestMethod http://162.14.120.240:8765/api/health
 ```
 
-`central` 不能是 `http://127.0.0.1:8765`。若是，说明启动的是旧客户端目录或旧进程；由管理员检查安装目录的 `drawflow-launcher.json`。
+`central` 不能是 `http://127.0.0.1:8765`。若是，说明启动的是旧客户端目录或旧进程；由管理员检查安装目录的 `drawflow-launcher.json`，用户不应手工编辑安装资源。
 
 ## 10. 安全边界
 

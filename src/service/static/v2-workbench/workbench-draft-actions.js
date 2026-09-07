@@ -16,9 +16,17 @@
 
 
   async function refreshTemplateList() {
-    const payload = await getJson(API_ROOT, "模板列表加载失败，请稍后重试。");
-    state.templates = Array.isArray(payload.templates) ? payload.templates : [];
-    renderTemplateList();
+    globalThis.setV2RuntimeStatus("v2LocalHealthText", "本机已就绪");
+    globalThis.setV2RuntimeStatus("v2CentralHealthText", "中央服务连接中", "busy");
+    try {
+      const payload = await getJson(API_ROOT, "模板列表加载失败，请稍后重试。");
+      state.templates = Array.isArray(payload.templates) ? payload.templates : [];
+      renderTemplateList();
+      globalThis.setV2RuntimeStatus("v2CentralHealthText", "中央服务已连接");
+    } catch (error) {
+      globalThis.setV2RuntimeStatus("v2CentralHealthText", "中央服务不可达", "error");
+      throw error;
+    }
   }
 
 
@@ -64,6 +72,46 @@
   }
 
 
+  function canFallBackFromPublishedRead(error) {
+    return cleanText(error && error.code) === "v2_route_not_found";
+  }
+
+
+  async function loadTemplateView(templateId, sharedVersion) {
+    const encodedId = encodeURIComponent(templateId);
+    if (!sharedVersion) {
+      return {
+        action: "draft",
+        payload: await getJson(
+          `${API_ROOT}/${encodedId}/draft`,
+          "草稿读取失败，请确认模板是否已创建。"
+        ),
+        compatibilityFallback: false
+      };
+    }
+    try {
+      return {
+        action: "published",
+        payload: await getJson(
+          `${API_ROOT}/${encodedId}/published`,
+          "共享配置读取失败，请确认模板已发布后重试。"
+        ),
+        compatibilityFallback: false
+      };
+    } catch (error) {
+      if (!canFallBackFromPublishedRead(error)) throw error;
+      return {
+        action: "draft",
+        payload: await getJson(
+          `${API_ROOT}/${encodedId}/draft`,
+          "该中央服务暂不支持读取已发布版本，草稿读取也失败了。"
+        ),
+        compatibilityFallback: true
+      };
+    }
+  }
+
+
   async function selectTemplate(templateId) {
     const draftLoadRequestId = ++state.draftLoadRequestId;
     state.validation = null;
@@ -86,20 +134,28 @@
     const draft = objectOf(template && template.draft);
     const hasEditablePublishedDraft = Boolean(sharedVersion && cleanText(draft.source_version) === sharedVersion);
     const isPublishedView = Boolean(sharedVersion && !hasEditablePublishedDraft);
-    const viewAction = isPublishedView ? "published" : "draft";
     const viewLabel = isPublishedView ? "已发布配置" : "草稿";
     setDraftStatus(`读取${viewLabel}中`, "pending");
     try {
-      const payload = await getJson(
-        `${API_ROOT}/${encodeURIComponent(templateId)}/${viewAction}`,
-        isPublishedView ? "共享配置读取失败，请确认模板已发布后重试。" : "草稿读取失败，请确认模板是否已创建。"
-      );
+      const loadedView = isPublishedView
+        ? await loadTemplateView(templateId, sharedVersion)
+        : {
+            action: "draft",
+            payload: await getJson(
+              `${API_ROOT}/${encodeURIComponent(templateId)}/draft`,
+              "草稿读取失败，请确认模板是否已创建。"
+            ),
+            compatibilityFallback: false
+          };
       if (draftLoadRequestId !== state.draftLoadRequestId || state.selectedTemplateId !== templateId) return false;
-      state.isPublishedView = isPublishedView;
-      state.draft = payload[viewAction] || null;
+      state.isPublishedView = loadedView.action === "published";
+      state.draft = loadedView.payload[loadedView.action] || null;
       state.scan = normalizeScanFromDraft(state.draft);
       fillDraftFields(state.draft, templateId);
       renderAll();
+      if (loadedView.compatibilityFallback) {
+        setDraftStatus("已读取草稿（中央服务未提供已发布版本读取）", "pending");
+      }
       return true;
     } catch (error) {
       if (draftLoadRequestId !== state.draftLoadRequestId || state.selectedTemplateId !== templateId) return false;
