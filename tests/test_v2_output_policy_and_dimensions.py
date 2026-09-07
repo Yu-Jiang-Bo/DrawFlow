@@ -3,7 +3,7 @@ from dataclasses import replace
 
 from src.renderer.v2_template_renderer import build_v2_color_frames_task, build_v2_execution_task, build_v2_order_column_task
 from src.service.v2_template_contract import V2ContractError, normalize_v2_template_contract
-from src.service.v2_order_task_builder import build_v2_order_task, create_v2_component_reuse_strategy
+from src.service.v2_order_task_builder import V2OrderTaskBuilderError, build_v2_order_task, create_v2_component_reuse_strategy
 from src.service.department_output import resolve_department_output
 from tests.test_v2_render_task import compile_task, render_config, scan_evidence
 from tests.test_v2_order_task_builder import V2Payload, _production_unit
@@ -203,6 +203,113 @@ def test_color_inputs_keep_dimensions_in_unit_order_for_duplicate_order_numbers(
         units=(unit_a, unit_b), output_ai=tmp_path / "color.ai", master_packing={"target_width_mm": 480}, rule=rule,
     )
     assert len(task["inputs"][0]["order_dimensions"]) == 2
+
+
+def test_component_reuse_fills_missing_dimension_from_the_batch_target(tmp_path):
+    rule = resolve_department_output("K")
+    compiled = compile_task()
+    sized = _production_unit(
+        order_no="ORDER-SIZED",
+        detail_id="SIZED",
+        color_option="White",
+        rule=rule,
+        payload=V2Payload(
+            output_key="Output_main",
+            values={"font": "F10", "design": "03", "name": "Sized"},
+            selections={"Output_main": {"font": "F10", "design": "Design03", "style": "style1"}},
+        ),
+    )
+    missing = _production_unit(
+        order_no="ORDER-MISSING",
+        detail_id="MISSING",
+        color_option="White",
+        rule=rule,
+        payload=V2Payload(
+            output_key="Output_main",
+            values={"font": "F10", "design": "missing", "name": "Tail"},
+            selections={"Output_main": {"font": "F10", "design": "DesignMissing", "style": "styleMissing"}},
+        ),
+    )
+    strategy = create_v2_component_reuse_strategy(compiled, template_ai=tmp_path / "template.ai")
+
+    order_task = strategy.build_order_column_task(
+        input_ai_files=[tmp_path / "sized.ai", tmp_path / "tail.ai"],
+        input_order_nos=["ORDER-SIZED", "ORDER-MISSING"],
+        units=(sized, missing),
+        output_ai=tmp_path / "order.ai",
+        rule=rule,
+    )
+    color_task = strategy.build_color_frames_task(
+        inputs=[{"path": str(tmp_path / "order.ai"), "order_nos": ["ORDER-SIZED", "ORDER-MISSING"]}],
+        unit_groups=((sized, missing),),
+        units=(sized, missing),
+        output_ai=tmp_path / "summary.ai",
+        master_packing={"target_width_mm": 480},
+        rule=rule,
+    )
+
+    expected = {"width_mm": 80.0, "height_mm": 50.0, "tolerance_mm": 0.007}
+    assert [item["target_dimensions"] for item in order_task["inputs"]] == [expected, expected]
+    assert color_task["inputs"][0]["order_dimensions"] == [expected, expected]
+    assert color_task["inputs"][0]["target_dimensions"] == expected
+
+
+def test_component_reuse_rejects_missing_dimension_when_the_batch_has_multiple_sizes(tmp_path):
+    rule = resolve_department_output("K")
+    compiled = compile_task()
+    compiled["outputs"][0]["actions"].append({
+        "type": "fit_output_bounds",
+        "group": "style",
+        "style_key": "style2",
+        "dimensions": {"width_mm": 120, "height_mm": 60, "tolerance_mm": 0.007},
+    })
+    units = (
+        _production_unit(
+            order_no="ORDER-SMALL",
+            detail_id="SMALL",
+            color_option="White",
+            rule=rule,
+            payload=V2Payload(
+                output_key="Output_main",
+                values={"font": "F10", "design": "03", "name": "Small"},
+                selections={"Output_main": {"font": "F10", "design": "Design03", "style": "style1"}},
+            ),
+        ),
+        _production_unit(
+            order_no="ORDER-LARGE",
+            detail_id="LARGE",
+            color_option="White",
+            rule=rule,
+            payload=V2Payload(
+                output_key="Output_main",
+                values={"font": "F10", "design": "03", "name": "Large"},
+                selections={"Output_main": {"font": "F10", "design": "Design03", "style": "style2"}},
+            ),
+        ),
+        _production_unit(
+            order_no="ORDER-MISSING",
+            detail_id="MISSING",
+            color_option="White",
+            rule=rule,
+            payload=V2Payload(
+                output_key="Output_main",
+                values={"font": "F10", "design": "missing", "name": "Tail"},
+                selections={"Output_main": {"font": "F10", "design": "DesignMissing", "style": "styleMissing"}},
+            ),
+        ),
+    )
+    strategy = create_v2_component_reuse_strategy(compiled, template_ai=tmp_path / "template.ai")
+
+    with __import__("pytest").raises(V2OrderTaskBuilderError) as exc_info:
+        strategy.build_order_column_task(
+            input_ai_files=[tmp_path / "small.ai", tmp_path / "large.ai", tmp_path / "tail.ai"],
+            input_order_nos=[unit.order_no for unit in units],
+            units=units,
+            output_ai=tmp_path / "order.ai",
+            rule=rule,
+        )
+
+    assert exc_info.value.code == "v2_order_task_dimensions_ambiguous"
 
 
 def test_component_reuse_uses_selected_design_dimensions_when_template_has_no_style_dimensions(tmp_path):
