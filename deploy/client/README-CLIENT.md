@@ -1,19 +1,7 @@
-# DrawFlowClient 本地客户端
+# DrawFlowClient 更新载荷（非同事安装包）
 
-## 用法
+此目录由发布流程生成，是 `DrawFlow.exe` 自动下载的版本化 PyInstaller 载荷，**不得直接发给同事，也不得手工解压后运行 `DrawFlowClient.exe`**。同事只接收并安装 `DrawFlow-Setup-<version>.exe`，之后只从开始菜单或桌面快捷方式启动 `DrawFlow.exe`。
 
-1. 解压整个 zip，保留同级的 `DrawFlowClient.exe`、`_internal` 和 `drawflow-client.json`。
-2. 确认本机已安装并激活 Adobe Illustrator，模板需要的字体也已安装。
-3. 双击 `DrawFlowClient.exe`。程序直接使用包内正式中央地址，只监听 `127.0.0.1:8766`，并自动打开 `http://127.0.0.1:8766/`。
-4. 仅在中央服务器地址变化时编辑同级 `drawflow-client.json`，不需要重新打包 exe。
-5. V2 工作台的真实样例预览需要可信 Windows 工作端与中央服务配置同一 `DRAWFLOW_PREVIEW_WORKER_SECRET`；自动识别 OpenType/PUA 尾巴字形还需要同一台可信 Illustrator 扫描工作端与中央服务配置独立的 `DRAWFLOW_SCAN_WORKER_SECRET`。两把密钥均不在压缩包内：由演示管理员在受控环境中为本机进程设置后，再启动客户端；不要把它们填到 `drawflow-client.json`、页面、日志或截图中，也不要复用两把密钥。设置完成后，扫描带尾巴的模板会自动提交受签名的完整字母表字形证明。
-6. 若页面提示生成失败，保留页面中的用户可读提示；同时可查看 `%LOCALAPPDATA%\\DrawFlow\\logs\\drawflow-client.log` 的最后几行，用于定位问题。
+运行时，启动器把候选载荷放入用户应用目录的唯一候选目录 `versions\<version>-<sha>-<uuid>`，健康检查通过后再由 `active.json` 记录该版本的实际目录，并通过 `DRAWFLOW_CENTRAL_URL` 向子进程传递中央服务地址。用户的模板缓存、任务记录和出图文件仍位于 `%LOCALAPPDATA%\DrawFlow`，不在本载荷中。
 
-## 本地职责
-
-- 代理中央 DrawFlow 页面和 API。
-- 拦截 `/local/render`、`/api/render`、`/local/templates/scan`。
-- 按需下载所选模板 bundle，校验 SHA256 后缓存到 `%LOCALAPPDATA%\DrawFlow\templates`。
-- 检查本机字体，调用本机 Illustrator 渲染，输出文件保存在 `%LOCALAPPDATA%\DrawFlow\output`。
-
-当前正式中央地址为 `http://162.14.120.240:8765`。客户端不保存 DeepSeek API Key，也不读取开发项目目录中的脚本或配置；DeepSeek 只在中央服务中配置。
+本地客户端继续代理中央 DrawFlow 页面和 API，拦截本机渲染/扫描接口，按需校验和缓存模板 bundle，并调用本机 Illustrator。若页面提示生成失败，先保留页面上的完整错误文字；同时可查看 `%LOCALAPPDATA%\DrawFlow\logs\drawflow-client.log` 和安装目录 `logs\launcher.log` 的最后几行，二者一起用于定位问题。

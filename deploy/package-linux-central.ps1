@@ -5,14 +5,18 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$ProjectRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
+. (Join-Path $PSScriptRoot "master-release-snapshot.ps1")
+$ReleaseContext = Enter-MasterReleaseSnapshot -InvocationRoot (Join-Path $PSScriptRoot "..")
+$ProjectRoot = $ReleaseContext.SourceRoot
+$ReleaseBase = $ReleaseContext.ReleaseBase
+. (Join-Path $PSScriptRoot "release-path-guards.ps1")
+try {
 if (-not $ReleaseName) {
     $ReleaseName = "drawflow-central-linux-{0}" -f (Get-Date -Format "yyyyMMdd-HHmm")
 }
 
-$ReleaseBase = Join-Path $ProjectRoot "release"
-$ReleaseRoot = Join-Path $ReleaseBase $ReleaseName
-$ArchivePath = Join-Path $ReleaseBase "$ReleaseName.zip"
+$ReleaseRoot = Resolve-SafeReleaseChildPath -BaseDirectory $ReleaseBase -Name $ReleaseName -Label "ReleaseName"
+$ArchivePath = Resolve-SafeReleaseChildPath -BaseDirectory $ReleaseBase -Name "$ReleaseName.zip" -Label "ReleaseName"
 New-Item -ItemType Directory -Force -Path $ReleaseBase | Out-Null
 if (Test-Path $ReleaseRoot) { throw "Release folder already exists: $ReleaseRoot" }
 
@@ -226,8 +230,8 @@ function Copy-Tree {
     $global:LASTEXITCODE = 0
 }
 
-Assert-ActiveTemplateAiFiles -BasePath $ProjectRoot
-$DefaultV2DataRoot = Join-Path $ProjectRoot "drawflow-data\v2-templates"
+Assert-ActiveTemplateAiFiles -BasePath $ReleaseContext.RepositoryRoot
+$DefaultV2DataRoot = Join-Path $ReleaseContext.RepositoryRoot "drawflow-data\v2-templates"
 $SourceV2DataRoot = if ($V2TemplateDataPath) { (Resolve-Path -LiteralPath $V2TemplateDataPath).Path } else { $DefaultV2DataRoot }
 $ActiveV2TemplateRecords = Get-ActiveV2TemplateRecords -DataRoot $SourceV2DataRoot
 New-Item -ItemType Directory -Force -Path $ReleaseRoot | Out-Null
@@ -235,6 +239,10 @@ New-Item -ItemType Directory -Force -Path $ReleaseRoot | Out-Null
 Copy-Tree "src" -ExcludeFiles @("local_client.py", "local_gateway.py", "local_scan_client.py")
 Copy-Tree "config"
 Copy-Tree "templates"
+$ExternalTemplates = Join-Path $ReleaseContext.RepositoryRoot "templates"
+if (Test-Path -LiteralPath $ExternalTemplates -PathType Container) {
+    Copy-Item -Path (Join-Path $ExternalTemplates "*") -Destination (Join-Path $ReleaseRoot "templates") -Recurse -Force
+}
 Copy-Tree "deploy\linux"
 Copy-Item (Join-Path $ProjectRoot "requirements.txt") (Join-Path $ReleaseRoot "requirements.txt")
 Copy-Item (Join-Path $ProjectRoot "deploy\README-LINUX.md") (Join-Path $ReleaseRoot "README-LINUX.md")
@@ -244,7 +252,7 @@ $RequiredOutputFiles = @(
     "output/template-named/JJMB202509231236046265/curved-title-mark-report.json"
 )
 foreach ($RelativeFile in $RequiredOutputFiles) {
-    $Source = Join-Path $ProjectRoot $RelativeFile
+    $Source = Join-Path $ReleaseContext.RepositoryRoot $RelativeFile
     if (-not (Test-Path $Source)) { throw "Missing required runtime file: $Source" }
     $Target = Join-Path $ReleaseRoot $RelativeFile
     New-Item -ItemType Directory -Force -Path (Split-Path -Parent $Target) | Out-Null
@@ -327,3 +335,6 @@ if (-not $NoArchive) {
 Write-Host "Linux release folder: $ReleaseRoot"
 Write-Host "Bundled active V2 templates: $($ActiveV2TemplateRecords.Count)"
 if (-not $NoArchive) { Write-Host "Linux release archive: $ArchivePath" }
+} finally {
+    Exit-MasterReleaseSnapshot -Context $ReleaseContext
+}

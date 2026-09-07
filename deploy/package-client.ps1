@@ -1,35 +1,27 @@
 param(
-    [string]$ReleaseName = "",
-    [string]$CentralUrl = "http://162.14.120.240:8765",
-    [switch]$NoArchive
+    [Parameter(Mandatory = $true)][string]$ClientVersion
 )
 
 $ErrorActionPreference = "Stop"
 
-$ProjectRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
-if (-not $ReleaseName) {
-    $ReleaseName = "drawflow-client-{0}" -f (Get-Date -Format "yyyyMMdd-HHmm")
+if ($ClientVersion -notmatch '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$') {
+    throw "ClientVersion must be a stable SemVer value such as 1.2.3."
 }
 
-$ReleaseBase = Join-Path $ProjectRoot "release"
-$ReleaseRoot = Join-Path $ReleaseBase $ReleaseName
-$ArchivePath = Join-Path $ReleaseBase "$ReleaseName.zip"
+. (Join-Path $PSScriptRoot "master-release-snapshot.ps1")
+$ReleaseContext = Enter-MasterReleaseSnapshot -InvocationRoot (Join-Path $PSScriptRoot "..")
+$ProjectRoot = $ReleaseContext.SourceRoot
+$ReleaseBase = $ReleaseContext.ReleaseBase
+try {
+$PayloadRoot = Join-Path $ReleaseBase ".client-payload-$ClientVersion"
 $BuildRoot = Join-Path $ReleaseBase ".client-build"
 $DistRoot = Join-Path $ReleaseBase ".client-dist"
 $VenvPython = Join-Path $ProjectRoot ".venv\Scripts\python.exe"
 $Python = if (Test-Path $VenvPython) { $VenvPython } else { "python" }
-$ParsedCentralUri = $null
-if (
-    -not [Uri]::TryCreate($CentralUrl.Trim(), [UriKind]::Absolute, [ref]$ParsedCentralUri) -or
-    $ParsedCentralUri.Scheme -notin @("http", "https") -or
-    -not $ParsedCentralUri.Host
-) {
-    throw "CentralUrl must be an absolute HTTP(S) URL: $CentralUrl"
-}
 
 New-Item -ItemType Directory -Force -Path $ReleaseBase | Out-Null
-if (Test-Path $ReleaseRoot) {
-    throw "Release folder already exists: $ReleaseRoot"
+if (Test-Path $PayloadRoot) {
+    Remove-Item -LiteralPath $PayloadRoot -Recurse -Force
 }
 if (Test-Path $BuildRoot) {
     Remove-Item -LiteralPath $BuildRoot -Recurse -Force
@@ -74,22 +66,12 @@ if (-not (Test-Path (Join-Path $BuiltApp "DrawFlowClient.exe"))) {
     throw "DrawFlowClient.exe was not produced."
 }
 
-New-Item -ItemType Directory -Force -Path $ReleaseRoot | Out-Null
-Copy-Item -Recurse -Path (Join-Path $BuiltApp "*") -Destination $ReleaseRoot
-Copy-Item (Join-Path $ProjectRoot "deploy\client\drawflow-client.example.json") (Join-Path $ReleaseRoot "drawflow-client.example.json")
-Copy-Item (Join-Path $ProjectRoot "deploy\client\start-client.bat") (Join-Path $ReleaseRoot "start-client.bat")
-Copy-Item (Join-Path $ProjectRoot "deploy\client\README-CLIENT.md") (Join-Path $ReleaseRoot "README-CLIENT.md")
-$ClientConfigPath = Join-Path $ReleaseRoot "drawflow-client.json"
-$ClientConfigJson = [ordered]@{ central_url = $CentralUrl.TrimEnd("/") } | ConvertTo-Json
-[System.IO.File]::WriteAllText($ClientConfigPath, $ClientConfigJson + [Environment]::NewLine, [System.Text.UTF8Encoding]::new($false))
+New-Item -ItemType Directory -Force -Path $PayloadRoot | Out-Null
+Copy-Item -Recurse -Path (Join-Path $BuiltApp "*") -Destination $PayloadRoot
 
 function Assert-CleanClientRelease {
-    $PackagedConfig = Get-Content -Raw -Encoding UTF8 $ClientConfigPath | ConvertFrom-Json
-    if ($PackagedConfig.central_url -ne $CentralUrl.TrimEnd("/")) {
-        throw "Client release central_url mismatch: $($PackagedConfig.central_url)"
-    }
     $TextExtensions = @(".bat", ".json", ".jsx", ".md", ".py", ".txt")
-    $TextFiles = Get-ChildItem -Path $ReleaseRoot -Recurse -File |
+    $TextFiles = Get-ChildItem -Path $PayloadRoot -Recurse -File |
         Where-Object { $TextExtensions -contains $_.Extension.ToLowerInvariant() }
 
     $RegexPatterns = @(
@@ -128,16 +110,59 @@ function Compress-ArchiveWithRetry {
     throw $LastError
 }
 
+$SourceCommit = ([string](& git -C $ProjectRoot rev-parse HEAD)).Trim()
+$SourceTree = ([string](& git -C $ProjectRoot rev-parse 'HEAD^{tree}')).Trim()
+if ($LASTEXITCODE -ne 0 -or $SourceCommit -notmatch '^[0-9a-f]{40,64}$' -or $SourceTree -notmatch '^[0-9a-f]{40,64}$') {
+    throw "Unable to record the verified master source for the client payload."
+}
+$SourceMetadata = [ordered]@{
+    schema = "drawflow/client-build-source/v1"
+    branch = "master"
+    commit = $SourceCommit
+    tree = $SourceTree
+    version = $ClientVersion
+    minimum_launcher_version = "1.0.0"
+}
+[System.IO.File]::WriteAllText(
+    (Join-Path $PayloadRoot "drawflow-release-source.json"),
+    ($SourceMetadata | ConvertTo-Json -Depth 3) + [Environment]::NewLine,
+    [System.Text.UTF8Encoding]::new($false)
+)
+
 Assert-CleanClientRelease
 
-if (-not $NoArchive) {
-    if (Test-Path $ArchivePath) {
-        Remove-Item -LiteralPath $ArchivePath -Force
-    }
-    Compress-ArchiveWithRetry -Source (Join-Path $ReleaseRoot "*") -Destination $ArchivePath
+$PayloadPath = Join-Path $ReleaseBase "drawflow-client-$ClientVersion.payload.zip"
+if (Test-Path $PayloadPath) {
+    Remove-Item -LiteralPath $PayloadPath -Force
 }
+Compress-ArchiveWithRetry -Source (Join-Path $PayloadRoot "*") -Destination $PayloadPath
+$PayloadHash = (Get-FileHash -LiteralPath $PayloadPath -Algorithm SHA256).Hash.ToLowerInvariant()
+$PayloadManifest = [ordered]@{
+    schema = "drawflow/client-release/v1"
+    channel = "stable"
+    version = $ClientVersion
+    minimum_launcher_version = "1.0.0"
+    source = [ordered]@{
+        branch = "master"
+        commit = $SourceCommit
+        tree = $SourceTree
+    }
+    artifact = [ordered]@{
+        payload_file = (Split-Path -Leaf $PayloadPath)
+        sha256 = $PayloadHash
+        size = (Get-Item -LiteralPath $PayloadPath).Length
+    }
+}
+$PayloadManifestPath = Join-Path $ReleaseBase "drawflow-client-$ClientVersion.release.json"
+[System.IO.File]::WriteAllText(
+    $PayloadManifestPath,
+    ($PayloadManifest | ConvertTo-Json -Depth 4) + [Environment]::NewLine,
+    [System.Text.UTF8Encoding]::new($false)
+)
 
-Write-Host "Client folder: $ReleaseRoot"
-if (-not $NoArchive) {
-    Write-Host "Client archive: $ArchivePath"
+Write-Host "Internal payload folder: $PayloadRoot"
+Write-Host "Client payload: $PayloadPath"
+Write-Host "Client payload SHA256: $PayloadHash"
+} finally {
+    Exit-MasterReleaseSnapshot -Context $ReleaseContext
 }

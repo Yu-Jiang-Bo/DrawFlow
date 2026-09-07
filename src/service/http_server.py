@@ -16,9 +16,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import quote, unquote, urlparse
 
+from .client_release import ClientReleaseError, ClientReleaseStore
 from .job_store import JobStore
 from .llm_rule_parser import LlmRuleParser
-from .paths import PROJECT_ROOT, SERVICE_UPLOADS_DIR
+from .paths import DRAWFLOW_DATA_DIR, PROJECT_ROOT, SERVICE_UPLOADS_DIR
 from .render_service import RenderService
 from .rule_center import build_template_rule_draft, check_template_definition, summarize_template_rule_draft
 from .rule_store import DepartmentRuleStore
@@ -780,6 +781,7 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
     llm_parser = LlmRuleParser()
     template_inspector = TemplateInspector()
     runtime_templates = RuntimeTemplateService(registry)
+    client_releases = ClientReleaseStore(DRAWFLOW_DATA_DIR)
     v2_template_api = V2TemplateApi()
     render_lock = threading.Lock()
     service_role = "legacy-renderer"
@@ -805,6 +807,22 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
             return
         if path == "/api/health":
             self._send_json(self._health_payload())
+            return
+        if path == "/api/client/releases/stable/latest" and self.service_role == "central":
+            try:
+                manifest = self.client_releases.latest_manifest()
+                self._send_json({
+                    **manifest,
+                    "download_path": f"/api/client/releases/stable/download/{manifest['version']}",
+                })
+            except ClientReleaseError as exc:
+                self._send_error(HTTPStatus.NOT_FOUND, str(exc))
+            return
+        if len(parts) == 6 and parts[:5] == ["api", "client", "releases", "stable", "download"] and self.service_role == "central":
+            try:
+                self._send_client_release(parts[5])
+            except ClientReleaseError as exc:
+                self._send_error(HTTPStatus.NOT_FOUND, str(exc))
             return
         if path.startswith("/local/jobs/"):
             if len(parts) == 4 and parts[0] == "local" and parts[1] == "jobs" and parts[3] == "output":
@@ -1513,6 +1531,15 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
 
     def _send_runtime_bundle(self, template_id: str, version: str) -> None:
         path = self.runtime_templates.bundle_path(template_id, version)
+        self._send_file_stream(
+            path,
+            content_type="application/zip",
+            download_name=_safe_download_name(path.name),
+            extra_headers={"X-DrawFlow-SHA256": sha256_file(path)},
+        )
+
+    def _send_client_release(self, version: str) -> None:
+        path = self.client_releases.payload_path(unquote(version))
         self._send_file_stream(
             path,
             content_type="application/zip",

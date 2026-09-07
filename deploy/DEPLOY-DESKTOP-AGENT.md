@@ -2,7 +2,7 @@
 
 需要执行完整安装、校验、启动和验收时，请先阅读 [`DEPLOY-SCHEME2-OPERATIONS.md`](./DEPLOY-SCHEME2-OPERATIONS.md)。本文保留方案二架构和客户端职责说明。
 
-方案二把 DrawFlow 拆成中央服务和用户电脑本地客户端。浏览器入口推荐为用户双击 `DrawFlowClient.exe`，由本地网关打开 `http://127.0.0.1:8766/`，代理中央最新页面和 API，同时在本地截获扫描、渲染和输出下载接口。这样不需要公网中央页面直接访问 `localhost`，避免 Chrome Local Network Access 和 CORS 限制。
+方案二把 DrawFlow 拆成中央服务和用户电脑本地客户端。用户入口为安装后双击 `DrawFlow.exe`；启动器先安全检查客户端更新，再启动版本化 `DrawFlowClient.exe` 本地网关，打开 `http://127.0.0.1:8766/`，代理中央最新页面和 API，同时在本地截获扫描、渲染和输出下载接口。这样不需要公网中央页面直接访问 `localhost`，避免 Chrome Local Network Access 和 CORS 限制。
 
 ## 1. 架构
 
@@ -38,15 +38,15 @@ powershell -ExecutionPolicy Bypass -File .\deploy\package-release.ps1
 本地客户端包：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\deploy\package-client.ps1
+powershell -ExecutionPolicy Bypass -File .\deploy\package-client.ps1 -ClientVersion <x.y.z>
 ```
 
 产物：
 
-- `release\drawflow-client-YYYYMMDD-HHMM\`
-- `release\drawflow-client-YYYYMMDD-HHMM.zip`
+- `release\drawflow-client-<x.y.z>.payload.zip`（仅供发布到中央服务）
+- `release\.client-payload-<x.y.z>\`（构建暂存目录，包含且仅包含 `DrawFlowClient.exe` 和 `_internal`）
 
-本地客户端包使用 PyInstaller onedir，包含 `DrawFlowClient.exe`、运行依赖、JSX 脚本、配置示例和说明。用户电脑不需要单独安装 Python，但必须安装并激活 Adobe Illustrator 和模板字体。
+版本化更新载荷使用 PyInstaller onedir，仅包含 `DrawFlowClient.exe` 与 `_internal`。它不是用户安装包，不能直接分发或解压运行；同事只使用 `DrawFlow-Setup-<version>.exe`。用户电脑不需要单独安装 Python，但必须安装并激活 Adobe Illustrator 和模板字体。
 
 ## 3. 中央服务部署
 
@@ -71,24 +71,10 @@ C:\DrawFlowData\templates\<id>\active.json
 
 ## 4. 客户端部署
 
-把 `drawflow-client-*.zip` 解压到用户电脑，例如：
+同事只接收一次 `DrawFlow-Setup-<version>.exe`。运行安装包后，从开始菜单或桌面快捷方式启动：
 
 ```text
-C:\DrawFlowClient
-```
-
-正式客户端包已经在 exe 同级包含 `drawflow-client.json`，默认连接当前 Linux 中央服务：
-
-```json
-{
-  "central_url": "http://162.14.120.240:8765"
-}
-```
-
-解压后直接双击：
-
-```text
-DrawFlowClient.exe
+DrawFlow.exe
 ```
 
 客户端会打开：
@@ -97,7 +83,7 @@ DrawFlowClient.exe
 http://127.0.0.1:8766/
 ```
 
-不要把 `8766` 绑定到公网或局域网地址。程序启动时会拒绝非 loopback host。中央地址变化时只编辑 exe 同级 `drawflow-client.json`，不需要重打 exe，也不要在该文件中保存 API Key 或密码。
+不要把 `8766` 绑定到公网或局域网地址。程序启动时会拒绝非 loopback host。管理员仅在中央地址变化时更新安装目录的 `drawflow-launcher.json`；该文件不保存 API Key、密码或私钥。用户不得手工替换或直接运行 `DrawFlowClient.exe`。
 
 本地数据默认位置：
 
@@ -163,14 +149,13 @@ http://127.0.0.1:8766/
 - DeepSeek 留在中央。
 - 选中模板按需同步、版本校验和 SHA256 校验。
 - 字体缺失可读提示。
-- 中央 zip 包和 DrawFlowClient zip 包。
+- 中央 zip 包、版本化客户端载荷、一次性安装包和启动时自动更新。
 - 单机单渲染锁。
 
 暂不做：
 
 - 登录鉴权。
 - 数据库。
-- 自动更新。
 - 应用商店分发。
 - 字体文件分发。
 - 多人编辑冲突。
@@ -203,3 +188,41 @@ powershell -ExecutionPolicy Bypass -File .\deploy\windows\test-illustrator.ps1
 ```
 
 这个检查必须在用户自己的 Windows 登录会话中运行。不要把 Illustrator 放入 Session 0 服务。
+
+## 10. 一次安装与客户端自动更新
+
+自动更新在现有 `DrawFlowClient.exe` 外新增 `DrawFlow.exe` 启动器。第一次只向同事分发 `DrawFlow-Setup-<version>.exe`；安装到当前用户的 `%LOCALAPPDATA%\Programs\DrawFlow` 后，用户只启动 `DrawFlow.exe`。`%LOCALAPPDATA%\DrawFlow` 内的模板缓存、订单上传、任务记录、输出和日志仍由渲染客户端管理，安装、更新和卸载都不会清理它。
+
+生产自动更新必须先为中央服务配置 HTTPS 反向代理，例如 `https://drawflow.example.com`。现有 `http://<central-host>:8765` 可继续提供页面、模板和渲染 API，但不能作为更新地址；启动器会拒绝公网 HTTP 更新源。中央服务升级到包含客户端发布接口后，需确认：
+
+```text
+GET https://drawflow.example.com/api/client/releases/stable/latest
+GET https://drawflow.example.com/api/client/releases/stable/download/<version>
+```
+
+构建首次安装包：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\deploy\package-setup.ps1 `
+  -ClientVersion 1.0.0 `
+  -CentralUrl http://<central-host>:8765 `
+  -UpdateBaseUrl https://drawflow.example.com
+```
+
+构建机必须安装 Inno Setup 6，且能找到 `ISCC.exe`；脚本找不到该工具会停止，不会伪造安装包。发布一个客户端更新时，先完成测试、审查和人工验收，再构建版本化载荷：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\deploy\package-client.ps1 -ClientVersion 1.0.1
+```
+
+把生成的 `release\drawflow-client-1.0.1.payload.zip` 传至已升级的中央服务，再在中央服务环境执行：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\deploy\publish-client-release.ps1 `
+  -DataDir <DRAWFLOW_DATA_DIR> `
+  -PayloadPath <已上传的 payload zip> `
+  -ClientVersion 1.0.1 `
+  -Notes "说明本次本地渲染改动"
+```
+
+该操作会先保存不可变 `1.0.1` 载荷，再原子更新 stable latest 清单。用户下一次启动 `DrawFlow.exe` 时自动下载、校验 SHA256，并仅在本机 `127.0.0.1:8766/health` 就绪后切换；下载、hash、解压或启动失败都会继续启动旧版。需要回退时，使用已保留的旧版 payload 重新发布其原版本号，latest 将回指旧版；不要手工编辑 `latest.json` 或删除版本目录。

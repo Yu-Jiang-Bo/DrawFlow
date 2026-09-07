@@ -5,14 +5,18 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$ProjectRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
+. (Join-Path $PSScriptRoot "master-release-snapshot.ps1")
+$ReleaseContext = Enter-MasterReleaseSnapshot -InvocationRoot (Join-Path $PSScriptRoot "..")
+$ProjectRoot = $ReleaseContext.SourceRoot
+$ReleaseBase = $ReleaseContext.ReleaseBase
+. (Join-Path $PSScriptRoot "release-path-guards.ps1")
+try {
 if (-not $ReleaseName) {
     $ReleaseName = "drawflow-central-{0}" -f (Get-Date -Format "yyyyMMdd-HHmm")
 }
 
-$ReleaseBase = Join-Path $ProjectRoot "release"
-$ReleaseRoot = Join-Path $ReleaseBase $ReleaseName
-$ArchivePath = Join-Path $ReleaseBase "$ReleaseName.zip"
+$ReleaseRoot = Resolve-SafeReleaseChildPath -BaseDirectory $ReleaseBase -Name $ReleaseName -Label "ReleaseName"
+$ArchivePath = Resolve-SafeReleaseChildPath -BaseDirectory $ReleaseBase -Name "$ReleaseName.zip" -Label "ReleaseName"
 
 New-Item -ItemType Directory -Force -Path $ReleaseBase | Out-Null
 if (Test-Path $ReleaseRoot) {
@@ -53,6 +57,10 @@ function Copy-Tree {
 Copy-Tree "src" -ExcludeFiles @("*.pyc", "local_client.py", "local_gateway.py")
 Copy-Tree "config"
 Copy-Tree "templates" -ExcludeDirs @("__pycache__", "onboarding")
+$ExternalTemplates = Join-Path $ReleaseContext.RepositoryRoot "templates"
+if (Test-Path -LiteralPath $ExternalTemplates -PathType Container) {
+    Copy-Item -Path (Join-Path $ExternalTemplates "*") -Destination (Join-Path $ReleaseRoot "templates") -Recurse -Force
+}
 Copy-Tree "deploy" -ExcludeDirs @("__pycache__", "client") -ExcludeFiles @("*.pyc", "package-client.ps1")
 
 Copy-Item (Join-Path $ProjectRoot "requirements.txt") (Join-Path $ReleaseRoot "requirements.txt")
@@ -65,7 +73,7 @@ $RequiredOutputFiles = @(
     "output/template-named/JJMB202509231236046265/curved-title-mark-report.json"
 )
 foreach ($RelativeFile in $RequiredOutputFiles) {
-    $Source = Join-Path $ProjectRoot $RelativeFile
+    $Source = Join-Path $ReleaseContext.RepositoryRoot $RelativeFile
     if (-not (Test-Path $Source)) {
         throw "Missing required runtime file: $Source"
     }
@@ -165,4 +173,7 @@ if (-not $NoArchive) {
 Write-Host "Release folder: $ReleaseRoot"
 if (-not $NoArchive) {
     Write-Host "Release archive: $ArchivePath"
+}
+} finally {
+    Exit-MasterReleaseSnapshot -Context $ReleaseContext
 }
