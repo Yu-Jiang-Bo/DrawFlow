@@ -281,8 +281,9 @@
             for (var childIndex = 0; childIndex < bucket.items.length; childIndex++) {
                 var entry = bucket.items[childIndex];
                 var frame = entry.frame.frame_bounds;
-                var dx = 0 - Number(frame[0]);
-                var dy = artworkTop - Number(frame[1]);
+                var placement = placeComponentFootprint(entry.frame, 0, artworkTop);
+                var dx = placement.dx;
+                var dy = placement.dy;
                 entry.copy_coordinate_translation = placeArtworkAtExpected(
                     entry.item,
                     entry.frame.artwork_bounds_after,
@@ -292,6 +293,7 @@
                 );
                 entry.translation = {x: dx, y: dy};
                 entry.final_frame_bounds = translateBounds(frame, dx, dy);
+                entry.final_footprint_bounds = placement.bounds;
                 entry.actual_artwork_bounds = verifyTranslatedArtwork(
                     entry.item,
                     entry.frame.artwork_bounds_after,
@@ -301,7 +303,7 @@
                 );
                 entry.key = String(entry.item.name || "");
                 composedItems.push(entry);
-                artworkTop = Number(entry.final_frame_bounds[3]) - gap;
+                artworkTop = Number(entry.final_footprint_bounds[3]) - gap;
             }
             var blockItems = [block];
             if (bucket.labelLines.length) {
@@ -512,6 +514,30 @@
 
     function translateBounds(bounds, dx, dy) {
         return [Number(bounds[0]) + Number(dx), Number(bounds[1]) + Number(dy), Number(bounds[2]) + Number(dx), Number(bounds[3]) + Number(dy)];
+    }
+
+    function componentFootprint(frame) {
+        var logical = frame.frame_bounds;
+        var artwork = frame.artwork_bounds_after;
+        if (!validBounds(logical) || !validBounds(artwork)) throw new Error("V2 component footprint bounds missing");
+        var bounds = [
+            Math.min(Number(logical[0]), Number(artwork[0])),
+            Math.max(Number(logical[1]), Number(artwork[1])),
+            Math.max(Number(logical[2]), Number(artwork[2])),
+            Math.min(Number(logical[3]), Number(artwork[3]))
+        ];
+        return {
+            bounds: bounds,
+            width: Number(bounds[2]) - Number(bounds[0]),
+            height: Number(bounds[1]) - Number(bounds[3])
+        };
+    }
+
+    function placeComponentFootprint(frame, left, top) {
+        var footprint = componentFootprint(frame);
+        var dx = Number(left) - Number(footprint.bounds[0]);
+        var dy = Number(top) - Number(footprint.bounds[1]);
+        return {dx: dx, dy: dy, bounds: translateBounds(footprint.bounds, dx, dy)};
     }
 
     function copyBounds(bounds) {

@@ -93,7 +93,10 @@ class V2TemplateApi:
         preview_challenge_ttl_seconds: int = 120,
     ) -> None:
         self.store = store or V2TemplateStore(V2_TEMPLATE_DATA_DIR)
-        self.limits = limits or V2TemplateLimitConfig(temp_dir=self.store.root / "_tmp")
+        # Keep streamed uploads outside the versioned template tree. Besides
+        # separating transient files from draft staging, this keeps Windows
+        # paths short when a template has a long identifier.
+        self.limits = limits or V2TemplateLimitConfig(temp_dir=self.store.root.parent / "_tmp")
         self.upload_gate = upload_gate or V2UploadConcurrencyGate(self.limits)
         self.audit_recorder = audit_recorder or V2AuditRecorder(self.store.root / "audit.jsonl")
         self.preview_worker_auth = V2PreviewWorkerChallengeRegistry(
@@ -250,8 +253,9 @@ class V2TemplateApi:
         safe_id = safe_segment(template_id)
         if not safe_id:
             raise V2TemplateApiError("v2_template_not_found", "模板 ID 不合法，无法上传资产。", status=HTTPStatus.NOT_FOUND)
-        upload_dir = self.limits.temp_dir / "uploads" / safe_id / uuid4().hex
-        upload_path = upload_dir / file_name
+        upload_dir = self.limits.temp_dir / uuid4().hex
+        staging_file_name = "upload.ai"
+        upload_path = upload_dir / staging_file_name
         guard = StreamingWriteGuard(
             upload_path,
             config=self.limits,
@@ -268,6 +272,7 @@ class V2TemplateApi:
                     scan_version=header(headers_by_name, "x-drawflow-scan-version") or str(scan.get("scan_version") or ""),
                     draft_version=str(dict(state.get("draft") or {}).get("revision") or ""),
                     mime_type=header(headers_by_name, "content-type"),
+                    staging_file_name=staging_file_name,
                     chunk_size=DEFAULT_CHUNK_SIZE,
                     on_chunk=guard.record_chunk,
                 )
@@ -276,7 +281,7 @@ class V2TemplateApi:
                     {
                         **upload_record,
                         "filename": upload_record["file_name"],
-                        "source_path": upload_dir / upload_record["file_name"],
+                        "source_path": upload_dir / staging_file_name,
                     },
                 ]
                 next_state = self.store.save_draft(

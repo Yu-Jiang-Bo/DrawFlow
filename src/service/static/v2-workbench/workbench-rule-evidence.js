@@ -175,7 +175,7 @@
   function isFontOptionSelfDependency(item, value) {
     if (!item || item.group !== "font") return false;
     const optionKey = safeOptionKey(item.key, "font");
-    return /^F[1-9]\d*$/i.test(String(optionKey || ""))
+    return /^F0*[1-9]\d*$/.test(String(optionKey || ""))
       && safeOptionKey(value, "font") === optionKey;
   }
 

@@ -177,6 +177,131 @@ if (JSON.stringify(frame.artwork_bounds_after) !== JSON.stringify([-8, 110, 119,
     assert "unionBounds(layer.pageItems)" in source
 
 
+def test_order_column_composer_reserves_fixed_artwork_footprints():
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node.js is unavailable")
+
+    source = Path("scripts/illustrator/compose_v2_order_column.jsx").read_text(encoding="utf-8")
+    functions = ("layoutOrderBlocks", "componentFootprint", "placeComponentFootprint", "translateBounds")
+    executable = "\n".join(_extract_js_function(source, name) for name in functions)
+    harness = f"""
+let composedItems = [];
+function groupPageItems(_layer, items, name) {{ return {{name, children: items}}; }}
+function addProductionLabelsAboveBlock() {{ throw new Error('unexpected label'); }}
+function placeArtworkAtExpected(item, sourceBounds, dx, dy) {{
+  item.bounds = translateBounds(sourceBounds, dx, dy);
+  return {{x: dx, y: dy}};
+}}
+function verifyTranslatedArtwork(item) {{ return item.bounds.slice(); }}
+function unionBounds(items) {{
+  const bounds = [];
+  function collect(item) {{
+    if (item.bounds) bounds.push(item.bounds);
+    (item.children || []).forEach(collect);
+  }}
+  items.forEach(collect);
+  return [
+    Math.min(...bounds.map(value => value[0])),
+    Math.max(...bounds.map(value => value[1])),
+    Math.max(...bounds.map(value => value[2])),
+    Math.min(...bounds.map(value => value[3]))
+  ];
+}}
+function validBounds(value) {{ return Array.isArray(value) && value.length === 4; }}
+{executable}
+
+const frame = {{frame_bounds: [0, 40, 100, 0], artwork_bounds_after: [-10, 50, 110, -20]}};
+const entries = [0, 1].map(index => ({{
+  item: {{name: 'component-' + index, bounds: frame.artwork_bounds_after.slice()}},
+  frame,
+  source_path: 'component-' + index + '.ai'
+}}));
+layoutOrderBlocks({{}}, [{{items: entries, labelLines: []}}], 10, 0, 0, 6);
+const first = composedItems[0];
+const second = composedItems[1];
+if (JSON.stringify(first.final_footprint_bounds) !== JSON.stringify([0, 0, 120, -70])) {{
+  throw new Error('first footprint was not placed as one unit: ' + JSON.stringify(first));
+}}
+if (JSON.stringify(second.final_footprint_bounds) !== JSON.stringify([0, -80, 120, -150])) {{
+  throw new Error('second footprint did not reserve the fixed-art gap: ' + JSON.stringify(second));
+}}
+if (first.actual_artwork_bounds[3] - second.actual_artwork_bounds[1] !== 10) {{
+  throw new Error('fixed artwork overlaps the following component');
+}}
+if ((first.final_frame_bounds[2] - first.final_frame_bounds[0]) !== 100) {{
+  throw new Error('logical frame width changed while reserving artwork');
+}}
+"""
+
+    result = subprocess.run([node, "-e", harness], capture_output=True, text=True, check=False)
+
+    assert result.returncode == 0, result.stderr
+    assert "artworkTop = Number(entry.final_footprint_bounds[3]) - gap;" in source
+
+
+def test_color_frame_composer_packs_fixed_artwork_footprints_inside_boundary():
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node.js is unavailable")
+
+    source = Path("scripts/illustrator/compose_color_frames.jsx").read_text(encoding="utf-8")
+    functions = (
+        "packAdaptiveGrid",
+        "placeWholeOrderIntoColumn",
+        "placeOrderIntoColumns",
+        "findBestColumnWindow",
+        "lowestColumn",
+        "addSegment",
+        "updateFragmentMetadata",
+        "finalizeSegment",
+        "componentFootprint",
+        "placeComponentFootprint",
+        "validateArtworkInsideColorFrame",
+        "translateBounds",
+    )
+    executable = "\n".join(_extract_js_function(source, name) for name in functions)
+    harness = f"""
+const labelFontSize = 6;
+function estimateLabelWidth() {{ return 0; }}
+function validBounds(value) {{ return Array.isArray(value) && value.length === 4; }}
+{executable}
+
+const frame = {{frame_bounds: [0, 40, 100, 0], artwork_bounds_after: [-10, 50, 110, -20]}};
+const footprint = componentFootprint(frame);
+const item = {{sourceChildIndex: 0, width: footprint.width, height: footprint.height, target_dimensions: {{}}}};
+const packed = packAdaptiveGrid(
+  [{{sourceIndex: 0, orderNo: 'ORDER-1', items: [item, item]}}],
+  120, 10, 0, 0, 0, 0, 0, 'Gold', true
+);
+if (packed.cellWidth !== 120 || packed.height !== 150) {{
+  throw new Error('fixed artwork footprint was not used by packing: ' + JSON.stringify(packed));
+}}
+const firstItem = packed.placements[0].items[0];
+const secondItem = packed.placements[0].items[1];
+const first = placeComponentFootprint(frame, firstItem.x, -firstItem.y);
+const second = placeComponentFootprint(frame, secondItem.x, -secondItem.y);
+if (first.bounds[3] - second.bounds[1] !== 10) throw new Error('packed fixed artwork overlaps');
+const plan = {{frameLeft: 0, frameHeight: 150, colorOption: 'Gold'}};
+validateArtworkInsideColorFrame(
+  translateBounds(frame.artwork_bounds_after, first.dx, first.dy), plan, 0, 120, 0, 0
+);
+validateArtworkInsideColorFrame(
+  translateBounds(frame.artwork_bounds_after, second.dx, second.dy), plan, 0, 120, 0, 0
+);
+let rejected = false;
+try {{ validateArtworkInsideColorFrame(frame.artwork_bounds_after, plan, 0, 120, 0, 0); }}
+catch (_error) {{ rejected = true; }}
+if (!rejected) throw new Error('out-of-frame artwork was not rejected');
+"""
+
+    result = subprocess.run([node, "-e", harness], capture_output=True, text=True, check=False)
+
+    assert result.returncode == 0, result.stderr
+    assert "var footprint = componentFootprint(componentFrame);" in source
+    assert "validateArtworkInsideColorFrame(actualArtworkBounds" in source
+
+
 def _extract_js_function(source, name):
     start = source.index(f"function {name}(")
     brace = source.index("{", start)

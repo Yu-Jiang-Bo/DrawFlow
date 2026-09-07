@@ -47,6 +47,7 @@ def receive_ai_stream(
     draft_revision: str = "",
     mime_type: str = "",
     relative_to: Path | str | None = None,
+    staging_file_name: str = "",
     chunk_size: int = DEFAULT_CHUNK_SIZE,
     on_chunk: Callable[[int], None] | None = None,
 ) -> dict[str, Any]:
@@ -54,16 +55,18 @@ def receive_ai_stream(
 
     chunk_size = _valid_chunk_size(chunk_size)
     final_name = _valid_ai_name(file_name)
+    disk_name = _valid_ai_name(staging_file_name) if staging_file_name else final_name
     target_dir = Path(destination_dir)
-    final_path = target_dir / final_name
-    temporary = target_dir / f".{final_name}.{uuid4().hex}.tmp"
+    final_path = target_dir / disk_name
+    temporary: Path | None = None
 
     target_dir.mkdir(parents=True, exist_ok=True)
     digest = hashlib.sha256()
     size_bytes = 0
 
     try:
-        with temporary.open("xb") as output:
+        temporary, output = _open_short_temporary(target_dir, "df-upload")
+        with output:
             while True:
                 chunk = source.read(chunk_size)
                 if chunk == b"":
@@ -100,12 +103,12 @@ def receive_ai_stream(
 
     base = Path(relative_to) if relative_to is not None else target_dir.parent
     return {
-        "file_name": final_path.name,
+        "file_name": final_name,
         "role": str(role or ""),
         "path": _relative_posix(final_path, base),
         "size_bytes": size_bytes,
         "sha256": digest.hexdigest(),
-        "mime_type": _mime_type(final_path.name, mime_type),
+        "mime_type": _mime_type(final_name, mime_type),
         "extension": AI_EXTENSION,
         "scan_version": str(scan_version or ""),
         "draft_version": str(draft_version or ""),
@@ -125,13 +128,16 @@ def download_stream_to_file(
     chunk_size = _valid_chunk_size(chunk_size)
     expected = _valid_expected_sha256(expected_sha256)
     target = Path(final_path)
-    temporary = target.with_name(f".{target.name}.{uuid4().hex}.download")
+    # Keep staging names short: trial-render destinations can already approach
+    # Windows' legacy path limit before a UUID is appended.
+    temporary: Path | None = None
     target.parent.mkdir(parents=True, exist_ok=True)
 
     digest = hashlib.sha256()
     size_bytes = 0
     try:
-        with temporary.open("xb") as output:
+        temporary, output = _open_short_temporary(target.parent, "df-download")
+        with output:
             while True:
                 chunk = source.read(chunk_size)
                 if chunk == b"":
@@ -293,7 +299,19 @@ def _relative_posix(path: Path, base: Path) -> str:
     except ValueError:
         return path.name
 
-def _delete_file(path: Path) -> None:
+def _open_short_temporary(directory: Path, prefix: str) -> tuple[Path, BinaryIO]:
+    for _attempt in range(8):
+        temporary = directory / f".{prefix}-{uuid4().hex[:16]}"
+        try:
+            return temporary, temporary.open("xb")
+        except FileExistsError:
+            continue
+    raise FileExistsError(f"Unable to reserve a temporary {prefix} file")
+
+
+def _delete_file(path: Path | None) -> None:
+    if path is None:
+        return
     try:
         path.unlink(missing_ok=True)
     except OSError:

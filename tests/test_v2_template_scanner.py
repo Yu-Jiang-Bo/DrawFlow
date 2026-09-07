@@ -128,7 +128,7 @@ def test_normalizes_scan_with_stable_sorting_and_digest():
     assert a["evidence"]["scan_protocol_version"] == V2_SCAN_PROTOCOL_VERSION
 
 
-def test_accepts_single_output_alias_and_spaced_design_font_names():
+def test_blocks_spaced_or_wrong_case_design_font_names_without_rewriting_them():
     result = normalize_v2_template_scan(
         base_raw_scan(
             group("Template", "Template"),
@@ -152,14 +152,14 @@ def test_accepts_single_output_alias_and_spaced_design_font_names():
         )
     )
 
-    output = result["outputs"][0]
-    assert result["blocked"] is False
-    assert output["key"] == "Output_main"
-    assert [option["key"] for option in output["design"]["options"]] == ["Design1", "design19"]
-    assert [option["key"] for option in output["font"]["options"]] == ["F1", "f2"]
+    assert result["blocked"] is True
+    assert result["outputs"][0]["key"] == "Output_main"
+    assert result["outputs"][0]["design"]["options"] == []
+    assert result["outputs"][0]["font"]["options"] == []
+    assert {"design_option_name_invalid", "font_option_name_invalid"} <= issue_codes(result)
 
 
-def test_blocks_equivalent_output_and_option_names_after_normalization():
+def test_distinguishes_zero_padded_option_keys_but_blocks_equivalent_outputs():
     duplicate_output = normalize_v2_template_scan(
         base_raw_scan(
             group("Template", "Template"),
@@ -181,8 +181,30 @@ def test_blocks_equivalent_output_and_option_names_after_normalization():
 
     assert duplicate_output["blocked"] is True
     assert "duplicate_output" in issue_codes(duplicate_output)
-    assert duplicate_design["blocked"] is True
-    assert "duplicate_design_option" in issue_codes(duplicate_design)
+    assert duplicate_design["blocked"] is False
+    assert "duplicate_design_option" not in issue_codes(duplicate_design)
+    assert [option["key"] for option in duplicate_design["outputs"][0]["design"]["options"]] == [
+        "Design1",
+        "Design01",
+    ]
+
+
+def test_distinguishes_zero_padded_font_option_keys():
+    result = normalize_v2_template_scan(
+        base_raw_scan(
+            group("Template", "Template"),
+            group("Template/Output", "Output"),
+            group("Template/Output/Font", "Font"),
+            group("Template/Output/Font/F1", "F1"),
+            text("Template/Output/Font/F1/slot_name", "slot_name"),
+            group("Template/Output/Font/F01", "F01"),
+            text("Template/Output/Font/F01/slot_title", "slot_title"),
+        )
+    )
+
+    assert result["blocked"] is False
+    assert "duplicate_font_option" not in issue_codes(result)
+    assert [option["key"] for option in result["outputs"][0]["font"]["options"]] == ["F1", "F01"]
 
 
 def test_single_text_font_without_slot_becomes_default_font_reference():

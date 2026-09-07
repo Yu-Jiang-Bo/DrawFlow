@@ -144,8 +144,8 @@ _EXECUTION_TEXT_RE = re.compile(
 _SAFE_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 _OUTPUT_MAIN_RE = re.compile(r"^Output_main$")
 _OUTPUT_SIDE_RE = re.compile(r"^Output_Side([A-Z])$")
-_DESIGN_RE = re.compile(r"^Design\d{2,}$")
-_FONT_RE = re.compile(r"^F[1-9]\d*$")
+_DESIGN_RE = re.compile(r"^Design0*[1-9]\d*$")
+_FONT_RE = re.compile(r"^F0*[1-9]\d*$")
 _STYLE_RE = re.compile(r"^style[1-9]\d*$", re.I)
 _SLOT_RE = re.compile(r"^slot_[A-Za-z0-9_]+$")
 _ANCHOR_RE = re.compile(r"^anchor_[A-Za-z0-9_]+$")
@@ -335,7 +335,7 @@ def _normalize_option(value: Any, kind: str, path: str, issues: list[Dict[str, s
     if key and kind == "style" and not _STYLE_RE.match(key):
         _issue(issues, f"{path}.key", "Style options must use style1/style2/... names.")
     if key and kind == "design" and not _DESIGN_RE.match(key):
-        _issue(issues, f"{path}.key", "Design options must use full names such as Design03.")
+        _issue(issues, f"{path}.key", "Design options must use template names such as Design1 or Design03.")
     if key and kind == "font" and not _FONT_RE.match(key):
         _issue(issues, f"{path}.key", "Font options must keep business names such as F1 or F12.")
     normalized = {

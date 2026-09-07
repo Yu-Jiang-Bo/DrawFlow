@@ -184,10 +184,12 @@
                     if (destinationLeft < plan.frameLeft + margin - 0.01 || destinationLeft + item.width > plan.frameLeft + width - margin + 0.01) {
                         throw new Error("Packed order sub-item exceeds target width: " + plan.colorOption + " / " + placement.orderNo);
                     }
-                    var dx = destinationLeft - componentFrame.frame_bounds[0];
-                    var dy = destinationTop - componentFrame.frame_bounds[1];
+                    var componentPlacement = placeComponentFootprint(componentFrame, destinationLeft, destinationTop);
+                    var dx = componentPlacement.dx;
+                    var dy = componentPlacement.dy;
                     var copyCoordinateTranslation = placeArtworkAtExpected(copy, componentFrame.artwork_bounds_after, dx, dy, "color frame placement");
                     var actualArtworkBounds = verifyTranslatedArtwork(copy, componentFrame.artwork_bounds_after, dx, dy, "color frame placement");
+                    validateArtworkInsideColorFrame(actualArtworkBounds, plan, frameTop, width, margin, labelBandHeight);
                     contracts.push({
                         key: String(componentFrame.key || ""),
                         source_frame_bounds: copyBounds(componentFrame.frame_bounds),
@@ -289,8 +291,9 @@
                     var target = requestedDimensions || {};
                     if (hasDimensionFields(requestedDimensions) && (!target.width_mm || !target.height_mm)) throw new Error("V2 color frame target dimensions missing");
                     validateRequestedDimensions(componentFrame, target);
-                    var itemWidth = Number(componentFrame.frame_bounds[2]) - Number(componentFrame.frame_bounds[0]);
-                    var itemHeight = Number(componentFrame.frame_bounds[1]) - Number(componentFrame.frame_bounds[3]);
+                    var footprint = componentFootprint(componentFrame);
+                    var itemWidth = footprint.width;
+                    var itemHeight = footprint.height;
                     if (itemWidth <= 0 || itemHeight <= 0) throw new Error("Order sub-item has empty component frame");
                     orderItems.push({
                         sourceChildIndex: sourceSubItems[childIndex].sourceChildIndex,
@@ -728,6 +731,42 @@
 
     function translateBounds(bounds, dx, dy) {
         return [Number(bounds[0]) + Number(dx), Number(bounds[1]) + Number(dy), Number(bounds[2]) + Number(dx), Number(bounds[3]) + Number(dy)];
+    }
+
+    function componentFootprint(frame) {
+        var logical = frame.frame_bounds;
+        var artwork = frame.artwork_bounds_after;
+        if (!validBounds(logical) || !validBounds(artwork)) throw new Error("V2 component footprint bounds missing");
+        var bounds = [
+            Math.min(Number(logical[0]), Number(artwork[0])),
+            Math.max(Number(logical[1]), Number(artwork[1])),
+            Math.max(Number(logical[2]), Number(artwork[2])),
+            Math.min(Number(logical[3]), Number(artwork[3]))
+        ];
+        return {
+            bounds: bounds,
+            width: Number(bounds[2]) - Number(bounds[0]),
+            height: Number(bounds[1]) - Number(bounds[3])
+        };
+    }
+
+    function placeComponentFootprint(frame, left, top) {
+        var footprint = componentFootprint(frame);
+        var dx = Number(left) - Number(footprint.bounds[0]);
+        var dy = Number(top) - Number(footprint.bounds[1]);
+        return {dx: dx, dy: dy, bounds: translateBounds(footprint.bounds, dx, dy)};
+    }
+
+    function validateArtworkInsideColorFrame(bounds, plan, frameTop, width, margin, labelBandHeight) {
+        var left = Number(plan.frameLeft) + Number(margin);
+        var right = Number(plan.frameLeft) + Number(width) - Number(margin);
+        var top = Number(frameTop) - Number(margin) - Number(labelBandHeight);
+        var bottom = Number(frameTop) - Number(plan.frameHeight) + Number(margin);
+        var epsilon = 0.01;
+        if (Number(bounds[0]) < left - epsilon || Number(bounds[2]) > right + epsilon
+            || Number(bounds[1]) > top + epsilon || Number(bounds[3]) < bottom - epsilon) {
+            throw new Error("Packed artwork exceeds color frame footprint: " + plan.colorOption);
+        }
     }
 
     function copyBounds(bounds) {

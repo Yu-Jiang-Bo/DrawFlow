@@ -541,11 +541,38 @@ def test_allows_incomplete_multi_output_draft_for_publication_checks():
     assert [output["key"] for output in result["contract"]["outputs"]] == ["Output_SideA", "Output_SideC"]
 
 
-def test_rejects_design_short_names_and_bad_font_names():
+def test_accepts_exact_scanned_design_and_font_names_with_or_without_zero_padding():
     payload = pure_design_contract()
-    payload["outputs"][0]["design"]["options"][0]["key"] = "03"
-    payload["outputs"][0]["design"]["options"][1]["key"] = "Design5"
-    payload["outputs"][0]["font"] = {"field": "font", "options": [{"key": "Font10"}]}
+    payload["outputs"][0]["design"]["options"][0]["key"] = "Design1"
+    payload["outputs"][0]["font"] = {"field": "font", "options": [{"key": "F01"}]}
+    payload["field_bindings"]["font"] = "Font"
+    payload["option_mappings"] = [
+        {
+            "field": "design",
+            "source_value": "1",
+            "target": "Design1",
+            "output": "Output_main",
+            "group": "design",
+        },
+        {
+            "field": "font",
+            "source_value": "01",
+            "target": "F01",
+            "output": "Output_main",
+            "group": "font",
+        },
+    ]
+
+    result = check_v2_template_contract(payload)
+
+    assert result["ok"] is True
+
+
+def test_rejects_invalid_design_names_and_bad_font_names():
+    payload = pure_design_contract()
+    payload["outputs"][0]["design"]["options"][0]["key"] = "design1"
+    payload["outputs"][0]["design"]["options"][1]["key"] = "DesignX"
+    payload["outputs"][0]["font"] = {"field": "font", "options": [{"key": "f01"}]}
 
     result = check_v2_template_contract(payload)
 

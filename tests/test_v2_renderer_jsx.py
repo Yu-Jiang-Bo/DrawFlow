@@ -1040,7 +1040,9 @@ def test_v2_renderer_preserves_fixed_art_size_during_non_uniform_output_fit(
         "values": {"design": "03", "name": "Design sample"},
         "selections": {"Output_main": {"design": "Design03"}},
         "mock_fixed_annotation_name": fixed_marker,
-        "mock_fixed_bounds": [65, 30, 85, 10],
+        "mock_anchor_name_bounds": [0, 80, 100, 40],
+        "mock_design_slot_bounds": [0, 80, 100, 40],
+        "mock_fixed_bounds": [-35, 30, -15, 10],
         "render_task": {
             "$schema": "custom-renderer/v2-render-task",
             "outputs": [
@@ -1085,9 +1087,9 @@ if (Math.abs(width - 20) > 0.1 || Math.abs(height - 20) > 0.1) {
 }
 const fixedCenterX = (fixed.visibleBounds[0] + fixed.visibleBounds[2]) / 2;
 const fixedCenterY = (fixed.visibleBounds[1] + fixed.visibleBounds[3]) / 2;
-if (Math.abs(fixedCenterX - 50) > 0.1 || Math.abs(fixedCenterY - 20) > 0.1) {
-  throw new Error('fixed art center was not mapped by output fit: actual=' + fixedCenterX + ',' + fixedCenterY
-    + ', expected=50,20');
+const slotBounds = child(designCopy, 'slot_name').visibleBounds;
+if (fixedCenterX >= slotBounds[0] || fixedCenterY >= slotBounds[3]) {
+  throw new Error('fixed art was moved into its editable design frame: ' + fixedCenterX + ',' + fixedCenterY);
 }
 if (fixed.resizeCalls < 2 || fixed.translateCalls < 1) {
   throw new Error('fixed art was not restored and repositioned after output fit');
@@ -1102,8 +1104,9 @@ const frameHeight = frame.frame_bounds[1] - frame.frame_bounds[3];
 if (Math.abs(frameWidth - 100.00062992125984) > 0.001 || Math.abs(frameHeight - 39.99968503937008) > 0.001) {
   throw new Error('component logical frame dimensions drifted: ' + JSON.stringify(frame));
 }
-if (Math.abs(frame.frame_bounds[0]) > 0.001 || Math.abs(frame.frame_bounds[1] - 40) > 0.001) {
-  throw new Error('component logical frame origin drifted: ' + JSON.stringify(frame));
+if (Math.abs(frame.frame_bounds[0]) > 0.001 || Math.abs(frame.frame_bounds[1] - 80) > 0.001
+    || Math.abs(frame.frame_bounds[3] - 40) > 0.001) {
+  throw new Error('component logical frame did not follow the editable anchor: ' + JSON.stringify(frame));
 }
 """.replace("__FIXED_MARKER__", json.dumps(fixed_marker)).replace(
         "__PACK_ORDER_BLOCKS__", json.dumps(pack_order_blocks)
@@ -1234,7 +1237,189 @@ if (fixedCenterX >= 100) {
     assert result.returncode == 0, result.stderr
 
 
-def test_v2_renderer_rejects_fixed_art_that_cannot_fit_output_bounds():
+def test_v2_renderer_keeps_each_fixed_art_with_its_own_root_after_global_fit():
+    task = {
+        "$schema": "custom-renderer/v2-render-execution",
+        "template_ai": "template.ai",
+        "output_ai": "out.ai",
+        "values": {"design": "03", "font": "F1"},
+        "selections": {"Output_main": {"design": "Design03", "font": "F1"}},
+        "mock_anchor_name_bounds": [0, 70, 100, 30],
+        "mock_design_slot_bounds": [0, 70, 100, 30],
+        "mock_fixed_annotation_name": "fixed",
+        "mock_fixed_bounds": [45, 0, 65, -20],
+        "mock_f1_slot_bounds": [1000, 1000, 2000, 0],
+        "render_task": {
+            "$schema": "custom-renderer/v2-render-task",
+            "outputs": [
+                {
+                    "key": "Output_main",
+                    "actions": [
+                        {
+                            "type": "copy_option_group",
+                            "group": "design",
+                            "option_key": "Design03",
+                            "object_path": "Template/Output_main/Design/Design03",
+                        },
+                        {
+                            "type": "copy_option_group",
+                            "group": "font",
+                            "option_key": "F1",
+                            "object_path": "Template/Output_main/Font/F1",
+                        },
+                        {
+                            "type": "fit_output_bounds",
+                            "group": "design",
+                            "option_key": "Design03",
+                            "dimensions": {"width_mm": 35.2777777778, "height_mm": 21.1666666667},
+                        },
+                    ],
+                }
+            ],
+        },
+    }
+
+    harness = node_mock_harness(task, """
+const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
+const fixed = child(designCopy, 'fixed');
+const variableItems = designCopy.pageItems.filter(item => item.name !== 'fixed');
+const variableBounds = variableItems.map(item => item.visibleBounds).reduce((result, bounds) => [
+  Math.min(result[0], bounds[0]), Math.max(result[1], bounds[1]),
+  Math.max(result[2], bounds[2]), Math.min(result[3], bounds[3])
+]);
+const fixedWidth = fixed.visibleBounds[2] - fixed.visibleBounds[0];
+const fixedHeight = fixed.visibleBounds[1] - fixed.visibleBounds[3];
+if (Math.abs(fixedWidth - 20) > 0.04 || Math.abs(fixedHeight - 20) > 0.04) {
+  throw new Error('fixed art size changed during multi-root fit');
+}
+if (fixed.visibleBounds[1] > variableBounds[3] + 0.04) {
+  throw new Error('fixed art was mapped against the global output instead of its design root: fixed='
+    + fixed.visibleBounds + ', variable=' + variableBounds);
+}
+""")
+
+    result = run_node(harness)
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_v2_renderer_keeps_fixed_art_below_its_anchor_frame():
+    task = {
+        "$schema": "custom-renderer/v2-render-execution",
+        "template_ai": "template.ai",
+        "output_ai": "out.ai",
+        "output": {"outline_text": False, "pathfinder_merge": False},
+        "values": {"design": "03"},
+        "selections": {"Output_main": {"design": "Design03"}},
+        "mock_anchor_name_bounds": [0, 70, 100, 30],
+        "mock_design_slot_bounds": [0, 70, 100, 30],
+        "mock_fixed_annotation_name": "fixed",
+        "mock_fixed_bounds": [45, 0, 65, -20],
+        "render_task": {
+            "$schema": "custom-renderer/v2-render-task",
+            "outputs": [
+                {
+                    "key": "Output_main",
+                    "actions": [
+                        {
+                            "type": "copy_option_group",
+                            "group": "design",
+                            "option_key": "Design03",
+                            "object_path": "Template/Output_main/Design/Design03",
+                        },
+                        {
+                            "type": "fit_output_bounds",
+                            "group": "design",
+                            "option_key": "Design03",
+                            "dimensions": {"width_mm": 35.2777777778, "height_mm": 21.1666666667},
+                        },
+                    ],
+                }
+            ],
+        },
+    }
+
+    harness = node_mock_harness(task, """
+const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
+const fixed = child(designCopy, 'fixed');
+const variableItems = designCopy.pageItems.filter(item => item.name !== 'fixed');
+const variableBounds = variableItems.map(item => item.visibleBounds).reduce((result, bounds) => [
+  Math.min(result[0], bounds[0]), Math.max(result[1], bounds[1]),
+  Math.max(result[2], bounds[2]), Math.min(result[3], bounds[3])
+]);
+const variableWidth = variableBounds[2] - variableBounds[0];
+const variableHeight = variableBounds[1] - variableBounds[3];
+const fixedWidth = fixed.visibleBounds[2] - fixed.visibleBounds[0];
+const fixedHeight = fixed.visibleBounds[1] - fixed.visibleBounds[3];
+if (Math.abs(variableWidth - 100) > 0.04 || Math.abs(variableHeight - 60) > 0.04) {
+  throw new Error('editable frame did not match its anchor: ' + variableWidth + 'x' + variableHeight);
+}
+if (Math.abs(fixedWidth - 20) > 0.04 || Math.abs(fixedHeight - 20) > 0.04) {
+  throw new Error('fixed art size changed: ' + fixedWidth + 'x' + fixedHeight);
+}
+if (fixed.visibleBounds[1] > variableBounds[3] + 0.04) {
+  throw new Error('fixed art moved into the editable frame');
+}
+""")
+
+    result = run_node(harness)
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_v2_renderer_preserves_anchor_until_final_fixed_art_positioning():
+    task = {
+        "$schema": "custom-renderer/v2-render-execution",
+        "template_ai": "template.ai",
+        "output_ai": "out.ai",
+        "values": {"design": "03"},
+        "selections": {"Output_main": {"design": "Design03"}},
+        "capture_removed_anchors": True,
+        "mock_anchor_name_bounds": [0, 100, 100, 50],
+        "mock_design_slot_bounds": [20, 90, 80, 60],
+        "mock_fixed_annotation_name": "fixed",
+        "mock_fixed_bounds": [45, 30, 65, 10],
+        "render_task": {
+            "$schema": "custom-renderer/v2-render-task",
+            "outputs": [
+                {
+                    "key": "Output_main",
+                    "actions": [
+                        {
+                            "type": "copy_option_group",
+                            "group": "design",
+                            "option_key": "Design03",
+                            "object_path": "Template/Output_main/Design/Design03",
+                        },
+                        {
+                            "type": "fit_output_bounds",
+                            "group": "design",
+                            "option_key": "Design03",
+                            "dimensions": {"width_mm": 35.2777777778, "height_mm": 17.6388888889},
+                        },
+                    ],
+                }
+            ],
+        },
+    }
+
+    harness = node_mock_harness(task, """
+const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
+const fixed = child(designCopy, 'fixed');
+const removedAnchor = removedAnchors.find(item => item.name === 'anchor_name');
+if (!removedAnchor) throw new Error('anchor was not retained through final output positioning');
+if (fixed.visibleBounds[1] > removedAnchor.bounds[3] + 0.04) {
+  throw new Error('fixed art was not positioned below its final anchor: fixed='
+    + fixed.visibleBounds + ', anchor=' + removedAnchor.bounds);
+}
+""")
+
+    result = run_node(harness)
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_v2_renderer_excludes_fixed_art_from_output_dimension_validation():
     task = {
         "$schema": "custom-renderer/v2-render-execution",
         "template_ai": "template.ai",
@@ -1267,10 +1452,29 @@ def test_v2_renderer_rejects_fixed_art_that_cannot_fit_output_bounds():
         },
     }
 
-    result = run_node(node_mock_harness(task, ""))
+    harness = node_mock_harness(task, """
+const designCopy = outputLayer.pageItems.find(item => item.name === 'Design03');
+const fixed = child(designCopy, 'fixed');
+const variableItems = designCopy.pageItems.filter(item => item.name !== 'fixed');
+const variableBounds = variableItems.map(item => item.visibleBounds).reduce((result, bounds) => [
+  Math.min(result[0], bounds[0]), Math.max(result[1], bounds[1]),
+  Math.max(result[2], bounds[2]), Math.min(result[3], bounds[3])
+]);
+const variableWidth = variableBounds[2] - variableBounds[0];
+const variableHeight = variableBounds[1] - variableBounds[3];
+const fixedWidth = fixed.visibleBounds[2] - fixed.visibleBounds[0];
+const fixedHeight = fixed.visibleBounds[1] - fixed.visibleBounds[3];
+if (Math.abs(variableWidth - 100) > 0.04 || Math.abs(variableHeight - 40) > 0.04) {
+  throw new Error('editable frame did not match final output bounds: ' + variableWidth + 'x' + variableHeight);
+}
+if (Math.abs(fixedWidth - 160) > 0.04 || Math.abs(fixedHeight - 120) > 0.04) {
+  throw new Error('fixed art should not be shrunk to the output frame');
+}
+""")
 
-    assert result.returncode != 0
-    assert "V2 output exceeds target bounds or does not match target bounds" in result.stderr
+    result = run_node(harness)
+
+    assert result.returncode == 0, result.stderr
 
 
 def test_v2_renderer_ignores_sub_tolerance_text_fit_rounding_warning():
@@ -3053,6 +3257,7 @@ let savedArtboard = null;
 let exportedAs = '';
 let exportOptions = null;
 const writtenFiles = {{}};
+const removedAnchors = [];
 let decoratedTailOutlineCalls = 0;
 global.$ = {{ getenv: () => 'task.json', global: {{}} }};
 global.File = function(path) {{
@@ -3152,6 +3357,9 @@ function item(typename, name, contents, children, styleToken, bounds, options) {
       return outlined;
     }},
     remove: function() {{
+      if (task.capture_removed_anchors && /^anchor_/.test(String(this.name || ''))) {{
+        removedAnchors.push({{ name: this.name, bounds: this.visibleBounds.slice() }});
+      }}
       if (!this.parent || !this.parent.pageItems) return;
       const index = this.parent.pageItems.indexOf(this);
       if (index >= 0) this.parent.pageItems.splice(index, 1);

@@ -1,8 +1,10 @@
 import hashlib
 import io
+from pathlib import Path
 
 import pytest
 
+import src.service.v2_template_transfer as transfer_module
 from src.service.v2_template_transfer import (
     TransferError,
     atomic_switch_verified_file,
@@ -90,7 +92,56 @@ def test_interrupted_upload_keeps_existing_asset_and_cleans_temp_file(tmp_path):
 
     assert exc.value.code == "stream_interrupted"
     assert existing.read_bytes() == b"old-ai"
-    assert not [item for item in destination.iterdir() if item.name.startswith(".template.ai.") and item.suffix == ".tmp"]
+    assert not [item for item in destination.iterdir() if item.name.startswith(".df-upload-")]
+
+
+def test_upload_uses_short_staging_name_for_long_ai_filename(tmp_path, monkeypatch):
+    destination = tmp_path / "assets"
+    final_name = "a" * 220 + ".ai"
+    payload = b"long-name-ai"
+    opened = []
+    original_open = Path.open
+
+    def record_staging_open(path, mode="r", *args, **kwargs):
+        if mode == "xb":
+            opened.append(path)
+        return original_open(path, mode, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", record_staging_open)
+
+    record = receive_ai_stream(
+        TrackingStream(payload),
+        destination,
+        final_name,
+        staging_file_name="upload.ai",
+    )
+
+    assert opened and opened[0].name.startswith(".df-upload-")
+    assert len(opened[0].name) == len(".df-upload-") + 16
+    assert final_name not in opened[0].name
+    assert (destination / "upload.ai").read_bytes() == payload
+    assert record["file_name"] == final_name
+    assert record["path"].endswith("/upload.ai")
+
+
+def test_upload_temp_collision_does_not_overwrite_or_delete_existing_file(tmp_path, monkeypatch):
+    destination = tmp_path / "assets"
+    destination.mkdir()
+    collision = destination / (".df-upload-" + "1" * 16)
+    collision.write_bytes(b"keep-me")
+    values = iter(["1" * 32, "2" * 32])
+
+    class FakeUuid:
+        def __init__(self, value):
+            self.hex = value
+
+    monkeypatch.setattr(transfer_module, "uuid4", lambda: FakeUuid(next(values)))
+
+    receive_ai_stream(TrackingStream(b"new-ai"), destination, "template.ai")
+
+    assert collision.read_bytes() == b"keep-me"
+    assert (destination / "template.ai").read_bytes() == b"new-ai"
+    assert not (destination / (".df-upload-" + "2" * 16)).exists()
 
 
 def test_download_sha256_mismatch_does_not_switch_existing_file_and_cleans_temp(tmp_path):
@@ -120,6 +171,40 @@ def test_download_stream_verifies_sha256_and_atomically_switches(tmp_path):
     assert final.read_bytes() == payload
     assert stream.read_sizes == [4, 4, 4, 4, 4]
     assert record == {"path": str(final), "size_bytes": len(payload), "sha256": sha256_bytes(payload)}
+
+
+def test_download_uses_a_short_staging_name_for_deep_destinations(tmp_path, monkeypatch):
+    destination = tmp_path
+    # A 225-character final path is valid on legacy Windows, while the former
+    # staging convention pushed it beyond the 260-character path limit.
+    while len(str(destination / "template-bundle.zip")) < 225:
+        destination /= "deep-cache-segment"
+    final = destination / "template-bundle.zip"
+    final.parent.mkdir(parents=True)
+    final.write_bytes(b"old-bundle")
+    payload = b"new-bundle-bytes"
+    opened = []
+    original_open = Path.open
+
+    def record_staging_open(path, mode="r", *args, **kwargs):
+        if mode == "xb":
+            opened.append(path)
+        return original_open(path, mode, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", record_staging_open)
+
+    download_stream_to_file(
+        TrackingStream(payload),
+        final,
+        expected_sha256=sha256_bytes(payload),
+    )
+
+    legacy_staging = final.with_name(f".{final.name}.{'f' * 32}.tmp")
+    assert len(str(legacy_staging)) > 260
+    assert opened and opened[0].name.startswith(".df-download-")
+    assert len(opened[0].name) == len(".df-download-") + 16
+    assert len(str(opened[0])) < 260
+    assert final.read_bytes() == payload
 
 
 def test_file_chunk_iterator_and_atomic_switch_helper_are_bounded(tmp_path):

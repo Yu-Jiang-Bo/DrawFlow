@@ -24,8 +24,8 @@ V2_STATUS_PENDING = "pending"
 _PT_TO_MM = 25.4 / 72.0
 _GROUP_TYPES = {"group", "groupitem", "layer"}
 _OUTPUT_SIDE_RE = re.compile(r"^Output_Side([A-Z])$", re.I)
-_DESIGN_RE = re.compile(r"^Design(?P<number>0*[1-9]\d*)$", re.I)
-_FONT_RE = re.compile(r"^F(?P<number>0*[1-9]\d*)$", re.I)
+_DESIGN_RE = re.compile(r"^Design0*[1-9]\d*$")
+_FONT_RE = re.compile(r"^F0*[1-9]\d*$")
 _STYLE_RE = re.compile(r"^style[1-9]\d*$", re.I)
 _TAIL_KEY_RE = re.compile(r"^tail_(?P<field>[A-Za-z0-9_]+)_(?P<position>first|last)_(?P<sample>[A-Za-z])$", re.I)
 
@@ -737,13 +737,9 @@ def _norm(value: str) -> str:
     return str(value or "").strip().lower()
 
 
-def _without_whitespace(value: str) -> str:
-    return re.sub(r"\s+", "", str(value or "").strip())
-
-
 def _option_name_match(kind: str, value: str) -> re.Match[str] | None:
     rules = {"style": _STYLE_RE, "design": _DESIGN_RE, "font": _FONT_RE}
-    return rules[kind].match(_without_whitespace(value))
+    return rules[kind].match(str(value or "").strip())
 
 
 def _is_option_name(kind: str, value: str) -> bool:
@@ -751,18 +747,14 @@ def _is_option_name(kind: str, value: str) -> bool:
 
 
 def _normalized_option_key(_kind: str, value: str) -> str:
-    raw = str(value or "").strip()
-    return _without_whitespace(raw) if any(char.isspace() for char in raw) else raw
+    return str(value or "").strip()
 
 
 def _option_identity(kind: str, value: str) -> str:
-    match = _option_name_match(kind, value)
-    if match is None:
-        return _norm(_without_whitespace(value))
+    raw = str(value or "").strip()
     if kind == "style":
-        return _norm(value)
-    prefix = "design" if kind == "design" else "f"
-    return f"{prefix}{int(match.group('number'))}"
+        return _norm(raw)
+    return raw
 
 
 def _is_group(item: Mapping[str, Any]) -> bool:

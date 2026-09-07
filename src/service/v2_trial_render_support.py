@@ -21,7 +21,7 @@ class V2TrialRenderError(RuntimeError):
         self.technical_message = technical_message
 
 
-_FONT_OPTION_MARKER_RE = re.compile(r"^F[1-9]\d*$", re.IGNORECASE)
+_FONT_OPTION_MARKER_RE = re.compile(r"^F0*[1-9]\d*$")
 
 
 def sample_row(value: Mapping[str, Any]) -> dict[str, str]:

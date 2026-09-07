@@ -5,10 +5,11 @@ import io
 
 import pytest
 
+from src.service import v2_template_api
 from src.service.v2_template_api import V2TemplateApi, V2TemplateApiError, handle_v2_template_api
 from src.service.v2_template_contract import V2_CONTRACT_SCHEMA, V2_CONTRACT_VERSION
 from src.service.v2_template_limits import V2TemplateLimitConfig, V2UploadConcurrencyGate
-from src.service.v2_template_store import V2TemplateStore
+from src.service.v2_template_store import V2TemplateStore, V2TemplateStoreError
 from src.service.v2_scan_worker_auth import scan_evidence_sha256, sign_scan_worker_challenge
 
 
@@ -763,6 +764,30 @@ def test_v2_api_uploads_ai_asset_as_stream_and_records_manifest_metadata(tmp_pat
     assert (tmp_path / "v2" / "audit.jsonl").read_text(encoding="utf-8")
 
 
+def test_v2_api_uses_a_short_upload_staging_path(tmp_path, monkeypatch):
+    store = V2TemplateStore(tmp_path / "central" / "v2-templates")
+    api = V2TemplateApi(store)
+    api.create_template({"template_id": "JJMB202511201110061195", "name": "API Demo"})
+    captured = {}
+
+    def record_destination(*args, **kwargs):
+        captured["directory"] = args[1]
+        raise V2TemplateStoreError("upload staging captured")
+
+    monkeypatch.setattr(v2_template_api, "receive_ai_stream", record_destination)
+    with pytest.raises(V2TemplateStoreError, match="upload staging captured"):
+        api.upload_asset(
+            "JJMB202511201110061195",
+            "JJMB202511201110061195.ai",
+            TrackingStream(b"ai-bytes"),
+            content_length=8,
+            headers={},
+        )
+
+    assert captured["directory"].parent == tmp_path / "central" / "_tmp"
+    assert "JJMB202511201110061195" not in {path.name for path in captured["directory"].parents}
+
+
 def test_v2_http_upload_reads_only_declared_content_length(tmp_path):
     api = api_for(tmp_path)
     api.create_template({"template_id": "V2API001", "name": "API Demo"})
@@ -909,6 +934,28 @@ def test_v2_http_bridge_logs_internal_code_and_cause_chain(tmp_path, caplog):
     assert "v2_payload_rejected" in log_text
     assert "cause_chain" in log_text
     assert "V2TemplateApiError" in log_text
+
+
+def test_v2_http_bridge_logs_streamed_asset_io_cause_without_exposing_path(caplog):
+    private_path = r"C:\\private\\v2\\template.ai"
+
+    class FailingApi:
+        def handle(self, method, parts, payload):
+            try:
+                raise FileNotFoundError(private_path)
+            except FileNotFoundError as exc:
+                raise V2TemplateStoreError("V2 storage write failed") from exc
+
+    handler = FakeHandler(FailingApi(), {})
+
+    assert handle_v2_template_api(handler, "GET", "/api/v2/templates", ["api", "v2", "templates"])
+
+    error, status = handler.sent[-1]
+    assert status == HTTPStatus.BAD_REQUEST
+    assert error["error"]["code"] == "v2_invalid_request"
+    assert private_path not in str(error)
+    assert "FileNotFoundError" in caplog.text
+    assert private_path in caplog.text
 
 
 def test_v2_bundle_download_bridge_streams_zip_file(tmp_path):
