@@ -10,11 +10,13 @@ from ..renderer.illustrator_bridge import IllustratorBridge, IllustratorBridgeEr
 
 
 PRODUCTION_BATCH_COM_RETRY_ATTEMPTS = 3
+PRODUCTION_BATCH_INTERNAL_ERROR_RETRY_ATTEMPTS = 1
 PRODUCTION_BATCH_COM_RETRY_DELAY_SECONDS = 5.0
 # DispatchEx returns before Illustrator has finished shutting down the previous
 # private process.  A short delay is not sufficient after large outlined AI8
 # batches; starting the next process too early can reject DoJavaScript calls.
 PRODUCTION_BATCH_CHUNK_DELAY_SECONDS = 5.0
+ILLUSTRATOR_INTERNAL_AUTOMATION_ERROR = "1095724867 ('AOoC')"
 
 
 def render_production_batch_files(batch_files: Iterable[Path], visible: bool) -> None:
@@ -63,14 +65,22 @@ def _new_isolated_bridge(visible: bool) -> IllustratorBridge:
 
 
 def _render_production_batch_chunk(bridge: IllustratorBridge, script: Path, task_file: Path) -> None:
-    for attempt in range(PRODUCTION_BATCH_COM_RETRY_ATTEMPTS):
+    com_retries = 0
+    internal_error_retries = 0
+    while True:
         try:
             bridge.render(script, task_file)
             return
         except IllustratorBridgeError as exc:
-            if attempt + 1 >= PRODUCTION_BATCH_COM_RETRY_ATTEMPTS or not _is_retryable_batch_failure(exc):
-                if _is_retryable_batch_failure(exc):
-                    raise IllustratorBridgeError(_format_batch_recovery_message(exc, retries=attempt)) from exc
+            if _is_retryable_illustrator_internal_failure(exc):
+                if internal_error_retries >= PRODUCTION_BATCH_INTERNAL_ERROR_RETRY_ATTEMPTS:
+                    raise
+                internal_error_retries += 1
+            elif _is_retryable_batch_failure(exc):
+                if com_retries + 1 >= PRODUCTION_BATCH_COM_RETRY_ATTEMPTS:
+                    raise IllustratorBridgeError(_format_batch_recovery_message(exc, retries=com_retries)) from exc
+                com_retries += 1
+            else:
                 raise
             bridge.reset()
             time.sleep(PRODUCTION_BATCH_COM_RETRY_DELAY_SECONDS)
@@ -83,6 +93,10 @@ def _is_retryable_batch_failure(exc: IllustratorBridgeError) -> bool:
         or "-2147023170" in detail
         or "an Illustrator error occurred: 248" in detail
     )
+
+
+def _is_retryable_illustrator_internal_failure(exc: IllustratorBridgeError) -> bool:
+    return ILLUSTRATOR_INTERNAL_AUTOMATION_ERROR in str(exc)
 
 
 def _format_batch_recovery_message(exc: IllustratorBridgeError, *, retries: int) -> str:

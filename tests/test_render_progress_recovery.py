@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from src.service import production_batch
 from src.service import render_service
 from src.service.job_store import JobStore
@@ -183,6 +185,77 @@ def test_production_batch_retries_illustrator_template_open_248(tmp_path, monkey
         ("reset", "", 1),
         ("render", "batch-001.json", 1),
         ("close", "", 2),
+    ]
+
+
+def test_production_batch_retries_illustrator_internal_a_ooc(tmp_path, monkeypatch):
+    events = []
+    delays = []
+
+    class FakeBridge:
+        def __init__(self, **_kwargs):
+            self.attempts = 0
+
+        def render(self, _script: Path, task_file: Path) -> str:
+            events.append(("render", task_file.name, self.attempts))
+            self.attempts += 1
+            if self.attempts == 1:
+                raise production_batch.IllustratorBridgeError(
+                    "an Illustrator error occurred: 1095724867 ('AOoC')"
+                )
+            return ""
+
+        def reset(self) -> None:
+            events.append(("reset", "", self.attempts))
+
+        def close(self) -> None:
+            events.append(("close", "", self.attempts))
+
+    monkeypatch.setattr(production_batch, "IllustratorBridge", FakeBridge)
+    monkeypatch.setattr(production_batch.time, "sleep", delays.append)
+    batch_file = tmp_path / "batch-001.json"
+
+    production_batch.render_production_batch_files([batch_file], visible=False)
+
+    assert events == [
+        ("render", "batch-001.json", 0),
+        ("reset", "", 1),
+        ("render", "batch-001.json", 1),
+        ("close", "", 2),
+    ]
+    assert delays == [5.0]
+
+
+def test_production_batch_preserves_a_ooc_code_after_one_retry(tmp_path, monkeypatch):
+    events = []
+    error_text = "an Illustrator error occurred: 1095724867 ('AOoC')"
+
+    class FakeBridge:
+        def __init__(self, **_kwargs):
+            pass
+
+        def render(self, _script: Path, task_file: Path) -> str:
+            events.append(("render", task_file.name))
+            raise production_batch.IllustratorBridgeError(error_text)
+
+        def reset(self) -> None:
+            events.append(("reset", ""))
+
+        def close(self) -> None:
+            events.append(("close", ""))
+
+    monkeypatch.setattr(production_batch, "IllustratorBridge", FakeBridge)
+    monkeypatch.setattr(production_batch.time, "sleep", lambda _seconds: None)
+
+    with pytest.raises(production_batch.IllustratorBridgeError, match="1095724867") as exc_info:
+        production_batch.render_production_batch_files([tmp_path / "batch-001.json"], visible=False)
+
+    assert str(exc_info.value) == error_text
+    assert events == [
+        ("render", "batch-001.json"),
+        ("reset", ""),
+        ("render", "batch-001.json"),
+        ("close", ""),
     ]
 
 
