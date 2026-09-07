@@ -51,7 +51,6 @@ class V2TemplateRenderer:
         preview_dpi: int | float | None = None,
         layout_warning_file: Path | str | None = None,
         pack_order_blocks: bool = False,
-        defer_output_transforms: bool = False,
     ) -> dict[str, Any]:
         return build_v2_execution_task(
             render_task,
@@ -64,7 +63,6 @@ class V2TemplateRenderer:
             preview_dpi=preview_dpi,
             layout_warning_file=layout_warning_file,
             pack_order_blocks=pack_order_blocks,
-            defer_output_transforms=defer_output_transforms,
         )
 
     def render(
@@ -81,7 +79,6 @@ class V2TemplateRenderer:
         preview_dpi: int | float | None = None,
         layout_warning_file: Path | str | None = None,
         pack_order_blocks: bool = False,
-        defer_output_transforms: bool = False,
     ) -> str:
         execution_task = self.build_execution_task(
             render_task,
@@ -94,7 +91,6 @@ class V2TemplateRenderer:
             preview_dpi=preview_dpi,
             layout_warning_file=layout_warning_file,
             pack_order_blocks=pack_order_blocks,
-            defer_output_transforms=defer_output_transforms,
         )
         task_path = Path(task_file) if task_file is not None else _default_task_file(Path(output_ai))
         task_path.parent.mkdir(parents=True, exist_ok=True)
@@ -240,7 +236,6 @@ def build_v2_execution_task(
     preview_dpi: int | float | None = None,
     layout_warning_file: Path | str | None = None,
     pack_order_blocks: bool = False,
-    defer_output_transforms: bool = False,
 ) -> dict[str, Any]:
     task = deepcopy(dict(render_task))
     if task.get("$schema") != V2_RENDER_TASK_SCHEMA:
@@ -252,12 +247,6 @@ def build_v2_execution_task(
         preview_png=preview_png,
         layout_warning_file=layout_warning_file,
     )
-    if defer_output_transforms and preview_path:
-        raise V2TemplateRendererError(
-            "deferred_transform_preview_unsupported",
-            "A deferred V2 component render cannot also create a terminal preview.",
-            path="$.defer_output_transforms",
-        )
     normalized_values = {str(key): _string_value(value) for key, value in values.items()}
     normalized_selections = _normalize_selections(task, normalized_values, selections)
     _preflight_renderable_options(task, normalized_selections, selected_output_key)
@@ -303,8 +292,6 @@ def build_v2_execution_task(
         execution["layout_warning_file"] = str(Path(warning_path).resolve())
     if pack_order_blocks:
         execution["pack_order_blocks"] = True
-    if defer_output_transforms:
-        execution["defer_output_transforms"] = True
     return execution
 
 

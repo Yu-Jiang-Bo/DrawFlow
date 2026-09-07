@@ -355,7 +355,6 @@ class V2OrderOutputRenderer:
             selections=task.get("selections") if isinstance(task.get("selections"), Mapping) else {},
             task_file=task_file,
             pack_order_blocks=bool(task.get("pack_order_blocks")),
-            defer_output_transforms=bool(task.get("defer_output_transforms")),
         )
 
     def _build_public_png_master_plan(

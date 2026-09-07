@@ -152,7 +152,6 @@ def build_v2_order_task(
             preview_dpi=dpi if png_path is not None else None,
             layout_warning_file=Path(output_ai).with_suffix(".warnings.json"),
             pack_order_blocks=should_pack_order_blocks,
-            defer_output_transforms=bool(component_reuse),
         )
     except V2TemplateRendererError as exc:
         raise V2OrderTaskBuilderError(

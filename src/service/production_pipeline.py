@@ -1028,10 +1028,6 @@ def _mark_composition_intermediate(task: dict[str, Any], make_error: ErrorFactor
     if str(task.get("type") or "") == "compose_v2_order_column":
         task["compatibility"] = "CS5"
         task["intermediate_component"] = True
-        # This order-column file is only a hand-off input for a later color or
-        # department master.  Its text must stay live until that final layout
-        # has added all labels and calculated the artboard.
-        task["output"] = {"outline_text": False, "pathfinder_merge": False}
         return
     output = task.get("output")
     if not isinstance(output, dict):

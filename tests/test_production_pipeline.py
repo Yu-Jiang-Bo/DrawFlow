@@ -253,7 +253,7 @@ def test_v2_cross_department_merge_keeps_pw_summary_labels_department_local(tmp_
         {"group_key": "annotation-0001", "label_lines": ["ORDER-Y", "盒子"]},
     ]
     assert summary_order_tasks[0]["intermediate_component"] is True
-    assert summary_order_tasks[0]["output"] == {"outline_text": False, "pathfinder_merge": False}
+    assert "output" not in summary_order_tasks[0]
 
 
 def test_product_name_annotation_groups_dedupe_by_department_and_product_name():

@@ -167,6 +167,26 @@ def test_png_master_composer_outlines_final_labels_only_after_layout():
     ) < source.index("saveAsAI(doc, aiFile, String(task.compatibility || \"CS5\"));")
 
 
+def test_v2_output_transforms_keep_pre_defer_execution_without_weakening_terminal_outputs():
+    order_source = Path("scripts/illustrator/compose_v2_order_column.jsx").read_text(encoding="utf-8")
+    render_source = Path("scripts/illustrator/render_v2_template.jsx").read_text(encoding="utf-8")
+    png_master_source = Path("scripts/illustrator/compose_png_master_pages.jsx").read_text(encoding="utf-8")
+    renderer_source = Path("src/renderer/v2_template_renderer.py").read_text(encoding="utf-8")
+    task_builder_source = Path("src/service/v2_order_task_builder.py").read_text(encoding="utf-8")
+    pipeline_source = Path("src/service/production_pipeline.py").read_text(encoding="utf-8")
+
+    assert "function applyOutputTransforms(doc, policy)" in order_source
+    assert render_source.index("applyOutputTransforms(doc, execution.output || task.output || {});") < render_source.index(
+        "var finalFitAction = selectedFitAction"
+    )
+    assert "defer_output_transforms" not in renderer_source
+    assert "defer_output_transforms" not in task_builder_source
+    assert 'task["output"] = {"outline_text": False, "pathfinder_merge": False}' not in pipeline_source
+    assert png_master_source.index("drawFrame(layer, 0, pageHeight, frameWidth, pageHeight);") < png_master_source.index(
+        "applyOutputTransforms(doc, task.output || {});"
+    ) < png_master_source.index("saveAsAI(doc, aiFile, String(task.compatibility || \"CS5\"));")
+
+
 def test_v2_terminal_output_composers_reacquire_and_gate_all_text_frames():
     scripts = (
         Path("scripts/illustrator/compose_v2_order_column.jsx"),
