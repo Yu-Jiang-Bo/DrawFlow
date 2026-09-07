@@ -77,7 +77,7 @@ def test_v2_order_builder_prefers_template_policy_over_department_defaults(tmp_p
         rule=rule,
         payload=V2Payload(
             output_key="Output_main",
-            values={"font": "F10", "design": "03", "name": "Kyra"},
+            values={"font": "F10", "design": "03", "name": "Kyra", "initial": "A"},
             selections={"Output_main": {"font": "F10", "design": "Design03", "style": "style1"}},
         ),
     )
