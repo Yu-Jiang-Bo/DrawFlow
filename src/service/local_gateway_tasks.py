@@ -13,10 +13,100 @@ from .local_gateway_multipart import (
     required_content_length,
 )
 from .local_gateway_support import LOGGER
+from .multi_template_dispatcher import MultiTemplateDispatchError
+from .multi_template_gateway_response import public_multi_template_job
+from .multi_template_parent_errors import MultiTemplateRenderError
 
 
 class LocalGatewayTaskMixin:
     """Routes that acquire the single local Illustrator task lock."""
+
+    def _handle_multi_template_render(self, path: str) -> bool:
+        """Handle the additive multi-template API without changing old routes.
+
+        The dispatcher owns ``render_lock`` for the full canary/formal sequence.
+        Taking it here too would deadlock the shared non-reentrant Illustrator
+        gate, while holding it only in the dispatcher also keeps retry/resume
+        mutually exclusive with legacy single-template rendering.
+        """
+        try:
+            route = _multi_template_route(path)
+        except MultiTemplateRenderError as exc:
+            self._send_client_error(
+                _multi_template_error_status(exc.code),
+                LocalClientError(str(exc), code=exc.code),
+            )
+            return True
+        if route is None:
+            return False
+        action, job_id = route
+        try:
+            if action == "preflight":
+                payload = self._read_render_payload()
+            else:
+                payload = {}
+            record = self._render_multi(payload, action=action, parent_job_id=job_id)
+            LOGGER.info(
+                "multi-template %s completed: job_id=%s status=%s",
+                action,
+                str(record.get("job_id") or job_id or "<new>"),
+                str(record.get("status") or "<missing>"),
+            )
+            self._send_json(public_multi_template_job(record))
+        except (MultiTemplateRenderError, MultiTemplateDispatchError) as exc:
+            status = _multi_template_error_status(exc.code)
+            LOGGER.warning(
+                "multi-template %s rejected: code=%s message=%s",
+                action,
+                exc.code,
+                exc,
+            )
+            self._send_client_error(status, LocalClientError(str(exc), code=exc.code))
+        except LocalClientError as exc:
+            LOGGER.warning(
+                "multi-template %s rejected: code=%s message=%s",
+                action,
+                exc.code,
+                exc,
+            )
+            self._send_client_error(_multi_template_error_status(exc.code), exc)
+        except Exception:
+            LOGGER.exception("multi-template %s failed", action)
+            self._send_client_error(
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+                LocalClientError(
+                    "多模板渲染请求未完成，请重新启动本地客户端后重试。",
+                    code="multi_template_gateway_unexpected",
+                ),
+            )
+        return True
+
+    def _multi_template_service(self):
+        factory = getattr(type(self), "multi_template_service_factory")
+        return factory(
+            self.drawflow_client,
+            self.render_lock,
+            self.multi_template_action_lock,
+        )
+
+    def _render_multi(self, payload, *, action: str, parent_job_id: str):
+        render_multi = getattr(self.drawflow_client, "render_multi", None)
+        if callable(render_multi):
+            return render_multi(
+                payload,
+                action=action,
+                parent_job_id=parent_job_id,
+                render_lock=self.render_lock,
+                action_lock=self.multi_template_action_lock,
+            )
+        service = self._multi_template_service()
+        if action == "preflight":
+            return service.preflight(payload)
+        if action == "execute":
+            return service.execute(parent_job_id)
+        if action == "retry-failed":
+            return service.retry_failed(parent_job_id)
+        return service.resume(parent_job_id)
 
     def _handle_local_render(self) -> None:
         if not self.render_lock.acquire(blocking=False):
@@ -167,6 +257,35 @@ class LocalGatewayTaskMixin:
             )
         finally:
             self.render_lock.release()
+
+
+def _multi_template_route(path: str) -> tuple[str, str] | None:
+    parts = path.strip("/").split("/")
+    if parts[:3] not in (["local", "render", "multi"], ["api", "render", "multi"]):
+        return None
+    if len(parts) == 4 and parts[3] == "preflight":
+        return "preflight", ""
+    if len(parts) != 5:
+        raise MultiTemplateRenderError("多模板渲染接口不存在。", code="multi_template_route_not_found")
+    action = parts[4]
+    if action not in {"execute", "retry-failed", "resume"}:
+        raise MultiTemplateRenderError("多模板渲染接口不存在。", code="multi_template_route_not_found")
+    job_id = unquote(parts[3])
+    if not _safe_multi_template_job_id(job_id):
+        raise MultiTemplateRenderError("多模板批次不存在。", code="multi_template_job_not_found")
+    return action, job_id
+
+
+def _safe_multi_template_job_id(value: str) -> bool:
+    return bool(value) and len(value) <= 128 and all(character.isascii() and (character.isalnum() or character in "_-") for character in value)
+
+
+def _multi_template_error_status(code: str) -> HTTPStatus:
+    if code in {"multi_template_job_not_found", "multi_template_route_not_found"}:
+        return HTTPStatus.NOT_FOUND
+    if code in {"multi_template_render_busy", "multi_template_checkpoint_busy"}:
+        return HTTPStatus.CONFLICT
+    return HTTPStatus.BAD_REQUEST
 
 
 __all__ = ["LocalGatewayTaskMixin"]

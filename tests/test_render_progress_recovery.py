@@ -51,11 +51,12 @@ def test_production_batch_render_uses_a_new_private_illustrator_for_each_chunk(t
     scripts = []
 
     class FakeBridge:
-        def __init__(self, *, visible=False, fresh_instance=False, reuse_instance=False, quit_after=False, **_kwargs):
+        def __init__(self, *, visible=False, fresh_instance=False, reuse_instance=False, quit_after=False, require_fresh_instance=False, **_kwargs):
             self.visible = visible
             self.fresh_instance = fresh_instance
             self.reuse_instance = reuse_instance
             self.quit_after = quit_after
+            self.require_fresh_instance = require_fresh_instance
             self.closed = False
             instances.append(self)
 
@@ -77,6 +78,7 @@ def test_production_batch_render_uses_a_new_private_illustrator_for_each_chunk(t
     assert all(instance.fresh_instance is True for instance in instances)
     assert all(instance.reuse_instance is False for instance in instances)
     assert all(instance.quit_after is True for instance in instances)
+    assert all(instance.require_fresh_instance is True for instance in instances)
     assert all(instance.closed is True for instance in instances)
     assert rendered == batch_files
     assert {script.name for script in scripts} == {"render_batch.jsx"}

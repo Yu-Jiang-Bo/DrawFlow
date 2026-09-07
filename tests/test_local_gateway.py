@@ -11,7 +11,7 @@ import pytest
 from src.service import local_gateway
 from src.service import local_gateway_http
 from src.service.job_store import JobStore
-from src.service.local_client import LocalClientError
+from src.service.local_client import LocalClientError, LocalDrawFlowClient
 
 
 def test_local_gateway_rejects_non_loopback_host(monkeypatch):
@@ -140,7 +140,8 @@ def test_local_gateway_hides_requested_job_id_when_job_is_missing(tmp_path):
     assert "%5C" not in rendered
 
 
-def test_local_gateway_returns_structured_error_for_render_sync_failures(tmp_path):
+@pytest.mark.parametrize("render_path", ["/local/render", "/api/render"])
+def test_local_gateway_returns_structured_error_for_render_sync_failures(tmp_path, render_path):
     class FakeClient:
         def __init__(self):
             self.jobs = JobStore(tmp_path / "jobs")
@@ -159,7 +160,7 @@ def test_local_gateway_returns_structured_error_for_render_sync_failures(tmp_pat
     worker.start()
     try:
         request = urllib.request.Request(
-            f"http://127.0.0.1:{server.server_address[1]}/local/render",
+            f"http://127.0.0.1:{server.server_address[1]}{render_path}",
             data=b"{}",
             method="POST",
             headers={"Content-Type": "application/json"},
@@ -179,6 +180,44 @@ def test_local_gateway_returns_structured_error_for_render_sync_failures(tmp_pat
             "message": "template MISSING001 has no published version",
         }
     }
+
+
+@pytest.mark.parametrize("render_path", ["/local/render", "/api/render"])
+def test_local_gateway_rejects_multi_template_parameter_without_template_id(tmp_path, render_path):
+    class FakeClient:
+        def __init__(self):
+            self.jobs = JobStore(tmp_path / "jobs")
+            self.data_dir = tmp_path
+            self.single_template_client = LocalDrawFlowClient(object(), tmp_path / "local", font_dirs=[])
+
+        def render(self, payload):
+            return self.single_template_client.render(payload)
+
+    handler = type(
+        "TestMissingSingleTemplateGatewayRequestHandler",
+        (local_gateway.LocalGatewayRequestHandler,),
+        {"client": FakeClient()},
+    )
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    worker = threading.Thread(target=server.serve_forever, daemon=True)
+    worker.start()
+    try:
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{server.server_address[1]}{render_path}",
+            data=json.dumps({"template_ids": ["TEMPLATE_A", "TEMPLATE_B"]}).encode("utf-8"),
+            method="POST",
+            headers={"Content-Type": "application/json"},
+        )
+        with pytest.raises(urllib.error.HTTPError) as exc_info:
+            urllib.request.urlopen(request)
+        payload = json.loads(exc_info.value.read().decode("utf-8"))
+    finally:
+        server.shutdown()
+        server.server_close()
+        worker.join(timeout=2)
+
+    assert exc_info.value.code == 400
+    assert payload["error"]["code"] == "missing_template_id"
 
 
 def test_local_gateway_hides_internal_scan_exception_details(tmp_path):

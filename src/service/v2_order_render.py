@@ -3,27 +3,35 @@
 from __future__ import annotations
 
 import shutil
+import zipfile
 from pathlib import Path
 from typing import Any, Mapping
 
+from .canary_diagnostics import suppress_delivery_outputs as suppress_canary_delivery_outputs
 from .job_store import JobStore
+from .local_gateway_support import LOGGER
+from .v2_order_io import read_order_rows
 from .v2_order_output import V2OrderOutputRenderer
-from .v2_order_plan import build_v2_order_units
+from .v2_order_plan import build_v2_order_units, v2_preflight_row_metrics
 from .v2_order_preflight import preflight_v2_order_rows
 from .v2_order_render_support import (
     V2OrderRenderError,
     asset_path,
     business_error,
-    central_v2_versions,
     compile_task,
     extract_bundle,
     read_json,
-    read_order_rows,
     safe_template_id,
     sha256_file,
     stats,
     to_bool,
     write_json,
+)
+from .v2_order_snapshot import (
+    check_snapshot_file_hash,
+    failure_scope as v2_failure_scope,
+    require_fixed_snapshot,
+    resolve_published_version,
 )
 from .v2_template_validation import validate_v2_template_configuration
 from .v2_trial_render_support import (
@@ -42,58 +50,121 @@ class V2OrderRenderService:
         renderer: Any,
         font_dirs: list[Path] | None,
         jobs: JobStore | None = None,
+        *,
+        production_batch_session: Any | None = None,
     ) -> None:
         self.central = central
         self.data_dir = Path(data_dir)
         self.renderer = renderer
         self.font_dirs = font_dirs
         self.jobs = jobs or JobStore(self.data_dir / "jobs")
+        # Internal-only dependency used by multi-template orchestration.  It
+        # leaves the public single-template request and constructor call shape
+        # intact for existing callers.
+        self.production_batch_session = production_batch_session
 
     def render(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+        return self._render(payload)
+
+    def render_fixed_snapshot(
+        self,
+        payload: Mapping[str, Any],
+        *,
+        version: str,
+        template_sha256: str,
+        config_sha256: str = "",
+        scan_sha256: str = "",
+        suppress_delivery_outputs: bool = False,
+    ) -> dict[str, Any]:
+        """Internal multi-template entry point; fixed fields are never HTTP payload data."""
+        fixed_snapshot = require_fixed_snapshot(
+            version=version,
+            template_sha256=template_sha256,
+            config_sha256=config_sha256,
+            scan_sha256=scan_sha256,
+        )
+        return self._render(
+            payload,
+            fixed_version=fixed_snapshot["version"],
+            fixed_template_sha256=fixed_snapshot["template_sha256"],
+            fixed_config_sha256=fixed_snapshot["config_sha256"],
+            fixed_scan_sha256=fixed_snapshot["scan_sha256"],
+            include_preflight_metrics=True,
+            suppress_delivery_outputs=suppress_delivery_outputs,
+        )
+
+    def _render(
+        self,
+        payload: Mapping[str, Any],
+        *,
+        fixed_version: str = "",
+        fixed_template_sha256: str = "",
+        fixed_config_sha256: str = "",
+        fixed_scan_sha256: str = "",
+        include_preflight_metrics: bool = False,
+        suppress_delivery_outputs: bool = False,
+    ) -> dict[str, Any]:
         template_id = safe_template_id(payload.get("template_id"))
-        publication = self._published_version(template_id)
-        request = self._normalize_request(payload, publication)
+        publication = self._published_version(
+            template_id,
+            fixed_version=fixed_version,
+        )
+        request = self._normalize_request(
+            payload,
+            publication,
+            fixed_template_sha256=fixed_template_sha256,
+            fixed_config_sha256=fixed_config_sha256,
+            fixed_scan_sha256=fixed_scan_sha256,
+            include_preflight_metrics=include_preflight_metrics,
+        )
         record = self.jobs.create(request)
         try:
             self.jobs.update(record, status="running")
             result = self._run(record, request)
             record["outputs"] = result["outputs"]
             record["stats"] = result["stats"]
+            if "_preflight_row_metrics" in result:
+                record["_preflight_row_metrics"] = result["_preflight_row_metrics"]
+            if suppress_delivery_outputs:
+                suppress_canary_delivery_outputs(record)
             self.jobs.update(record, status="completed")
         except Exception as exc:
-            message, code = business_error(exc)
-            technical_error = str(getattr(exc, "technical_message", "") or exc)
+            failure = business_error(exc)
+            message, code = failure[:2]
+            technical_message = failure[2] if len(failure) > 2 else str(exc)
+            LOGGER.error(
+                "V2 render failed (job_id=%s, code=%s): %s",
+                record["job_id"],
+                code,
+                technical_message,
+            )
+            failure_scope = v2_failure_scope(exc)
             self.jobs.update(
                 record,
                 status="failed",
                 error=message,
                 error_code=code,
-                technical_error=technical_error,
+                technical_error=technical_message if failure_scope == "template" else "",
+                failure_scope=failure_scope,
             )
+            # Recovery orchestration may inspect this in-memory value, but a
+            # job query is public to the local UI and must never expose COM
+            # details or machine paths from the exception chain.
+            record["_technical_failure"] = technical_message
         return record
 
-    def _published_version(self, template_id: str) -> dict[str, str]:
-        try:
-            payload = central_v2_versions(self.central, template_id)
-        except Exception as exc:
-            raise V2OrderRenderError(
-                "模板尚未在 V2 工作台发布可用版本，请先发布后再出图。",
-                code="v2_template_not_found",
-                technical_message=str(exc),
-            ) from exc
-        publication = dict(payload.get("publication") or {})
-        version = str(publication.get("current_version") or "").strip()
-        if str(publication.get("status") or "").strip() != "active" or not version:
-            raise V2OrderRenderError(
-                "模板尚未在 V2 工作台发布可用版本，请先发布后再出图。",
-                code="v2_template_not_published",
-            )
-        return {"template_id": template_id, "version": version}
+    def _published_version(self, template_id: str, *, fixed_version: str = "") -> dict[str, str]:
+        return resolve_published_version(self.central, template_id, fixed_version=fixed_version)
 
     def _normalize_request(
         self,
         payload: Mapping[str, Any],
         publication: Mapping[str, str],
+        *,
+        fixed_template_sha256: str = "",
+        fixed_config_sha256: str = "",
+        fixed_scan_sha256: str = "",
+        include_preflight_metrics: bool = False,
     ) -> dict[str, Any]:
         order_file_value = str(payload.get("order_file") or "").strip()
         if not order_file_value:
@@ -104,13 +175,22 @@ class V2OrderRenderService:
                 "订单表格不存在，请重新选择后再试。",
                 code="order_file_missing",
             )
-        return {
+        request = {
             "template_id": publication["template_id"],
             "template_version": publication["version"],
             "order_file": str(order_file.resolve()),
             "sheet_name": str(payload.get("sheet_name") or "").strip(),
             "dry_run": to_bool(payload.get("dry_run", False)),
         }
+        if fixed_template_sha256 or fixed_config_sha256 or fixed_scan_sha256:
+            request.update({
+                "_fixed_template_sha256": fixed_template_sha256,
+                "_fixed_config_sha256": fixed_config_sha256,
+                "_fixed_scan_sha256": fixed_scan_sha256,
+            })
+        if include_preflight_metrics:
+            request["_include_preflight_metrics"] = True
+        return request
 
     def _run(self, record: Mapping[str, Any], request: Mapping[str, Any]) -> dict[str, Any]:
         job_dir = Path(str(record["job_dir"])).resolve()
@@ -118,8 +198,15 @@ class V2OrderRenderService:
         version = str(request["template_version"])
         version_dir = self._download_version(template_id, version, job_dir)
         manifest = read_json(version_dir / "manifest.json")
+        if str(manifest.get("version") or "").strip() != version:
+            raise V2OrderRenderError(
+                "预检时固定的模板版本校验未通过，请重新预检后再试。",
+                code="v2_template_version_unavailable",
+            )
         config = read_json(version_dir / "config.json")
         scan = read_json(version_dir / "scan.json")
+        check_snapshot_file_hash(config_path := version_dir / "config.json", request.get("_fixed_config_sha256"), "模板配置")
+        check_snapshot_file_hash(scan_path := version_dir / "scan.json", request.get("_fixed_scan_sha256"), "模板扫描")
         validation = validate_v2_template_configuration(config)
         if validation.get("can_save") is not True:
             raise V2OrderRenderError(
@@ -129,6 +216,12 @@ class V2OrderRenderService:
         asset = current_template_asset(manifest)
         template_ai = asset_path(version_dir, asset)
         self._check_asset(template_ai, asset)
+        expected_snapshot_sha = str(request.get("_fixed_template_sha256") or "").strip().lower()
+        if expected_snapshot_sha and sha256_file(template_ai) != expected_snapshot_sha:
+            raise V2OrderRenderError(
+                "预检时固定的模板文件已变化，请重新预检后再试。",
+                code="v2_template_asset_invalid",
+            )
         rows = read_order_rows(request)
         preflight = preflight_v2_order_rows(config, rows)
         if preflight.get("can_render") is not True:
@@ -149,11 +242,17 @@ class V2OrderRenderService:
         if request.get("dry_run"):
             planned_units = build_v2_order_units(config, render_task, rows, preflight)
             write_json(manifest_path, {"orders": len(rows), "outputs": len(render_task.get("outputs", [])), "items": len(planned_units)})
-            return {
+            result = {
                 "outputs": {"render_task": str(task_file), "output_manifest": str(manifest_path)},
                 "stats": stats(rows, render_task, dry_run=True, planned_items=len(planned_units)),
             }
-        return V2OrderOutputRenderer(self.renderer).render_outputs(
+            if request.get("_include_preflight_metrics"):
+                result["_preflight_row_metrics"] = v2_preflight_row_metrics(render_task, planned_units)
+            return result
+        return V2OrderOutputRenderer(
+            self.renderer,
+            production_batch_session=self.production_batch_session,
+        ).render_outputs(
             record,
             config,
             render_task,
@@ -180,11 +279,26 @@ class V2OrderRenderService:
             extract_bundle(bundle_path, version_dir)
         except V2OrderRenderError:
             raise
-        except Exception as exc:
+        except OSError as exc:
             raise V2OrderRenderError(
-                "正式模板文件读取失败，请重新发布模板后再试。",
+                "正式模板文件无法写入本机，请检查磁盘空间和目录权限后重试。",
                 code="v2_template_version_unavailable",
                 technical_message=str(exc),
+                failure_scope="system",
+            ) from exc
+        except zipfile.BadZipFile as exc:
+            raise V2OrderRenderError(
+                "正式模板文件包已损坏，请重新发布模板后再试。",
+                code="v2_template_version_unavailable",
+                technical_message=str(exc),
+                failure_scope="template",
+            ) from exc
+        except Exception as exc:
+            raise V2OrderRenderError(
+                "正式模板文件暂时无法读取，请检查本机客户端和模板服务后重试。",
+                code="v2_template_version_unavailable",
+                technical_message=str(exc),
+                failure_scope="system",
             ) from exc
         return version_dir
 
@@ -195,5 +309,6 @@ class V2OrderRenderService:
                 "正式模板文件校验未通过，请重新发布模板后再试。",
                 code="v2_template_asset_invalid",
             )
+
 
 __all__ = ["V2OrderRenderError", "V2OrderRenderService"]

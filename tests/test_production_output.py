@@ -222,7 +222,9 @@ def test_color_frame_composer_packs_order_segments_by_adaptive_grid():
     assert "placement.fragmentCount = total;" in source
     assert "placement.split = total > 1;" in source
     assert "label_scope: \"order_segment\"" in source
-    assert "copy.translate(destinationLeft - copiedBounds[0], destinationTop - copiedBounds[1]);" in source
+    assert "placeArtworkAtExpected(copy, componentFrame.artwork_bounds_after, dx, dy" in source
+    assert "var dx = destinationLeft - componentFrame.frame_bounds[0];" in source
+    assert ".resize(" not in source
     assert "coordinate_unit: \"mm\"" in source
     assert "function auditColumns(columns)" in source
     assert "function auditFragments(placements)" in source

@@ -33,7 +33,7 @@ from .v2_template_boundary import V2_RENDER_PIPELINE, V2_TEMPLATE_TYPE
 from .v2_template_api import V2TemplateApi, handle_v2_template_api
 from .v2_template_validation import validate_v2_template_configuration
 from .v2_trial_render_support import current_template_asset
-from .web_page import INDEX_HTML as WORKBENCH_HTML
+from .web_page import workbench_html
 
 V2_WORKBENCH_STATIC_DIR = Path(__file__).resolve().parent / "static" / "v2-workbench"
 
@@ -800,7 +800,7 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
             self._send_v2_workbench_static(path)
             return
         if path == "/":
-            self._send_html(WORKBENCH_HTML)
+            self._send_html(workbench_html())
             return
         if path == "/health":
             self._send_json(self._health_payload())

@@ -910,9 +910,9 @@ def test_generic_pipeline_splits_large_illustrator_runs_into_chunks(tmp_path, mo
 
     assert result["status"] == "completed", result.get("error")
     assert calls == [
-        ("render-task-001.json", 8, {"visible": False, "fresh_instance": True, "reuse_instance": True}),
-        ("render-task-002.json", 8, {"visible": False, "fresh_instance": True, "reuse_instance": True}),
-        ("render-task-003.json", 1, {"visible": False, "fresh_instance": True, "reuse_instance": True}),
+        ("render-task-001.json", 8, {"visible": False, "fresh_instance": True, "reuse_instance": True, "require_fresh_instance": True}),
+        ("render-task-002.json", 8, {"visible": False, "fresh_instance": True, "reuse_instance": True, "require_fresh_instance": True}),
+        ("render-task-003.json", 1, {"visible": False, "fresh_instance": True, "reuse_instance": True, "require_fresh_instance": True}),
     ]
     assert len(result["outputs"]["output_ai_files"]) == 17
 

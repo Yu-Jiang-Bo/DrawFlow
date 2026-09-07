@@ -12,6 +12,9 @@ import pytest
 from openpyxl import Workbook
 
 from src.renderer.illustrator_bridge import IllustratorBridgeError
+from src.service import v2_order_render
+from src.service import v2_order_io
+from src.service import v2_order_render_support
 from src.service.http_server import RenderRequestHandler
 from src.service.local_client import LocalClientError, LocalDrawFlowClient
 from src.service.template_registry import TemplateRegistry
@@ -168,6 +171,7 @@ def _bundle(
     with_styles: bool = False,
     with_design_dimensions: bool = False,
     config_updates: dict | None = None,
+    manifest_version: str = "v0001",
 ) -> None:
     digest = _sha256(template_bytes)
     payload = _v2_payload(
@@ -179,7 +183,7 @@ def _bundle(
     if config_updates:
         payload["config"].update(config_updates)
     manifest = {
-        "version": "v0001",
+        "version": manifest_version,
         "config_sha256": "a" * 64,
         "scan_sha256": "b" * 64,
         "assets": [
@@ -274,6 +278,106 @@ class CapturingRenderer:
         return str(output_ai)
 
 
+class FailingRenderer(CapturingRenderer):
+    def render(self, render_task, **kwargs):
+        raise IllustratorBridgeError("Illustrator 自动化服务暂时不可用（HRESULT -2146959355）")
+
+
+def test_v2_public_payload_cannot_override_version_snapshot_fields(tmp_path):
+    bundle_path = tmp_path / "published.zip"
+    _bundle(bundle_path, "V2ORDER001", b"template-ai")
+    order_path = tmp_path / "order.xlsx"
+    _write_order(order_path)
+    renderer = CapturingRenderer()
+    service = v2_order_render.V2OrderRenderService(V2PublishedCentral(bundle_path), tmp_path / "local", renderer, [])
+
+    record = service.render({
+        "template_id": "V2ORDER001",
+        "order_file": str(order_path),
+        "dry_run": True,
+        "_fixed_template_version": "v9999",
+        "_fixed_template_sha256": "0" * 64,
+    })
+
+    assert record["status"] == "completed"
+    assert record["request"]["template_version"] == "v0001"
+    assert set(record["request"]) == {"template_id", "template_version", "order_file", "sheet_name", "dry_run"}
+    assert renderer.calls == []
+
+
+def test_v2_fixed_snapshot_rejects_a_bundle_with_another_version(tmp_path):
+    bundle_path = tmp_path / "published.zip"
+    _bundle(bundle_path, "V2ORDER001", b"template-ai", manifest_version="v0002")
+    order_path = tmp_path / "order.xlsx"
+    _write_order(order_path)
+    service = v2_order_render.V2OrderRenderService(V2PublishedCentral(bundle_path), tmp_path / "local", CapturingRenderer(), [])
+
+    record = service.render_fixed_snapshot(
+        {"template_id": "V2ORDER001", "order_file": str(order_path), "dry_run": True},
+        version="v0001",
+        template_sha256=_sha256(b"template-ai"),
+        config_sha256="a" * 64,
+        scan_sha256="b" * 64,
+    )
+
+    assert (record["status"], record["error_code"]) == ("failed", "v2_template_version_unavailable")
+
+
+@pytest.mark.parametrize("field", ("version", "template_sha256", "config_sha256", "scan_sha256"))
+def test_v2_fixed_snapshot_rejects_missing_fixed_snapshot_fields(tmp_path, field):
+    bundle_path = tmp_path / "published.zip"
+    _bundle(bundle_path, "V2ORDER001", b"template-ai")
+    order_path = tmp_path / "order.xlsx"
+    _write_order(order_path)
+    snapshot = {
+        "version": "v0001",
+        "template_sha256": _sha256(b"template-ai"),
+        "config_sha256": "a" * 64,
+        "scan_sha256": "b" * 64,
+    }
+    snapshot[field] = ""
+    service = v2_order_render.V2OrderRenderService(V2PublishedCentral(bundle_path), tmp_path / "local", CapturingRenderer(), [])
+
+    with pytest.raises(v2_order_render.V2OrderRenderError) as caught:
+        service.render_fixed_snapshot(
+            {"template_id": "V2ORDER001", "order_file": str(order_path), "dry_run": True},
+            **snapshot,
+        )
+
+    assert caught.value.code == "v2_template_snapshot_invalid"
+
+
+def test_v2_fixed_snapshot_rejects_changed_config_or_scan(tmp_path):
+    bundle_path = tmp_path / "published.zip"
+    _bundle(bundle_path, "V2ORDER001", b"template-ai")
+    order_path = tmp_path / "order.xlsx"
+    _write_order(order_path)
+    with zipfile.ZipFile(bundle_path) as archive:
+        config_sha = _sha256(archive.read("config.json"))
+        scan_sha = _sha256(archive.read("scan.json"))
+    service = v2_order_render.V2OrderRenderService(V2PublishedCentral(bundle_path), tmp_path / "local", CapturingRenderer(), [])
+    payload = {"template_id": "V2ORDER001", "order_file": str(order_path), "dry_run": True}
+
+    changed_config = service.render_fixed_snapshot(
+        payload,
+        version="v0001",
+        template_sha256=_sha256(b"template-ai"),
+        config_sha256="0" * 64,
+        scan_sha256=scan_sha,
+    )
+    changed_scan = service.render_fixed_snapshot(
+        payload,
+        version="v0001",
+        template_sha256=_sha256(b"template-ai"),
+        config_sha256=config_sha,
+        scan_sha256="0" * 64,
+    )
+
+    assert (changed_config["status"], changed_config["error_code"]) == ("failed", "v2_template_config_invalid")
+    assert (changed_scan["status"], changed_scan["error_code"]) == ("failed", "v2_template_config_invalid")
+    assert {"_fixed_template_sha256", "_fixed_config_sha256", "_fixed_scan_sha256"} <= set(changed_config["request"])
+
+
 def _png_bytes() -> bytes:
     raw = b"\x00\x00\x00\x00\x00"
     return (
@@ -343,6 +447,67 @@ def test_v2_order_preflight_failure_is_business_safe(tmp_path):
     assert "Traceback" not in message
     assert "C:" not in message
     assert "$." not in message
+
+
+def test_v2_order_render_logs_technical_message_without_exposing_it_to_jobs(tmp_path, monkeypatch):
+    bundle_path = tmp_path / "published.zip"
+    _bundle(bundle_path, "V2ORDER001", b"template-ai")
+    order_path = tmp_path / "order.xlsx"
+    _write_order(order_path, department="K")
+    client = LocalDrawFlowClient(
+        V2PublishedCentral(bundle_path),
+        tmp_path / "local",
+        v2_renderer=FailingRenderer(),
+        font_dirs=[],
+    )
+    logged_messages = []
+    monkeypatch.setattr(
+        v2_order_render.LOGGER,
+        "error",
+        lambda message, *args: logged_messages.append(message % args),
+    )
+
+    with pytest.raises(LocalClientError) as exc_info:
+        client.render({"template_id": "V2ORDER001", "order_file": str(order_path)})
+
+    assert exc_info.value.code == "v2_order_render_failed"
+    assert not exc_info.value.technical_message
+    job = client.jobs.list_recent(1)[0]
+    assert job["status"] == "failed"
+    assert job["error_code"] == "v2_order_render_failed"
+    assert job["failure_scope"] == "system"
+    assert "technical_message" not in job
+    assert "_technical_failure" not in job
+    assert len(logged_messages) == 1
+    assert "HRESULT -2146959355" in logged_messages[0]
+
+
+def test_v2_download_disk_failure_is_saved_as_a_system_scope(tmp_path):
+    class DiskFullCentral(V2PublishedCentral):
+        def download_v2_version_bundle_to_file(self, template_id, version, target_path):
+            raise OSError("disk full")
+
+    bundle_path = tmp_path / "published.zip"
+    _bundle(bundle_path, "V2ORDER001", b"template-ai")
+    order_path = tmp_path / "order.xlsx"
+    _write_order(order_path, department="K")
+    client = LocalDrawFlowClient(DiskFullCentral(bundle_path), tmp_path / "local", v2_renderer=CapturingRenderer(), font_dirs=[])
+
+    with pytest.raises(LocalClientError) as exc_info:
+        client.render({"template_id": "V2ORDER001", "order_file": str(order_path)})
+
+    assert exc_info.value.code == "v2_template_version_unavailable"
+    job = client.jobs.list_recent(1)[0]
+    assert (job["status"], job["failure_scope"]) == ("failed", "system")
+
+
+def test_v2_order_file_disk_failure_is_a_system_scope(monkeypatch):
+    monkeypatch.setattr(v2_order_io, "read_xlsx_rows", lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("disk full")))
+
+    with pytest.raises(v2_order_render_support.V2OrderRenderError) as exc_info:
+        v2_order_render_support.read_order_rows({"order_file": "orders.xlsx"})
+
+    assert (exc_info.value.code, exc_info.value.failure_scope) == ("v2_order_file_unreadable", "system")
 
 
 def test_v2_order_stats_counts_orders_times_outputs_once():

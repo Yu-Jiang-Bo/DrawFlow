@@ -235,7 +235,7 @@ function createApp(fetchImpl, fileNames, locationSearch) {
 def run_node(script: str, *, cwd: Path | None = None) -> None:
     completed = subprocess.run(
         ["node", "-e", HARNESS + "\n" + textwrap.dedent(script)],
-        cwd=cwd or "C:/Users/Administrator/Desktop/image/custom-renderer-v2-template-workbench",
+        cwd=cwd or Path(__file__).resolve().parents[1],
         text=True,
         encoding="utf-8",
         errors="replace",

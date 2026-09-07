@@ -407,6 +407,7 @@ def test_v2_public_pipeline_maps_bridge_failures_to_safe_render_error(monkeypatc
         )
 
     assert exc_info.value.code == "v2_order_render_failed"
+    assert exc_info.value.failure_scope == "system"
     assert "HRESULT -2146959355" in exc_info.value.technical_message
 
 
@@ -474,6 +475,25 @@ def test_v2_renderer_with_bridge_keeps_public_batch_executor(tmp_path):
     renderer = V2OrderOutputRenderer(SimpleNamespace(bridge=object()))
 
     assert renderer._public_batch_renderer_overrides(tmp_path) == {}
+
+
+def test_v2_parent_session_overrides_public_batch_executor(tmp_path):
+    class ParentSession:
+        def render_batch_files(self, *_args):
+            pass
+
+        def render_batch_sequence(self, *_args):
+            pass
+
+    session = ParentSession()
+    renderer = V2OrderOutputRenderer(SimpleNamespace(bridge=object()), production_batch_session=session)
+
+    overrides = renderer._public_batch_renderer_overrides(tmp_path)
+
+    assert overrides == {
+        "render_batch_files": session.render_batch_files,
+        "render_batch_sequence": session.render_batch_sequence,
+    }
 
 
 def test_v2_injected_batch_rejects_task_paths_outside_current_job(tmp_path):

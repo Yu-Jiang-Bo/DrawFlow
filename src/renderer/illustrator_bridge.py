@@ -5,16 +5,22 @@ from __future__ import annotations
 import time
 from pathlib import Path
 from types import TracebackType
-from typing import Any
+from typing import Any, Callable
 
 
 COM_RETRY_ATTEMPTS = 3
 COM_RETRY_DELAY_SECONDS = 3.0
-RETRYABLE_COM_HRESULTS = ("-2147417851", "-2147023170", "-2146959355", "-2147467259")
+# RPC server unavailable means the Illustrator process that owned this proxy
+# has exited.  It is a transport failure, not a template/content failure.
+RETRYABLE_COM_HRESULTS = ("-2147417851", "-2147023170", "-2147023174", "-2146959355", "-2147467259")
 
 
 class IllustratorBridgeError(RuntimeError):
     """Raised when Illustrator cannot execute a render script."""
+
+    def __init__(self, message: str, *, failure_scope: str = "") -> None:
+        super().__init__(message)
+        self.failure_scope = failure_scope if failure_scope in {"template", "system"} else ""
 
 
 class IllustratorBridge:
@@ -25,11 +31,13 @@ class IllustratorBridge:
         fresh_instance: bool = False,
         quit_after: bool = False,
         reuse_instance: bool = False,
+        require_fresh_instance: bool = False,
     ) -> None:
         self.visible = visible
         self.fresh_instance = fresh_instance
         self.quit_after = quit_after
         self.reuse_instance = reuse_instance
+        self.require_fresh_instance = require_fresh_instance
         self._app: Any = None
         self._apartment: ComApartment | None = None
 
@@ -53,10 +61,7 @@ class IllustratorBridge:
                     if app is None:
                         import win32com.client
 
-                        dispatch = (
-                            getattr(win32com.client, "DispatchEx", win32com.client.Dispatch)
-                            if self.fresh_instance else win32com.client.Dispatch
-                        )
+                        dispatch = self._application_dispatch(win32com.client)
                         app = dispatch("Illustrator.Application")
                         if self.reuse_instance:
                             self._app = app
@@ -67,7 +72,9 @@ class IllustratorBridge:
                     result = app.DoJavaScript(bootstrap)
                     return str(result) if result else ""
                 except ImportError as exc:
-                    raise IllustratorBridgeError("缺少 pywin32，无法调用 Illustrator") from exc
+                    raise IllustratorBridgeError("缺少 pywin32，无法调用 Illustrator", failure_scope="system") from exc
+                except IllustratorBridgeError:
+                    raise
                 except Exception as exc:
                     detail = _read_text(error_report)
                     if (
@@ -82,10 +89,16 @@ class IllustratorBridge:
                         time.sleep(COM_RETRY_DELAY_SECONDS)
                         continue
                     if detail:
-                        raise IllustratorBridgeError(f"Illustrator JSX failed: {exc}: {detail}") from exc
+                        raise IllustratorBridgeError(
+                            f"Illustrator JSX failed: {exc}: {detail}",
+                            failure_scope="template",
+                        ) from exc
                     if _is_retryable_com_failure(exc):
-                        raise IllustratorBridgeError(format_com_recovery_message(exc, retries=attempt)) from exc
-                    raise IllustratorBridgeError(f"执行 Illustrator JSX 失败: {exc}") from exc
+                        raise IllustratorBridgeError(
+                            format_com_recovery_message(exc, retries=attempt),
+                            failure_scope="system",
+                        ) from exc
+                    raise IllustratorBridgeError(f"执行 Illustrator JSX 失败: {exc}", failure_scope="template") from exc
 
         finally:
             if self.quit_after and not self.reuse_instance:
@@ -107,14 +120,61 @@ class IllustratorBridge:
         self.close(self._app)
         self._app = None
 
+    def check_fresh_session(self) -> bool:
+        """Open and close an isolated COM session without running a JSX task."""
+        apartment = ComApartment()
+        app: Any = None
+        try:
+            apartment.__enter__()
+            import win32com.client
+
+            dispatch = self._application_dispatch(win32com.client)
+            app = dispatch("Illustrator.Application")
+            try:
+                app.Visible = self.visible
+            except Exception:
+                pass
+            getattr(app, "Version", None)
+            return True
+        except Exception:
+            return False
+        finally:
+            if app is not None:
+                try:
+                    app.Quit()
+                except Exception:
+                    pass
+            apartment.__exit__(None, None, None)
+
+    def _application_dispatch(self, client: Any) -> Callable[[str], Any]:
+        """Return an isolated COM dispatcher when the caller requires one.
+
+        ``Dispatch`` may attach to a manually opened Illustrator process.  A
+        parent multi-template session owns and closes its process, so it must
+        never fall back to that shared dispatcher when ``DispatchEx`` is not
+        available.
+        """
+
+        if not self.fresh_instance:
+            return client.Dispatch
+        dispatch_ex = getattr(client, "DispatchEx", None)
+        if callable(dispatch_ex):
+            return dispatch_ex
+        if self.require_fresh_instance:
+            raise IllustratorBridgeError(
+                "当前环境不支持创建独立的 Illustrator 自动化会话（缺少 DispatchEx）；"
+                "为避免影响手工打开的 Illustrator，已安全停止本次渲染。",
+                failure_scope="system",
+            )
+        return client.Dispatch
+
     def close(self, app: Any = None) -> None:
         target = app if app is not None else self._app
-        if target is None:
-            return
-        try:
-            target.Quit()
-        except Exception:
-            pass
+        if target is not None:
+            try:
+                target.Quit()
+            except Exception:
+                pass
         self._app = None
         if self._apartment is not None:
             self._apartment.__exit__(None, None, None)

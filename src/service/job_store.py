@@ -3,12 +3,18 @@
 from __future__ import annotations
 
 import json
+import os
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Mapping
 
 from .paths import SERVICE_JOBS_DIR
+
+
+JOB_SAVE_REPLACE_ATTEMPTS = 4
+JOB_SAVE_REPLACE_RETRY_DELAY_SECONDS = 0.05
 
 
 def utc_now() -> str:
@@ -20,7 +26,7 @@ class JobStore:
         self.root = Path(root)
         self.root.mkdir(parents=True, exist_ok=True)
 
-    def create(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    def create(self, request: Dict[str, Any], *, record_fields: Mapping[str, Any] | None = None) -> Dict[str, Any]:
         job_id = uuid.uuid4().hex[:12]
         job_dir = self.root / job_id
         job_dir.mkdir(parents=True, exist_ok=False)
@@ -38,6 +44,7 @@ class JobStore:
             "error_code": "",
             "technical_error": "",
         }
+        record.update(dict(record_fields or {}))
         self.save(record)
         return record
 
@@ -62,7 +69,18 @@ class JobStore:
     def save(self, record: Dict[str, Any]) -> None:
         record["updated_at"] = utc_now()
         path = Path(record["job_dir"]) / "job.json"
-        path.write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
+        temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+        try:
+            with temporary.open("w", encoding="utf-8") as target:
+                target.write(json.dumps(record, ensure_ascii=False, indent=2))
+                target.flush()
+                os.fsync(target.fileno())
+            _replace_with_permission_retry(temporary, path)
+        finally:
+            try:
+                temporary.unlink()
+            except FileNotFoundError:
+                pass
 
     def update(self, record: Dict[str, Any], **changes: Any) -> Dict[str, Any]:
         record.update(changes)
@@ -94,3 +112,14 @@ def _safe_int(value: Any) -> int:
         return max(int(value), 0)
     except (TypeError, ValueError):
         return 0
+
+
+def _replace_with_permission_retry(source: Path, destination: Path) -> None:
+    for attempt in range(JOB_SAVE_REPLACE_ATTEMPTS):
+        try:
+            os.replace(source, destination)
+            return
+        except PermissionError:
+            if attempt + 1 >= JOB_SAVE_REPLACE_ATTEMPTS:
+                raise
+            time.sleep(JOB_SAVE_REPLACE_RETRY_DELAY_SECONDS)

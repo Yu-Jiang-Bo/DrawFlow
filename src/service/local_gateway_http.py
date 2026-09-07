@@ -18,8 +18,9 @@ from .local_gateway_support import (
     V2_WORKBENCH_STATIC_DIR,
     safe_static_name,
 )
+from .multi_template_gateway_response import public_multi_template_job
 from .http_server import _v2_workbench_html
-from .web_page import INDEX_HTML as FALLBACK_HTML
+from .web_page import workbench_html
 
 
 class LocalGatewayHttpMixin:
@@ -71,11 +72,12 @@ class LocalGatewayHttpMixin:
             self._send_error(HTTPStatus.NOT_FOUND, "not found")
 
     def _send_local_jobs(self) -> None:
-        self._send_json({"jobs": self.drawflow_client.jobs.list_recent(30)})
+        records = self.drawflow_client.jobs.list_recent(30)
+        self._send_json({"jobs": [_public_job(record) for record in records]})
 
     def _send_local_job(self, job_id: str) -> None:
         try:
-            self._send_json(self.drawflow_client.jobs.load(job_id))
+            self._send_json(_public_job(self.drawflow_client.jobs.load(job_id)))
         except KeyError:
             self._send_error(HTTPStatus.NOT_FOUND, "任务不存在")
 
@@ -128,13 +130,13 @@ class LocalGatewayHttpMixin:
         self,
         path: str,
         *,
-        fallback_html: str = FALLBACK_HTML,
+        fallback_html: str | None = None,
     ) -> None:
         try:
             status, headers, body = self.drawflow_client.central.proxy("GET", path)
             self._send_proxy_response(status, headers, body)
         except Exception:
-            self._send_html(fallback_html)
+            self._send_html(fallback_html or workbench_html())
 
     def _send_central_or_v2_workbench(self, path: str) -> None:
         """Serve the gateway's page together with its local V2 endpoints.
@@ -198,3 +200,9 @@ class LocalGatewayHttpMixin:
         self._send_proxy_response(status, headers, body)
 
 __all__ = ["LocalGatewayHttpMixin"]
+
+
+def _public_job(record: dict[str, object]) -> dict[str, object]:
+    if record.get("job_type") == "multi_template_parent":
+        return public_multi_template_job(record)
+    return record

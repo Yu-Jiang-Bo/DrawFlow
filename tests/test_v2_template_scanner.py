@@ -903,7 +903,12 @@ def test_v2_template_scanner_uses_isolated_illustrator_session_by_default(tmp_pa
     result = scanner.scan(ai)
 
     assert result["blocked"] is False
-    assert bridge_kwargs == [{"visible": False, "fresh_instance": True, "quit_after": True}]
+    assert bridge_kwargs == [{
+        "visible": False,
+        "fresh_instance": True,
+        "quit_after": True,
+        "require_fresh_instance": True,
+    }]
 
 
 def test_v2_template_scanner_reports_missing_json_without_fake_success(tmp_path):

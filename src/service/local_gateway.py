@@ -31,6 +31,7 @@ from .local_gateway_support import (
     safe_static_name,
 )
 from .local_gateway_tasks import LocalGatewayTaskMixin
+from .multi_template_gateway_service import build_multi_template_render_service
 from .paths import LOCAL_DRAWFLOW_DIR
 
 
@@ -45,6 +46,8 @@ class LocalGatewayRequestHandler(
 ):
     client: LocalDrawFlowClient | None = None
     render_lock = threading.Lock()
+    multi_template_action_lock = threading.Lock()
+    multi_template_service_factory = build_multi_template_render_service
 
     def do_GET(self) -> None:
         path = urlparse(self.path).path
@@ -73,6 +76,8 @@ class LocalGatewayRequestHandler(
         path = urlparse(self.path).path
         if path in {"/local/render", "/api/render"}:
             self._handle_local_render()
+        elif self._handle_multi_template_render(path):
+            return
         elif path == "/local/templates/scan":
             self._handle_local_scan()
         elif path.startswith("/local/v2/templates/") and path.endswith(

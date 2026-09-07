@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import http.client  # Re-exported for existing transport monkeypatches.
 import os
+import threading
 from pathlib import Path
 from typing import Any, Mapping
 from urllib.parse import quote
@@ -70,6 +71,7 @@ class LocalDrawFlowClient:
                 visible=False,
                 fresh_instance=True,
                 quit_after=True,
+                require_fresh_instance=True,
             )
         )
         self.font_dirs = font_dirs
@@ -127,11 +129,12 @@ class LocalDrawFlowClient:
                 "template_sha256": template_sha256(cached.manifest),
             })
         except RenderServiceError as exc:
-            raise LocalClientError(str(exc), code=exc.code) from exc
+            raise LocalClientError(str(exc), code=exc.code, failure_scope=exc.failure_scope) from exc
         if record.get("status") == "failed":
             raise LocalClientError(
                 str(record.get("error") or "渲染失败"),
                 code=str(record.get("error_code") or "render_failed"),
+                failure_scope=str(record.get("failure_scope") or ""),
             )
         record["template_cache"] = {
             "version": cached.version,
@@ -139,6 +142,36 @@ class LocalDrawFlowClient:
             "sha256": template_sha256(cached.manifest),
         }
         return record
+
+    def render_multi(
+        self,
+        payload: Mapping[str, Any] | None = None,
+        *,
+        action: str = "preflight",
+        parent_job_id: str = "",
+        render_lock: threading.Lock,
+        action_lock: threading.Lock,
+    ) -> dict[str, Any]:
+        """Run the additive multi-template workflow without changing ``render``.
+
+        The loopback gateway provides its shared Illustrator and parent-action
+        locks, so multi-template work remains mutually exclusive with legacy
+        single-template rendering while retaining a public client facade.
+        """
+        from .multi_template_gateway_service import build_multi_template_render_service
+
+        service = build_multi_template_render_service(self, render_lock, action_lock)
+        if action == "preflight":
+            return service.preflight(dict(payload or {}))
+        if not parent_job_id:
+            raise LocalClientError("缺少多模板父任务 ID。", code="multi_template_job_not_found")
+        if action == "execute":
+            return service.execute(parent_job_id)
+        if action == "retry-failed":
+            return service.retry_failed(parent_job_id)
+        if action == "resume":
+            return service.resume(parent_job_id)
+        raise LocalClientError("多模板渲染操作不支持。", code="multi_template_action_invalid")
 
     def _render_v2_if_published(
         self,
@@ -159,12 +192,14 @@ class LocalDrawFlowClient:
                 str(exc),
                 code=exc.code,
                 technical_message=exc.technical_message,
+                failure_scope=exc.failure_scope,
             ) from exc
         if record.get("status") == "failed":
             raise LocalClientError(
                 str(record.get("error") or "V2 模板出图失败"),
                 code=str(record.get("error_code") or "v2_order_render_failed"),
                 technical_message=str(record.get("technical_error") or ""),
+                failure_scope=str(record.get("failure_scope") or ""),
             )
         request = dict(record.get("request") or {})
         record["template_cache"] = {

@@ -1,5 +1,12 @@
 """Static HTML for the local renderer workbench."""
 
+from __future__ import annotations
+
+import os
+
+from .web_page_multi_template import MULTI_TEMPLATE_RENDER_SCRIPT
+from .web_page_multi_template_view import MULTI_TEMPLATE_RENDER_VIEW_SCRIPT
+
 INDEX_HTML = """<!doctype html>
 <html lang="zh-CN">
 <head>
@@ -895,7 +902,7 @@ INDEX_HTML = """<!doctype html>
     }
   </style>
 </head>
-<body>
+<body data-multi-template-render-enabled="false">
   <header class="app-header">
     <div class="header-inner">
       <div class="brand">
@@ -922,7 +929,14 @@ INDEX_HTML = """<!doctype html>
           </div>
           <div class="panel-body">
             <div class="form-grid">
-              <div class="field-full">
+              <div class="field-full" id="renderModeField" hidden>
+                <label for="renderMode">出图方式</label>
+                <select id="renderMode">
+                  <option value="single">手动选择一个模板</option>
+                  <option value="multi">按订单模板自动匹配（试用）</option>
+                </select>
+              </div>
+              <div class="field-full" id="renderTemplateField">
                 <label for="renderTemplate">模板</label>
                 <select id="renderTemplate"></select>
               </div>
@@ -934,10 +948,23 @@ INDEX_HTML = """<!doctype html>
                 <label for="sheetName">工作表名称</label>
                 <input id="sheetName" placeholder="默认第一个工作表，例如 Sheet2" />
               </div>
+              <p class="rule-section-note" id="multiTemplateHint" hidden>订单表必须包含“模板”列，单元格填写已启用模板的精确模板 ID。系统会先检查整表涉及的全部模板，再允许开始批量渲染。</p>
             </div>
             <div class="actions">
               <button class="btn-primary" id="renderBtn" title="解析订单并调用 Illustrator 生成 AI 效果图">生成效果图</button>
             </div>
+            <section class="rule-section" id="multiTemplateResultPanel" hidden>
+              <h3 class="rule-section-title">订单模板预检与批量执行</h3>
+              <p class="rule-section-note" id="multiTemplateResultSummary"></p>
+              <div class="message" id="multiTemplateIssueList"></div>
+              <div class="template-list" id="multiTemplateGroupList"></div>
+              <div class="actions" id="multiTemplateActions">
+                <button class="btn-primary" id="multiTemplateExecuteBtn" hidden>开始批量渲染</button>
+                <button class="btn-secondary" id="multiTemplateRetryBtn" hidden>重试失败模板</button>
+                <button class="btn-secondary" id="multiTemplateResumeBtn" hidden>继续未执行模板</button>
+                <button class="btn-secondary" id="multiTemplatePrimaryDownloadBtn" hidden>下载完整 ZIP</button>
+              </div>
+            </section>
           </div>
         </section>
       </div>
@@ -1405,7 +1432,12 @@ INDEX_HTML = """<!doctype html>
       compiledRuleAst: null,
       specialRuleCompileResult: null,
       runtimeRole: "unknown",
-      pendingTemplateRemovalId: ""
+      pendingTemplateRemovalId: "",
+      multiTemplateParentJobId: "",
+      multiTemplatePreflight: null,
+      multiTemplateInputRevision: 0,
+      multiTemplatePollTimer: null,
+      multiTemplatePollGeneration: 0
     };
     let progressMode = "render";
 
@@ -1439,6 +1471,7 @@ INDEX_HTML = """<!doctype html>
       bindEvents();
       await checkHealth();
       await Promise.all([loadTemplates(), loadRules(), loadJobs()]);
+      syncMultiTemplateMode();
       resetTaskResult();
     }
 
@@ -1482,7 +1515,20 @@ INDEX_HTML = """<!doctype html>
         state.selectedTemplateId = event.target.value;
         syncSelectedTemplate();
       });
-      document.getElementById("renderBtn").addEventListener("click", () => submitRender(false));
+      document.getElementById("renderMode").addEventListener("change", syncMultiTemplateMode);
+      document.getElementById("orderFile").addEventListener("change", invalidateMultiTemplatePreflight);
+      document.getElementById("sheetName").addEventListener("input", invalidateMultiTemplatePreflight);
+      document.getElementById("renderBtn").addEventListener("click", () => {
+        if (multiTemplateModeSelected()) {
+          submitMultiTemplatePreflight();
+          return;
+        }
+        submitRender(false);
+      });
+      document.getElementById("multiTemplateExecuteBtn").addEventListener("click", () => submitMultiTemplateAction("execute"));
+      document.getElementById("multiTemplateRetryBtn").addEventListener("click", () => submitMultiTemplateAction("retry-failed"));
+      document.getElementById("multiTemplateResumeBtn").addEventListener("click", () => submitMultiTemplateAction("resume"));
+      document.getElementById("multiTemplatePrimaryDownloadBtn").addEventListener("click", downloadMultiTemplateOutput);
       document.getElementById("refreshJobsPageBtn").addEventListener("click", loadJobs);
       document.getElementById("closeRenderErrorBtn").addEventListener("click", hideRenderError);
       document.getElementById("cancelTemplateRemoveBtn").addEventListener("click", closeTemplateRemoveConfirm);
@@ -2015,12 +2061,12 @@ INDEX_HTML = """<!doctype html>
     function syncSelectedTemplate() {
       const template = selectedTemplate();
       if (!template) {
-        document.getElementById("renderTemplateBadge").textContent = "未选择模板";
+        if (!multiTemplateModeSelected()) document.getElementById("renderTemplateBadge").textContent = "未选择模板";
         clearTemplateForm();
         return;
       }
       document.getElementById("renderTemplate").value = template.template_id;
-      document.getElementById("renderTemplateBadge").textContent = displayType(template.template_type);
+      if (!multiTemplateModeSelected()) document.getElementById("renderTemplateBadge").textContent = displayType(template.template_type);
       fillTemplateForm(template);
       renderTemplateList();
     }
@@ -3562,6 +3608,8 @@ INDEX_HTML = """<!doctype html>
       }
     }
 
+    /* MULTI_TEMPLATE_RENDER_SCRIPT */
+
     function setTaskRunning(dryRun) {
       setRenderButtonsDisabled(true);
     }
@@ -3585,11 +3633,15 @@ INDEX_HTML = """<!doctype html>
 
     function progressTitle(mode) {
       if (mode === "dryRun") return "正在解析订单";
+      if (mode === "multiPreflight") return "正在检查订单模板";
+      if (mode === "multiRender") return "正在按模板批量渲染";
       return "正在生成效果图";
     }
 
     function progressSubtitle(mode) {
       if (mode === "dryRun") return "正在检查字段、分组和渲染任务";
+      if (mode === "multiPreflight") return "正在读取“模板”列并检查全部模板配置";
+      if (mode === "multiRender") return "模板组会依次试渲染并按各自生产部门规则生成成品";
       return "Illustrator 正在生成 AI 文件，请不要关闭软件";
     }
 
@@ -3597,12 +3649,18 @@ INDEX_HTML = """<!doctype html>
       if (progressMode === "dryRun") {
         return ["上传订单表格", "解析订单字段", "生成解析结果", "等待返回结果"];
       }
+      if (progressMode === "multiPreflight") {
+        return ["上传订单表格", "解析“模板”列", "检查模板配置", "生成预检结果"];
+      }
+      if (progressMode === "multiRender") {
+        return ["读取预检结果", "代表订单试渲染", "按模板正式渲染", "汇总各模板成品", "完成收尾"];
+      }
       return ["上传订单表格", "解析订单字段", "调用 Illustrator", "生成 AI 文件", "完成收尾"];
     }
 
     function activeProgressStage() {
       const stages = progressStages();
-      if (progressMode === "dryRun") {
+      if (progressMode === "dryRun" || progressMode === "multiPreflight") {
         return stages[1];
       }
       return stages[2];
@@ -4172,3 +4230,22 @@ INDEX_HTML = """<!doctype html>
 </body>
 </html>
 """
+
+INDEX_HTML = INDEX_HTML.replace(
+    "/* MULTI_TEMPLATE_RENDER_SCRIPT */",
+    f"{MULTI_TEMPLATE_RENDER_VIEW_SCRIPT}\n\n{MULTI_TEMPLATE_RENDER_SCRIPT}",
+    1,
+)
+
+
+def multi_template_render_enabled() -> bool:
+    return os.environ.get("DRAWFLOW_MULTI_TEMPLATE_RENDER_ENABLED", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def workbench_html() -> str:
+    enabled = "true" if multi_template_render_enabled() else "false"
+    return INDEX_HTML.replace(
+        'data-multi-template-render-enabled="false"',
+        f'data-multi-template-render-enabled="{enabled}"',
+        1,
+    )
